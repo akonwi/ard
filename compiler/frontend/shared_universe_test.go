@@ -21,10 +21,10 @@ func TestLoadModuleReportsWarningsWithoutFailing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	originalStdout := os.Stdout
-	os.Stdout = writer
+	originalStderr := os.Stderr
+	os.Stderr = writer
 	loaded, loadErr := LoadModule(filepath.Join(projectDir, "main.ard"))
-	os.Stdout = originalStdout
+	os.Stderr = originalStderr
 	if err := writer.Close(); err != nil {
 		t.Fatal(err)
 	}

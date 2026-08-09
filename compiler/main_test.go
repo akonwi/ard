@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -10,36 +11,201 @@ import (
 
 	"github.com/akonwi/ard/air"
 	"github.com/akonwi/ard/checker"
+	"github.com/akonwi/ard/diagnostics"
 	"github.com/akonwi/ard/frontend"
 	gotarget "github.com/akonwi/ard/go"
 )
 
 func captureStdout(t *testing.T, fn func()) string {
 	t.Helper()
-	oldStdout := os.Stdout
+	return captureFileOutput(t, &os.Stdout, fn)
+}
+
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	return captureFileOutput(t, &os.Stderr, fn)
+}
+
+func captureFileOutput(t *testing.T, target **os.File, fn func()) string {
+	t.Helper()
+	old := *target
 	r, w, err := os.Pipe()
 	if err != nil {
-		t.Fatalf("failed to create stdout pipe: %v", err)
+		t.Fatalf("failed to create output pipe: %v", err)
 	}
-	os.Stdout = w
+	*target = w
 	defer func() {
-		os.Stdout = oldStdout
+		*target = old
 	}()
 
 	fn()
 
 	if err := w.Close(); err != nil {
-		t.Fatalf("failed to close stdout writer: %v", err)
+		t.Fatalf("failed to close output writer: %v", err)
 	}
 	out, err := io.ReadAll(r)
 	if err != nil {
-		t.Fatalf("failed to read captured stdout: %v", err)
+		t.Fatalf("failed to read captured output: %v", err)
 	}
 	if err := r.Close(); err != nil {
-		t.Fatalf("failed to close stdout reader: %v", err)
+		t.Fatalf("failed to close output reader: %v", err)
 	}
 	return string(out)
 }
+
+type testCLIHintError struct {
+	message string
+	hint    string
+}
+
+func (e testCLIHintError) Error() string { return e.message }
+func (e testCLIHintError) Hint() string  { return e.hint }
+
+func TestReportCLIError(t *testing.T) {
+	t.Run("plain error", func(t *testing.T) {
+		var output strings.Builder
+		reportCLIError(&output, testCLIHintError{message: "project not found", hint: "run this command inside an Ard project"})
+		want := "error: project not found\n\nhint: run this command inside an Ard project\n"
+		if got := output.String(); got != want {
+			t.Fatalf("output = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("already rendered", func(t *testing.T) {
+		var output strings.Builder
+		reportCLIError(&output, diagnostics.AlreadyReported(testCLIHintError{message: "type errors"}))
+		if got := output.String(); got != "" {
+			t.Fatalf("output = %q, want empty", got)
+		}
+	})
+}
+
+func TestCheckReturnsLoadFailures(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing.ard")
+	if err := check(missing); err == nil || !strings.Contains(err.Error(), "error reading file") {
+		t.Fatalf("check error = %v, want missing-file error", err)
+	}
+}
+
+func TestCheckDoesNotRepeatRenderedDiagnostics(t *testing.T) {
+	projectDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"example\"\nard = \">= 0.27.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(projectDir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte("let name: Str = 42\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	output := captureStderr(t, func() {
+		err := check(mainPath)
+		if err == nil {
+			t.Fatal("check succeeded; expected type error")
+		}
+		reportCLIError(os.Stderr, err)
+	})
+	if strings.Count(output, "error:") != 1 || strings.Contains(output, "error: type errors") {
+		t.Fatalf("unexpected duplicate diagnostics:\n%s", output)
+	}
+}
+
+func TestRunTestsReportsDiscoveryFailures(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing")
+	output := captureStderr(t, func() {
+		if runTests(missing, "", false) {
+			t.Fatal("runTests succeeded for a missing path")
+		}
+	})
+	if !strings.Contains(output, "error: error reading path") {
+		t.Fatalf("stderr missing discovery error:\n%s", output)
+	}
+}
+
+func TestCLIHelperProcess(t *testing.T) {
+	if os.Getenv("ARD_TEST_CLI_HELPER") != "1" {
+		return
+	}
+	separator := -1
+	for i, arg := range os.Args {
+		if arg == "--" {
+			separator = i
+			break
+		}
+	}
+	if separator < 0 {
+		fmt.Fprintln(os.Stderr, "missing CLI helper separator")
+		os.Exit(2)
+	}
+	os.Args = append([]string{"ard"}, os.Args[separator+1:]...)
+	main()
+}
+
+func runCLIForTest(t *testing.T, args ...string) (string, string, error) {
+	t.Helper()
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	commandArgs := append([]string{"-test.run=^TestCLIHelperProcess$", "--"}, args...)
+	cmd := exec.Command(executable, commandArgs...)
+	cmd.Env = append(os.Environ(), "ARD_TEST_CLI_HELPER=1")
+	var stdout strings.Builder
+	var stderr strings.Builder
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err = cmd.Run()
+	return stdout.String(), stderr.String(), err
+}
+
+func TestCLIFailureOutput(t *testing.T) {
+	t.Run("missing check input", func(t *testing.T) {
+		stdout, stderr, err := runCLIForTest(t, "check", filepath.Join(t.TempDir(), "missing.ard"))
+		if err == nil {
+			t.Fatal("check succeeded; expected failure")
+		}
+		if stdout != "" {
+			t.Fatalf("stdout = %q, want empty", stdout)
+		}
+		if !strings.Contains(stderr, "error: error reading file") {
+			t.Fatalf("stderr missing useful error:\n%s", stderr)
+		}
+	})
+
+	t.Run("rendered type diagnostic", func(t *testing.T) {
+		projectDir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"example\"\nard = \">= 0.27.0\"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		mainPath := filepath.Join(projectDir, "main.ard")
+		if err := os.WriteFile(mainPath, []byte("let name: Str = 42\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		stdout, stderr, err := runCLIForTest(t, "check", mainPath)
+		if err == nil {
+			t.Fatal("check succeeded; expected failure")
+		}
+		if stdout != "" {
+			t.Fatalf("stdout = %q, want empty", stdout)
+		}
+		if strings.Count(stderr, "error:") != 1 || strings.Contains(stderr, "error: type errors") {
+			t.Fatalf("unexpected rendered diagnostics:\n%s", stderr)
+		}
+	})
+
+	t.Run("missing test path", func(t *testing.T) {
+		stdout, stderr, err := runCLIForTest(t, "test", filepath.Join(t.TempDir(), "missing"))
+		if err == nil {
+			t.Fatal("test succeeded; expected failure")
+		}
+		if stdout != "" {
+			t.Fatalf("stdout = %q, want empty", stdout)
+		}
+		if !strings.Contains(stderr, "error: error reading path") {
+			t.Fatalf("stderr missing useful error:\n%s", stderr)
+		}
+	})
+}
+
 func TestParseRunArgs(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -111,7 +277,7 @@ func TestLoadModuleRendersStructuredTypeMismatch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	output := captureStdout(t, func() {
+	output := captureStderr(t, func() {
 		if _, err := frontend.LoadModule(mainPath); err == nil {
 			t.Fatal("expected type error")
 		}
@@ -975,7 +1141,7 @@ test fn private_access() Void!Str {
 	}
 
 	var ok bool
-	output := captureStdout(t, func() {
+	output := captureStderr(t, func() {
 		ok = runTests(projectDir, "", false)
 	})
 	if ok {

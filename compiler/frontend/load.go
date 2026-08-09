@@ -24,7 +24,7 @@ func LoadModule(inputPath string) (*LoadResult, error) {
 	result := parse.Parse(sourceCode, inputPath)
 	if len(result.Errors) > 0 {
 		result.PrintErrors()
-		return nil, fmt.Errorf("parse errors")
+		return nil, diagnostics.AlreadyReported(fmt.Errorf("parse errors"))
 	}
 	program := result.Program
 
@@ -57,12 +57,12 @@ func LoadModule(inputPath string) (*LoadResult, error) {
 		if err != nil {
 			displayRoot = projectInfo.RootPath
 		}
-		if err := diagnostics.RenderRelative(os.Stdout, c.Diagnostics(), projectInfo.RootPath, displayRoot); err != nil {
+		if err := diagnostics.RenderRelative(os.Stderr, c.Diagnostics(), projectInfo.RootPath, displayRoot); err != nil {
 			return nil, fmt.Errorf("render diagnostics: %w", err)
 		}
 	}
 	if c.HasErrors() {
-		return nil, fmt.Errorf("type errors")
+		return nil, diagnostics.AlreadyReported(fmt.Errorf("type errors"))
 	}
 
 	return &LoadResult{
