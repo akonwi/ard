@@ -20,7 +20,8 @@ These types map directly onto Go:
 | `Bool` | `bool` | |
 | `Byte` | `byte` | Unsigned 8-bit value |
 | `Rune` | `rune` | One Unicode scalar value |
-| `[T]` | `[]T` | List / slice |
+| `[T]` | `[]T` | Growable list |
+| `Slice<T>` | `[]T` | Fixed-length shared list view |
 | `[T; N]` | `[N]T` | Fixed-size array |
 | `[K:V]` | `map[K]V` | Map |
 | `Chan<T>` | `chan T` | Typed channel |
@@ -61,6 +62,17 @@ let from_runes: Str = Str::from(runes)
 
 `Str::from([Byte])` mirrors Go's `string([]byte)` conversion; validate bytes first if your program needs to reject invalid UTF-8.
 
+Strings support checked Go-style byte slicing with optional bounds:
+
+```ard
+"hello".slice()                       // Str? containing "hello"
+"hello".slice(start: 1)               // Str? containing "ello"
+"hello".slice(end: 4)                 // Str? containing "hell"
+"hello".slice(start: 1, end: 4)       // Str? containing "ell"
+```
+
+Bounds are UTF-8 byte offsets, matching Go string slicing and `Str.size()`. Invalid bounds return `none`. A byte range can split a multi-byte encoding and produce invalid UTF-8; use `runes()` when boundaries must follow Unicode scalar values. On the Go target, a small substring may retain the larger source string's storage.
+
 ### Collections
 
 ```ard
@@ -77,7 +89,7 @@ let scores: [Str:Int] = ["Alice": 95, "Bob": 87]
 let config: [Int:Str] = [0: "zero", 1: "one", 2: "two"]
 ```
 
-Lists and maps behave like Go slices and maps, with methods like `.size()`, `.push()`, and `.at()` in place of Go's built-in functions. Fixed-size arrays behave like Go arrays: the length is part of the type, so `[Byte; 3]` and `[Byte; 4]` are distinct types. Lists and arrays support `.at()`, which returns a `Maybe` instead of panicking or returning a zero value.
+Lists and maps behave like Go slices and maps, with methods like `.size()`, `.push()`, and `.at()` in place of Go's built-in functions. `Slice<T>` is a fixed-length shared view created by a list or another slice's checked `.slice()` method. Use `.to_list()` when independent growable storage is required. Fixed-size arrays behave like Go arrays: the length is part of the type, so `[Byte; 3]` and `[Byte; 4]` are distinct types. Lists, slices, and arrays support `.at()`, which returns a `Maybe` instead of panicking or returning a zero value.
 
 ### Any
 

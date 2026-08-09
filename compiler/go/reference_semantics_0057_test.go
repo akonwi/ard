@@ -388,6 +388,8 @@ func (value Item) Read() int { return value.N }
 type Reader interface { Read() int }
 type Numbers []int
 type Scores map[string]int
+type Sink struct{}
+func (Sink) Mutate(values []int) { values[0] = 6 }
 var saved Reader
 
 func Bump(value *Item) { value.N++ }
@@ -399,6 +401,7 @@ func ReaderValue() Reader { return &Item{N: 11} }
 func ReadReaderPointer(value any) int { return (*value.(*Reader)).Read() }
 func MutateSlice(values []int) { values[0] = 9 }
 func MutateNumbers(values Numbers) { values[0] = 8 }
+func AppendAndSize(values []int) int { values = append(values, 5); return len(values) }
 func ReplaceSlice(values *[]int) { *values = append(*values, 3) }
 func MutateMap(values map[string]int) { values["b"] = 2 }
 func MutateScores(values Scores) { values["c"] = 3 }
@@ -415,6 +418,15 @@ func Identity[T any](value T) T { return value }
 func IsComparable[T comparable](value T) bool { return value == value }
 func ReadGeneric[T interface{ Read() int }](value T) int { return value.Read() }
 func SliceSize[S ~[]E, E any](value S) int { return len(value) }
+func Rebuffer[S ~[]int](value S) S {
+	out := make(S, 1, 3)
+	out[0] = value[0]
+	return out
+}
+func MaybeRebuffer[S ~[]int](value S) (S, bool) { return Rebuffer(value), true }
+func ResultRebuffer[S ~[]int](value S) (S, error) { return Rebuffer(value), nil }
+func WrapRebuffer[S ~[]int](value S) []S { return []S{Rebuffer(value)} }
+func SliceProducer[S ~[]int]() func() S { return func() S { return make(S, 1, 3) } }
 func MapSize[M ~map[K]V, K comparable, V any](value M) int { return len(value) }
 func MixedSize[S ~[]E | string, E any](value S) int { return len(value) }
 `), 0o644); err != nil {
@@ -484,6 +496,41 @@ fn main() {
   if not ffi::MixedSize<[Int], Int>(mut values) == 3 { panic("mixed generic projection failed") }
   ffi::MutateNumbers(mut values)
   if not values.at(0).or(0) == 8 { panic("named slice projection failed") }
+
+  let view = values.slice(start: 0, end: 2).expect("slice bounds")
+  ffi::MutateSlice(mut view)
+  if not values.at(0).or(0) == 9 { panic("Slice element mutation lost at Go boundary") }
+  let mutate_slice_value = ffi::MutateSlice
+  mutate_slice_value(mut view)
+  if not values.at(0).or(0) == 9 { panic("Slice function-value projection failed") }
+  let sink = ffi::Sink{}
+  sink.Mutate(mut view)
+  if not values.at(0).or(0) == 6 { panic("Slice method projection failed") }
+  ffi::MutateNumbers(mut view)
+  if not values.at(0).or(0) == 8 { panic("Slice named projection failed") }
+  if not ffi::SliceSize(mut view) == 2 { panic("Slice generic projection failed") }
+  if not ffi::AppendAndSize(mut view) == 3 { panic("Slice append did not use a local descriptor") }
+  if not values.size() == 3 { panic("Slice append resized the source") }
+  if not values.at(2).or(0) == 3 { panic("Slice append overwrote an element beyond the view") }
+
+  let returned: [Int] = ffi::Rebuffer(mut view)
+  let returned_ref = mut returned
+  returned_ref.push(7)
+  if not returned.size() == 2 { panic("generic Go Slice result did not normalize to List") }
+  let optional_returned: [Int]? = ffi::MaybeRebuffer(mut view)
+  if not optional_returned.expect("present").size() == 1 { panic("generic Go Maybe slice result did not normalize to List") }
+  let result_returned: [Int]!Str = ffi::ResultRebuffer(mut view)
+  if not result_returned.expect("ok").size() == 1 { panic("generic Go Result slice result did not normalize to List") }
+  let nested_returned: [[Int]] = ffi::WrapRebuffer(mut view)
+  let nested_inner = nested_returned.at(0).expect("nested")
+  let nested_inner_ref = mut nested_inner
+  nested_inner_ref.push(7)
+  if not nested_inner.size() == 2 { panic("nested generic Go slice result did not normalize to List") }
+  let produce = ffi::SliceProducer<Slice<Int>>()
+  let callback_returned: [Int] = produce()
+  let callback_returned_ref = mut callback_returned
+  callback_returned_ref.push(7)
+  if not callback_returned.size() == 2 { panic("generic Go callback result did not normalize to List") }
 
   let mapping = ["a": 1]
   ffi::MutateMap(mut mapping)

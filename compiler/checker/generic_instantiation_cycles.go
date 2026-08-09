@@ -171,6 +171,8 @@ func structApplicationsInType(t Type, seen map[Type]bool) []*StructDef {
 		return applications
 	case *List:
 		return structApplicationsInType(typ.Of(), seen)
+	case *Slice:
+		return structApplicationsInType(typ.Of(), seen)
 	case *FixedArray:
 		return structApplicationsInType(typ.Of(), seen)
 	case *Chan:
@@ -235,6 +237,8 @@ func collectGenericVarOccurrences(t Type, wrapped bool, params map[string]bool, 
 	seen[t] = true
 	switch typ := t.(type) {
 	case *List:
+		collectGenericVarOccurrences(typ.Of(), true, params, out, seen)
+	case *Slice:
 		collectGenericVarOccurrences(typ.Of(), true, params, out, seen)
 	case *FixedArray:
 		collectGenericVarOccurrences(typ.Of(), true, params, out, seen)

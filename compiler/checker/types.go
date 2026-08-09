@@ -168,6 +168,15 @@ func (s str) get(name string) Type {
 			Parameters: []Parameter{{Name: "index", Type: Int}},
 			ReturnType: MakeMaybe(Rune),
 		}
+	case "slice":
+		return &FunctionDef{
+			Name: name,
+			Parameters: []Parameter{
+				{Name: "start", Type: MakeMaybe(Int)},
+				{Name: "end", Type: MakeMaybe(Int)},
+			},
+			ReturnType: MakeMaybe(Str),
+		}
 	case "bytes":
 		return &FunctionDef{
 			Name:       name,
@@ -544,6 +553,15 @@ func (l List) get(name string) Type {
 			Parameters: []Parameter{{Name: "index", Type: Int}},
 			ReturnType: MakeMaybe(l.of),
 		}
+	case "slice":
+		return &FunctionDef{
+			Name: name,
+			Parameters: []Parameter{
+				{Name: "start", Type: MakeMaybe(Int)},
+				{Name: "end", Type: MakeMaybe(Int)},
+			},
+			ReturnType: MakeMaybe(MakeSlice(l.of)),
+		}
 	case "prepend":
 		return &FunctionDef{
 			Name:       name,
@@ -610,6 +628,80 @@ func (l *List) hasTrait(trait *Trait) bool {
 }
 func (l *List) Of() Type {
 	return l.of
+}
+
+// Slice is a fixed-length shared view over contiguous list storage. It is
+// nominally distinct from List even though both use a Go slice descriptor.
+type Slice struct {
+	of Type
+}
+
+func MakeSlice(of Type) *Slice {
+	return &Slice{of: of}
+}
+
+func (s Slice) String() string {
+	return "Slice<" + s.of.String() + ">"
+}
+
+func (s Slice) get(name string) Type {
+	switch name {
+	case "at":
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{{Name: "index", Type: Int}},
+			ReturnType: MakeMaybe(s.of),
+		}
+	case "size":
+		return &FunctionDef{Name: name, ReturnType: Int}
+	case "is_empty":
+		return &FunctionDef{Name: name, ReturnType: Bool}
+	case "slice":
+		return &FunctionDef{
+			Name: name,
+			Parameters: []Parameter{
+				{Name: "start", Type: MakeMaybe(Int)},
+				{Name: "end", Type: MakeMaybe(Int)},
+			},
+			ReturnType: MakeMaybe(MakeSlice(s.of)),
+		}
+	case "to_list":
+		return &FunctionDef{Name: name, ReturnType: MakeList(s.of)}
+	case "set":
+		return &FunctionDef{
+			Name: name,
+			Parameters: []Parameter{
+				{Name: "index", Type: Int},
+				{Name: "value", Type: s.of},
+			},
+			Mutates:    true,
+			ReturnType: Bool,
+		}
+	case "swap":
+		return &FunctionDef{
+			Name: name,
+			Parameters: []Parameter{
+				{Name: "l", Type: Int},
+				{Name: "r", Type: Int},
+			},
+			Mutates:    true,
+			ReturnType: Void,
+		}
+	default:
+		return nil
+	}
+}
+
+func (s *Slice) equal(other Type) bool {
+	return equalTypes(s, other)
+}
+
+func (s *Slice) hasTrait(trait *Trait) bool {
+	return false
+}
+
+func (s *Slice) Of() Type {
+	return s.of
 }
 
 type FixedArray struct {
@@ -902,6 +994,8 @@ func typeSyntaxString(t Type) string {
 		return resultOperandSyntax(typ.val) + "!" + resultOperandSyntax(typ.err)
 	case *List:
 		return "[" + typeSyntaxString(typ.of) + "]"
+	case *Slice:
+		return "Slice<" + typeSyntaxString(typ.of) + ">"
 	case *FixedArray:
 		return fmt.Sprintf("[%s; %d]", typeSyntaxString(typ.of), typ.length)
 	case *Map:

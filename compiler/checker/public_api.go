@@ -148,6 +148,8 @@ func privateNominalType(current Type, seen map[uintptr]bool) string {
 		return privateNominalType(value.err, seen)
 	case *List:
 		return privateNominalType(value.of, seen)
+	case *Slice:
+		return privateNominalType(value.of, seen)
 	case *FixedArray:
 		return privateNominalType(value.of, seen)
 	case *Chan:

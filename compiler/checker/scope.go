@@ -282,6 +282,8 @@ func extractGenericNames(t Type, names map[string]bool) {
 		names[t.name] = true
 	case *List:
 		extractGenericNames(t.of, names)
+	case *Slice:
+		extractGenericNames(t.of, names)
 	case *Map:
 		extractGenericNames(t.key, names)
 		extractGenericNames(t.value, names)
@@ -330,6 +332,8 @@ func hasGenericsInTypeSeen(t Type, seen map[Type]struct{}) bool {
 		}
 		return true
 	case *List:
+		return hasGenericsInTypeSeen(t.of, seen)
+	case *Slice:
 		return hasGenericsInTypeSeen(t.of, seen)
 	case *FixedArray:
 		return hasGenericsInTypeSeen(t.of, seen)
@@ -405,6 +409,8 @@ func hasUnresolvedGenericsFrom(t Type, context *GenericContext) bool {
 			}
 			return owned[current]
 		case *List:
+			return visit(current.of, seen)
+		case *Slice:
 			return visit(current.of, seen)
 		case *FixedArray:
 			return visit(current.of, seen)
@@ -486,6 +492,8 @@ func maskUnresolvedGenericsFrom(t Type, context *GenericContext) Type {
 			return current
 		case *List:
 			return MakeList(visit(current.of, seen))
+		case *Slice:
+			return MakeSlice(visit(current.of, seen))
 		case *FixedArray:
 			return MakeFixedArray(visit(current.of, seen), current.length)
 		case *Map:
@@ -558,6 +566,8 @@ func typeContainsTypeVar(t Type, target *TypeVar) bool {
 			return current.bound && current.actual != nil && visit(current.actual, seen)
 		case *List:
 			return visit(current.of, seen)
+		case *Slice:
+			return visit(current.of, seen)
 		case *FixedArray:
 			return visit(current.of, seen)
 		case *Map:
@@ -623,6 +633,8 @@ func bindUnresolvedCallTypeVars(t Type, fallback Type) {
 			}
 		case *List:
 			visit(current.of)
+		case *Slice:
+			visit(current.of)
 		case *FixedArray:
 			visit(current.of)
 		case *Map:
@@ -679,6 +691,8 @@ func firstUnresolvedCallTypeVar(t Type) *TypeVar {
 				return current
 			}
 		case *List:
+			return visit(current.of, seen)
+		case *Slice:
 			return visit(current.of, seen)
 		case *FixedArray:
 			return visit(current.of, seen)
@@ -747,6 +761,12 @@ func replaceGeneric(t Type, genericName string, concreteType Type) Type {
 			return t
 		}
 		return &List{of: newOf}
+	case *Slice:
+		newOf := replaceGeneric(t.of, genericName, concreteType)
+		if newOf == t.of {
+			return t
+		}
+		return &Slice{of: newOf}
 	case *Chan:
 		newOf := replaceGeneric(t.of, genericName, concreteType)
 		if newOf == t.of {
@@ -875,6 +895,8 @@ func hasGeneric(t Type, genericName string) bool {
 	case *TypeVar:
 		return t.name == genericName
 	case *List:
+		return hasGeneric(t.of, genericName)
+	case *Slice:
 		return hasGeneric(t.of, genericName)
 	case *Map:
 		return hasGeneric(t.key, genericName) || hasGeneric(t.value, genericName)
@@ -1050,6 +1072,8 @@ func substituteTypeBindings(t Type, bindings map[string]Type) Type {
 		return typ
 	case *List:
 		return MakeList(substituteTypeBindings(typ.of, bindings))
+	case *Slice:
+		return MakeSlice(substituteTypeBindings(typ.of, bindings))
 	case *FixedArray:
 		return MakeFixedArray(substituteTypeBindings(typ.of, bindings), typ.length)
 	case *Chan:
@@ -1218,6 +1242,8 @@ func collectUnboundGenericsFromType(t Type, params *[]string, seenGenerics map[s
 		}
 	case *List:
 		collectUnboundGenericsFromType(typ.of, params, seenGenerics, seenTypes)
+	case *Slice:
+		collectUnboundGenericsFromType(typ.of, params, seenGenerics, seenTypes)
 	case *FixedArray:
 		collectUnboundGenericsFromType(typ.of, params, seenGenerics, seenTypes)
 	case *Chan:
@@ -1273,6 +1299,8 @@ func copyTypeWithTypeVarMapSeen(t Type, typeVarMap map[string]*TypeVar, seenStru
 		return typ // Keep as-is if not a generic parameter
 	case *List:
 		return &List{of: copyTypeWithTypeVarMapSeen(typ.of, typeVarMap, seenStructs)}
+	case *Slice:
+		return &Slice{of: copyTypeWithTypeVarMapSeen(typ.of, typeVarMap, seenStructs)}
 	case *FixedArray:
 		return MakeFixedArray(copyTypeWithTypeVarMapSeen(typ.of, typeVarMap, seenStructs), typ.length)
 	case *Chan:

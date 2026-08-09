@@ -99,6 +99,9 @@ const (
 	// producing Maybe(elem). ExprListAt is raw indexing used by internal
 	// desugaring such as for-loop lowering.
 	ExprListAtChecked
+	ExprListSlice
+	ExprListIsEmpty
+	ExprListToList
 	ExprListPrepend
 	ExprListPush
 	ExprListSet
@@ -137,6 +140,7 @@ const (
 	ExprToInt
 	ExprToF64
 	ExprStrAt
+	ExprStrSlice
 	ExprStrBytes
 	ExprStrRunes
 	ExprStrSize
@@ -254,6 +258,7 @@ type Expr struct {
 	Trait              TraitID
 	Method             int
 	Args               []Expr
+	ArgOrder           []int
 	Entries            []MapEntry
 	CaptureLocals      []LocalID
 

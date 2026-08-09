@@ -307,7 +307,7 @@ func (l *lowerer) collectExternalTypeOwnerModules(typeID air.TypeID, self air.Mo
 	}
 	info := l.program.Types[typeID-1]
 	switch info.Kind {
-	case air.TypeList, air.TypeMaybe:
+	case air.TypeList, air.TypeSlice, air.TypeMaybe:
 		l.collectExternalTypeOwnerModules(info.Elem, self, out)
 	case air.TypeMap:
 		l.collectExternalTypeOwnerModules(info.Key, self, out)
@@ -2884,6 +2884,8 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		}
 		byteExpr := &ast.IndexExpr{X: target.expr, Index: index.expr}
 		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: ast.NewIdent("string"), Args: []ast.Expr{byteExpr}}}, nil
+	case air.ExprStrSlice:
+		return l.lowerCheckedSlice(fn, expr, false)
 	case air.ExprListSize:
 		if expr.Target == nil {
 			return loweredExpr{}, fmt.Errorf("list size missing target")
@@ -2960,6 +2962,19 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 			Else: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(resultTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{someCall}}}},
 		})
 		return loweredExpr{stmts: stmts, expr: ast.NewIdent(resultTemp)}, nil
+	case air.ExprListSlice:
+		return l.lowerCheckedSlice(fn, expr, true)
+	case air.ExprListIsEmpty:
+		if expr.Target == nil {
+			return loweredExpr{}, fmt.Errorf("slice is_empty missing target")
+		}
+		target, err := l.lowerExpr(fn, *expr.Target)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		return loweredExpr{stmts: target.stmts, expr: &ast.BinaryExpr{X: &ast.CallExpr{Fun: ast.NewIdent("len"), Args: []ast.Expr{l.valueThroughReference(expr.Target.Type, target.expr)}}, Op: token.EQL, Y: &ast.BasicLit{Kind: token.INT, Value: "0"}}}, nil
+	case air.ExprListToList:
+		return l.lowerSliceToList(fn, expr)
 	case air.ExprListPush:
 		return l.lowerListPush(fn, expr)
 	case air.ExprListPrepend:
@@ -4445,7 +4460,7 @@ func (l *lowerer) goType(typeID air.TypeID) (ast.Expr, error) {
 			return nil, err
 		}
 		return &ast.IndexListExpr{X: l.runtimeQualified("Result"), Indices: []ast.Expr{value, errType}}, nil
-	case air.TypeList:
+	case air.TypeList, air.TypeSlice:
 		elem, err := l.goType(info.Elem)
 		if err != nil {
 			return nil, err
@@ -6678,6 +6693,154 @@ func (l *lowerer) lowerCallClosure(fn air.Function, expr air.Expr) (loweredExpr,
 	return l.finishCallWithWriteback(expr.Type, stmts, call, writeback)
 }
 
+func (l *lowerer) lowerCheckedSlice(fn air.Function, expr air.Expr, capToLength bool) (loweredExpr, error) {
+	if expr.Target == nil || len(expr.Args) != 2 {
+		return loweredExpr{}, fmt.Errorf("checked slice expects a target and two nullable bounds")
+	}
+	if !validTypeID(l.program, expr.Type) || l.program.Types[expr.Type-1].Kind != air.TypeMaybe {
+		return loweredExpr{}, fmt.Errorf("checked slice lowered with non-Maybe type %d", expr.Type)
+	}
+
+	target, err := l.lowerExpr(fn, *expr.Target)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	stmts := append([]ast.Stmt{}, target.stmts...)
+	sourceTemp := l.nextTemp()
+	stmts = append(stmts, &ast.AssignStmt{
+		Lhs: []ast.Expr{ast.NewIdent(sourceTemp)}, Tok: token.DEFINE,
+		Rhs: []ast.Expr{l.valueThroughReference(expr.Target.Type, target.expr)},
+	})
+
+	boundTemps := make([]string, 2)
+	argOrder := expr.ArgOrder
+	if len(argOrder) == 0 {
+		argOrder = []int{0, 1}
+	}
+	for _, i := range argOrder {
+		if i < 0 || i >= len(expr.Args) || boundTemps[i] != "" {
+			return loweredExpr{}, fmt.Errorf("checked slice has invalid argument order %v", argOrder)
+		}
+		lowered, err := l.lowerExpr(fn, expr.Args[i])
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		stmts = append(stmts, lowered.stmts...)
+		boundTemps[i] = l.nextTemp()
+		stmts = append(stmts, &ast.AssignStmt{
+			Lhs: []ast.Expr{ast.NewIdent(boundTemps[i])}, Tok: token.DEFINE,
+			Rhs: []ast.Expr{lowered.expr},
+		})
+	}
+	if boundTemps[0] == "" || boundTemps[1] == "" {
+		return loweredExpr{}, fmt.Errorf("checked slice argument order omits a bound")
+	}
+
+	startTemp := l.nextTemp()
+	endTemp := l.nextTemp()
+	stmts = append(stmts,
+		&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(startTemp)}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.BasicLit{Kind: token.INT, Value: "0"}}},
+		&ast.IfStmt{
+			Cond: l.maybeIsSomeExpr(ast.NewIdent(boundTemps[0])),
+			Body: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{
+				Lhs: []ast.Expr{ast.NewIdent(startTemp)}, Tok: token.ASSIGN,
+				Rhs: []ast.Expr{l.maybeValueExpr(ast.NewIdent(boundTemps[0]))},
+			}}},
+		},
+		&ast.AssignStmt{
+			Lhs: []ast.Expr{ast.NewIdent(endTemp)}, Tok: token.DEFINE,
+			Rhs: []ast.Expr{&ast.CallExpr{Fun: ast.NewIdent("len"), Args: []ast.Expr{ast.NewIdent(sourceTemp)}}},
+		},
+		&ast.IfStmt{
+			Cond: l.maybeIsSomeExpr(ast.NewIdent(boundTemps[1])),
+			Body: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{
+				Lhs: []ast.Expr{ast.NewIdent(endTemp)}, Tok: token.ASSIGN,
+				Rhs: []ast.Expr{l.maybeValueExpr(ast.NewIdent(boundTemps[1]))},
+			}}},
+		},
+	)
+
+	resultTemp := l.nextTemp()
+	decls, err := l.declareTemp(expr.Type, resultTemp)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	stmts = append(stmts, decls...)
+	noneExpr, err := l.maybeNoneExpr(expr.Type)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+
+	sliceExpr := &ast.SliceExpr{
+		X:    ast.NewIdent(sourceTemp),
+		Low:  ast.NewIdent(startTemp),
+		High: ast.NewIdent(endTemp),
+	}
+	if capToLength {
+		sliceExpr.Max = ast.NewIdent(endTemp)
+		sliceExpr.Slice3 = true
+	}
+	someExpr, err := l.maybeSomeExpr(expr.Type, sliceExpr)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+
+	invalid := &ast.BinaryExpr{
+		X: &ast.BinaryExpr{
+			X:  &ast.BinaryExpr{X: ast.NewIdent(startTemp), Op: token.LSS, Y: &ast.BasicLit{Kind: token.INT, Value: "0"}},
+			Op: token.LOR,
+			Y:  &ast.BinaryExpr{X: ast.NewIdent(startTemp), Op: token.GTR, Y: ast.NewIdent(endTemp)},
+		},
+		Op: token.LOR,
+		Y: &ast.BinaryExpr{
+			X: ast.NewIdent(endTemp), Op: token.GTR,
+			Y: &ast.CallExpr{Fun: ast.NewIdent("len"), Args: []ast.Expr{ast.NewIdent(sourceTemp)}},
+		},
+	}
+	stmts = append(stmts, &ast.IfStmt{
+		Cond: invalid,
+		Body: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{
+			Lhs: []ast.Expr{ast.NewIdent(resultTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{noneExpr},
+		}}},
+		Else: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{
+			Lhs: []ast.Expr{ast.NewIdent(resultTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{someExpr},
+		}}},
+	})
+	return loweredExpr{stmts: stmts, expr: ast.NewIdent(resultTemp)}, nil
+}
+
+func (l *lowerer) lowerSliceToList(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	if expr.Target == nil || len(expr.Args) != 0 {
+		return loweredExpr{}, fmt.Errorf("slice to_list expects a target and no args")
+	}
+	target, err := l.lowerExpr(fn, *expr.Target)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	resultType, err := l.goType(expr.Type)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	stmts := append([]ast.Stmt{}, target.stmts...)
+	sourceTemp := l.nextTemp()
+	resultTemp := l.nextTemp()
+	stmts = append(stmts,
+		&ast.AssignStmt{
+			Lhs: []ast.Expr{ast.NewIdent(sourceTemp)}, Tok: token.DEFINE,
+			Rhs: []ast.Expr{l.valueThroughReference(expr.Target.Type, target.expr)},
+		},
+		&ast.AssignStmt{
+			Lhs: []ast.Expr{ast.NewIdent(resultTemp)}, Tok: token.DEFINE,
+			Rhs: []ast.Expr{&ast.CallExpr{
+				Fun:  ast.NewIdent("make"),
+				Args: []ast.Expr{resultType, &ast.CallExpr{Fun: ast.NewIdent("len"), Args: []ast.Expr{ast.NewIdent(sourceTemp)}}},
+			}},
+		},
+		&ast.ExprStmt{X: &ast.CallExpr{Fun: ast.NewIdent("copy"), Args: []ast.Expr{ast.NewIdent(resultTemp), ast.NewIdent(sourceTemp)}}},
+	)
+	return loweredExpr{stmts: stmts, expr: ast.NewIdent(resultTemp)}, nil
+}
+
 func (l *lowerer) lowerListSet(fn air.Function, expr air.Expr) (loweredExpr, error) {
 	if expr.Target == nil || len(expr.Args) != 2 {
 		return loweredExpr{}, fmt.Errorf("list set expects target and two args")
@@ -6691,7 +6854,7 @@ func (l *lowerer) lowerListSet(fn air.Function, expr air.Expr) (loweredExpr, err
 		return loweredExpr{}, err
 	}
 	elemType := air.NoType
-	if info, ok := l.typeInfoThroughReference(expr.Target.Type); ok && info.Kind == air.TypeList {
+	if info, ok := l.typeInfoThroughReference(expr.Target.Type); ok && (info.Kind == air.TypeList || info.Kind == air.TypeSlice) {
 		elemType = info.Elem
 	}
 	var value loweredExpr
@@ -6703,16 +6866,40 @@ func (l *lowerer) lowerListSet(fn air.Function, expr air.Expr) (loweredExpr, err
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	stmts := append(target.stmts, index.stmts...)
+
+	stmts := append([]ast.Stmt{}, target.stmts...)
+	targetTemp := l.nextTemp()
+	stmts = append(stmts, &ast.AssignStmt{
+		Lhs: []ast.Expr{ast.NewIdent(targetTemp)}, Tok: token.DEFINE,
+		Rhs: []ast.Expr{l.valueThroughReference(expr.Target.Type, target.expr)},
+	})
+	stmts = append(stmts, index.stmts...)
+	indexTemp := l.nextTemp()
+	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(indexTemp)}, Tok: token.DEFINE, Rhs: []ast.Expr{index.expr}})
 	stmts = append(stmts, value.stmts...)
-	targetExpr := l.valueThroughReference(expr.Target.Type, target.expr)
 	valueExpr := value.expr
 	if l.isVoidType(elemType) || isVoidExpr(valueExpr) {
 		stmts = l.appendVoidValueEval(stmts, valueExpr)
 		valueExpr = l.voidValueExpr()
 	}
-	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{&ast.IndexExpr{X: targetExpr, Index: index.expr}}, Tok: token.ASSIGN, Rhs: []ast.Expr{valueExpr}})
-	return loweredExpr{stmts: stmts, expr: ast.NewIdent("true")}, nil
+	valueTemp := l.nextTemp()
+	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(valueTemp)}, Tok: token.DEFINE, Rhs: []ast.Expr{valueExpr}})
+	resultTemp := l.nextTemp()
+	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(resultTemp)}, Tok: token.DEFINE, Rhs: []ast.Expr{ast.NewIdent("false")}})
+
+	valid := &ast.BinaryExpr{
+		X:  &ast.BinaryExpr{X: ast.NewIdent(indexTemp), Op: token.GEQ, Y: &ast.BasicLit{Kind: token.INT, Value: "0"}},
+		Op: token.LAND,
+		Y:  &ast.BinaryExpr{X: ast.NewIdent(indexTemp), Op: token.LSS, Y: &ast.CallExpr{Fun: ast.NewIdent("len"), Args: []ast.Expr{ast.NewIdent(targetTemp)}}},
+	}
+	stmts = append(stmts, &ast.IfStmt{
+		Cond: valid,
+		Body: &ast.BlockStmt{List: []ast.Stmt{
+			&ast.AssignStmt{Lhs: []ast.Expr{&ast.IndexExpr{X: ast.NewIdent(targetTemp), Index: ast.NewIdent(indexTemp)}}, Tok: token.ASSIGN, Rhs: []ast.Expr{ast.NewIdent(valueTemp)}},
+			&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(resultTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{ast.NewIdent("true")}},
+		}},
+	})
+	return loweredExpr{stmts: stmts, expr: ast.NewIdent(resultTemp)}, nil
 }
 
 func (l *lowerer) lowerListSwap(fn air.Function, expr air.Expr) (loweredExpr, error) {

@@ -117,10 +117,12 @@ The source-level reference requirement is separate from Go's raw ABI:
 - exact Go `*Interface` parameters remain unsupported;
 - multi-level pointers can flow only from an already compatible foreign pointer value—pure Ard cannot create them by applying another `mut`;
 - a Go `[]T` or `map[K]V` receives the current descriptor value from an Ard reference;
-- a Go `*[]T` or `*map[K]V` receives the pointer to that descriptor;
+- a Go `*[]T` or `*map[K]V` receives the pointer to an Ard list or map descriptor;
 - Go functions and channels remain ordinary values.
 
 Each boundary copies the selected current pointer or descriptor. Later rebinding of an Ard reference slot does not retarget a value already passed to or retained by Go. Foreign code receiving a pointer may replace its pointee; this is part of the explicit FFI trust boundary.
+
+A `mut Slice<T>` reference projects to a compatible Go `[]T` parameter, with capacity restricted to the view's visible length. It does not satisfy Go `*[]T`: replacing that descriptor would violate the fixed-length `Slice<T>` contract. Convert the view with `to_list()` when a pointer-to-slice API must be used.
 
 ## Numeric Conversions
 

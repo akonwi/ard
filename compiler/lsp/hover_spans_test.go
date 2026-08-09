@@ -266,3 +266,18 @@ type Cells = [Str]
 		}
 	})
 }
+
+func TestSpanHoverSliceMethods(t *testing.T) {
+	source := `fn main() {
+  let view = [1, 2].slice().expect("bounds")
+  let copy = view.to_list()
+  let text = "hello".slice(start: 1)
+}
+`
+	t.Run("slice materialization", func(t *testing.T) {
+		requireSpanHover(t, source, 2, 20, "fn Slice<Int>.to_list() [Int]")
+	})
+	t.Run("string slice nullable bounds", func(t *testing.T) {
+		requireSpanHover(t, source, 3, 24, "fn Str.slice(start: Int?, end: Int?) Str?")
+	})
+}

@@ -141,6 +141,7 @@ const (
 	TypeRune
 	TypeStr
 	TypeList
+	TypeSlice
 	TypeFixedArray
 	TypeMap
 	TypeStruct
