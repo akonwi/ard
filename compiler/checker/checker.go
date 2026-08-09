@@ -600,6 +600,7 @@ type Checker struct {
 	topLevelStructDeclarations        map[string]*parse.StructDefinition
 	topLevelTypeAliases               map[string]*parse.TypeDeclaration
 	hoistedTopLevelFunctions          map[*parse.FunctionDeclaration]*FunctionDef
+	preparedInherentMethods           map[*parse.FunctionDeclaration]preparedInherentMethod
 	resolvingTopLevelStructs          map[string]bool
 	resolvedTopLevelStructs           map[string]bool
 	resolvingTopLevelAliases          map[string]bool
@@ -643,9 +644,10 @@ func New(filePath string, input *parse.Program, moduleResolver *ModuleResolver, 
 			StructMethods:         map[MethodOwner]map[string]*FunctionDef{},
 			ForeignInterfaceImpls: map[MethodOwner][]*ForeignType{},
 		},
-		scope:                &rootScope,
-		goTypesContext:       gotypes.NewContext(),
-		foreignABIParameters: map[*parse.FunctionDeclaration][]ForeignParameterABI{},
+		scope:                   &rootScope,
+		goTypesContext:          gotypes.NewContext(),
+		foreignABIParameters:    map[*parse.FunctionDeclaration][]ForeignParameterABI{},
+		preparedInherentMethods: map[*parse.FunctionDeclaration]preparedInherentMethod{},
 	}
 	if checkOptions.RecordSpans {
 		c.spans = &SpanIndex{}
@@ -824,6 +826,7 @@ func (c *Checker) Check() {
 	c.hoistTopLevelTypeDeclarations()
 	c.predeclareTopLevelTypeAliases()
 	c.populateTopLevelTypeDefinitions()
+	c.prepareInherentImplSignatures()
 	c.hoistTopLevelFunctionSignatures()
 
 	for i := range c.input.Statements {
@@ -3956,24 +3959,14 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 			switch def := sym.Type.(type) {
 			case *StructDef:
 				receiverGenerics := genericParamsForType(def)
-				signatures := make([]*FunctionDef, len(s.Methods))
 				for i := range s.Methods {
 					method := &s.Methods[i]
 					if len(method.TypeParams) > 0 {
 						c.addMethodIntroducedGeneric("", methodGenericExplicitDeclaration, method.GetLocation())
 						continue
 					}
-					c.pushMethodGenericAllowlist(receiverGenerics)
-					fnDef := c.resolveMethodSignature(method)
-					c.popMethodGenericAllowlist()
-					fnDef.Receiver = s.Receiver.Name
-					fnDef.Mutates = method.Mutates
-					signatures[i] = fnDef
-					c.addStructMethod(def, fnDef)
-				}
-				for i := range s.Methods {
-					method := &s.Methods[i]
-					if signatures[i] == nil {
+					prepared, ok := c.preparedInherentMethods[method]
+					if !ok || prepared.Signature == nil {
 						continue
 					}
 					if c.spans != nil {
@@ -3986,7 +3979,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					c.pushMethodGenericAllowlist(receiverGenerics)
 					fnDef := c.checkFunctionWithSignature(method, func() {
 						c.scope.add(s.Receiver.Name, receiverBindingType(def, method.Mutates), false)
-					}, signatures[i], receiverGenerics...)
+					}, prepared.Signature, receiverGenerics...)
 					c.popMethodGenericAllowlist()
 					if !methodUsesOnlyReceiverGenerics(fnDef, receiverGenerics) {
 						c.addMethodIntroducedGeneric("", methodGenericSemanticLeak, method.GetLocation())
@@ -3994,11 +3987,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				}
 				return &Statement{Stmt: def}
 			case *Enum:
-				if def.Methods == nil {
-					def.Methods = make(map[string]*FunctionDef)
-				}
 				receiverGenerics := genericParamsForType(def)
-				signatures := make([]*FunctionDef, len(s.Methods))
 				for i := range s.Methods {
 					method := &s.Methods[i]
 					if len(method.TypeParams) > 0 {
@@ -4008,22 +3997,14 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					if method.Mutates {
 						c.addDiagnostic(mutatingEnumMethodDiagnostic{Span: c.sourceSpan(method.GetLocation())}.build())
 					}
-					c.pushMethodGenericAllowlist(receiverGenerics)
-					fnDef := c.resolveMethodSignature(method)
-					c.popMethodGenericAllowlist()
-					fnDef.Receiver = s.Receiver.Name
-					signatures[i] = fnDef
-					def.Methods[method.Name] = fnDef
-				}
-				for i := range s.Methods {
-					method := &s.Methods[i]
-					if signatures[i] == nil {
+					prepared, ok := c.preparedInherentMethods[method]
+					if !ok || prepared.Signature == nil {
 						continue
 					}
 					c.pushMethodGenericAllowlist(receiverGenerics)
 					fnDef := c.checkFunctionWithSignature(method, func() {
 						c.scope.add(s.Receiver.Name, def, false)
-					}, signatures[i], receiverGenerics...)
+					}, prepared.Signature, receiverGenerics...)
 					c.popMethodGenericAllowlist()
 					if !methodUsesOnlyReceiverGenerics(fnDef, receiverGenerics) {
 						c.addMethodIntroducedGeneric("", methodGenericSemanticLeak, method.GetLocation())

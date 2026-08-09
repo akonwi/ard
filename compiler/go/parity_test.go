@@ -24,6 +24,33 @@ type goParityCase struct {
 	input string
 }
 
+func TestGoTargetParityMethodsAcrossImplBlocks(t *testing.T) {
+	runGoParityCases(t, []goParityCase{
+		{
+			name: "earlier method calls later impl method",
+			input: `
+				struct Shape { width: Int, height: Int }
+
+				impl Shape {
+					fn area_label() Str {
+						self.format_area(self.area())
+					}
+				}
+
+				impl Shape {
+					private fn format_area(area: Int) Str { "Area: {area}" }
+					fn area() Int { self.width * self.height }
+				}
+
+				fn main() Bool {
+					let shape = Shape{width: 3, height: 4}
+					shape.area_label() == "Area: 12"
+				}
+			`,
+		},
+	})
+}
+
 func TestGoTargetParityRecursiveStructFields(t *testing.T) {
 	runGoParityCases(t, []goParityCase{
 		{

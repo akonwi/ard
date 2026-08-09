@@ -1,5 +1,74 @@
 package checker
 
+import "github.com/akonwi/ard/parse"
+
+type preparedInherentMethod struct {
+	Signature *FunctionDef
+}
+
+func (c *Checker) prepareInherentImplSignatures() {
+	firstDeclarations := map[MethodOwner]map[string]SourceSpan{}
+	for _, statement := range c.input.Statements {
+		impl, ok := statement.(*parse.ImplBlock)
+		if !ok {
+			continue
+		}
+		sym, ok := c.scope.get(impl.Target.Name)
+		if !ok {
+			continue
+		}
+
+		var owner MethodOwner
+		var receiverGenerics []string
+		var addMethod func(*FunctionDef)
+		switch target := sym.Type.(type) {
+		case *StructDef:
+			owner = StructMethodOwner(target)
+			receiverGenerics = genericParamsForType(target)
+			addMethod = func(method *FunctionDef) { c.addStructMethod(target, method) }
+		case *Enum:
+			owner = MethodOwner{ModulePath: target.ModulePath, TypeName: target.Name}
+			receiverGenerics = genericParamsForType(target)
+			if target.Methods == nil {
+				target.Methods = map[string]*FunctionDef{}
+			}
+			addMethod = func(method *FunctionDef) { target.Methods[method.Name] = method }
+		default:
+			continue
+		}
+
+		if firstDeclarations[owner] == nil {
+			firstDeclarations[owner] = map[string]SourceSpan{}
+		}
+		for i := range impl.Methods {
+			method := &impl.Methods[i]
+			if len(method.TypeParams) > 0 {
+				continue
+			}
+			c.pushMethodGenericAllowlist(receiverGenerics)
+			signature := c.resolveMethodSignature(method)
+			c.popMethodGenericAllowlist()
+			signature.Receiver = impl.Receiver.Name
+			if _, isEnum := sym.Type.(*Enum); !isEnum {
+				signature.Mutates = method.Mutates
+			}
+
+			prepared := preparedInherentMethod{Signature: signature}
+			if original, duplicate := firstDeclarations[owner][method.Name]; duplicate {
+				c.addDiagnostic(duplicateMethodDiagnostic{
+					Method:       method.Name,
+					Span:         c.sourceSpan(method.GetLocation()),
+					OriginalSpan: &original,
+				}.build())
+			} else {
+				firstDeclarations[owner][method.Name] = c.sourceSpan(method.GetLocation())
+				addMethod(signature)
+			}
+			c.preparedInherentMethods[method] = prepared
+		}
+	}
+}
+
 // MethodOwner identifies the named type whose method namespace a method belongs to.
 type MethodOwner struct {
 	ModulePath string
