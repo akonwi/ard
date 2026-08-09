@@ -56,6 +56,18 @@ ffi::TakeScores(mut values)`},
 ffi::TakeChan(channel)`},
 		{name: "pointer to descriptor accepts actual reference", source: `let values = [1, 2]
 ffi::TakeSlicePtr(mut values)`},
+		{name: "Go slice accepts Slice reference", source: `let view = [1, 2].slice().expect("bounds")
+ffi::TakeSlice(mut view)`},
+		{name: "Go slice function value accepts Slice reference", source: `let view = [1, 2].slice().expect("bounds")
+let take = ffi::TakeSlice
+take(mut view)`},
+		{name: "Go slice method accepts Slice reference", source: `let view = [1, 2].slice().expect("bounds")
+let sink = ffi::Sink{}
+sink.Take(mut view)`},
+		{name: "named Go slice accepts Slice reference", source: `let view = [1, 2].slice().expect("bounds")
+ffi::TakeNumbers(mut view)`},
+		{name: "Go pointer to slice rejects Slice reference", source: `let view = [1, 2].slice().expect("bounds")
+ffi::TakeSlicePtr(mut view)`, wantError: true},
 		{name: "bare generic preserves concrete reference", source: `let value = ffi::Item{N: 1}
 let reference = mut value
 let echoed = ffi::Identity(reference)
@@ -100,6 +112,9 @@ let size = ffi::SliceSize(values)`, wantError: true},
 		{name: "slice shaped generic infers from referent", source: `let values = [1, 2]
 let reference = mut values
 let size = ffi::SliceSize(reference)`},
+		{name: "slice shaped generic infers from Slice referent", source: `let view = [1, 2].slice().expect("bounds")
+let size = ffi::SliceSize(mut view)`},
+		{name: "generic Go callback Slice parameter is rejected", source: `let consume = ffi::SliceConsumer<Slice<Int>>()`, wantError: true},
 		{name: "map shaped generic rejects bare value", source: `let values = ["a": 1]
 let size = ffi::MapSize(values)`, wantError: true},
 		{name: "map shaped generic infers from referent", source: `let values = ["a": 1]
@@ -251,6 +266,8 @@ type Bumper interface { Bump() }
 type Reader interface { Read() int }
 type Numbers []int
 type Scores map[string]int
+type Sink struct{}
+func (Sink) Take(values []int) {}
 
 var Global Item
 var item = Item{N: 1}
@@ -278,6 +295,7 @@ func IsComparable[T comparable](value T) bool { return value == value }
 func Two[T comparable, U any](t T, u U) {}
 func UseBumper[T interface{ Bump() }](value T) { value.Bump() }
 func SliceSize[S ~[]E, E any](value S) int { return len(value) }
+func SliceConsumer[S ~[]int]() func(S) { return func(value S) {} }
 func MapSize[M ~map[K]V, K comparable, V any](value M) int { return len(value) }
 func MixedSize[S ~[]E | string, E any](value S) int { return len(value) }
 `

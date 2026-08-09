@@ -135,7 +135,7 @@ func inlineStructReferencesWithNullable(t Type, seen map[Type]bool, seenStructs 
 			refs = append(refs, inlineStructReferencesWithNullable(member, seen, seenStructs)...)
 		}
 		return refs
-	case *MutableRef, *List, *Trait, *FunctionDef:
+	case *MutableRef, *List, *Slice, *Trait, *FunctionDef:
 		return nil
 	default:
 		return nil

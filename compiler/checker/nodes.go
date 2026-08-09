@@ -352,6 +352,7 @@ type StrMethodKind uint8
 const (
 	StrSize StrMethodKind = iota
 	StrAt
+	StrSlice
 	StrBytes
 	StrRunes
 	StrIsEmpty
@@ -365,9 +366,10 @@ const (
 )
 
 type StrMethod struct {
-	Subject Expression
-	Kind    StrMethodKind
-	Args    []Expression
+	Subject  Expression
+	Kind     StrMethodKind
+	Args     []Expression
+	ArgOrder []int
 }
 
 func (s *StrMethod) Type() Type {
@@ -376,6 +378,8 @@ func (s *StrMethod) Type() Type {
 		return Int
 	case StrAt:
 		return MakeMaybe(Rune)
+	case StrSlice:
+		return MakeMaybe(Str)
 	case StrBytes:
 		return MakeList(Byte)
 	case StrRunes:
@@ -515,6 +519,9 @@ type ListMethodKind uint8
 
 const (
 	ListAt ListMethodKind = iota
+	ListSlice
+	ListIsEmpty
+	ListToList
 	ListPrepend
 	ListPush
 	ListSet
@@ -527,6 +534,7 @@ type ListMethod struct {
 	Subject    Expression
 	Kind       ListMethodKind
 	Args       []Expression
+	ArgOrder   []int
 	ReturnType Type // Resolved from the specialized method signature; required.
 }
 

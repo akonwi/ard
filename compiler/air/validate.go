@@ -62,7 +62,7 @@ func Validate(program *Program) error {
 
 func validateTypeInfo(program *Program, typ TypeInfo) error {
 	switch typ.Kind {
-	case TypeList, TypeMaybe, TypeChannel, TypeReceiver, TypeSender, TypeReference:
+	case TypeList, TypeSlice, TypeMaybe, TypeChannel, TypeReceiver, TypeSender, TypeReference:
 		if !validTypeID(program, typ.Elem) {
 			return fmt.Errorf("type %s has invalid elem type %d", typ.Name, typ.Elem)
 		}
@@ -261,7 +261,7 @@ func validateABIParamMode(program *Program, typeID TypeID, mode ABIParamMode) er
 		return fmt.Errorf("descriptor-value ABI requires a reference type, got %s", reference.Name)
 	}
 	referent := program.Types[reference.Elem-1]
-	if referent.Kind == TypeList || referent.Kind == TypeMap {
+	if referent.Kind == TypeList || referent.Kind == TypeSlice || referent.Kind == TypeMap {
 		return nil
 	}
 	if referent.Kind == TypeForeignType && !referent.ForeignPointer &&
@@ -941,7 +941,7 @@ func foreignTypeAssignableTo(program *Program, foreign TypeInfo, otherID TypeID,
 	if validTypeID(program, foreign.Key) && validTypeID(program, foreign.Value) && other.Kind == TypeMap {
 		return foreign.Key == other.Key && foreign.Value == other.Value
 	}
-	if validTypeID(program, foreign.Elem) && other.Kind == TypeList {
+	if validTypeID(program, foreign.Elem) && (other.Kind == TypeList || other.Kind == TypeSlice) {
 		return foreign.Elem == other.Elem
 	}
 	return false
@@ -974,7 +974,7 @@ func typesStructurallyEquivalent(program *Program, leftID TypeID, rightID TypeID
 		return left.Name == right.Name
 	case TypeParam:
 		return left.ParamIndex == right.ParamIndex && left.Name == right.Name
-	case TypeList, TypeMaybe, TypeChannel, TypeReceiver, TypeSender, TypeReference:
+	case TypeList, TypeSlice, TypeMaybe, TypeChannel, TypeReceiver, TypeSender, TypeReference:
 		return equivalent(left.Elem, right.Elem)
 	case TypeFixedArray:
 		return left.Length == right.Length && equivalent(left.Elem, right.Elem)

@@ -215,6 +215,9 @@ func functionDefFromGoSignatureBound(name string, sig *types.Signature, bindings
 		if reason != "" {
 			return nil, fmt.Sprintf("parameter %d has unsupported type %s: %s", i+1, goType.String(), reason)
 		}
+		if _, callback := ardType.(*FunctionDef); callback {
+			ardType = normalizeGoSliceResultType(ardType)
+		}
 		if !variadic && !isReferenceType(ardType) && isDescriptorBoundaryArdType(ardType) {
 			// A descriptor-shaped instantiation is an explicit-reference-
 			// required boundary, matching non-generic Go slice/map parameters
@@ -245,7 +248,11 @@ func boundReturnTypeFromGo(results *types.Tuple, tparams *types.TypeParamList, b
 		if isGoError(results.At(0).Type()) {
 			return MakeResult(Void, Str), ""
 		}
-		return boundTypeFromGo(results.At(0).Type(), tparams, bindings)
+		value, reason := boundTypeFromGo(results.At(0).Type(), tparams, bindings)
+		if reason != "" {
+			return nil, reason
+		}
+		return normalizeGoSliceResultType(value), ""
 	case 2:
 		if isGoError(results.At(1).Type()) {
 			val, reason := boundTypeFromGo(results.At(0).Type(), tparams, bindings)
@@ -255,7 +262,7 @@ func boundReturnTypeFromGo(results *types.Tuple, tparams *types.TypeParamList, b
 			if _, ok := val.(*MutableRef); ok {
 				return nil, "mut results inside Result are not supported yet"
 			}
-			return MakeResult(val, Str), ""
+			return MakeResult(normalizeGoSliceResultType(val), Str), ""
 		}
 		if isGoBool(results.At(1).Type()) {
 			val, reason := boundTypeFromGo(results.At(0).Type(), tparams, bindings)
@@ -265,10 +272,93 @@ func boundReturnTypeFromGo(results *types.Tuple, tparams *types.TypeParamList, b
 			if _, ok := val.(*MutableRef); ok {
 				return nil, "mut results inside Maybe are not supported yet"
 			}
-			return MakeMaybe(val), ""
+			return MakeMaybe(normalizeGoSliceResultType(val)), ""
 		}
 	}
 	return nil, fmt.Sprintf("unsupported result shape %s", results.String())
+}
+
+// normalizeGoSliceResultType preserves the ordinary Go-import rule that slice
+// results become Ard lists. A type parameter may have been inferred from an
+// input Slice<T>, but a foreign result is a complete returned descriptor, not
+// an Ard-created fixed-length view.
+func containsArdSlice(t Type) bool {
+	switch value := t.(type) {
+	case *Slice:
+		return true
+	case *List:
+		return containsArdSlice(value.Of())
+	case *FixedArray:
+		return containsArdSlice(value.Of())
+	case *Map:
+		return containsArdSlice(value.Key()) || containsArdSlice(value.Value())
+	case *Maybe:
+		return containsArdSlice(value.Of())
+	case *Result:
+		return containsArdSlice(value.Val()) || containsArdSlice(value.Err())
+	case *Chan:
+		return containsArdSlice(value.Of())
+	case *Receiver:
+		return containsArdSlice(value.Of())
+	case *Sender:
+		return containsArdSlice(value.Of())
+	case *FunctionDef:
+		for _, param := range value.Parameters {
+			if containsArdSlice(param.Type) {
+				return true
+			}
+		}
+		return containsArdSlice(value.ReturnType)
+	case *ForeignType:
+		for _, arg := range value.TypeArgs {
+			if containsArdSlice(arg) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func normalizeGoSliceResultType(t Type) Type {
+	switch value := t.(type) {
+	case *Slice:
+		return MakeList(normalizeGoSliceResultType(value.Of()))
+	case *List:
+		return MakeList(normalizeGoSliceResultType(value.Of()))
+	case *FixedArray:
+		return MakeFixedArray(normalizeGoSliceResultType(value.Of()), value.Len())
+	case *Map:
+		return MakeMap(normalizeGoSliceResultType(value.Key()), normalizeGoSliceResultType(value.Value()))
+	case *Maybe:
+		return MakeMaybe(normalizeGoSliceResultType(value.Of()))
+	case *Result:
+		return MakeResult(normalizeGoSliceResultType(value.Val()), normalizeGoSliceResultType(value.Err()))
+	case *Chan:
+		return MakeChan(normalizeGoSliceResultType(value.Of()))
+	case *Receiver:
+		return MakeReceiver(normalizeGoSliceResultType(value.Of()))
+	case *Sender:
+		return MakeSender(normalizeGoSliceResultType(value.Of()))
+	case *Union:
+		members := make([]Type, len(value.Types))
+		for i, member := range value.Types {
+			members[i] = normalizeGoSliceResultType(member)
+		}
+		return &Union{Name: value.Name, ModulePath: value.ModulePath, Types: members, MemberNames: copyUnionMemberNames(value), Private: value.Private}
+	case *ForeignType:
+		args := make([]Type, len(value.TypeArgs))
+		for i, arg := range value.TypeArgs {
+			args[i] = normalizeGoSliceResultType(arg)
+		}
+		return foreignTypeWithArgs(value, args)
+	case *FunctionDef:
+		copy := *value
+		copy.Parameters = append([]Parameter(nil), value.Parameters...)
+		copy.ReturnType = normalizeGoSliceResultType(value.ReturnType)
+		return &copy
+	default:
+		return t
+	}
 }
 
 // boundTypeFromGo maps a Go type that may mention type parameters to an Ard
@@ -337,6 +427,9 @@ func boundTypeFromGo(t types.Type, tparams *types.TypeParamList, bindings goType
 			if reason != "" {
 				return nil, fmt.Sprintf("callback parameter %d %s", i+1, reason)
 			}
+			if containsArdSlice(param) {
+				return nil, fmt.Sprintf("callback parameter %d resolves to Slice; generic Go callback slice parameters are not supported", i+1)
+			}
 			name := typ.Params().At(i).Name()
 			if name == "" {
 				name = fmt.Sprintf("arg%d", i+1)
@@ -362,7 +455,7 @@ func boundTypeFromGo(t types.Type, tparams *types.TypeParamList, bindings goType
 // is a slice/map descriptor at the Go boundary.
 func isDescriptorBoundaryArdType(t Type) bool {
 	switch typ := t.(type) {
-	case *List, *Map:
+	case *List, *Slice, *Map:
 		return true
 	case *ForeignType:
 		return !typ.Pointer && (typ.Elem != nil || (typ.MapKey != nil && typ.MapValue != nil))
@@ -496,8 +589,11 @@ func inferGoFuncTypeArgs(pattern types.Type, actual Type, tparams *types.TypePar
 			return true, nil, nil, nil, SourceSpan{}
 		}
 	case *types.Slice:
-		if list, ok := actual.(*List); ok {
-			return inferGoFuncTypeArgs(pattern.Elem(), list.Of(), tparams, inferred, inferredSpans, currentSpan)
+		switch sequence := actual.(type) {
+		case *List:
+			return inferGoFuncTypeArgs(pattern.Elem(), sequence.Of(), tparams, inferred, inferredSpans, currentSpan)
+		case *Slice:
+			return inferGoFuncTypeArgs(pattern.Elem(), sequence.Of(), tparams, inferred, inferredSpans, currentSpan)
 		}
 	case *types.Map:
 		if m, ok := actual.(*Map); ok {

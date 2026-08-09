@@ -30,6 +30,19 @@ let first = values.at(0).or(0) // 10
 let missing = values.at(9)     // Int?
 ```
 
+### `fn slice(start: Int?, end: Int?) Slice<T>?`
+
+Return a fixed-length shared view over a checked, half-open range. Both bounds are optional:
+
+```ard
+let values = [10, 20, 30, 40]
+let tail = values.slice(start: 1)               // Slice<Int>?
+let head = values.slice(end: 3)                 // Slice<Int>?
+let middle = values.slice(start: 1, end: 3)     // Slice<Int>?
+```
+
+Invalid bounds return `none`. See [`Slice<T>`](/stdlib/slice-type/) for aliasing, mutation, copying, and Go interop semantics.
+
 ### `fn push(value: T) Int`
 
 Append `value` through a list reference and return the new length.

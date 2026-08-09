@@ -7,7 +7,7 @@ import "sort"
 // resolution when adding builtin methods.
 var (
 	strMethodNames = map[StrMethodKind]string{
-		StrSize: "size", StrAt: "at", StrBytes: "bytes", StrRunes: "runes",
+		StrSize: "size", StrAt: "at", StrSlice: "slice", StrBytes: "bytes", StrRunes: "runes",
 		StrIsEmpty: "is_empty", StrContains: "contains", StrReplace: "replace",
 		StrReplaceAll: "replace_all",
 		StrStartsWith: "starts_with", StrEndsWith: "ends_with",
@@ -19,10 +19,13 @@ var (
 	floatMethodNames = map[FloatMethodKind]string{FloatToStr: "to_str", FloatToInt: "to_int"}
 	boolMethodNames  = map[BoolMethodKind]string{BoolToStr: "to_str"}
 	listMethodNames  = map[ListMethodKind]string{
-		ListAt: "at", ListPrepend: "prepend", ListPush: "push", ListSet: "set",
+		ListAt: "at", ListSlice: "slice", ListIsEmpty: "is_empty", ListToList: "to_list",
+		ListPrepend: "prepend", ListPush: "push", ListSet: "set",
 		ListSize: "size", ListSort: "sort", ListSwap: "swap",
 	}
-	mapMethodNames = map[MapMethodKind]string{
+	listMemberNames  = []string{"at", "prepend", "push", "set", "size", "slice", "sort", "swap"}
+	sliceMemberNames = []string{"at", "is_empty", "set", "size", "slice", "swap", "to_list"}
+	mapMethodNames   = map[MapMethodKind]string{
 		MapKeys: "keys", MapSize: "size", MapGet: "get", MapSet: "set",
 		MapDelete: "delete", MapHas: "has",
 	}
@@ -125,9 +128,9 @@ func BuiltinMemberNames(receiver Type) []string {
 	default:
 		switch receiver.(type) {
 		case *List:
-			for _, name := range listMethodNames {
-				collect(name)
-			}
+			collect(listMemberNames...)
+		case *Slice:
+			collect(sliceMemberNames...)
 		case *Map:
 			for _, name := range mapMethodNames {
 				collect(name)

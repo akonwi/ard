@@ -80,6 +80,12 @@ func derefTypeSeen(t Type, seen map[Type]bool) Type {
 			return typ // No change, return original
 		}
 		return &List{of: derefInner}
+	case *Slice:
+		derefInner := derefTypeSeen(typ.of, seen)
+		if derefInner == typ.of {
+			return typ
+		}
+		return &Slice{of: derefInner}
 	case *FixedArray:
 		derefInner := derefTypeSeen(typ.of, seen)
 		if derefInner == typ.of {
@@ -1129,6 +1135,8 @@ func collectGenericsFromType(t Type, params *[]string, seen map[string]bool) {
 		}
 	case *List:
 		collectGenericsFromType(t.of, params, seen)
+	case *Slice:
+		collectGenericsFromType(t.of, params, seen)
 	case *FixedArray:
 		collectGenericsFromType(t.of, params, seen)
 	case *MutableRef:
@@ -1328,7 +1336,7 @@ func isValidMapKeyTypeSeen(t Type, context *mapKeyTypeContext) bool {
 		return isValidMapKeyTypeSeen(ty.Of(), context)
 	case *ForeignType:
 		return ty.GoType == nil || gotypes.Comparable(ty.GoType)
-	case *Maybe, *List, *Map, *Result, *Union, *FunctionDef, *Trait, *anyType:
+	case *Maybe, *List, *Slice, *Map, *Result, *Union, *FunctionDef, *Trait, *anyType:
 		return false
 	default:
 		return true
@@ -1353,6 +1361,8 @@ func mapKeyTypeComplexity(t Type, seen map[Type]bool) int {
 		}
 		return total
 	case *List:
+		return 1 + mapKeyTypeComplexity(typ.Of(), seen)
+	case *Slice:
 		return 1 + mapKeyTypeComplexity(typ.Of(), seen)
 	case *FixedArray:
 		return 1 + mapKeyTypeComplexity(typ.Of(), seen)
@@ -1504,20 +1514,16 @@ func (c *Checker) resolveType(t parse.DeclaredType) Type {
 		switch t.GetName() {
 		case "Any":
 			baseType = Any
-			break
 		case "Byte":
 			baseType = Byte
-			break
 		case "Error":
 			if sym, ok := c.scope.get("Error"); ok {
 				baseType = sym.Type
 			} else {
 				baseType = BuiltinError
 			}
-			break
 		case "Rune":
 			baseType = Rune
-			break
 		case "Maybe":
 			if len(ty.TypeArgs) != 1 {
 				c.addIncorrectTypeArgumentCount(1, len(ty.TypeArgs), "Generic type Maybe requires type arguments", ty.GetLocation())
@@ -1528,28 +1534,30 @@ func (c *Checker) resolveType(t parse.DeclaredType) Type {
 			if inner == Void {
 				c.addRedundantNullableVoid(ty.GetLocation())
 			}
-			break
+		case "Slice":
+			if len(ty.TypeArgs) != 1 {
+				c.addIncorrectTypeArgumentCount(1, len(ty.TypeArgs), "Generic type Slice requires type arguments", ty.GetLocation())
+				return &TypeVar{name: "unknown"}
+			}
+			baseType = MakeSlice(c.resolveType(ty.TypeArgs[0]))
 		case "Chan":
 			if len(ty.TypeArgs) != 1 {
 				c.addIncorrectTypeArgumentCount(1, len(ty.TypeArgs), "Generic type Chan requires type arguments", ty.GetLocation())
 				return &TypeVar{name: "unknown"}
 			}
 			baseType = MakeChan(c.resolveType(ty.TypeArgs[0]))
-			break
 		case "Receiver":
 			if len(ty.TypeArgs) != 1 {
 				c.addIncorrectTypeArgumentCount(1, len(ty.TypeArgs), "Generic type Receiver requires type arguments", ty.GetLocation())
 				return &TypeVar{name: "unknown"}
 			}
 			baseType = MakeReceiver(c.resolveType(ty.TypeArgs[0]))
-			break
 		case "Sender":
 			if len(ty.TypeArgs) != 1 {
 				c.addIncorrectTypeArgumentCount(1, len(ty.TypeArgs), "Generic type Sender requires type arguments", ty.GetLocation())
 				return &TypeVar{name: "unknown"}
 			}
 			baseType = MakeSender(c.resolveType(ty.TypeArgs[0]))
-			break
 		default:
 			baseType = scalarTypeByName(t.GetName())
 		}
@@ -2314,6 +2322,30 @@ func (c *Checker) areCompatible(expected Type, actual Type) bool {
 	return expected.equal(actual)
 }
 
+// sliceDescriptorProjectionCompatible permits the one nominal conversion
+// Slice<T> supports: an explicit mutable Slice reference may project to a
+// compatible Go []T descriptor-value parameter. It deliberately does not make
+// Slice<T> interchangeable with Ard List<T> elsewhere.
+func sliceDescriptorProjectionCompatible(expected Type, actual Type) bool {
+	expectedRef, expectedIsRef := expected.(*MutableRef)
+	actualRef, actualIsRef := actual.(*MutableRef)
+	if !expectedIsRef || !actualIsRef {
+		return false
+	}
+	actualSlice, ok := actualRef.Of().(*Slice)
+	if !ok {
+		return false
+	}
+	switch target := expectedRef.Of().(type) {
+	case *List:
+		return target.Of().equal(actualSlice.Of())
+	case *ForeignType:
+		return !target.Pointer && target.Elem != nil && target.Elem.equal(actualSlice.Of())
+	default:
+		return false
+	}
+}
+
 func (c *Checker) checkForeignInterfaceImplementation(s *parse.TraitImplementation, iface *ForeignType) *Statement {
 	typeSym, ok := c.scope.get(s.ForType.Name)
 	if !ok {
@@ -2588,7 +2620,7 @@ func expressionUsesForeignDescriptor(expr Expression) bool {
 func isDescriptorBackedMutableType(t Type) bool {
 	base, _ := mutableRefBase(t)
 	switch typ := base.(type) {
-	case *List, *Map, *Chan, *Receiver, *Sender:
+	case *List, *Slice, *Map, *Chan, *Receiver, *Sender:
 		return true
 	case *ForeignType:
 		return typ.Pointer || typ.Interface || typ.MapKey != nil || typ.Elem != nil
@@ -3754,6 +3786,23 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				return &Statement{Stmt: loop}
 			}
 
+			if sliceType, ok := iterValue.Type().(*Slice); ok {
+				loop := &ForInList{
+					Cursor: s.Cursor.Name,
+					Index:  s.Cursor2.Name,
+					List:   iterValue,
+				}
+				cursorMutable := c.isMutable(iterValue)
+				body := c.checkBlock(s.Body, c.markLoopScope(func() {
+					c.recordBinding(s.Cursor.GetLocation(), c.scope.add(s.Cursor.Name, sliceType.of, cursorMutable))
+					if loop.Index != "" {
+						c.recordBinding(s.Cursor2.GetLocation(), c.scope.add(loop.Index, Int, false))
+					}
+				}))
+				loop.Body = body
+				return &Statement{Stmt: loop}
+			}
+
 			if arrayType, ok := iterValue.Type().(*FixedArray); ok {
 				loop := &ForInList{
 					Cursor: s.Cursor.Name,
@@ -4608,6 +4657,9 @@ func unsafeResultOkValueCompatible(expected Type, actual Type) bool {
 	switch expectedType := expected.(type) {
 	case *List:
 		actualType, ok := actual.(*List)
+		return ok && unsafeResultOkValueCompatible(expectedType.of, actualType.of)
+	case *Slice:
+		actualType, ok := actual.(*Slice)
 		return ok && unsafeResultOkValueCompatible(expectedType.of, actualType.of)
 	case *Chan:
 		actualType, ok := actual.(*Chan)
@@ -5639,6 +5691,11 @@ func checkerTypeToGoType(t Type) (gotypes.Type, bool) {
 		if ok {
 			return gotypes.NewSlice(elem), true
 		}
+	case *Slice:
+		elem, ok := checkerTypeToGoType(typ.Of())
+		if ok {
+			return gotypes.NewSlice(elem), true
+		}
 	case *Map:
 		key, ok := checkerTypeToGoType(typ.Key())
 		if !ok {
@@ -5939,6 +5996,47 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 
 // createPrimitiveMethodNode creates type-specific method nodes for primitives and collections
 // Falls back to generic InstanceMethod for user-defined types (structs, enums)
+func applySliceArgumentOrder(node Expression, sourceArgs []parse.Argument, params []Parameter) Expression {
+	if len(params) == 0 {
+		return node
+	}
+	paramIndexes := make(map[string]int, len(params))
+	for i, param := range params {
+		paramIndexes[param.Name] = i
+	}
+	order := make([]int, 0, len(params))
+	used := make([]bool, len(params))
+	nextPositional := 0
+	for _, arg := range sourceArgs {
+		index := nextPositional
+		if arg.Name != "" {
+			index = paramIndexes[arg.Name]
+		} else {
+			nextPositional++
+		}
+		if index >= 0 && index < len(params) && !used[index] {
+			order = append(order, index)
+			used[index] = true
+		}
+	}
+	for i := range params {
+		if !used[i] {
+			order = append(order, i)
+		}
+	}
+	switch method := node.(type) {
+	case *StrMethod:
+		if method.Kind == StrSlice {
+			method.ArgOrder = order
+		}
+	case *ListMethod:
+		if method.Kind == ListSlice {
+			method.ArgOrder = order
+		}
+	}
+	return node
+}
+
 func (c *Checker) createPrimitiveMethodNode(subject Expression, methodName string, args []Expression, fnDef *FunctionDef, typeArgs []Type, loc parse.Location) Expression {
 	// Determine subject type - emit specialized nodes for all built-in types.
 	// A reference-valued subject dispatches through its referent: method
@@ -5961,6 +6059,9 @@ func (c *Checker) createPrimitiveMethodNode(subject Expression, methodName strin
 
 	// Check for collection types
 	if _, isList := subjectType.(*List); isList {
+		return c.createListMethod(subject, methodName, args, fnDef, loc)
+	}
+	if _, isSlice := subjectType.(*Slice); isSlice {
 		return c.createListMethod(subject, methodName, args, fnDef, loc)
 	}
 	if _, isFixedArray := subjectType.(*FixedArray); isFixedArray {
@@ -6155,6 +6256,8 @@ func (c *Checker) createStrMethod(subject Expression, methodName string, args []
 	switch methodName {
 	case "at":
 		kind = StrAt
+	case "slice":
+		kind = StrSlice
 	case "size":
 		kind = StrSize
 	case "bytes":
@@ -6265,6 +6368,12 @@ func (c *Checker) createListMethod(subject Expression, methodName string, args [
 	switch methodName {
 	case "at":
 		kind = ListAt
+	case "slice":
+		kind = ListSlice
+	case "is_empty":
+		kind = ListIsEmpty
+	case "to_list":
+		kind = ListToList
 	case "prepend":
 		kind = ListPrepend
 	case "push":
@@ -6307,7 +6416,7 @@ func (c *Checker) createListMethod(subject Expression, methodName string, args [
 
 func isListMethodName(name string) bool {
 	switch name {
-	case "at", "prepend", "push", "set", "size", "sort", "swap":
+	case "at", "slice", "is_empty", "to_list", "prepend", "push", "set", "size", "sort", "swap":
 		return true
 	default:
 		return false
@@ -6463,6 +6572,10 @@ func bindGenericTypes(original Type, specialized Type, bindings map[string]Type)
 		}
 	case *List:
 		if spec, ok := specialized.(*List); ok {
+			bindGenericTypes(orig.of, spec.of, bindings)
+		}
+	case *Slice:
+		if spec, ok := specialized.(*Slice); ok {
 			bindGenericTypes(orig.of, spec.of, bindings)
 		}
 	case *Chan:
@@ -7287,10 +7400,12 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 					return c.createPrimitiveMethodNode(subj, s.Method.Name, args, fnToUse, callTypeArgs, s.Method.GetLocation())
 				}
 				if foreign.Elem != nil && isListMethodName(s.Method.Name) {
-					return c.createPrimitiveMethodNode(subj, s.Method.Name, args, fnToUse, callTypeArgs, s.Method.GetLocation())
+					node := c.createPrimitiveMethodNode(subj, s.Method.Name, args, fnToUse, callTypeArgs, s.Method.GetLocation())
+					return applySliceArgumentOrder(node, s.Method.Args, fnToUse.Parameters)
 				}
 				if _, ok := foreign.Underlying.(*FixedArray); ok && isListMethodName(s.Method.Name) {
-					return c.createPrimitiveMethodNode(subj, s.Method.Name, args, fnToUse, callTypeArgs, s.Method.GetLocation())
+					node := c.createPrimitiveMethodNode(subj, s.Method.Name, args, fnToUse, callTypeArgs, s.Method.GetLocation())
+					return applySliceArgumentOrder(node, s.Method.Args, fnToUse.Parameters)
 				}
 				for _, arg := range s.Method.Args {
 					if arg.Name != "" {
@@ -7301,8 +7416,10 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 				pointer := foreign.Pointer || foreignPointerReceiver
 				return &ForeignMethodCall{Subject: subj, Target: foreign.Target, Namespace: foreign.Namespace, Qualifier: foreign.Qualifier, Receiver: foreign.Name, Pointer: pointer, Symbol: s.Method.Name, ForeignResultShape: fnToUse.ForeignResultShape, Call: &FunctionCall{Name: s.Method.Name, Args: args, fn: fnToUse, ReturnType: fnToUse.ReturnType}}
 			}
-			// Create function call
-			return c.createPrimitiveMethodNode(subj, s.Method.Name, args, fnToUse, callTypeArgs, s.Method.GetLocation())
+			// Create function call. Slice bounds retain source evaluation order even
+			// though named arguments are stored by destination parameter index.
+			node := c.createPrimitiveMethodNode(subj, s.Method.Name, args, fnToUse, callTypeArgs, s.Method.GetLocation())
+			return applySliceArgumentOrder(node, s.Method.Args, fnToUse.Parameters)
 		}
 	case *parse.MutRef:
 		return c.checkMutRef(s)
@@ -7846,7 +7963,7 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 					}
 					if converted, ok := c.destinationConversion(effectiveFnDef.Parameters[i].Type, checkedArg); ok {
 						checkedArg = converted
-					} else if !c.areCompatible(effectiveFnDef.Parameters[i].Type, checkedArg.Type()) {
+					} else if !c.areCompatible(effectiveFnDef.Parameters[i].Type, checkedArg.Type()) && !sliceDescriptorProjectionCompatible(effectiveFnDef.Parameters[i].Type, checkedArg.Type()) {
 						legacyMessage := typeMismatch(effectiveFnDef.Parameters[i].Type, checkedArg.Type())
 						c.addIncorrectArgumentType(legacyMessage, effectiveFnDef.Parameters[i].Type, checkedArg.Type(), expr.GetLocation(), effectiveFnDef.Parameters[i], false)
 						return nil
@@ -9554,6 +9671,10 @@ func bindInferredTypeVars(expected Type, actual Type) {
 		if act, ok := actual.(*List); ok {
 			bindInferredTypeVars(exp.Of(), act.Of())
 		}
+	case *Slice:
+		if act, ok := actual.(*Slice); ok {
+			bindInferredTypeVars(exp.Of(), act.Of())
+		}
 	case *Chan:
 		if act, ok := actual.(*Chan); ok {
 			bindInferredTypeVars(exp.Of(), act.Of())
@@ -10312,7 +10433,11 @@ func (c *Checker) checkExprAsInner(expr parse.Expression, expectedType Type, exp
 		return converted
 	}
 
-	if !c.areCompatible(expectedType, checked.Type()) {
+	compatible := c.areCompatible(expectedType, checked.Type())
+	if !compatible && argumentParameter != nil && argumentParameter.ForeignABI == ForeignParameterDescriptorValue {
+		compatible = sliceDescriptorProjectionCompatible(expectedType, checked.Type())
+	}
+	if !compatible {
 		if argumentParameter != nil {
 			legacyMessage := typeMismatch(expectedType, checked.Type())
 			c.addIncorrectArgumentType(legacyMessage, expectedType, checked.Type(), expr.GetLocation(), *argumentParameter, false)
@@ -10673,6 +10798,8 @@ func substituteType(t Type, typeMap map[string]Type) Type {
 		)
 	case *List:
 		return &List{of: substituteType(typ.of, typeMap)}
+	case *Slice:
+		return &Slice{of: substituteType(typ.of, typeMap)}
 	case *Chan:
 		return &Chan{of: substituteType(typ.of, typeMap)}
 	case *Receiver:
@@ -10796,6 +10923,10 @@ func inferGenericBindingsFromTypes(original, specialized Type, bindings map[stri
 		}
 	case *List:
 		if spec, ok := specialized.(*List); ok {
+			inferGenericBindingsFromTypes(orig.Of(), spec.Of(), bindings)
+		}
+	case *Slice:
+		if spec, ok := specialized.(*Slice); ok {
 			inferGenericBindingsFromTypes(orig.Of(), spec.Of(), bindings)
 		}
 	case *Map:
@@ -11160,6 +11291,12 @@ func (c *Checker) inferBindingsFromExpectedReturn(pattern Type, expected Type, g
 			return newUnificationError(pattern, expected, fmt.Sprintf("expected list type, got %s", expected))
 		}
 		return c.inferBindingsFromExpectedReturn(p.of, e.of, genericScope)
+	case *Slice:
+		e, ok := expected.(*Slice)
+		if !ok {
+			return newUnificationError(pattern, expected, fmt.Sprintf("expected slice type, got %s", expected))
+		}
+		return c.inferBindingsFromExpectedReturn(p.of, e.of, genericScope)
 	case *FixedArray:
 		e, ok := expected.(*FixedArray)
 		if !ok || p.length != e.length {
@@ -11331,11 +11468,23 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 				// earlier-argument, or enclosing-return evidence has resolved this
 				// call's variables. Enclosing declaration generics are safe context;
 				// unresolved variables owned by this call are not.
+				diagnosticCount := len(c.diagnostics)
+				spansMark := c.spansMark()
 				if genericScope != nil && hasUnresolvedGenericsFrom(expectedType, genericScope.genericContext) {
 					partialContext := maskUnresolvedGenericsFrom(expectedType, genericScope.genericContext)
 					checkedArg = c.checkExprAsArgument(resolvedExprs[i], partialContext, fnDefCopy.Parameters[i])
 				} else {
 					checkedArg = c.checkExprAsArgument(resolvedExprs[i], expectedType, fnDefCopy.Parameters[i])
+				}
+				// Nullable argument sugar also applies to computed call results. Try
+				// the full Maybe context first so a call returning Maybe keeps it;
+				// when that fails, retry against the inner type and wrap below.
+				if checkedArg == nil {
+					if maybeExpected, ok := expectedType.(*Maybe); ok {
+						c.diagnostics = c.diagnostics[:diagnosticCount]
+						c.spansTruncate(spansMark)
+						checkedArg = c.checkExprAsArgument(resolvedExprs[i], maybeExpected.Of(), fnDefCopy.Parameters[i])
+					}
 				}
 			default:
 				checkedArg = c.checkExpr(resolvedExprs[i])
@@ -11454,7 +11603,7 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 			// broad compatibility already accepts the nominal implementation.
 			if converted, ok := c.destinationConversion(paramType, checkedArg); ok {
 				checkedArg = converted
-			} else if !c.areCompatible(paramType, checkedArg.Type()) {
+			} else if !c.areCompatible(paramType, checkedArg.Type()) && !(fnDefCopy.Parameters[i].ForeignABI == ForeignParameterDescriptorValue && sliceDescriptorProjectionCompatible(paramType, checkedArg.Type())) {
 				legacyMessage := typeMismatch(paramType, checkedArg.Type())
 				c.addIncorrectArgumentType(legacyMessage, paramType, checkedArg.Type(), resolvedExprs[i].GetLocation(), fnDefCopy.Parameters[i], false)
 				return nil, nil
@@ -11779,6 +11928,11 @@ func (c *Checker) unifyTypes(expected Type, actual Type, genericScope *SymbolTab
 			return c.unifyTypes(expectedType.of, actualList.of, genericScope)
 		}
 		return newUnificationError(expected, actual, fmt.Sprintf("expected list type, got %T", actual))
+	case *Slice:
+		if actualSlice, ok := actual.(*Slice); ok {
+			return c.unifyTypes(expectedType.of, actualSlice.of, genericScope)
+		}
+		return newUnificationError(expected, actual, fmt.Sprintf("expected slice type, got %T", actual))
 	case *FixedArray:
 		if actualArray, ok := actual.(*FixedArray); ok && expectedType.length == actualArray.length {
 			return c.unifyTypes(expectedType.of, actualArray.of, genericScope)

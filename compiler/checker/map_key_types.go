@@ -75,6 +75,8 @@ func (c *Checker) validateNestedStructMapKeys(t Type, loc parse.Location, seen m
 		c.validateNestedStructMapKeys(typ.Value(), loc, seen, context)
 	case *List:
 		c.validateNestedStructMapKeys(typ.Of(), loc, seen, context)
+	case *Slice:
+		c.validateNestedStructMapKeys(typ.Of(), loc, seen, context)
 	case *FixedArray:
 		c.validateNestedStructMapKeys(typ.Of(), loc, seen, context)
 	case *Chan:
