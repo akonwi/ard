@@ -228,6 +228,104 @@ func TestMethods(t *testing.T) {
 			diagnostics: []checker.Diagnostic{},
 		},
 		{
+			name: "Impl method can call a method in a later impl block",
+			input: fmt.Sprintf(
+				`%s
+				impl Shape {
+				  fn area_label() Str {
+						self.format_area(self.get_area())
+					}
+				}
+
+				impl Shape {
+				  private fn format_area(area: Int) Str {
+						"Area: {area}"
+					}
+
+				  fn get_area() Int {
+						self.width * self.height
+					}
+				}`, shapeCode),
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
+			name: "Trait method can call an inherent method in a later impl block",
+			input: `struct DecodeError {
+				message: Str,
+			}
+
+			impl Error for DecodeError {
+				fn error() Str {
+					self.to_str()
+				}
+			}
+
+			impl DecodeError {
+				fn to_str() Str {
+					self.message
+				}
+			}`,
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
+			name: "Generic receiver method can call a method in a later impl block",
+			input: `struct Box<$T> {
+				value: $T,
+			}
+
+			impl Box {
+				fn value() $T {
+					self.read_value()
+				}
+			}
+
+			impl Box {
+				private fn read_value() $T {
+					self.value
+				}
+			}`,
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
+			name: "Enum method can call a method in a later impl block",
+			input: `enum Direction { up, down }
+
+			impl Direction {
+				fn label() Str {
+					self.word()
+				}
+			}
+
+			impl Direction {
+				private fn word() Str {
+					match self {
+						Direction::up => "up",
+						Direction::down => "down",
+					}
+				}
+			}`,
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
+			name: "Duplicate inherent method across impl blocks is rejected",
+			input: fmt.Sprintf(
+				`%s
+				impl Shape {
+				  fn get_area() Int {
+						self.width * self.height
+					}
+				}
+
+				impl Shape {
+				  fn get_area() Int {
+						0
+					}
+				}`, shapeCode),
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Duplicate method: get_area"},
+			},
+		},
+		{
 			name: "The instance can't be mutated in a non-mutable impl block",
 			input: fmt.Sprintf(
 				`%s
