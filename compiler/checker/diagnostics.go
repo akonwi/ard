@@ -17,6 +17,7 @@ const (
 type DiagnosticCode string
 
 const (
+	DiagnosticCodeParseError                    DiagnosticCode = "parse_error"
 	DiagnosticCodeTypeMismatch                  DiagnosticCode = "type_mismatch"
 	DiagnosticCodeDuplicateDeclaration          DiagnosticCode = "duplicate_declaration"
 	DiagnosticCodeDuplicateFieldDeclaration     DiagnosticCode = "duplicate_field_declaration"

@@ -26,3 +26,10 @@ func TestIsAlreadyReportedRecognizesWrappedMarker(t *testing.T) {
 		t.Fatal("wrapped marker was not recognized")
 	}
 }
+
+func TestIsAlreadyReportedDoesNotSuppressJoinedFailures(t *testing.T) {
+	err := errors.Join(AlreadyReported(errors.New("type errors")), errors.New("cleanup failed"))
+	if IsAlreadyReported(err) {
+		t.Fatal("joined failure was treated as fully reported")
+	}
+}

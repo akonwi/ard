@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -76,6 +77,28 @@ func TestReportCLIError(t *testing.T) {
 		reportCLIError(&output, diagnostics.AlreadyReported(testCLIHintError{message: "type errors"}))
 		if got := output.String(); got != "" {
 			t.Fatalf("output = %q, want empty", got)
+		}
+	})
+
+	t.Run("joined failure", func(t *testing.T) {
+		var output strings.Builder
+		err := errors.Join(diagnostics.AlreadyReported(errors.New("type errors")), errors.New("cleanup failed"))
+		reportCLIError(&output, err)
+		if got, want := output.String(), "error: cleanup failed\n"; got != want {
+			t.Fatalf("output = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("wrapped joined failure", func(t *testing.T) {
+		var output strings.Builder
+		joined := errors.Join(
+			diagnostics.AlreadyReported(errors.New("type errors")),
+			testCLIHintError{message: "cleanup failed", hint: "remove the stale output"},
+		)
+		reportCLIError(&output, fmt.Errorf("load failed: %w", joined))
+		want := "error: load failed: cleanup failed\n\nhint: remove the stale output\n"
+		if got := output.String(); got != want {
+			t.Fatalf("output = %q, want %q", got, want)
 		}
 	})
 }
@@ -158,6 +181,36 @@ func runCLIForTest(t *testing.T, args ...string) (string, string, error) {
 }
 
 func TestCLIFailureOutput(t *testing.T) {
+	t.Run("missing command", func(t *testing.T) {
+		stdout, stderr, err := runCLIForTest(t)
+		if err == nil {
+			t.Fatal("CLI succeeded; expected failure")
+		}
+		if stdout != "" {
+			t.Fatalf("stdout = %q, want empty", stdout)
+		}
+		for _, want := range []string{"error: expected a command", "Usage: ard <command> [args]"} {
+			if !strings.Contains(stderr, want) {
+				t.Fatalf("stderr missing %q:\n%s", want, stderr)
+			}
+		}
+	})
+
+	t.Run("unknown command", func(t *testing.T) {
+		stdout, stderr, err := runCLIForTest(t, "unknown")
+		if err == nil {
+			t.Fatal("CLI succeeded; expected failure")
+		}
+		if stdout != "" {
+			t.Fatalf("stdout = %q, want empty", stdout)
+		}
+		for _, want := range []string{"error: unknown command \"unknown\"", "Usage: ard <command> [args]"} {
+			if !strings.Contains(stderr, want) {
+				t.Fatalf("stderr missing %q:\n%s", want, stderr)
+			}
+		}
+	})
+
 	t.Run("missing check input", func(t *testing.T) {
 		stdout, stderr, err := runCLIForTest(t, "check", filepath.Join(t.TempDir(), "missing.ard"))
 		if err == nil {
@@ -168,6 +221,32 @@ func TestCLIFailureOutput(t *testing.T) {
 		}
 		if !strings.Contains(stderr, "error: error reading file") {
 			t.Fatalf("stderr missing useful error:\n%s", stderr)
+		}
+	})
+
+	t.Run("rendered parse diagnostic", func(t *testing.T) {
+		projectDir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"example\"\nard = \">= 0.27.0\"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		mainPath := filepath.Join(projectDir, "main.ard")
+		if err := os.WriteFile(mainPath, []byte("let name =\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		stdout, stderr, err := runCLIForTest(t, "check", mainPath)
+		if err == nil {
+			t.Fatal("check succeeded; expected failure")
+		}
+		if stdout != "" {
+			t.Fatalf("stdout = %q, want empty", stdout)
+		}
+		for _, want := range []string{"error: Parse error", "let name =", "Unexpected token"} {
+			if !strings.Contains(stderr, want) {
+				t.Fatalf("stderr missing %q:\n%s", want, stderr)
+			}
+		}
+		if strings.Contains(stderr, "error: parse errors") {
+			t.Fatalf("stderr repeats parse sentinel:\n%s", stderr)
 		}
 	})
 
@@ -189,6 +268,99 @@ func TestCLIFailureOutput(t *testing.T) {
 		}
 		if strings.Count(stderr, "error:") != 1 || strings.Contains(stderr, "error: type errors") {
 			t.Fatalf("unexpected rendered diagnostics:\n%s", stderr)
+		}
+	})
+
+	t.Run("invalid project configuration", func(t *testing.T) {
+		projectDir := t.TempDir()
+		manifest := "name = \"example\"\nard = \">= 0.27.0\"\n\n[go]\nbuild_tags = [\"bad tag\"]\n"
+		if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte(manifest), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		mainPath := filepath.Join(projectDir, "main.ard")
+		if err := os.WriteFile(mainPath, []byte("let value = 1\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		stdout, stderr, err := runCLIForTest(t, "check", mainPath)
+		if err == nil {
+			t.Fatal("check succeeded; expected configuration failure")
+		}
+		if stdout != "" {
+			t.Fatalf("stdout = %q, want empty", stdout)
+		}
+		if !strings.Contains(stderr, "error: error initializing module resolver") || !strings.Contains(stderr, "invalid Go build tag") {
+			t.Fatalf("stderr missing configuration failure:\n%s", stderr)
+		}
+	})
+
+	t.Run("dependency verification failure", func(t *testing.T) {
+		projectDir := t.TempDir()
+		manifest := `name = "example"
+ard = ">= 0.27.0"
+
+[dependencies]
+helper = { git = "https://github.com/example/helper.git", commit = "deadbeef" }
+`
+		if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte(manifest), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		mainPath := filepath.Join(projectDir, "main.ard")
+		if err := os.WriteFile(mainPath, []byte("let value = 1\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		stdout, stderr, err := runCLIForTest(t, "check", mainPath)
+		if err == nil {
+			t.Fatal("check succeeded; expected dependency failure")
+		}
+		if stdout != "" {
+			t.Fatalf("stdout = %q, want empty", stdout)
+		}
+		if !strings.Contains(stderr, "error:") || !strings.Contains(stderr, "not locked") {
+			t.Fatalf("stderr missing dependency failure:\n%s", stderr)
+		}
+	})
+
+	t.Run("failing Ard test", func(t *testing.T) {
+		projectDir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"example\"\nard = \">= 0.27.0\"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		testPath := filepath.Join(projectDir, "failure_test.ard")
+		source := "use ard/testing\n\ntest fn failure() Void!Str {\n  testing::fail(\"nope\")\n}\n"
+		if err := os.WriteFile(testPath, []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		stdout, stderr, err := runCLIForTest(t, "test", projectDir)
+		if err == nil {
+			t.Fatal("test command succeeded; expected failure")
+		}
+		if !strings.Contains(stdout, "0 passed; 1 failed; 0 panicked") {
+			t.Fatalf("stdout missing test summary:\n%s", stdout)
+		}
+		if !strings.Contains(stderr, "error: tests failed") {
+			t.Fatalf("stderr missing failure diagnostic:\n%s", stderr)
+		}
+	})
+
+	t.Run("runtime failure", func(t *testing.T) {
+		projectDir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"example\"\nard = \">= 0.27.0\"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		mainPath := filepath.Join(projectDir, "main.ard")
+		source := "fn main() {\n  let missing: Int? = Maybe::new()\n  missing.expect(\"boom\")\n}\n"
+		if err := os.WriteFile(mainPath, []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		stdout, stderr, err := runCLIForTest(t, "run", mainPath)
+		if err == nil {
+			t.Fatal("run succeeded; expected runtime failure")
+		}
+		if stdout != "" {
+			t.Fatalf("stdout = %q, want empty", stdout)
+		}
+		if !strings.Contains(stderr, "panic: boom") || !strings.Contains(stderr, "error: exit status") {
+			t.Fatalf("stderr missing runtime failure details:\n%s", stderr)
 		}
 	})
 

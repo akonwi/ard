@@ -31,6 +31,14 @@ func AlreadyReported(err error) error {
 }
 
 func IsAlreadyReported(err error) bool {
-	var reported *ReportedError
-	return errors.As(err, &reported)
+	for err != nil {
+		if _, ok := err.(*ReportedError); ok {
+			return true
+		}
+		if _, joined := err.(interface{ Unwrap() []error }); joined {
+			return false
+		}
+		err = errors.Unwrap(err)
+	}
+	return false
 }

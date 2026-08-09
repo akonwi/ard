@@ -27,13 +27,15 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		printUsage()
+		reportCLIError(os.Stderr, fmt.Errorf("expected a command"))
+		fmt.Fprintln(os.Stderr)
+		printUsage(os.Stderr)
 		os.Exit(1)
 	}
 
 	switch os.Args[1] {
 	case "help", "--help", "-h":
-		printUsage()
+		printUsage(os.Stdout)
 		os.Exit(0)
 	case "version":
 		fmt.Println(version.Get())
@@ -185,7 +187,7 @@ func main() {
 	default:
 		reportCLIError(os.Stderr, fmt.Errorf("unknown command %q", os.Args[1]))
 		fmt.Fprintln(os.Stderr)
-		printUsage()
+		printUsage(os.Stderr)
 		os.Exit(1)
 	}
 }
@@ -199,6 +201,14 @@ type cliFailure struct {
 	hint string
 }
 
+type prefixedError struct {
+	prefix string
+	err    error
+}
+
+func (e *prefixedError) Error() string { return e.prefix + e.err.Error() }
+func (e *prefixedError) Unwrap() error { return e.err }
+
 func (e *cliFailure) Error() string { return e.err.Error() }
 func (e *cliFailure) Unwrap() error { return e.err }
 func (e *cliFailure) Hint() string  { return e.hint }
@@ -211,7 +221,16 @@ func withCLIHint(err error, hint string) error {
 }
 
 func reportCLIError(w io.Writer, err error) {
-	if err == nil || diagnostics.IsAlreadyReported(err) {
+	if err == nil {
+		return
+	}
+	if remaining, joined := filterReportedJoin(err); joined {
+		for _, child := range remaining {
+			reportCLIError(w, child)
+		}
+		return
+	}
+	if diagnostics.IsAlreadyReported(err) {
 		return
 	}
 	fmt.Fprintf(w, "error: %s\n", err)
@@ -221,8 +240,35 @@ func reportCLIError(w io.Writer, err error) {
 	}
 }
 
-func printUsage() {
-	fmt.Print(`Usage: ard <command> [args]
+func filterReportedJoin(err error) ([]error, bool) {
+	if err == nil || diagnostics.IsAlreadyReported(err) {
+		return nil, false
+	}
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		remaining := make([]error, 0, len(joined.Unwrap()))
+		for _, child := range joined.Unwrap() {
+			filtered, _ := filterReportedJoin(child)
+			remaining = append(remaining, filtered...)
+		}
+		return remaining, true
+	}
+	child := errors.Unwrap(err)
+	if child == nil {
+		return []error{err}, false
+	}
+	remaining, joined := filterReportedJoin(child)
+	if !joined {
+		return []error{err}, false
+	}
+	prefix := strings.TrimSuffix(err.Error(), child.Error())
+	for i := range remaining {
+		remaining[i] = &prefixedError{prefix: prefix, err: remaining[i]}
+	}
+	return remaining, true
+}
+
+func printUsage(w io.Writer) {
+	fmt.Fprint(w, `Usage: ard <command> [args]
 
 Commands:
   check <file.ard>                  Type-check a program
@@ -1096,6 +1142,7 @@ func runGoTests(inputPath, filter string, failFast bool) bool {
 		reportTestOutcome(outcome)
 		if failFast && outcome.status != testPass {
 			reportTestSummary(outcomes)
+			reportCLIError(os.Stderr, fmt.Errorf("tests failed"))
 			return false
 		}
 	}
@@ -1103,6 +1150,7 @@ func runGoTests(inputPath, filter string, failFast bool) bool {
 	reportTestSummary(outcomes)
 	for _, outcome := range outcomes {
 		if outcome.status != testPass {
+			reportCLIError(os.Stderr, fmt.Errorf("tests failed"))
 			return false
 		}
 	}
@@ -1135,7 +1183,9 @@ func loadGoTestModules(inputPath string, files []string, filter string) ([]loade
 		}
 		result := parse.Parse(sourceCode, path)
 		if len(result.Errors) > 0 {
-			result.PrintErrors()
+			if err := diagnostics.RenderParseErrors(os.Stderr, path, result.Errors); err != nil {
+				return nil, projectInfo, fmt.Errorf("render parse diagnostics: %w", err)
+			}
 			return nil, projectInfo, diagnostics.AlreadyReported(fmt.Errorf("parse errors"))
 		}
 		parsedFiles[path] = result.Program
