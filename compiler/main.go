@@ -3,7 +3,9 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -25,13 +27,15 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		printUsage()
+		reportCLIError(os.Stderr, fmt.Errorf("expected a command"))
+		fmt.Fprintln(os.Stderr)
+		printUsage(os.Stderr)
 		os.Exit(1)
 	}
 
 	switch os.Args[1] {
 	case "help", "--help", "-h":
-		printUsage()
+		printUsage(os.Stdout)
 		os.Exit(0)
 	case "version":
 		fmt.Println(version.Get())
@@ -39,12 +43,13 @@ func main() {
 	case "check":
 		{
 			if len(os.Args) < 3 {
-				fmt.Println("Expected filepath argument")
+				reportCLIError(os.Stderr, fmt.Errorf("expected filepath argument"))
 				os.Exit(1)
 			}
 
 			inputPath := os.Args[2]
-			if !check(inputPath) {
+			if err := check(inputPath); err != nil {
+				reportCLIError(os.Stderr, err)
 				os.Exit(1)
 			}
 
@@ -55,7 +60,7 @@ func main() {
 		{
 			inputPath, err := parseRunArgs(os.Args[2:])
 			if err != nil {
-				fmt.Println(err)
+				reportCLIError(os.Stderr, err)
 				os.Exit(1)
 			}
 			profile := newPipelineProfile("run go")
@@ -66,6 +71,7 @@ func main() {
 				loaded, loadErr = frontend.LoadModule(inputPath)
 				return loadErr
 			}); err != nil {
+				reportCLIError(os.Stderr, err)
 				os.Exit(1)
 			}
 			var program *air.Program
@@ -74,15 +80,15 @@ func main() {
 				program, lowerErr = air.Lower(loaded.Module)
 				return lowerErr
 			}); err != nil {
-				fmt.Println(err)
+				reportCLIError(os.Stderr, err)
 				os.Exit(1)
 			}
 			if err := validateEntrypointSignature(profile, program); err != nil {
-				fmt.Println(err)
+				reportCLIError(os.Stderr, err)
 				os.Exit(1)
 			}
 			if err := gotarget.RunProgram(program, os.Args, loaded.ProjectInfo); err != nil {
-				fmt.Println(err)
+				reportCLIError(os.Stderr, err)
 				os.Exit(1)
 			}
 		}
@@ -90,11 +96,11 @@ func main() {
 		{
 			inputPath, outputPath, err := parseBuildArgs(os.Args[2:])
 			if err != nil {
-				fmt.Println(err)
+				reportCLIError(os.Stderr, err)
 				os.Exit(1)
 			}
 			if _, err := buildGoBinary(inputPath, outputPath); err != nil {
-				fmt.Println(err)
+				reportCLIError(os.Stderr, err)
 				os.Exit(1)
 			}
 		}
@@ -102,7 +108,7 @@ func main() {
 		{
 			inputPath, filter, failFast, err := parseTestArgs(os.Args[2:])
 			if err != nil {
-				fmt.Println(err)
+				reportCLIError(os.Stderr, err)
 				os.Exit(1)
 			}
 			if !runTests(inputPath, filter, failFast) {
@@ -113,7 +119,7 @@ func main() {
 	case "add":
 		{
 			if err := runAddCommand(os.Args[2:]); err != nil {
-				fmt.Println(err)
+				reportCLIError(os.Stderr, err)
 				os.Exit(1)
 			}
 			os.Exit(0)
@@ -121,7 +127,7 @@ func main() {
 	case "remove":
 		{
 			if err := runRemoveCommand(os.Args[2:]); err != nil {
-				fmt.Println(err)
+				reportCLIError(os.Stderr, err)
 				os.Exit(1)
 			}
 			os.Exit(0)
@@ -129,7 +135,7 @@ func main() {
 	case "update":
 		{
 			if err := runUpdateCommand(os.Args[2:]); err != nil {
-				fmt.Println(err)
+				reportCLIError(os.Stderr, err)
 				os.Exit(1)
 			}
 			os.Exit(0)
@@ -137,7 +143,7 @@ func main() {
 	case "deps":
 		{
 			if err := runDepsCommand(os.Args[2:]); err != nil {
-				fmt.Println(err)
+				reportCLIError(os.Stderr, err)
 				os.Exit(1)
 			}
 			os.Exit(0)
@@ -147,7 +153,7 @@ func main() {
 			ctx := context.Background()
 			server := lsp.NewServer()
 			if err := server.Run(ctx); err != nil {
-				fmt.Fprintln(os.Stderr, err)
+				reportCLIError(os.Stderr, err)
 				os.Exit(1)
 			}
 		}
@@ -155,19 +161,19 @@ func main() {
 		{
 			inputPath, checkOnly, err := parseFormatArgs(os.Args[2:])
 			if err != nil {
-				fmt.Println(err)
+				reportCLIError(os.Stderr, err)
 				os.Exit(1)
 			}
 			changedPaths, err := formatPath(inputPath, checkOnly)
 			if err != nil {
-				fmt.Println(err)
+				reportCLIError(os.Stderr, err)
 				os.Exit(1)
 			}
 			if checkOnly {
 				if len(changedPaths) > 0 {
-					fmt.Println("files with format errors:")
+					fmt.Fprintln(os.Stderr, "error: files require formatting")
 					for _, changedPath := range changedPaths {
-						fmt.Println(changedPath)
+						fmt.Fprintln(os.Stderr, changedPath)
 					}
 					os.Exit(1)
 				}
@@ -179,14 +185,90 @@ func main() {
 			os.Exit(0)
 		}
 	default:
-		fmt.Printf("Unknown command: %s\n\n", os.Args[1])
-		printUsage()
+		reportCLIError(os.Stderr, fmt.Errorf("unknown command %q", os.Args[1]))
+		fmt.Fprintln(os.Stderr)
+		printUsage(os.Stderr)
 		os.Exit(1)
 	}
 }
 
-func printUsage() {
-	fmt.Print(`Usage: ard <command> [args]
+type CLIHintError interface {
+	Hint() string
+}
+
+type cliFailure struct {
+	err  error
+	hint string
+}
+
+type prefixedError struct {
+	prefix string
+	err    error
+}
+
+func (e *prefixedError) Error() string { return e.prefix + e.err.Error() }
+func (e *prefixedError) Unwrap() error { return e.err }
+
+func (e *cliFailure) Error() string { return e.err.Error() }
+func (e *cliFailure) Unwrap() error { return e.err }
+func (e *cliFailure) Hint() string  { return e.hint }
+
+func withCLIHint(err error, hint string) error {
+	if err == nil {
+		return nil
+	}
+	return &cliFailure{err: err, hint: hint}
+}
+
+func reportCLIError(w io.Writer, err error) {
+	if err == nil {
+		return
+	}
+	if remaining, joined := filterReportedJoin(err); joined {
+		for _, child := range remaining {
+			reportCLIError(w, child)
+		}
+		return
+	}
+	if diagnostics.IsAlreadyReported(err) {
+		return
+	}
+	fmt.Fprintf(w, "error: %s\n", err)
+	var hinted CLIHintError
+	if errors.As(err, &hinted) && hinted.Hint() != "" {
+		fmt.Fprintf(w, "\nhint: %s\n", hinted.Hint())
+	}
+}
+
+func filterReportedJoin(err error) ([]error, bool) {
+	if err == nil || diagnostics.IsAlreadyReported(err) {
+		return nil, false
+	}
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		remaining := make([]error, 0, len(joined.Unwrap()))
+		for _, child := range joined.Unwrap() {
+			filtered, _ := filterReportedJoin(child)
+			remaining = append(remaining, filtered...)
+		}
+		return remaining, true
+	}
+	child := errors.Unwrap(err)
+	if child == nil {
+		return []error{err}, false
+	}
+	remaining, joined := filterReportedJoin(child)
+	if !joined {
+		return []error{err}, false
+	}
+	prefix := strings.TrimSuffix(err.Error(), child.Error())
+	for i := range remaining {
+		remaining[i] = &prefixedError{prefix: prefix, err: remaining[i]}
+	}
+	return remaining, true
+}
+
+func printUsage(w io.Writer) {
+	fmt.Fprint(w, `Usage: ard <command> [args]
 
 Commands:
   check <file.ard>                  Type-check a program
@@ -227,7 +309,7 @@ func runAddCommand(args []string) error {
 		return err
 	}
 	if _, err := os.Stat(filepath.Join(project.RootPath, "ard.toml")); err != nil {
-		return fmt.Errorf("ard add requires an ard.toml project")
+		return withCLIHint(fmt.Errorf("ard add requires an ard.toml project"), "run this command from a directory containing ard.toml")
 	}
 	replacedAliases, err := dependencyAliasesForGitInManifest(filepath.Join(project.RootPath, "ard.toml"), dep.Git, dep.Alias)
 	if err != nil {
@@ -330,7 +412,7 @@ func runRemoveCommand(args []string) error {
 	}
 	manifestPath := filepath.Join(project.RootPath, "ard.toml")
 	if _, err := os.Stat(manifestPath); err != nil {
-		return fmt.Errorf("ard remove requires an ard.toml project")
+		return withCLIHint(fmt.Errorf("ard remove requires an ard.toml project"), "run this command from a directory containing ard.toml")
 	}
 	removed, err := removeDependencyFromManifest(manifestPath, alias)
 	if err != nil {
@@ -358,7 +440,7 @@ func runUpdateCommand(args []string) error {
 	}
 	manifestPath := filepath.Join(project.RootPath, "ard.toml")
 	if _, err := os.Stat(manifestPath); err != nil {
-		return fmt.Errorf("ard update requires an ard.toml project")
+		return withCLIHint(fmt.Errorf("ard update requires an ard.toml project"), "run this command from a directory containing ard.toml")
 	}
 	// Read the git sources as declared, not overlaid with lockfile metadata, so
 	// a manually edited source is honored.
@@ -752,9 +834,9 @@ func dependencyManifestEntry(dep checker.DependencyInfo) string {
 	return fmt.Sprintf("%s = { git = %q, commit = %q }", dep.Alias, dep.Git, dep.Commit)
 }
 
-func check(inputPath string) bool {
+func check(inputPath string) error {
 	_, err := loadModule(inputPath)
-	return err == nil
+	return err
 }
 
 func loadModule(inputPath string) (checker.Module, error) {
@@ -993,12 +1075,13 @@ func runTests(inputPath, filter string, failFast bool) bool {
 func runGoTests(inputPath, filter string, failFast bool) bool {
 	files, err := discoverTestFiles(inputPath)
 	if err != nil {
-		fmt.Println(err)
+		reportCLIError(os.Stderr, err)
 		return false
 	}
 
 	loadedModules, projectInfo, err := loadGoTestModules(inputPath, files, filter)
 	if err != nil {
+		reportCLIError(os.Stderr, err)
 		return false
 	}
 
@@ -1018,21 +1101,21 @@ func runGoTests(inputPath, filter string, failFast bool) bool {
 
 	program, err := air.LowerModulesWithTests(modules)
 	if err != nil {
-		fmt.Println(err)
+		reportCLIError(os.Stderr, err)
 		return false
 	}
 	if err := air.Validate(program); err != nil {
-		fmt.Println(err)
+		reportCLIError(os.Stderr, err)
 		return false
 	}
 	goTests, err := goTestCasesForDiscovered(program, tests)
 	if err != nil {
-		fmt.Println(err)
+		reportCLIError(os.Stderr, err)
 		return false
 	}
 	goOutcomes, err := gotarget.RunTests(program, []string{"ard", "test", inputPath}, goTests, failFast, projectInfo)
 	if err != nil {
-		fmt.Println(err)
+		reportCLIError(os.Stderr, err)
 		return false
 	}
 
@@ -1059,6 +1142,7 @@ func runGoTests(inputPath, filter string, failFast bool) bool {
 		reportTestOutcome(outcome)
 		if failFast && outcome.status != testPass {
 			reportTestSummary(outcomes)
+			reportCLIError(os.Stderr, fmt.Errorf("tests failed"))
 			return false
 		}
 	}
@@ -1066,6 +1150,7 @@ func runGoTests(inputPath, filter string, failFast bool) bool {
 	reportTestSummary(outcomes)
 	for _, outcome := range outcomes {
 		if outcome.status != testPass {
+			reportCLIError(os.Stderr, fmt.Errorf("tests failed"))
 			return false
 		}
 	}
@@ -1098,8 +1183,10 @@ func loadGoTestModules(inputPath string, files []string, filter string) ([]loade
 		}
 		result := parse.Parse(sourceCode, path)
 		if len(result.Errors) > 0 {
-			result.PrintErrors()
-			return nil, projectInfo, fmt.Errorf("parse errors")
+			if err := diagnostics.RenderParseErrors(os.Stderr, path, result.Errors); err != nil {
+				return nil, projectInfo, fmt.Errorf("render parse diagnostics: %w", err)
+			}
+			return nil, projectInfo, diagnostics.AlreadyReported(fmt.Errorf("parse errors"))
 		}
 		parsedFiles[path] = result.Program
 		scanEntries = append(scanEntries, checker.GoImportScanEntry{Program: result.Program, ModulePath: goTestModulePath(projectInfo, path)})
@@ -1144,12 +1231,12 @@ func loadGoTestModule(path string, program *parse.Program, resolver *checker.Mod
 		if err != nil {
 			displayRoot = root
 		}
-		if err := diagnostics.RenderRelative(os.Stdout, c.Diagnostics(), root, displayRoot); err != nil {
+		if err := diagnostics.RenderRelative(os.Stderr, c.Diagnostics(), root, displayRoot); err != nil {
 			return nil, fmt.Errorf("render diagnostics: %w", err)
 		}
 	}
 	if c.HasErrors() {
-		return nil, fmt.Errorf("type errors")
+		return nil, diagnostics.AlreadyReported(fmt.Errorf("type errors"))
 	}
 	return c.Module(), nil
 }
