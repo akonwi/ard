@@ -7,6 +7,7 @@ import (
 
 	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/lsp/analysis"
+	"github.com/akonwi/ard/parse"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
 )
@@ -17,10 +18,13 @@ import (
 // static/import completion) during the migration.
 func (s *Server) completionFromSpans(ctx context.Context, docURI uri.URI, source string, position protocol.Position) []protocol.CompletionItem {
 	cctx, ok := completionContextAt(source, position)
-	if !ok || cctx.sepEnd < 2 {
+	if !ok {
 		return nil
 	}
-	if cctx.kind != completionInstance && cctx.kind != completionStatic {
+	if cctx.kind != completionMatchPattern && cctx.sepEnd < 2 {
+		return nil
+	}
+	if cctx.kind != completionInstance && cctx.kind != completionStatic && cctx.kind != completionMatchPattern {
 		return nil
 	}
 	filePath, err := filePathFromURI(docURI)
@@ -28,9 +32,17 @@ func (s *Server) completionFromSpans(ctx context.Context, docURI uri.URI, source
 		return nil
 	}
 
-	// Patch a placeholder identifier after the dot so the file parses, then
-	// analyze it against one immutable snapshot of the workspace overlays.
-	patched := source[:cctx.sepEnd] + completionPlaceholder + source[cctx.offset:]
+	// Patch a placeholder identifier so the file parses, then analyze it
+	// against one immutable snapshot of the workspace overlays. A new match
+	// arm also needs a synthetic arrow and body to survive parser recovery.
+	placeholder := completionPlaceholder
+	if cctx.kind == completionMatchPattern {
+		rest := strings.TrimLeft(source[cctx.offset:], " \t")
+		if !strings.HasPrefix(rest, "=>") {
+			placeholder += " => {}"
+		}
+	}
+	patched := source[:cctx.sepEnd] + placeholder + source[cctx.offset:]
 	snap := s.workspaceSnapshotFor(filePath).WithOverlay(filePath, patched)
 	fa, err := snap.AnalyzeEphemeral(ctx, filePath)
 	if err != nil || fa == nil || fa.Spans == nil {
@@ -39,6 +51,14 @@ func (s *Server) completionFromSpans(ctx context.Context, docURI uri.URI, source
 
 	if cctx.kind == completionStatic {
 		items := s.staticCompletionFromSpans(fa, source, cctx)
+		if len(items) == 0 {
+			return nil
+		}
+		return withCompletionTextEdits(items, cctx, position)
+	}
+	if cctx.kind == completionMatchPattern {
+		patternPoint := offsetToParsePoint(patched, cctx.sepEnd)
+		items := enumMatchPatternCompletionItems(fa, patternPoint)
 		if len(items) == 0 {
 			return nil
 		}
@@ -77,6 +97,46 @@ func (s *Server) completionFromSpans(ctx context.Context, docURI uri.URI, source
 		return nil
 	}
 	return withCompletionTextEdits(items, cctx, position)
+}
+
+func enumMatchPatternCompletionItems(fa *analysis.FileAnalysis, point parse.Point) []protocol.CompletionItem {
+	for _, rec := range fa.Spans.At(point) {
+		parsed, ok := rec.Source.(*parse.MatchExpression)
+		if !ok {
+			continue
+		}
+		matchedPattern := false
+		for _, matchCase := range parsed.Cases {
+			id, ok := matchCase.Pattern.(*parse.Identifier)
+			if ok && id.Name == completionPlaceholder && id.GetLocation().Start == point {
+				matchedPattern = true
+				break
+			}
+		}
+		if !matchedPattern {
+			continue
+		}
+
+		checked, ok := rec.Node.(*checker.EnumMatch)
+		if !ok || checked.Subject == nil {
+			return nil
+		}
+		enumType, ok := checked.Subject.Type().(*checker.Enum)
+		if !ok {
+			return nil
+		}
+		items := make([]protocol.CompletionItem, 0, len(enumType.Values))
+		for _, value := range enumType.Values {
+			items = append(items, protocol.CompletionItem{
+				Label:  value.Name,
+				Kind:   protocol.CompletionItemKindEnumMember,
+				Detail: enumType.Name,
+			})
+		}
+		sort.Slice(items, func(i, j int) bool { return items[i].Label < items[j].Label })
+		return items
+	}
+	return nil
 }
 
 // memberCompletionItems enumerates fields and methods for a checked type.

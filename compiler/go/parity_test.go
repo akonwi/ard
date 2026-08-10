@@ -380,9 +380,9 @@ func TestGoTargetParityCoreCorpus(t *testing.T) {
 
 				fn main() Str {
 					match Light::Yellow {
-						Light::Red => "stop",
-						Light::Yellow => "wait",
-						Light::Green => "go",
+						Red => "stop",
+						Yellow => "wait",
+						Green => "go",
 					}
 				}
 			`,
