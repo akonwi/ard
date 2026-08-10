@@ -389,6 +389,82 @@ fn main() {
 	})
 }
 
+func TestCompletionUnqualifiedEnumMatchPatterns(t *testing.T) {
+	root := t.TempDir()
+	os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"proj\"\nard = \">= 0.1.0\"\n"), 0o644)
+	source := strings.Join([]string{
+		"enum Color {",
+		"  Red,",
+		"  Green,",
+		"}",
+		"",
+		"fn main() {",
+		"  let color = Color::Red",
+		"  match color {",
+		"    Red => \"red\",",
+		"    ",
+		"  }",
+		"}",
+		"",
+	}, "\n")
+	path := filepath.Join(root, "main.ard")
+	os.WriteFile(path, []byte(source), 0o644)
+	srv := NewServer()
+	docURI := uri.File(path)
+	srv.cache.Open(docURI, "ard", 1, source)
+
+	assertVariants := func(t *testing.T, items []protocol.CompletionItem) {
+		t.Helper()
+		for _, label := range []string{"Red", "Green"} {
+			item, ok := completionItemByLabel(items, label)
+			if !ok {
+				t.Fatalf("enum variant %q missing from %#v", label, items)
+			}
+			if item.Kind != protocol.CompletionItemKindEnumMember || item.Detail != "Color" {
+				t.Fatalf("enum variant %q = %#v", label, item)
+			}
+		}
+	}
+
+	t.Run("empty pattern", func(t *testing.T) {
+		items := srv.completionFromSpans(context.Background(), docURI, source, protocol.Position{Line: 9, Character: 4})
+		assertVariants(t, items)
+		item, _ := completionItemByLabel(items, "Green")
+		want := protocol.Range{Start: protocol.Position{Line: 9, Character: 4}, End: protocol.Position{Line: 9, Character: 4}}
+		if item.TextEdit == nil || item.TextEdit.Range != want || item.TextEdit.NewText != "Green" {
+			t.Fatalf("empty-pattern text edit = %#v, want range %#v with Green", item.TextEdit, want)
+		}
+	})
+
+	t.Run("partial pattern", func(t *testing.T) {
+		partial := strings.Replace(source, "    \n", "    Gr\n", 1)
+		srv.cache.Update(docURI, 2, partial)
+		items := srv.completionFromSpans(context.Background(), docURI, partial, protocol.Position{Line: 9, Character: 6})
+		assertVariants(t, items)
+		item, _ := completionItemByLabel(items, "Green")
+		want := protocol.Range{Start: protocol.Position{Line: 9, Character: 4}, End: protocol.Position{Line: 9, Character: 6}}
+		if item.TextEdit == nil || item.TextEdit.Range != want || item.TextEdit.NewText != "Green" {
+			t.Fatalf("partial-pattern text edit = %#v, want range %#v with Green", item.TextEdit, want)
+		}
+	})
+
+	t.Run("partial pattern before existing arm", func(t *testing.T) {
+		partial := strings.Replace(source, "    \n", "    Gr => \"green\"\n", 1)
+		srv.cache.Update(docURI, 3, partial)
+		items := srv.completionFromSpans(context.Background(), docURI, partial, protocol.Position{Line: 9, Character: 6})
+		assertVariants(t, items)
+	})
+
+	t.Run("not in arm body", func(t *testing.T) {
+		body := strings.Replace(source, "    Red => \"red\",\n    \n", "    Red => {\n      Gr\n    },\n    _ => {}\n", 1)
+		srv.cache.Update(docURI, 4, body)
+		items := srv.completionFromSpans(context.Background(), docURI, body, protocol.Position{Line: 9, Character: 8})
+		if len(items) != 0 {
+			t.Fatalf("arm body completions = %#v, want none", items)
+		}
+	})
+}
+
 // TestStaticCompletionAliasedImport covers `use x as y` alias resolution.
 func TestStaticCompletionAliasedImport(t *testing.T) {
 	root := t.TempDir()

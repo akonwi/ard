@@ -14,6 +14,7 @@ type completionKind int
 const (
 	completionInstance completionKind = iota + 1
 	completionStatic
+	completionMatchPattern
 	completionImport
 )
 
@@ -50,7 +51,23 @@ func completionContextAt(source string, position protocol.Position) (completionC
 	if sepEnd >= 2 && source[sepEnd-2:sepEnd] == "::" {
 		return completionContext{kind: completionStatic, prefix: prefix, sepEnd: sepEnd, offset: offset}, true
 	}
-	return completionContext{}, false
+	// Bare completions are only meaningful at the start of a potential match
+	// arm. Semantic analysis below confirms that this position is actually an
+	// enum pattern, but these line checks avoid analyzing ordinary identifiers.
+	if strings.TrimSpace(source[lineStart:identStart]) != "" {
+		return completionContext{}, false
+	}
+	lineEnd := strings.IndexByte(source[offset:], '\n')
+	if lineEnd == -1 {
+		lineEnd = len(source)
+	} else {
+		lineEnd += offset
+	}
+	rest := strings.TrimSpace(source[offset:lineEnd])
+	if rest != "" && !strings.HasPrefix(rest, "=>") {
+		return completionContext{}, false
+	}
+	return completionContext{kind: completionMatchPattern, prefix: prefix, sepEnd: identStart, offset: offset}, true
 }
 
 func withCompletionTextEdits(items []protocol.CompletionItem, ctx completionContext, position protocol.Position) []protocol.CompletionItem {
