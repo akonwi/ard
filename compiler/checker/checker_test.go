@@ -2143,6 +2143,44 @@ func TestMatchingOnEnums(t *testing.T) {
 			},
 		},
 		{
+			name: "Enum variant patterns can omit the enum name",
+			input: strings.Join([]string{
+				`enum Direction { up, down }`,
+				`let dir = Direction::down`,
+				"match dir {",
+				`  up => "north",`,
+				`  down => "south"`,
+				`}`,
+			}, "\n"),
+			output: &checker.Program{
+				Statements: []checker.Statement{
+					{
+						Stmt: &checker.VariableDef{
+							Name:  "dir",
+							Value: &checker.EnumVariant{Variant: 1},
+						},
+					},
+					{
+						Expr: &checker.EnumMatch{
+							Subject: &checker.Variable{},
+							Cases: []*checker.Block{
+								{
+									Stmts: []checker.Statement{
+										{Expr: &checker.StrLiteral{Value: "north"}},
+									},
+								},
+								{
+									Stmts: []checker.Statement{
+										{Expr: &checker.StrLiteral{Value: "south"}},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
 			name: "Matching on enums should be exhaustive",
 			input: strings.Join([]string{
 				`enum Direction { up, down, left, right }`,

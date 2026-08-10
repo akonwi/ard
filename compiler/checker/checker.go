@@ -8341,57 +8341,76 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 					}
 				}
 
-				// Handle enum variant case - the pattern should be a static property reference like Enum::Variant
-				if staticProp, ok := matchCase.Pattern.(*parse.StaticProperty); ok {
-					// Resolve the pattern using existing expression resolution logic
-					patternExpr := c.checkExpr(staticProp)
+				var enumVariant *EnumVariant
+				switch pattern := matchCase.Pattern.(type) {
+				case *parse.Identifier:
+					variant := -1
+					for i := range enumType.Values {
+						if enumType.Values[i].Name == pattern.Name {
+							variant = i
+							break
+						}
+					}
+					if variant == -1 {
+						c.addUnresolvedReference(undefinedEnumVariant, fmt.Sprintf("%s::%s", enumType.Name, pattern.Name), pattern.GetLocation())
+						continue
+					}
+					enumVariant = &EnumVariant{
+						enum:         enumType,
+						Variant:      variant,
+						EnumType:     enumType,
+						Discriminant: enumType.Values[variant].Value,
+					}
+				case *parse.StaticProperty:
+					// Resolve qualified patterns using existing expression resolution logic.
+					patternExpr := c.checkExpr(pattern)
 					if patternExpr == nil {
 						continue // Error already reported by checkExpr
 					}
 
-					// Check if the pattern resolves to an enum variant
-					enumVariant, ok := patternExpr.(*EnumVariant)
+					var ok bool
+					enumVariant, ok = patternExpr.(*EnumVariant)
 					if !ok {
-						c.addInvalidMatchPattern("Pattern in enum match must be an enum variant", staticProp.GetLocation(), "this does not resolve to an enum variant")
+						c.addInvalidMatchPattern("Pattern in enum match must be an enum variant", pattern.GetLocation(), "this does not resolve to an enum variant")
 						continue
 					}
-
-					// Verify that the variant's enum matches the subject's enum
-					if !enumVariant.enum.equal(enumType) {
-						legacy := fmt.Sprintf("Cannot match %s variant against %s enum", enumVariant.enum.Name, enumType.Name)
-						c.addInvalidMatchPattern(legacy, staticProp.GetLocation(), fmt.Sprintf("this variant belongs to `%s`, not `%s`", enumVariant.enum.Name, enumType.Name))
-						continue
-					}
-
-					// Get the variant name and index
-					variantName := enumType.Values[enumVariant.Variant].Name
-					variantIndex := int(enumVariant.Variant)
-
-					// Check for duplicate cases by value, not just by name. This lets Go
-					// enum-like constants import aliases while preserving closed enum
-					// exhaustiveness over distinct values.
-					discriminant := enumType.Values[enumVariant.Variant].Value
-					current := fmt.Sprintf("%s::%s", enumType.Name, variantName)
-					if previous, found := seenDiscriminants[discriminant]; found {
-						legacy := fmt.Sprintf("Duplicate case: %s", current)
-						if previous.Name != current {
-							legacy = fmt.Sprintf("Duplicate case: %s has same value as %s", current, previous.Name)
-						}
-						c.addDuplicateMatchArm(Error, legacy, staticProp.GetLocation(), &previous.Span)
-						continue
-					}
-					seenDiscriminants[discriminant] = struct {
-						Name string
-						Span SourceSpan
-					}{Name: current, Span: c.sourceSpan(staticProp.GetLocation())}
-
-					// Check the body for this case
-					body := c.checkMatchArmBlock(matchCase.Body, nil)
-					cases[variantIndex] = body
-				} else {
+				default:
 					c.addInvalidMatchPattern("Pattern in enum match must be an enum variant or wildcard", matchCase.Pattern.GetLocation(), "expected an enum variant or `_`")
 					return nil
 				}
+
+				// Verify that the variant's enum matches the subject's enum.
+				if !enumVariant.enum.equal(enumType) {
+					legacy := fmt.Sprintf("Cannot match %s variant against %s enum", enumVariant.enum.Name, enumType.Name)
+					c.addInvalidMatchPattern(legacy, matchCase.Pattern.GetLocation(), fmt.Sprintf("this variant belongs to `%s`, not `%s`", enumVariant.enum.Name, enumType.Name))
+					continue
+				}
+
+				// Get the variant name and index
+				variantName := enumType.Values[enumVariant.Variant].Name
+				variantIndex := int(enumVariant.Variant)
+
+				// Check for duplicate cases by value, not just by name. This lets Go
+				// enum-like constants import aliases while preserving closed enum
+				// exhaustiveness over distinct values.
+				discriminant := enumType.Values[enumVariant.Variant].Value
+				current := fmt.Sprintf("%s::%s", enumType.Name, variantName)
+				if previous, found := seenDiscriminants[discriminant]; found {
+					legacy := fmt.Sprintf("Duplicate case: %s", current)
+					if previous.Name != current {
+						legacy = fmt.Sprintf("Duplicate case: %s has same value as %s", current, previous.Name)
+					}
+					c.addDuplicateMatchArm(Error, legacy, matchCase.Pattern.GetLocation(), &previous.Span)
+					continue
+				}
+				seenDiscriminants[discriminant] = struct {
+					Name string
+					Span SourceSpan
+				}{Name: current, Span: c.sourceSpan(matchCase.Pattern.GetLocation())}
+
+				// Check the body for this case
+				body := c.checkMatchArmBlock(matchCase.Body, nil)
+				cases[variantIndex] = body
 			}
 
 			// Check if the match is exhaustive over distinct values. Aliases do not
