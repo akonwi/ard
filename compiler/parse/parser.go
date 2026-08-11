@@ -44,7 +44,9 @@ type parser struct {
 }
 
 func Parse(source []byte, fileName string) ParseResult {
-	p := new(NewLexer(source).Scan(), fileName)
+	lexer := NewLexer(source)
+	p := new(lexer.Scan(), fileName)
+	p.errors = append(p.errors, lexer.errors...)
 	program, err := p.parse()
 
 	result := ParseResult{
@@ -3042,6 +3044,10 @@ func (p *parser) iterRange() (Expression, error) {
 		}
 
 		return &RangeExpression{
+			Location: Location{
+				Start: start.GetLocation().Start,
+				End:   end.GetLocation().End,
+			},
 			Start: start,
 			End:   end,
 		}, nil
@@ -4032,13 +4038,21 @@ func (p *parser) map_() (Expression, error) {
 }
 
 func (p *parser) string() (Expression, error) {
-	tok := p.previous()
-	str := &StrLiteral{
-		Value:    tok.text,
-		Location: tok.getLocation(),
+	firstToken := p.previous()
+	first := &StrLiteral{
+		Value:    firstToken.text,
+		Form:     firstToken.stringForm,
+		Location: firstToken.getLocation(),
 	}
+	if first.Form == StringFormQuoted {
+		return p.quotedString(first)
+	}
+	return p.rawString(first)
+}
+
+func (p *parser) quotedString(first *StrLiteral) (Expression, error) {
 	if p.match(expr_open) {
-		chunks := []Expression{str}
+		chunks := []Expression{first}
 		for !p.check(expr_close) {
 			if p.isAtEnd() {
 				p.addError(p.previous(), "Unterminated string interpolation")
@@ -4063,13 +4077,96 @@ func (p *parser) string() (Expression, error) {
 		return &InterpolatedStr{
 			Chunks: chunks,
 			Location: Location{
-				Start: str.GetLocation().Start,
+				Start: first.GetLocation().Start,
 				End:   p.previous().getLocation().End,
 			},
 		}, nil
 	}
+	return first, nil
+}
 
-	return str, nil
+func (p *parser) rawString(first *StrLiteral) (Expression, error) {
+	if !p.check(expr_open) {
+		return first, nil
+	}
+
+	chunks := []Expression{first}
+	interpolations := []bool{false}
+	end := first.GetLocation().End
+	for p.match(expr_open) {
+		opening := p.previous()
+		if p.isAtEnd() {
+			return p.unterminatedRawInterpolation(first, opening, chunks, interpolations), nil
+		}
+		if p.check(expr_close) {
+			p.addError(p.peek(), "Expected an expression inside string interpolation")
+		} else {
+			expr, err := p.parseExpression()
+			if err != nil {
+				return nil, err
+			}
+			chunks = append(chunks, expr)
+			interpolations = append(interpolations, true)
+		}
+
+		if p.isAtEnd() {
+			return p.unterminatedRawInterpolation(first, opening, chunks, interpolations), nil
+		}
+		if !p.check(expr_close) {
+			p.addError(p.peek(), "Expected '}' after string interpolation expression")
+			p.synchronizeToTokens(expr_close)
+			if p.isAtEnd() {
+				return p.unterminatedRawInterpolation(first, opening, chunks, interpolations), nil
+			}
+		}
+		p.advance() // consume expr_close
+		end = p.previous().getLocation().End
+
+		if !p.match(string_) {
+			break
+		}
+		continuationToken := p.previous()
+		continuation := &StrLiteral{
+			Value:    continuationToken.text,
+			Form:     continuationToken.stringForm,
+			Location: continuationToken.getLocation(),
+		}
+		end = continuation.GetLocation().End
+		if continuation.Value != "" {
+			chunks = append(chunks, continuation)
+			interpolations = append(interpolations, false)
+		}
+	}
+
+	return &InterpolatedStr{
+		Chunks:         chunks,
+		Form:           first.Form,
+		Interpolations: interpolations,
+		Location: Location{
+			Start: first.GetLocation().Start,
+			End:   end,
+		},
+	}, nil
+}
+
+func (p *parser) unterminatedRawInterpolation(first *StrLiteral, opening *token, chunks []Expression, interpolations []bool) Expression {
+	location := opening.getLocation()
+	if previous := p.previous(); previous != nil && previous.getLocation().End.Row > 0 {
+		location.End = previous.getLocation().End
+	}
+	p.errors = append(p.errors, ParseError{
+		Location: location,
+		Message:  "Unterminated string interpolation",
+	})
+	return &InterpolatedStr{
+		Chunks:         chunks,
+		Form:           first.Form,
+		Interpolations: interpolations,
+		Location: Location{
+			Start: first.GetLocation().Start,
+			End:   location.End,
+		},
+	}
 }
 
 func (p *parser) advance() token {

@@ -721,9 +721,21 @@ func (i Identifier) String() string {
 	return fmt.Sprintf("%s", i.Name)
 }
 
+// StringForm records how a source string was delimited so formatting can
+// preserve raw strings while later compiler stages continue to consume their
+// semantic Str values.
+type StringForm uint8
+
+const (
+	StringFormQuoted StringForm = iota
+	StringFormRawSingleLine
+	StringFormRawMultiline
+)
+
 type StrLiteral struct {
 	Location
 	Value string
+	Form  StringForm
 }
 
 func (s StrLiteral) String() string {
@@ -742,6 +754,10 @@ func (r RuneLiteral) String() string {
 type InterpolatedStr struct {
 	Location
 	Chunks []Expression
+	Form   StringForm
+	// Interpolations parallels Chunks for raw strings. A true entry marks a
+	// chunk that came from {expression}; false marks static raw text.
+	Interpolations []bool
 }
 
 func (i InterpolatedStr) String() string {

@@ -1506,6 +1506,23 @@ func (d invalidForClauseDiagnostic) build() Diagnostic {
 	return diagnostic
 }
 
+type rangeValueDiagnostic struct {
+	Span          SourceSpan
+	LegacyMessage string
+}
+
+func (d rangeValueDiagnostic) build() Diagnostic {
+	diagnostic := newLabeledDiagnostic(
+		Error,
+		d.LegacyMessage,
+		"Invalid range",
+		"Range expressions can be used as loop iterators and match patterns, but they are not runtime values.",
+		DiagnosticLabel{Span: d.Span, Message: "this range cannot be used as a value"},
+	)
+	diagnostic.Code = DiagnosticCodeInvalidRange
+	return diagnostic
+}
+
 type invalidRangeDiagnostic struct {
 	StartType     Type
 	EndType       Type

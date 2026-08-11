@@ -99,6 +99,7 @@ type token struct {
 	kind                           kind
 	line, column                   int
 	text                           string
+	stringForm                     StringForm
 	sourceLength                   int
 	sourceEndLine, sourceEndColumn int
 	err                            string
@@ -131,28 +132,60 @@ func (c char) asToken(kind kind) token {
 	}
 }
 
+type stringInterpolation struct {
+	form   StringForm
+	depth  int
+	resume char
+	raw    *rawStringState
+	open   Location
+}
+
+type rawStringChunk struct {
+	tokenIndex          int
+	start               int
+	end                 int
+	endsAtInterpolation bool
+}
+
+type rawStringState struct {
+	form         StringForm
+	opener       char
+	contentStart int
+	chunks       []rawStringChunk
+	margin       string
+	reportedLine map[int]bool
+}
+
 type lexer struct {
-	source []byte
-	tokens []token
+	source     []byte
+	lineStarts []int
+	tokens     []token
+	errors     []ParseError
 	// position in the source
 	cursor int
 	// position of the current token to take
 	start int
 	// position in the source
-	line, column  int
-	inString      bool
-	inTemplate    bool
-	templateDepth int
+	line, column int
+	strings      []stringInterpolation
 }
 
 func NewLexer(source []byte) *lexer {
 	return &lexer{
-		source: source,
-		tokens: []token{},
-		cursor: 0,
-		line:   1,
-		column: 1,
+		source:     source,
+		lineStarts: sourceLineStarts(source),
+		tokens:     []token{},
+		cursor:     0,
+		line:       1,
+		column:     1,
 	}
+}
+
+func (l *lexer) currentInterpolation() *stringInterpolation {
+	if len(l.strings) == 0 {
+		return nil
+	}
+	return &l.strings[len(l.strings)-1]
 }
 
 func (l lexer) isAtEnd() bool {
@@ -289,32 +322,33 @@ func (l *lexer) take() (token, bool) {
 	case ')':
 		return currentChar.asToken(right_paren), true
 	case '{':
-		if l.inTemplate {
-			l.templateDepth++
+		if interpolation := l.currentInterpolation(); interpolation != nil {
+			interpolation.depth++
 		}
 		return currentChar.asToken(left_brace), true
 	case '}':
-		if l.inTemplate {
-			if l.templateDepth > 0 {
-				l.templateDepth--
+		if interpolation := l.currentInterpolation(); interpolation != nil {
+			if interpolation.depth > 0 {
+				interpolation.depth--
 				return currentChar.asToken(right_brace), true
 			}
 
-			// Add the expr_close token with correct position
-			l.tokens = append(l.tokens, currentChar.asToken(expr_close))
+			closingToken := currentChar.asToken(expr_close)
+			closingToken.sourceLength = 1
+			l.tokens = append(l.tokens, closingToken)
+			context := *interpolation
+			l.strings = l.strings[:len(l.strings)-1]
 
-			// Continue from the current position after the closing brace
-			l.inTemplate = false
-
-			// Create a new char with the column correctly positioned for the next string part
-			stringStart := char{
+			resume := char{
 				line:  l.line,
 				col:   l.column,
 				index: l.cursor,
-				// raw: // unused property
 			}
-
-			return l.takeString(stringStart)
+			if context.form == StringFormQuoted {
+				return l.takeString(resume)
+			}
+			l.takeRawStringSegment(context.raw, resume)
+			return token{}, false
 		}
 		return currentChar.asToken(right_brace), true
 	case '[':
@@ -395,10 +429,13 @@ func (l *lexer) take() (token, bool) {
 		return currentChar.asToken(equal), true
 	case '"':
 		return l.takeString(*currentChar)
+	case '`':
+		l.takeRawString(*currentChar)
+		return token{}, false
 	case '\'':
 		return l.takeRune(*currentChar)
 	case '\\':
-		if l.inTemplate && l.hasMore() && l.peek().raw == '"' {
+		if interpolation := l.currentInterpolation(); interpolation != nil && interpolation.form == StringFormQuoted && l.hasMore() && l.peek().raw == '"' {
 			return l.takeEscapedTemplateString(*currentChar)
 		}
 		return token{}, false
@@ -503,9 +540,12 @@ func (l *lexer) takeString(start char) (token, bool) {
 			exprChar := l.advance() // Consume the '{'
 			l.tokens = append(l.tokens, exprChar.asToken(expr_open))
 
-			// Set template mode so the next unmatched } will be treated as expr_close
-			l.inTemplate = true
-			l.templateDepth = 0
+			// Pause this string until the matching interpolation brace closes.
+			l.strings = append(l.strings, stringInterpolation{
+				form:   StringFormQuoted,
+				resume: start,
+				open:   exprChar.asToken(expr_open).getLocation(),
+			})
 			return token{}, false
 		}
 
@@ -535,6 +575,279 @@ func (l *lexer) takeString(start char) (token, bool) {
 		str.sourceEndColumn = lastConsumed.col
 	}
 	return str, true
+}
+
+func (l *lexer) takeRawString(start char) {
+	state := &rawStringState{
+		form:         StringFormRawSingleLine,
+		opener:       start,
+		contentStart: l.cursor,
+		reportedLine: map[int]bool{},
+	}
+	if l.hasMore() && (l.peek().raw == '\n' || l.peek().raw == '\r') {
+		state.form = StringFormRawMultiline
+		l.advanceRawNewline()
+		state.contentStart = l.cursor
+	}
+	l.takeRawStringSegment(state, start)
+}
+
+func (l *lexer) takeRawStringSegment(state *rawStringState, tokenStart char) {
+	rawStart := l.cursor
+	for l.hasMore() {
+		current := l.peek()
+		if current == nil {
+			break
+		}
+
+		if current.raw == '`' {
+			contentEnd := current.index
+			if state.form == StringFormRawMultiline {
+				lineStart := l.physicalLineStart(current.index)
+				prefix := l.source[lineStart:current.index]
+				if rawIndentation(prefix) {
+					state.margin = string(prefix)
+					contentEnd = trimBoundaryNewline(l.source, lineStart, state.contentStart)
+				} else {
+					l.addLexError(current.getLocation(), "Closing backtick for a multiline raw string must be preceded only by indentation")
+				}
+			}
+
+			closing := l.advance()
+			l.appendRawStringChunk(state, tokenStart, rawStart, contentEnd, false, Point{Row: closing.line, Col: closing.col})
+			l.finalizeRawString(state)
+			return
+		}
+
+		if (current.raw == '{' || current.raw == '}') && l.cursor+1 < len(l.source) && l.source[l.cursor+1] == current.raw {
+			l.advanceN(2)
+			continue
+		}
+
+		if current.raw == '{' {
+			end := l.pointBefore(current.index, tokenStart)
+			l.appendRawStringChunk(state, tokenStart, rawStart, current.index, true, end)
+			opening := l.advance()
+			openingToken := opening.asToken(expr_open)
+			openingToken.sourceLength = 1
+			l.tokens = append(l.tokens, openingToken)
+			l.strings = append(l.strings, stringInterpolation{
+				form: state.form,
+				raw:  state,
+				open: openingToken.getLocation(),
+			})
+			return
+		}
+
+		if current.raw == '\n' || current.raw == '\r' {
+			if state.form == StringFormRawSingleLine && !state.reportedLine[current.line] {
+				state.reportedLine[current.line] = true
+				l.addLexError(current.getLocation(), "Single-line raw strings cannot contain physical newlines; put a newline immediately after the opening backtick")
+			}
+			l.advanceRawNewline()
+			continue
+		}
+
+		l.advance()
+	}
+
+	end := l.pointBefore(l.cursor, tokenStart)
+	l.appendRawStringChunk(state, tokenStart, rawStart, l.cursor, false, end)
+	l.finalizeRawString(state)
+	endLocation := Location{Start: state.opener.getLocation().Start, End: end}
+	l.addLexError(endLocation, "Unterminated raw string literal")
+}
+
+func (l *lexer) appendRawStringChunk(state *rawStringState, tokenStart char, start, end int, endsAtInterpolation bool, sourceEnd Point) {
+	if end < start {
+		end = start
+	}
+	entry := token{
+		kind:            string_,
+		line:            tokenStart.line,
+		column:          tokenStart.col,
+		stringForm:      state.form,
+		sourceEndLine:   sourceEnd.Row,
+		sourceEndColumn: sourceEnd.Col,
+	}
+	index := len(l.tokens)
+	l.tokens = append(l.tokens, entry)
+	state.chunks = append(state.chunks, rawStringChunk{
+		tokenIndex:          index,
+		start:               start,
+		end:                 end,
+		endsAtInterpolation: endsAtInterpolation,
+	})
+}
+
+func (l *lexer) finalizeRawString(state *rawStringState) {
+	for _, chunk := range state.chunks {
+		l.tokens[chunk.tokenIndex].text = l.decodeRawStringChunk(state, chunk)
+	}
+}
+
+func (l *lexer) decodeRawStringChunk(state *rawStringState, chunk rawStringChunk) string {
+	var value strings.Builder
+	for index := chunk.start; index < chunk.end; {
+		if state.form == StringFormRawMultiline && l.isPhysicalLineStart(index) {
+			lineEnd := index
+			for lineEnd < chunk.end && l.source[lineEnd] != '\n' && l.source[lineEnd] != '\r' {
+				lineEnd++
+			}
+			lineText := l.source[index:lineEnd]
+			endsBeforeInterpolation := lineEnd == chunk.end && chunk.endsAtInterpolation
+			if lineEnd > index && len(strings.Trim(string(lineText), " \t")) == 0 && !endsBeforeInterpolation {
+				index = lineEnd
+				continue
+			}
+			if state.margin != "" {
+				if len(lineText) >= len(state.margin) && string(lineText[:len(state.margin)]) == state.margin {
+					index += len(state.margin)
+				} else if len(strings.Trim(string(lineText), " \t")) > 0 || endsBeforeInterpolation {
+					point := l.pointAt(index)
+					if !state.reportedLine[point.Row] {
+						state.reportedLine[point.Row] = true
+						end := point
+						if len(lineText) > 0 {
+							end.Col += len(lineText) - 1
+						}
+						l.addLexError(Location{Start: point, End: end}, "Raw string content must begin with the closing delimiter margin")
+					}
+				}
+			}
+		}
+
+		if index >= chunk.end {
+			break
+		}
+		current := l.source[index]
+		if current == '\r' {
+			if index+1 < chunk.end && l.source[index+1] == '\n' {
+				index++
+			}
+			value.WriteByte('\n')
+			index++
+			continue
+		}
+		if current == '\n' {
+			value.WriteByte('\n')
+			index++
+			continue
+		}
+		if (current == '{' || current == '}') && index+1 < chunk.end && l.source[index+1] == current {
+			value.WriteByte(current)
+			index += 2
+			continue
+		}
+		value.WriteByte(current)
+		index++
+	}
+	return value.String()
+}
+
+func (l *lexer) advanceRawNewline() {
+	if !l.hasMore() {
+		return
+	}
+	if l.peek().raw == '\r' {
+		l.advance()
+		if l.hasMore() && l.peek().raw == '\n' {
+			l.advance()
+		}
+	} else {
+		l.advance()
+	}
+	l.line++
+	l.column = 1
+}
+
+func (l *lexer) physicalLineStart(index int) int {
+	for index > 0 {
+		previous := l.source[index-1]
+		if previous == '\n' || previous == '\r' {
+			break
+		}
+		index--
+	}
+	return index
+}
+
+func (l *lexer) isPhysicalLineStart(index int) bool {
+	return index == 0 || l.source[index-1] == '\n' || l.source[index-1] == '\r'
+}
+
+func (l *lexer) pointAt(index int) Point {
+	low, high := 0, len(l.lineStarts)
+	for low+1 < high {
+		middle := low + (high-low)/2
+		if l.lineStarts[middle] <= index {
+			low = middle
+		} else {
+			high = middle
+		}
+	}
+	return Point{Row: low + 1, Col: index - l.lineStarts[low] + 1}
+}
+
+func (l *lexer) pointBefore(index int, fallback char) Point {
+	if index <= 0 {
+		return Point{Row: fallback.line, Col: fallback.col}
+	}
+	return l.pointAt(index - 1)
+}
+
+func sourceLineStarts(source []byte) []int {
+	starts := []int{0}
+	for index := 0; index < len(source); index++ {
+		if source[index] == '\r' {
+			if index+1 < len(source) && source[index+1] == '\n' {
+				index++
+			}
+			starts = append(starts, index+1)
+		} else if source[index] == '\n' {
+			starts = append(starts, index+1)
+		}
+	}
+	return starts
+}
+
+func (l *lexer) addLexError(location Location, message string) {
+	l.errors = append(l.errors, ParseError{Location: location, Message: message})
+}
+
+func (c char) getLocation() Location {
+	return Location{
+		Start: Point{Row: c.line, Col: c.col},
+		End:   Point{Row: c.line, Col: c.col},
+	}
+}
+
+func rawIndentation(value []byte) bool {
+	for _, char := range value {
+		if char != ' ' && char != '\t' {
+			return false
+		}
+	}
+	return true
+}
+
+func trimBoundaryNewline(source []byte, lineStart, contentStart int) int {
+	end := lineStart
+	if end <= contentStart {
+		return contentStart
+	}
+	if source[end-1] == '\n' {
+		end--
+		if end > contentStart && source[end-1] == '\r' {
+			end--
+		}
+	} else if source[end-1] == '\r' {
+		end--
+	}
+	if end < contentStart {
+		return contentStart
+	}
+	return end
 }
 
 func (l *lexer) takeRune(start char) (token, bool) {

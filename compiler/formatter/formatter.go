@@ -9,9 +9,9 @@ import (
 
 // Format applies Ard formatting rules.
 func Format(input []byte, fileName string) ([]byte, error) {
-	normalized := normalizeWhitespace(string(input))
+	normalized := normalizeLineEndings(string(input))
 	if strings.TrimSpace(normalized) == "" {
-		return []byte(normalized), nil
+		return []byte(normalizeWhitespace(normalized)), nil
 	}
 
 	result := parse.Parse([]byte(normalized), fileName)
@@ -27,7 +27,19 @@ func Format(input []byte, fileName string) ([]byte, error) {
 
 	printer := newPrinter(100)
 	formatted := printer.program(result.Program)
-	return []byte(normalizeWhitespace(formatted)), nil
+	return []byte(ensureFinalNewline(formatted)), nil
+}
+
+func normalizeLineEndings(source string) string {
+	source = strings.ReplaceAll(source, "\r\n", "\n")
+	return strings.ReplaceAll(source, "\r", "\n")
+}
+
+func ensureFinalNewline(source string) string {
+	if source != "" && !strings.HasSuffix(source, "\n") {
+		return source + "\n"
+	}
+	return source
 }
 
 func normalizeWhitespace(source string) string {
@@ -35,8 +47,7 @@ func normalizeWhitespace(source string) string {
 		return ""
 	}
 
-	source = strings.ReplaceAll(source, "\r\n", "\n")
-	source = strings.ReplaceAll(source, "\r", "\n")
+	source = normalizeLineEndings(source)
 
 	lines := strings.Split(source, "\n")
 	for i := range lines {
