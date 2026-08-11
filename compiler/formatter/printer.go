@@ -838,9 +838,10 @@ func (p printer) renderExpressionDoc(expression parse.Expression, parentPreceden
 	case parse.Identifier:
 		return dText(node.Name)
 	case *parse.StrLiteral:
-		return dText(quoteArdString(node.Value))
+		return p.renderStringLiteralDoc(node)
 	case parse.StrLiteral:
-		return dText(quoteArdString(node.Value))
+		copy := node
+		return p.renderStringLiteralDoc(&copy)
 	case *parse.RuneLiteral:
 		return dText(quoteArdRune(node.Value))
 	case parse.RuneLiteral:
@@ -1048,12 +1049,61 @@ func (p printer) renderUnsafeBlockDoc(node *parse.UnsafeBlock) doc {
 	))
 }
 
+func (p printer) renderStringLiteralDoc(value *parse.StrLiteral) doc {
+	if value.Form == parse.StringFormQuoted {
+		return dText(quoteArdString(value.Value))
+	}
+	return renderRawStringDoc(value.Form, escapeRawStringText(value.Value))
+}
+
 func (p printer) renderInterpolatedStringDoc(value *parse.InterpolatedStr) doc {
 	var builder strings.Builder
+	if value.Form != parse.StringFormQuoted {
+		p.writeRawInterpolatedChunks(&builder, value)
+		return renderRawStringDoc(value.Form, builder.String())
+	}
 	builder.WriteByte('"')
 	p.writeInterpolatedChunks(&builder, value.Chunks)
 	builder.WriteByte('"')
 	return dText(builder.String())
+}
+
+func renderRawStringDoc(form parse.StringForm, content string) doc {
+	if form == parse.StringFormRawSingleLine {
+		return dText("`" + content + "`")
+	}
+	parts := []doc{dHardLine()}
+	if content != "" {
+		parts = append(parts, dText(content), dHardLine())
+	}
+	parts = append(parts, dText("`"))
+	return dConcat(dText("`"), dIndent(dConcat(parts...)))
+}
+
+func (p printer) writeRawInterpolatedChunks(builder *strings.Builder, value *parse.InterpolatedStr) {
+	for index, chunk := range value.Chunks {
+		isInterpolation := index < len(value.Interpolations) && value.Interpolations[index]
+		if isInterpolation {
+			builder.WriteByte('{')
+			builder.WriteString(p.renderExpression(chunk, 0))
+			builder.WriteByte('}')
+			continue
+		}
+		if literal, ok := chunk.(*parse.StrLiteral); ok {
+			builder.WriteString(escapeRawStringText(literal.Value))
+		}
+	}
+}
+
+func escapeRawStringText(value string) string {
+	var escaped strings.Builder
+	for _, char := range value {
+		if char == '{' || char == '}' {
+			escaped.WriteRune(char)
+		}
+		escaped.WriteRune(char)
+	}
+	return escaped.String()
 }
 
 func (p printer) writeInterpolatedChunks(builder *strings.Builder, chunks []parse.Expression) {

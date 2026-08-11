@@ -2483,6 +2483,21 @@ func TestGoTargetParityGenericClosureCapturePreservesArgumentIdentityAndOrder(t 
 	}
 }
 
+func TestGoTargetParityRawStrings(t *testing.T) {
+	program := "fn main() Bool {\n" +
+		"  let name = \"Ada\"\n" +
+		"  let value = `\n" +
+		"    C:\\Users\\{name}\n" +
+		"    SELECT '{{column}}'\n" +
+		"    `\n" +
+		"  value == \"C:\\\\Users\\\\Ada\\nSELECT '{{column}}'\"\n" +
+		"}\n"
+	lowered := lowerParitySource(t, program)
+	if got := runGoTargetParityJSON(t, lowered); got != "true" {
+		t.Fatalf("got %s, want true", got)
+	}
+}
+
 func TestGoTargetParityStringHelpers(t *testing.T) {
 	runGoParityCases(t, []goParityCase{
 		{name: "int to str", input: `fn main() Str { 100.to_str() }`},

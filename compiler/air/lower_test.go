@@ -375,6 +375,20 @@ func TestLowerBoolMatch(t *testing.T) {
 		t.Fatalf("else block = %#v, want 2", choose.Body.Result.Else.Result)
 	}
 }
+func TestLowerRawStrings(t *testing.T) {
+	literalProgram := lowerSource(t, "`\n  first\n  second\n  `")
+	literal := literalProgram.Functions[literalProgram.Script].Body.Result
+	if literal == nil || literal.Kind != ExprConstStr || literal.Str != "first\nsecond" {
+		t.Fatalf("raw literal = %#v, want exact ExprConstStr", literal)
+	}
+
+	templateProgram := lowerSource(t, "let name = \"Ada\"\n`Hello, {name}`")
+	template := templateProgram.Functions[templateProgram.Script].Body.Result
+	if template == nil || template.Kind != ExprStrConcat {
+		t.Fatalf("raw interpolation = %#v, want ExprStrConcat", template)
+	}
+}
+
 func TestLowerTemplateString(t *testing.T) {
 	program := lowerSource(t, `
 		let name = "Ada"

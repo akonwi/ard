@@ -71,13 +71,13 @@ other character escapes. Source characters are preserved as written after the
 multiline margin and interpolation rules below are applied.
 
 Backticks may be used for single-line or multiline values. A single-line raw
-string preserves every content character exactly. Multiline mode begins when
-the opening backtick is immediately followed by a physical newline. In
-multiline mode:
+string preserves every content character exactly and cannot cross a physical
+source line. Multiline mode begins when the opening backtick is immediately
+followed by a physical newline. In multiline mode:
 
 1. the newline immediately after the opening backtick is not part of the value;
-2. the closing backtick must appear on its own line, preceded only by
-   indentation;
+2. the closing backtick must be preceded on its line only by indentation;
+   ordinary expression suffix syntax, such as a comma, may follow it;
 3. the newline immediately before that closing line is not part of the value;
 4. the whitespace prefix before the closing backtick is the margin;
 5. exactly that margin is removed from every nonblank raw-text line;

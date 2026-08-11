@@ -46,6 +46,35 @@ export default [
       strings: {
         patterns: [
           {
+            name: 'string.quoted.raw.ard',
+            begin: '`',
+            beginCaptures: {
+              0: { name: 'punctuation.definition.string.begin.ard' },
+            },
+            end: '`',
+            endCaptures: {
+              0: { name: 'punctuation.definition.string.end.ard' },
+            },
+            patterns: [
+              {
+                name: 'constant.character.escape.ard',
+                match: '\\{\\{|\\}\\}',
+              },
+              {
+                name: 'meta.interpolation.ard',
+                begin: '(?<!\\{)\\{(?!\\{)',
+                beginCaptures: {
+                  0: { name: 'punctuation.section.interpolation.begin.ard' },
+                },
+                end: '(?<!\\})\\}(?!\\})',
+                endCaptures: {
+                  0: { name: 'punctuation.section.interpolation.end.ard' },
+                },
+                patterns: [{ include: '#main' }],
+              },
+            ],
+          },
+          {
             name: 'string.quoted.double.ard',
             begin: '"',
             beginCaptures: {

@@ -821,7 +821,25 @@ func TestExplicitGenericConflictUsesMatchingGenericOrigin(t *testing.T) {
 	}
 }
 
-func TestStringTypeMismatchSpansRawSourceLiteral(t *testing.T) {
+func TestRangeInRawInterpolationReportsDiagnostic(t *testing.T) {
+	for _, source := range []string{
+		"fn main() Str { `{1..2}` }\n",
+		"fn main() Str { `{[1..2]}` }\n",
+	} {
+		result := parse.Parse([]byte(source), "main.ard")
+		if len(result.Errors) > 0 {
+			t.Fatalf("source %q parse errors: %#v", source, result.Errors)
+		}
+		c := checker.New("main.ard", result.Program, nil)
+		c.Check()
+		diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeInvalidRange)
+		if diagnostic.Primary.Span.Location.Start.Row != 1 || diagnostic.Primary.Span.Location.Start.Col == 0 {
+			t.Fatalf("source %q diagnostic = %#v", source, diagnostic)
+		}
+	}
+}
+
+func TestStringTypeMismatchSpansSourceLiteral(t *testing.T) {
 	tests := []struct {
 		name    string
 		literal string
@@ -832,6 +850,9 @@ func TestStringTypeMismatchSpansRawSourceLiteral(t *testing.T) {
 		{"unicode", `"é"`, parse.Point{Row: 1, Col: 21}},
 		{"interpolated", `"age = {1}"`, parse.Point{Row: 1, Col: 28}},
 		{"multiline", "\"a\nb\"", parse.Point{Row: 2, Col: 2}},
+		{"raw", "`abc`", parse.Point{Row: 1, Col: 22}},
+		{"raw interpolated", "`age = {1}`", parse.Point{Row: 1, Col: 28}},
+		{"raw multiline", "`\n  a\n  `", parse.Point{Row: 3, Col: 3}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

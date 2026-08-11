@@ -49,6 +49,28 @@ func TestRenderParseErrorsUsesSourceExcerpt(t *testing.T) {
 	}
 }
 
+func TestRenderRawStringMarginErrorUsesContentLine(t *testing.T) {
+	sourceText := "`\n  first\n second\n  `\n"
+	result := parse.Parse([]byte(sourceText), "main.ard")
+	if len(result.Errors) != 1 {
+		t.Fatalf("parse errors = %#v, want one", result.Errors)
+	}
+	var output bytes.Buffer
+	source := func(string) ([]byte, error) { return []byte(sourceText), nil }
+	if err := diagnostics.RenderWithOptions(&output, diagnostics.ParseErrors("main.ard", result.Errors), source, diagnostics.RenderOptions{Color: diagnostics.ColorNever}); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		" --> main.ard:3:1",
+		"3 |  second",
+		"closing delimiter margin",
+	} {
+		if !strings.Contains(output.String(), want) {
+			t.Fatalf("output missing %q:\n%s", want, output.String())
+		}
+	}
+}
+
 func TestParseErrorsNormalizeMissingLocation(t *testing.T) {
 	converted := diagnostics.ParseErrors("main.ard", []parse.ParseError{{Message: "unexpected parser failure"}})
 	location := converted[0].Primary.Span.Location

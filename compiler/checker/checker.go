@@ -9546,6 +9546,12 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 				}
 			}
 		}
+	case *parse.RangeExpression:
+		c.addDiagnostic(rangeValueDiagnostic{
+			Span:          c.sourceSpan(s.GetLocation()),
+			LegacyMessage: "Range expressions are not values",
+		}.build())
+		return &VoidLiteral{}
 	case *parse.UnsafeBlock:
 		{
 			if parseStatementsContainBreak(s.Statements) {

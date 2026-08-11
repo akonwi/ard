@@ -105,7 +105,11 @@ export default defineConfig({
             },
             {
               name: "Ard strings",
-              scope: ["string", "string.quoted.double.ard"],
+              scope: [
+                "string",
+                "string.quoted.double.ard",
+                "string.quoted.raw.ard",
+              ],
               settings: { foreground: palette.string },
             },
             {
@@ -188,6 +192,7 @@ export default defineConfig({
           items: [
             { label: "Overview", slug: "guide/overview" },
             { label: "Types", slug: "guide/types" },
+            { label: "Strings", slug: "guide/strings" },
             { label: "Variables", slug: "guide/variables" },
             { label: "Functions", slug: "guide/functions" },
             { label: "Control Flow", slug: "guide/control-flow" },

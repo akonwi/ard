@@ -33,6 +33,7 @@ func TestParserTerminatesOnUnterminatedDelimiters(t *testing.T) {
 		{name: "impl block", input: "impl S {"},
 		{name: "paren mut", input: "fn main() {\n  let x = (mut [1]"},
 		{name: "interpolation", input: "fn main() {\n  let x = \"{"},
+		{name: "raw interpolation", input: "fn main() {\n  let x = `{value"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
