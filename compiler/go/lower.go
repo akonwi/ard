@@ -3193,10 +3193,37 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 			}
 		}
 		return loweredExpr{stmts: append(left.stmts, right.stmts...), expr: equality}, nil
+	case air.ExprAnd, air.ExprOr:
+		left, err := l.lowerExpr(fn, *expr.Left)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		right, err := l.lowerExpr(fn, *expr.Right)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		if len(right.stmts) == 0 {
+			return loweredExpr{
+				stmts: left.stmts,
+				expr:  &ast.BinaryExpr{X: left.expr, Op: l.binaryToken(expr.Kind), Y: right.expr},
+			}, nil
+		}
+
+		resultName := l.nextTemp()
+		result := ast.NewIdent(resultName)
+		stmts := append([]ast.Stmt{}, left.stmts...)
+		stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{result}, Tok: token.DEFINE, Rhs: []ast.Expr{left.expr}})
+		body := append([]ast.Stmt{}, right.stmts...)
+		body = append(body, &ast.AssignStmt{Lhs: []ast.Expr{result}, Tok: token.ASSIGN, Rhs: []ast.Expr{right.expr}})
+		condition := ast.Expr(result)
+		if expr.Kind == air.ExprOr {
+			condition = &ast.UnaryExpr{Op: token.NOT, X: result}
+		}
+		stmts = append(stmts, &ast.IfStmt{Cond: condition, Body: &ast.BlockStmt{List: body}})
+		return loweredExpr{stmts: stmts, expr: result}, nil
 	case air.ExprIntAdd, air.ExprIntSub, air.ExprIntMul, air.ExprIntDiv, air.ExprIntMod,
 		air.ExprFloatAdd, air.ExprFloatSub, air.ExprFloatMul, air.ExprFloatDiv,
-		air.ExprLt, air.ExprLte, air.ExprGt, air.ExprGte,
-		air.ExprAnd, air.ExprOr, air.ExprStrConcat:
+		air.ExprLt, air.ExprLte, air.ExprGt, air.ExprGte, air.ExprStrConcat:
 		leftTypeID := expr.Left.Type
 		rightTypeID := expr.Right.Type
 		left, err := l.lowerExpr(fn, *expr.Left)
