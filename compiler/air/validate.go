@@ -103,6 +103,9 @@ func validateTypeInfo(program *Program, typ TypeInfo) error {
 			}
 		}
 	case TypeFunction:
+		if typ.Variadic && len(typ.Params) == 0 {
+			return fmt.Errorf("type %s is variadic without a parameter", typ.Name)
+		}
 		for _, param := range typ.Params {
 			if !validTypeID(program, param) {
 				return fmt.Errorf("type %s has invalid function param type %d", typ.Name, param)
@@ -434,14 +437,14 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 			return fmt.Errorf("trait reference projection impl %d does not match source referent", expr.Impl)
 		}
 	}
-	isForeignCall := expr.Kind == ExprForeignCall || expr.Kind == ExprForeignMethodCall || expr.Kind == ExprForeignMethodValue
+	isForeignCall := expr.Kind == ExprForeignCall || expr.Kind == ExprForeignMethodCall || expr.Kind == ExprForeignMethodValue || expr.Kind == ExprForeignValue
 	if isForeignCall {
 		argCount := len(expr.Args)
 		argTypes := make([]TypeID, argCount)
 		for i := range expr.Args {
 			argTypes[i] = expr.Args[i].Type
 		}
-		if expr.Kind == ExprForeignMethodValue && validTypeID(program, expr.Type) {
+		if (expr.Kind == ExprForeignMethodValue || expr.Kind == ExprForeignValue) && validTypeID(program, expr.Type) {
 			if functionType := program.Types[expr.Type-1]; functionType.Kind == TypeFunction {
 				argCount = len(functionType.Params)
 				argTypes = functionType.Params
@@ -510,6 +513,28 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 	}
 	if expr.Kind == ExprCall && !validFunctionID(program, expr.Function) {
 		return fmt.Errorf("expression calls invalid function %d", expr.Function)
+	}
+	if expr.Kind == ExprCallClosure {
+		if expr.Target == nil {
+			return fmt.Errorf("closure call missing target")
+		}
+		callable, err := typeInfo(program, expr.Target.Type)
+		if err != nil {
+			return err
+		}
+		if callable.Kind == TypeForeignType && validTypeID(program, callable.Value) && callable.Key == NoType {
+			callable = program.Types[callable.Value-1]
+		}
+		if callable.Kind != TypeFunction {
+			return fmt.Errorf("closure call target has non-function type %d", expr.Target.Type)
+		}
+		minimum := len(callable.Params)
+		if callable.Variadic {
+			minimum--
+		}
+		if len(expr.Args) < minimum || (!callable.Variadic && len(expr.Args) != len(callable.Params)) {
+			return fmt.Errorf("closure call has %d arguments for function with %d parameters (variadic=%t)", len(expr.Args), len(callable.Params), callable.Variadic)
+		}
 	}
 	if expr.Kind == ExprMakeClosure && !validFunctionID(program, expr.Function) {
 		return fmt.Errorf("expression creates invalid closure function %d", expr.Function)
@@ -983,7 +1008,7 @@ func typesStructurallyEquivalent(program *Program, leftID TypeID, rightID TypeID
 	case TypeResult:
 		return equivalent(left.Value, right.Value) && equivalent(left.Error, right.Error)
 	case TypeFunction:
-		if len(left.Params) != len(right.Params) {
+		if left.Variadic != right.Variadic || len(left.Params) != len(right.Params) {
 			return false
 		}
 		for i := range left.Params {

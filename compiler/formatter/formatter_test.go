@@ -36,6 +36,10 @@ func TestFormatIsIdempotent(t *testing.T) {
 			name:  "go import",
 			input: "use go:fmt\n\nfn main() {\n  fmt::Println(\"hello\")\n}\n",
 		},
+		{
+			name:  "variadic callable type",
+			input: "fn invoke(call: fn(Str,...Str) Str) Str {\n  call(\"a\", \"b\")\n}\n",
+		},
 	}
 
 	for _, tt := range inputs {

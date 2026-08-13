@@ -9,9 +9,8 @@ import (
 )
 
 // TestGoFunctionsAsValues pins that imported Go functions are first-class
-// values with their Ard-facing signatures: unadapted shapes reference the Go
-// function directly, while adapted shapes (variadic, error or comma-ok
-// results) carry the same adapted signature they have in call position.
+// values with their Ard-facing signatures. Variadicity is part of the callable
+// type and survives assignment and explicitly typed function boundaries.
 // Generic functions still report an actionable diagnostic.
 func TestGoFunctionsAsValues(t *testing.T) {
 	tests := []struct {
@@ -42,14 +41,36 @@ fn main() {
 }`,
 		},
 		{
-			name: "variadic Go function value takes a trailing Maybe parameter",
+			name: "variadic Go function value accepts zero and repeated arguments",
+			input: `use go:fmt
+
+fn invoke(print: fn(...Any) Int!Str) Int!Str {
+  print("hello", 42, true)
+}
+
+fn main() {
+  let print: fn(...Any) Int!Str = fmt::Println
+  let rebound = print
+  print()
+  rebound("hello")
+  invoke(rebound)
+}`,
+		},
+		{
+			name: "fixed and variadic callable types are distinct",
 			input: `use go:fmt
 
 fn main() {
-  let print: fn(Any?) Int!Str = fmt::Println
-  print("hello")
-  print(Maybe::new())
+  let print: fn(Any) Int!Str = fmt::Println
 }`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected fn(Any) Int!Str, got fn(...Any) Int!Str"}},
+		},
+		{
+			name: "Ard closure cannot acquire variadicity from context",
+			input: `fn main() {
+  let join: fn(...Str) Str = fn(value: Str) Str { value }
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected fn(...Str) Str, got fn(Str) Str"}},
 		},
 		{
 			name: "error-adapted Go function value carries its Result signature",

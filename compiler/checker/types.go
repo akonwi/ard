@@ -1028,6 +1028,9 @@ func callableTypeString(params []Parameter, returnType Type) string {
 		if foreign, ok := paramType.(*ForeignType); mutable && (!ok || !foreign.Pointer) {
 			paramStrs[i] = "mut " + paramStrs[i]
 		}
+		if params[i].Variadic {
+			paramStrs[i] = "..." + paramStrs[i]
+		}
 	}
 	rendered := fmt.Sprintf("fn(%s)", strings.Join(paramStrs, ", "))
 	// Ard syntax omits the return type for non-returning functions.

@@ -185,6 +185,7 @@ func NamedChannel() chan NamedEmpty { return make(chan NamedEmpty) }
 func EmptyCallback(callback func() struct{}) { callback() }
 func EmptyErrorCallback(callback func() (struct{}, error)) { callback() }
 func EmptyOKCallback(callback func() (EmptyAlias, bool)) { callback() }
+type VariadicSliceCallback func(...[]int)
 `), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -237,6 +238,9 @@ func EmptyOKCallback(callback func() (EmptyAlias, bool)) { callback() }
 	}
 	if got := pkg.UnsupportedFunctions["EmptyOKCallback"]; got != "parameter 1 has unsupported type func() (example.com/app/ffi.EmptyAlias, bool): callback result 1 struct{} requires an ABI adapter" {
 		t.Fatalf("EmptyOKCallback unsupported reason = %q", got)
+	}
+	if got := pkg.UnsupportedTypes["VariadicSliceCallback"]; got != "variadic callback parameter 1 has descriptor element type []int, which requires an unsupported call adapter" {
+		t.Fatalf("VariadicSliceCallback unsupported reason = %q", got)
 	}
 }
 

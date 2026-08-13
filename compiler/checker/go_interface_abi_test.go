@@ -34,6 +34,18 @@ type ValueTaker interface {
 type PointerTaker interface {
 	Take(p *Payload)
 }
+
+type Variadic interface {
+	Count(values ...int) int
+}
+
+type EmptyResult interface {
+	Ready() (struct{}, error)
+}
+
+type EmptyMaybe interface {
+	Lookup() (struct{}, bool)
+}
 `
 	if err := os.WriteFile(filepath.Join(ffiDir, "ffi.go"), []byte(contents), 0o644); err != nil {
 		t.Fatal(err)
@@ -81,6 +93,39 @@ impl ffi::PointerTaker for Impl {
     p.N = 1
   }
 }`,
+		},
+		{
+			name: "variadic Go interface implementation is rejected",
+			input: `use go:example.com/app/ffi
+
+struct Impl {}
+
+impl ffi::Variadic for Impl {
+  fn count(value: Int) Int { value }
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Unsupported Go interface method ffi::Variadic.Count: variadic Go interface methods cannot be implemented by fixed-arity Ard declarations"}},
+		},
+		{
+			name: "empty Result Go interface implementation is rejected",
+			input: `use go:example.com/app/ffi
+
+struct Impl {}
+
+impl ffi::EmptyResult for Impl {
+  fn ready() Void!Str { Result::ok(()) }
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Unsupported Go interface method ffi::EmptyResult.Ready: Go interface methods returning (struct{}, error) require an unsupported empty-success ABI adapter"}},
+		},
+		{
+			name: "empty Maybe Go interface implementation is rejected",
+			input: `use go:example.com/app/ffi
+
+struct Impl {}
+
+impl ffi::EmptyMaybe for Impl {
+  fn lookup() Void? { Maybe::new(()) }
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Unsupported Go interface method ffi::EmptyMaybe.Lookup: Go interface methods returning (struct{}, bool) require an unsupported empty-success ABI adapter"}},
 		},
 		{
 			name: "native mut parameter still trips the ABI diagnostic",

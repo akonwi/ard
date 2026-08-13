@@ -21,6 +21,7 @@ const (
 	comma              = "comma"
 	dot                = "dot"
 	dot_dot            = "dot_dot"
+	ellipsis           = "ellipsis"
 	question_mark      = "question_mark"
 	pipe               = "pipe"
 	double_quote       = "double_quote"
@@ -361,6 +362,11 @@ func (l *lexer) take() (token, bool) {
 		return currentChar.asToken(comma), true
 	case '.':
 		if l.matchNext('.') != nil {
+			if l.matchNext('.') != nil {
+				tok := currentChar.asToken(ellipsis)
+				tok.sourceLength = 3
+				return tok, true
+			}
 			return currentChar.asToken(dot_dot), true
 		}
 		return currentChar.asToken(dot), true

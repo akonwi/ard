@@ -191,7 +191,11 @@ type TypeInfo struct {
 
 	Params []TypeID
 	Return TypeID
-	Trait  TraitID
+	// Variadic marks the final TypeFunction parameter as a repeated element.
+	// Ard declarations remain fixed-arity; this is carried by foreign callable
+	// values and named Go function types.
+	Variadic bool
+	Trait    TraitID
 
 	// Generic representation (ADR 0031). A generic definition sets TypeParams
 	// (the parameter names) and references them via TypeParam-kind fields. A

@@ -5,25 +5,18 @@ import (
 	"go/token"
 	"go/types"
 	"math"
-	"slices"
 )
 
 // GoPackage is target metadata for a directly imported Go package. It is kept
 // separate from Ard modules so Go symbols do not become core Ard declarations.
 type GoPackage struct {
-	Path      string
-	TypesName string
-	Functions map[string]*FunctionDef
-	Generics  map[string]*types.Func
-	Types     map[string]Type
-	Constants map[string]Type
-	Variables map[string]Type
-	// AdaptedFunctions records why an imported function's raw Go signature
-	// differs from its Ard-visible one (variadic calling convention, error
-	// or comma-ok results rewritten at call boundaries). Such functions can
-	// be called but not referenced as values: a direct Go reference would
-	// have the unadapted signature.
-	AdaptedFunctions     map[string]string
+	Path                 string
+	TypesName            string
+	Functions            map[string]*FunctionDef
+	Generics             map[string]*types.Func
+	Types                map[string]Type
+	Constants            map[string]Type
+	Variables            map[string]Type
 	UnsupportedTypes     map[string]string
 	UnsupportedConstants map[string]string
 	UnsupportedVariables map[string]string
@@ -43,7 +36,6 @@ func goPackageFromTypesPackage(path string, pkg *types.Package) *GoPackage {
 		Types:                map[string]Type{},
 		Constants:            map[string]Type{},
 		Variables:            map[string]Type{},
-		AdaptedFunctions:     map[string]string{},
 		UnsupportedTypes:     map[string]string{},
 		UnsupportedConstants: map[string]string{},
 		UnsupportedVariables: map[string]string{},
@@ -93,76 +85,11 @@ func goPackageFromTypesPackage(path string, pkg *types.Package) *GoPackage {
 		def, reason := functionDefFromGoSignature(name, sig)
 		if reason == "" {
 			goPkg.Functions[name] = def
-			if adapted := goSignatureAdaptation(sig); adapted != "" {
-				goPkg.AdaptedFunctions[name] = adapted
-			}
 		} else {
 			goPkg.UnsupportedFunctions[name] = reason
 		}
 	}
 	return goPkg
-}
-
-// adaptedGoFunctionValueType returns the signature a reference to an adapted
-// Go function carries as a value, along with whether the function is
-// variadic. The imported FunctionDef already maps results to their Ard forms
-// (error results to Result, comma-ok to Maybe); a variadic tail additionally
-// becomes a trailing Maybe of the variadic element type, mirroring the
-// call-site rule. It reports false when the adaptation has no value form the
-// compiler knows how to synthesize.
-func adaptedGoFunctionValueType(def *FunctionDef) (*FunctionDef, bool, bool) {
-	variadic := len(def.Parameters) > 0 && def.Parameters[len(def.Parameters)-1].Variadic
-	resultAdapted := false
-	switch def.ReturnType.(type) {
-	case *Result, *Maybe:
-		resultAdapted = true
-	}
-	descriptorAdapted := slices.ContainsFunc(def.Parameters, func(param Parameter) bool {
-		return param.ForeignABI == ForeignParameterDescriptorValue
-	})
-	if !variadic && !resultAdapted && !descriptorAdapted {
-		return nil, false, false
-	}
-	if !variadic {
-		// Copy so a ForeignValue's ValueType can never alias the package's
-		// canonical definition.
-		value := *def
-		return &value, false, true
-	}
-	params := make([]Parameter, len(def.Parameters))
-	copy(params, def.Parameters)
-	last := params[len(params)-1]
-	last.Type = MakeMaybe(last.Type)
-	params[len(params)-1] = last
-	value := *def
-	value.Parameters = params
-	return &value, true, true
-}
-
-// goSignatureAdaptation reports why a Go signature's raw form differs from
-// its Ard-visible mapping, or "" when the two agree and a direct reference
-// to the function is a faithful value of the Ard type.
-func goSignatureAdaptation(sig *types.Signature) string {
-	if sig.Variadic() {
-		return "it is variadic"
-	}
-	for i := 0; i < sig.Params().Len(); i++ {
-		switch sig.Params().At(i).Type().Underlying().(type) {
-		case *types.Slice, *types.Map:
-			return "a descriptor parameter requires reference projection at call boundaries"
-		}
-	}
-	results := sig.Results()
-	switch {
-	case results.Len() == 1 && isGoError(results.At(0).Type()),
-		results.Len() == 2 && isGoError(results.At(1).Type()):
-		return "it returns a Go error, which Ard adapts to a Result at call sites"
-	case results.Len() == 2 && isGoBool(results.At(1).Type()):
-		return "its comma-ok result is adapted to a Maybe at call sites"
-	case results.Len() >= 2:
-		return "its results are adapted at call boundaries"
-	}
-	return ""
 }
 
 func functionDefFromGoSignature(name string, sig *types.Signature) (*FunctionDef, string) {
@@ -197,7 +124,8 @@ func functionDefFromGoSignatureWithMethods(name string, sig *types.Signature, in
 			}
 			goType = slice.Elem()
 			variadic = true
-		} else if _, ok := goType.Underlying().(*types.Slice); ok {
+		}
+		if _, ok := goType.Underlying().(*types.Slice); ok {
 			mutable = true
 			foreignABI = ForeignParameterDescriptorValue
 		} else if _, ok := goType.Underlying().(*types.Map); ok {
@@ -241,7 +169,8 @@ func functionDefFromGoCallbackSignature(name string, sig *types.Signature) (*Fun
 	for i := 0; i < sig.Params().Len(); i++ {
 		param := sig.Params().At(i)
 		goType := param.Type()
-		if sig.Variadic() && i == sig.Params().Len()-1 {
+		variadic := sig.Variadic() && i == sig.Params().Len()-1
+		if variadic {
 			slice, ok := goType.(*types.Slice)
 			if !ok {
 				return nil, fmt.Sprintf("variadic parameter %d is not a slice", i+1)
@@ -252,11 +181,14 @@ func functionDefFromGoCallbackSignature(name string, sig *types.Signature) (*Fun
 		if reason != "" {
 			return nil, fmt.Sprintf("parameter %d has unsupported type %s: %s", i+1, goType.String(), reason)
 		}
+		if variadic && isDescriptorBoundaryArdType(ardType) {
+			return nil, fmt.Sprintf("variadic callback parameter %d has descriptor element type %s, which requires an unsupported call adapter", i+1, goType.String())
+		}
 		paramName := param.Name()
 		if paramName == "" {
 			paramName = fmt.Sprintf("arg%d", i+1)
 		}
-		params = append(params, Parameter{Name: paramName, Type: ardType})
+		params = append(params, Parameter{Name: paramName, Type: ardType, Variadic: variadic})
 	}
 	ret, reason := callbackReturnTypeFromGo(sig.Results())
 	if reason != "" {

@@ -176,7 +176,7 @@ func equalFunctionDefSeen(left FunctionDef, right Type, seen map[typeEqualKey]st
 	for i := range left.Parameters {
 		lMut, lType := normalizedParamMutability(left.Parameters[i])
 		rMut, rType := normalizedParamMutability(r.Parameters[i])
-		if lMut != rMut || !equalTypesSeen(lType, rType, seen) {
+		if lMut != rMut || left.Parameters[i].Variadic != r.Parameters[i].Variadic || !equalTypesSeen(lType, rType, seen) {
 			return false
 		}
 	}
