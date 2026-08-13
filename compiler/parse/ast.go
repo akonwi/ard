@@ -156,7 +156,11 @@ type FunctionType struct {
 	Nullable        bool
 	Params          []DeclaredType
 	ParamMutability []bool
-	Return          DeclaredType
+	// Variadic marks the final parameter as a repeated element in a callable
+	// type. Ard declarations remain fixed-arity; this syntax describes foreign
+	// variadic function values.
+	Variadic bool
+	Return   DeclaredType
 }
 
 func (f FunctionType) IsNullable() bool {

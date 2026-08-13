@@ -10,6 +10,33 @@ import (
 	"github.com/akonwi/ard/parse"
 )
 
+func TestVariadicCallableTypeSurvivesAIRInterning(t *testing.T) {
+	program := lowerSource(t, `
+		struct Callables {
+			fixed: fn(Str) Str,
+			variadic: fn(...Str) Str,
+		}
+	`)
+
+	var fixed, variadic TypeID
+	for _, typ := range program.Types {
+		if typ.Kind != TypeFunction || len(typ.Params) != 1 || typeKind(t, program, typ.Params[0]) != TypeStr {
+			continue
+		}
+		if typ.Variadic {
+			variadic = typ.ID
+		} else {
+			fixed = typ.ID
+		}
+	}
+	if fixed == NoType || variadic == NoType {
+		t.Fatalf("fixed=%d variadic=%d, want distinct function types in %#v", fixed, variadic, program.Types)
+	}
+	if fixed == variadic {
+		t.Fatalf("fixed and variadic callable types share AIR id %d", fixed)
+	}
+}
+
 func TestLowerTinyProgram(t *testing.T) {
 	program := lowerSource(t, `
 		fn add(a: Int, b: Int) Int {

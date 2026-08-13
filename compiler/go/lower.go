@@ -3135,7 +3135,7 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 	case air.ExprForeignStructInstance:
 		return l.lowerForeignStructInstance(fn, expr)
 	case air.ExprForeignValue:
-		return l.lowerForeignValue(expr)
+		return l.lowerForeignValue(fn, expr)
 	case air.ExprInterfaceConversion:
 		return l.lowerInterfaceConversion(fn, expr)
 	case air.ExprDiscardingFunctionCoercion:
@@ -3617,7 +3617,7 @@ func typeSwitchClausesToStmts(cases []*ast.CaseClause) []ast.Stmt {
 	return stmts
 }
 
-func (l *lowerer) lowerForeignValue(expr air.Expr) (loweredExpr, error) {
+func (l *lowerer) lowerForeignValue(fn air.Function, expr air.Expr) (loweredExpr, error) {
 	if expr.ForeignTarget != "go" {
 		return loweredExpr{}, fmt.Errorf("unsupported foreign value target %q", expr.ForeignTarget)
 	}
@@ -3631,7 +3631,11 @@ func (l *lowerer) lowerForeignValue(expr air.Expr) (loweredExpr, error) {
 			qualifier = qualifier[slash+1:]
 		}
 	}
-	return loweredExpr{expr: l.qualified(qualifier, expr.ForeignNamespace, expr.ForeignSymbol)}, nil
+	value := loweredExpr{expr: l.qualified(qualifier, expr.ForeignNamespace, expr.ForeignSymbol)}
+	if validTypeID(l.program, expr.Type) && l.program.Types[expr.Type-1].Kind == air.TypeFunction {
+		return l.lowerForeignCallableValue(fn, expr, value)
+	}
+	return value, nil
 }
 
 func (l *lowerer) lowerInterfaceConversion(fn air.Function, expr air.Expr) (loweredExpr, error) {
@@ -3806,6 +3810,120 @@ func (l *lowerer) lowerGoErrorOnlyResultCall(expr air.Expr, stmts []ast.Stmt, ca
 	return loweredExpr{stmts: stmts, expr: ast.NewIdent(resultTemp)}, nil
 }
 
+func (l *lowerer) lowerForeignCallableValue(_ air.Function, expr air.Expr, callee loweredExpr) (loweredExpr, error) {
+	if !validTypeID(l.program, expr.Type) {
+		return callee, nil
+	}
+	fnInfo := l.program.Types[expr.Type-1]
+	if fnInfo.Kind != air.TypeFunction {
+		return callee, nil
+	}
+	if len(expr.ForeignArgABI) != len(fnInfo.Params) {
+		return loweredExpr{}, fmt.Errorf("foreign callable %s has %d ABI modes for %d parameters", expr.ForeignSymbol, len(expr.ForeignArgABI), len(fnInfo.Params))
+	}
+	needsArgAdaptation := false
+	for _, mode := range expr.ForeignArgABI {
+		if mode != air.ABIParamExact {
+			needsArgAdaptation = true
+			break
+		}
+	}
+	returnInfo := air.TypeInfo{}
+	if validTypeID(l.program, fnInfo.Return) {
+		returnInfo = l.program.Types[fnInfo.Return-1]
+	}
+	discardsEmptyResult := returnInfo.Kind == air.TypeResult && l.isVoidType(returnInfo.Value) && expr.ForeignResultShape == air.ForeignResultValueError
+	discardsEmptyMaybe := returnInfo.Kind == air.TypeMaybe && l.isVoidType(returnInfo.Elem) && expr.ForeignResultShape == air.ForeignResultValueBool
+	// Ard Result/Maybe returns normally use their idiomatic Go ABI in function
+	// type position. Empty success values are the exception: Go returns
+	// (struct{}, error/bool), while the Ard callable ABI omits struct{}.
+	if !needsArgAdaptation && !discardsEmptyResult && !discardsEmptyMaybe {
+		return callee, nil
+	}
+
+	callableTemp := l.nextTemp()
+	stmts := append([]ast.Stmt{}, callee.stmts...)
+	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(callableTemp)}, Tok: token.DEFINE, Rhs: []ast.Expr{callee.expr}})
+	params := make([]*ast.Field, len(fnInfo.Params))
+	args := make([]ast.Expr, len(fnInfo.Params))
+	var bodyPrefix []ast.Stmt
+	for i, paramType := range fnInfo.Params {
+		name := fmt.Sprintf("arg%d", i+1)
+		typ, err := l.goType(paramType)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		argExpr := ast.Expr(ast.NewIdent(name))
+		if fnInfo.Variadic && i == len(fnInfo.Params)-1 {
+			typ = &ast.Ellipsis{Elt: typ}
+			if expr.ForeignArgABI[i] == air.ABIParamDescriptorValue {
+				paramInfo := l.program.Types[paramType-1]
+				if paramInfo.Kind != air.TypeReference {
+					return loweredExpr{}, fmt.Errorf("variadic foreign callable %s descriptor element is not a reference", expr.ForeignSymbol)
+				}
+				elemType, err := l.goType(paramInfo.Elem)
+				if err != nil {
+					return loweredExpr{}, err
+				}
+				projectedName := l.nextTemp()
+				indexName := l.nextTemp()
+				itemName := l.nextTemp()
+				projectedType := &ast.ArrayType{Elt: elemType}
+				projectRange := &ast.RangeStmt{
+					Key: ast.NewIdent(indexName), Value: ast.NewIdent(itemName), Tok: token.DEFINE, X: ast.NewIdent(name),
+					Body: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{
+						Lhs: []ast.Expr{&ast.IndexExpr{X: ast.NewIdent(projectedName), Index: ast.NewIdent(indexName)}}, Tok: token.ASSIGN,
+						Rhs: []ast.Expr{l.foreignABIValueArg(air.Expr{Type: paramType}, ast.NewIdent(itemName), expr.ForeignArgABI[i])},
+					}}},
+				}
+				bodyPrefix = append(bodyPrefix,
+					&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(projectedName)}, Type: projectedType}}}},
+					&ast.IfStmt{
+						Cond: &ast.BinaryExpr{X: ast.NewIdent(name), Op: token.NEQ, Y: ast.NewIdent("nil")},
+						Body: &ast.BlockStmt{List: []ast.Stmt{
+							&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(projectedName)}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.CallExpr{Fun: ast.NewIdent("make"), Args: []ast.Expr{projectedType, &ast.CallExpr{Fun: ast.NewIdent("len"), Args: []ast.Expr{ast.NewIdent(name)}}}}}},
+							projectRange,
+						}},
+					},
+				)
+				argExpr = ast.NewIdent(projectedName)
+			} else if expr.ForeignArgABI[i] != air.ABIParamExact {
+				return loweredExpr{}, fmt.Errorf("variadic foreign callable %s has unsupported element ABI mode %d", expr.ForeignSymbol, expr.ForeignArgABI[i])
+			}
+		} else {
+			argExpr = l.foreignABIValueArg(air.Expr{Type: paramType}, argExpr, expr.ForeignArgABI[i])
+		}
+		params[i] = &ast.Field{Names: []*ast.Ident{ast.NewIdent(name)}, Type: typ}
+		args[i] = argExpr
+	}
+	call := &ast.CallExpr{Fun: ast.NewIdent(callableTemp), Args: args}
+	if fnInfo.Variadic {
+		call.Ellipsis = token.Pos(1)
+	}
+	body := append([]ast.Stmt{}, bodyPrefix...)
+	switch {
+	case discardsEmptyResult || discardsEmptyMaybe:
+		resultName := l.nextTemp()
+		body = append(body,
+			&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("_"), ast.NewIdent(resultName)}, Tok: token.DEFINE, Rhs: []ast.Expr{call}},
+			&ast.ReturnStmt{Results: []ast.Expr{ast.NewIdent(resultName)}},
+		)
+	case l.isVoidType(fnInfo.Return):
+		body = append(body, &ast.ExprStmt{X: call})
+	default:
+		body = append(body, &ast.ReturnStmt{Results: []ast.Expr{call}})
+	}
+	funcType := &ast.FuncType{Params: &ast.FieldList{List: params}}
+	results, err := l.goTypeInfoReturnFields(fnInfo)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	if len(results) > 0 {
+		funcType.Results = &ast.FieldList{List: results}
+	}
+	return loweredExpr{stmts: stmts, expr: &ast.FuncLit{Type: funcType, Body: &ast.BlockStmt{List: body}}}, nil
+}
+
 func (l *lowerer) lowerForeignMethodValue(fn air.Function, expr air.Expr) (loweredExpr, error) {
 	if expr.ForeignTarget != "go" {
 		return loweredExpr{}, fmt.Errorf("unsupported foreign method target %q", expr.ForeignTarget)
@@ -3818,81 +3936,7 @@ func (l *lowerer) lowerForeignMethodValue(fn air.Function, expr air.Expr) (lower
 		return loweredExpr{}, err
 	}
 	selector := &ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent(expr.ForeignSymbol)}
-	if !validTypeID(l.program, expr.Type) {
-		return loweredExpr{stmts: target.stmts, expr: selector}, nil
-	}
-	fnInfo := l.program.Types[expr.Type-1]
-	if fnInfo.Kind != air.TypeFunction {
-		return loweredExpr{stmts: target.stmts, expr: selector}, nil
-	}
-	retInfo := air.TypeInfo{}
-	adapt := false
-	shape := expr.ForeignResultShape
-	if validTypeID(l.program, fnInfo.Return) {
-		retInfo = l.program.Types[fnInfo.Return-1]
-		switch retInfo.Kind {
-		case air.TypeResult:
-			if shape == air.ForeignResultUnknown {
-				return loweredExpr{}, fmt.Errorf("Go foreign method value %s.%s is missing its result shape", expr.ForeignReceiver, expr.ForeignSymbol)
-			}
-			adapt = shape == air.ForeignResultValueError || shape == air.ForeignResultErrorOnly
-		case air.TypeMaybe:
-			if shape == air.ForeignResultUnknown {
-				return loweredExpr{}, fmt.Errorf("Go foreign method value %s.%s is missing its result shape", expr.ForeignReceiver, expr.ForeignSymbol)
-			}
-			adapt = shape == air.ForeignResultValueBool
-		}
-	}
-	needsArgAdaptation := false
-	for _, mode := range expr.ForeignArgABI {
-		if mode != air.ABIParamExact {
-			needsArgAdaptation = true
-			break
-		}
-	}
-	if !adapt && !needsArgAdaptation {
-		return loweredExpr{stmts: target.stmts, expr: selector}, nil
-	}
-	methodTemp := l.nextTemp()
-	stmts := append([]ast.Stmt{}, target.stmts...)
-	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(methodTemp)}, Tok: token.DEFINE, Rhs: []ast.Expr{selector}})
-	methodValue := ast.NewIdent(methodTemp)
-	params := make([]*ast.Field, len(fnInfo.Params))
-	args := make([]ast.Expr, len(fnInfo.Params))
-	bodyPrefix := []ast.Stmt{}
-	for i, paramType := range fnInfo.Params {
-		name := fmt.Sprintf("arg%d", i+1)
-		typ, err := l.goType(paramType)
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		argExpr := ast.Expr(ast.NewIdent(name))
-		mode := expr.ForeignArgABI[i]
-		argExpr = l.foreignABIValueArg(air.Expr{Type: paramType}, argExpr, mode)
-		params[i] = &ast.Field{Names: []*ast.Ident{ast.NewIdent(name)}, Type: typ}
-		args[i] = argExpr
-	}
-	call := &ast.CallExpr{Fun: methodValue, Args: args}
-	var body []ast.Stmt
-	if retInfo.Kind == air.TypeResult && l.resultUsesGoErrorABI(fnInfo.Return) && (shape == air.ForeignResultValueError || shape == air.ForeignResultErrorOnly) {
-		body = append(bodyPrefix, &ast.ReturnStmt{Results: l.unpackABIResultExprs(fnInfo.Return, call)})
-	} else if retInfo.Kind == air.TypeMaybe && shape == air.ForeignResultValueBool {
-		body = append(bodyPrefix, &ast.ReturnStmt{Results: l.unpackABIResultExprs(fnInfo.Return, call)})
-	} else if l.isVoidType(fnInfo.Return) {
-		body = append(bodyPrefix, &ast.ExprStmt{X: call})
-	} else {
-		body = append(bodyPrefix, &ast.ReturnStmt{Results: []ast.Expr{call}})
-	}
-	funcType := &ast.FuncType{Params: &ast.FieldList{List: params}}
-	results, err := l.goTypeInfoReturnFields(fnInfo)
-	if err != nil {
-		return loweredExpr{}, err
-	}
-	if len(results) > 0 {
-		funcType.Results = &ast.FieldList{List: results}
-	}
-	lit := &ast.FuncLit{Type: funcType, Body: &ast.BlockStmt{List: body}}
-	return loweredExpr{stmts: stmts, expr: lit}, nil
+	return l.lowerForeignCallableValue(fn, expr, loweredExpr{stmts: target.stmts, expr: selector})
 }
 
 func (l *lowerer) resultErrorReturnIfStmt(resultType ast.Expr, errName ast.Expr) ast.Stmt {
@@ -4460,10 +4504,13 @@ func (l *lowerer) goType(typeID air.TypeID) (ast.Expr, error) {
 		return &ast.IndexExpr{X: l.runtimeQualified("Maybe"), Index: elem}, nil
 	case air.TypeFunction:
 		params := make([]*ast.Field, 0, len(info.Params))
-		for _, paramTypeID := range info.Params {
+		for i, paramTypeID := range info.Params {
 			paramType, err := l.goType(paramTypeID)
 			if err != nil {
 				return nil, err
+			}
+			if info.Variadic && i == len(info.Params)-1 {
+				paramType = &ast.Ellipsis{Elt: paramType}
 			}
 			params = append(params, &ast.Field{Type: paramType})
 		}
@@ -6703,9 +6750,17 @@ func (l *lowerer) lowerCallClosure(fn air.Function, expr air.Expr) (loweredExpr,
 	}
 	params := []air.Param{}
 	if hasFunctionType {
-		params = make([]air.Param, len(targetInfo.Params))
-		for i, paramType := range targetInfo.Params {
-			params[i] = air.Param{Type: paramType}
+		paramCount := len(targetInfo.Params)
+		if targetInfo.Variadic && len(expr.Args) > paramCount {
+			paramCount = len(expr.Args)
+		}
+		params = make([]air.Param, paramCount)
+		for i := range params {
+			paramIndex := i
+			if paramIndex >= len(targetInfo.Params) {
+				paramIndex = len(targetInfo.Params) - 1
+			}
+			params[i] = air.Param{Type: targetInfo.Params[paramIndex]}
 		}
 	}
 	args, stmts, writeback, err := l.lowerCallArgs(fn, expr.Args, params)

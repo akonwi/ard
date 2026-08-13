@@ -1203,10 +1203,9 @@ type Parameter struct {
 	// declaredAt retains complete source provenance for diagnostics. It is zero
 	// for synthesized Go, builtin, and prelude parameters.
 	declaredAt SourceSpan
-	// Variadic marks the single Ard argument that maps to a Go variadic
-	// parameter. The argument may be omitted at the call site, mirroring
-	// Go's zero-argument variadic calls. Ard has no variadic parameters or
-	// spread syntax; at most one value can be passed.
+	// Variadic marks the final element parameter of a foreign variadic
+	// callable. Calls may omit it or provide any number of repeated values of
+	// Type. Ard declarations and closures remain fixed-arity.
 	Variadic bool
 }
 
@@ -1415,25 +1414,13 @@ type DiscardingFunctionCoercion struct {
 func (p *DiscardingFunctionCoercion) Type() Type { return p.TargetType }
 
 type ForeignValue struct {
-	Target     string
-	Namespace  string
-	Qualifier  string
-	Symbol     string
-	ValueType  Type
-	Assignable bool
-	// AdaptedFunction marks a reference to a Go function whose raw signature
-	// differs from its Ard-facing one (error results become Results, comma-ok
-	// becomes Maybe, a variadic tail becomes a trailing Maybe parameter).
-	// ValueType is the adapted signature; targets synthesize the boundary
-	// adapter so the value behaves exactly like a call to the function.
-	AdaptedFunction    bool
+	Target             string
+	Namespace          string
+	Qualifier          string
+	Symbol             string
+	ValueType          Type
+	Assignable         bool
 	ForeignResultShape ForeignResultShape
-	// VariadicAdapter is set with AdaptedFunction when the Go function is
-	// variadic and is referenced as a function value: the adapted signature's
-	// final parameter is a Maybe of the variadic element type, and the adapter
-	// passes the value when present and nothing otherwise. Direct Go calls use
-	// repeated trailing arguments instead of this function-value adapter shape.
-	VariadicAdapter bool
 }
 
 func (p *ForeignValue) Type() Type {

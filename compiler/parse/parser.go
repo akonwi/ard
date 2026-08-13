@@ -1635,8 +1635,10 @@ func (p *parser) tryParseType() DeclaredType {
 		// Parse parameter types
 		paramTypes := []DeclaredType{}
 		paramMutability := []bool{}
+		variadic := false
 		if hasLeftParen && !p.check(right_paren) {
 			for {
+				isVariadic := p.match(ellipsis)
 				// Skip 'mut' keyword if present (marks mutable parameters in type signatures)
 				isMutable := p.match(mut)
 				paramType := p.parseType()
@@ -1649,8 +1651,14 @@ func (p *parser) tryParseType() DeclaredType {
 				}
 				paramTypes = append(paramTypes, paramType)
 				paramMutability = append(paramMutability, isMutable)
+				if isVariadic {
+					variadic = true
+				}
 				if !p.match(comma) {
 					break
+				}
+				if isVariadic {
+					p.addError(p.previous(), "Variadic function type parameter must be final")
 				}
 			}
 		}
@@ -1702,6 +1710,7 @@ func (p *parser) tryParseType() DeclaredType {
 		return &FunctionType{
 			Params:          paramTypes,
 			ParamMutability: paramMutability,
+			Variadic:        variadic,
 			Return:          returnType,
 			Nullable:        nullable,
 			Location: Location{

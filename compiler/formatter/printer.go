@@ -760,6 +760,9 @@ func (p printer) renderType(declared parse.DeclaredType) string {
 			if i < len(node.ParamMutability) && node.ParamMutability[i] {
 				param = "mut " + param
 			}
+			if node.Variadic && i == len(node.Params)-1 {
+				param = "..." + param
+			}
 			params = append(params, param)
 		}
 		name := "fn(" + strings.Join(params, ", ") + ")"

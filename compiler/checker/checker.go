@@ -1481,9 +1481,10 @@ func (c *Checker) resolveType(t parse.DeclaredType) Type {
 				}
 			}
 			params[i] = Parameter{
-				Name:    fmt.Sprintf("arg%d", i),
-				Type:    paramType,
-				Mutable: mutable,
+				Name:     fmt.Sprintf("arg%d", i),
+				Type:     paramType,
+				Mutable:  mutable,
+				Variadic: ty.Variadic && i == len(ty.Params)-1,
 			}
 		}
 		// If no return type specified, default to Void
@@ -2349,6 +2350,26 @@ func sliceDescriptorProjectionCompatible(expected Type, actual Type) bool {
 	}
 }
 
+func unsupportedArdGoInterfaceImplementationMethod(method *FunctionDef) string {
+	if method == nil {
+		return ""
+	}
+	if len(method.Parameters) > 0 && method.Parameters[len(method.Parameters)-1].Variadic {
+		return "variadic Go interface methods cannot be implemented by fixed-arity Ard declarations"
+	}
+	switch result := method.ReturnType.(type) {
+	case *Result:
+		if method.ForeignResultShape == ForeignResultValueError && result.Val().equal(Void) {
+			return "Go interface methods returning (struct{}, error) require an unsupported empty-success ABI adapter"
+		}
+	case *Maybe:
+		if method.ForeignResultShape == ForeignResultValueBool && result.Of().equal(Void) {
+			return "Go interface methods returning (struct{}, bool) require an unsupported empty-success ABI adapter"
+		}
+	}
+	return ""
+}
+
 func (c *Checker) checkForeignInterfaceImplementation(s *parse.TraitImplementation, iface *ForeignType) *Statement {
 	typeSym, ok := c.scope.get(s.ForType.Name)
 	if !ok {
@@ -2409,6 +2430,14 @@ func (c *Checker) checkForeignInterfaceImplementation(s *parse.TraitImplementati
 			continue
 		}
 		implementedMethods[method.Name] = true
+		if reason := unsupportedArdGoInterfaceImplementationMethod(interfaceMethod); reason != "" {
+			validImpl = false
+			invalidImplementedMethods[method.Name] = true
+			qualified := fmt.Sprintf("%s::%s.%s", iface.Qualifier, iface.Name, interfaceMethodName)
+			legacy := fmt.Sprintf("Unsupported Go interface method %s: %s", qualified, reason)
+			c.addDiagnostic(unsupportedGoEntityDiagnostic{Kind: "interface method", Name: qualified, Reason: reason, Span: c.sourceSpan(method.GetLocation()), LegacyMessage: legacy}.build())
+			continue
+		}
 		if len(method.Parameters) != len(interfaceMethod.Parameters) {
 			validImpl = false
 			c.addDiagnostic(implementationParameterCountDiagnostic{
@@ -6783,13 +6812,13 @@ func (c *Checker) checkFunctionValueCall(callee Expression, callArgs []parse.Arg
 	numOmittedArgs := 0
 	if len(resolvedExprs) < len(fnDef.Parameters) {
 		for i := len(resolvedExprs); i < len(fnDef.Parameters); i++ {
-			if !parameterOmittable(fnDef.Parameters[i]) {
+			if !callableParameterOmittable(fnDef.Parameters, i) {
 				c.addMissingArgument(fnDef.Parameters[i], location)
 				return nil
 			}
 		}
 		numOmittedArgs = len(fnDef.Parameters) - len(resolvedExprs)
-	} else if len(resolvedExprs) > len(fnDef.Parameters) {
+	} else if len(resolvedExprs) > len(fnDef.Parameters) && !(len(fnDef.Parameters) > 0 && fnDef.Parameters[len(fnDef.Parameters)-1].Variadic) {
 		c.addArgumentCount(fmt.Sprint(len(fnDef.Parameters)), len(resolvedExprs), location, "")
 		resolvedExprs = resolvedExprs[:len(fnDef.Parameters)]
 	}
@@ -6799,6 +6828,8 @@ func (c *Checker) checkFunctionValueCall(callee Expression, callArgs []parse.Arg
 		c.addGenericFunctionResolutionError(setupErr, location)
 		return nil
 	}
+	fnDef = expandFunctionDefForRepeatedVariadic(fnDef, len(resolvedExprs))
+	fnDefCopy = expandFunctionDefForRepeatedVariadic(fnDefCopy, len(resolvedExprs))
 	args, fnToUse := c.checkAndProcessArguments(fnDef, resolvedExprs, fnDefCopy, genericScope, numOmittedArgs, contextualGenericReturn(expectedReturn, callTypeArgs), location)
 	if args == nil {
 		return nil
@@ -7077,18 +7108,17 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 				return nil
 			}
 
-			// Check argument count after resolving
+			// Check argument count after resolving.
 			numOmittedArgs := 0
 			if len(resolvedExprs) < len(fnDef.Parameters) {
-				// Find first non-nullable parameter that's missing
 				for i := len(resolvedExprs); i < len(fnDef.Parameters); i++ {
-					if !parameterOmittable(fnDef.Parameters[i]) {
+					if !callableParameterOmittable(fnDef.Parameters, i) {
 						c.addMissingArgument(fnDef.Parameters[i], s.GetLocation())
 						return nil
 					}
 				}
 				numOmittedArgs = len(fnDef.Parameters) - len(resolvedExprs)
-			} else if len(resolvedExprs) > len(fnDef.Parameters) {
+			} else if len(resolvedExprs) > len(fnDef.Parameters) && !(len(fnDef.Parameters) > 0 && fnDef.Parameters[len(fnDef.Parameters)-1].Variadic) {
 				c.addArgumentCount(fmt.Sprint(len(fnDef.Parameters)), len(resolvedExprs), s.GetLocation(), "")
 				resolvedExprs = resolvedExprs[:len(fnDef.Parameters)]
 			}
@@ -7099,7 +7129,9 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 				return nil
 			}
 
-			// Check and process arguments (handles both generics and mutability)
+			// Check and process arguments (handles both generics and mutability).
+			fnDef = expandFunctionDefForRepeatedVariadic(fnDef, len(resolvedExprs))
+			fnDefCopy = expandFunctionDefForRepeatedVariadic(fnDefCopy, len(resolvedExprs))
 			args, fnToUse := c.checkAndProcessArguments(fnDef, resolvedExprs, fnDefCopy, genericScope, numOmittedArgs, contextualGenericReturn(expectedReturn, callTypeArgs), s.GetLocation())
 			if args == nil {
 				return nil
@@ -7320,7 +7352,7 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 			if len(resolvedExprs) < len(fnDef.Parameters) {
 				// Find first non-nullable parameter that's missing
 				for i := len(resolvedExprs); i < len(fnDef.Parameters); i++ {
-					if !parameterOmittable(fnDef.Parameters[i]) {
+					if !callableParameterOmittable(fnDef.Parameters, i) {
 						c.addMissingArgument(fnDef.Parameters[i], s.GetLocation())
 						return nil
 					}
@@ -7805,7 +7837,7 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 				numOmittedArgs := 0
 				if len(resolvedExprs) < len(fnDef.Parameters) {
 					for i := len(resolvedExprs); i < len(fnDef.Parameters); i++ {
-						if !parameterOmittable(fnDef.Parameters[i]) {
+						if !callableParameterOmittable(fnDef.Parameters, i) {
 							c.addMissingArgument(fnDef.Parameters[i], s.GetLocation())
 							return nil
 						}
@@ -7971,16 +8003,10 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 				return nil
 			}
 
-			// Handle both regular functions and external functions
+			// Handle declarations, function-typed module globals, and named Go
+			// function values through the same callable-type resolution.
 			var ok bool
-			switch fn := sym.Type.(type) {
-			case *FunctionDef:
-				fnDef = fn
-				ok = true
-			default:
-				ok = false
-			}
-
+			fnDef, ok = functionDefForCallableType(sym.Type)
 			if !ok {
 				targetName := s.Target.String()
 				c.addNonCallable(fmt.Sprintf("%s::%s", targetName, s.Function.Name), s.GetLocation(), nil, nonCallableSuffix)
@@ -7995,18 +8021,17 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 				return nil
 			}
 
-			// Check argument count and validate omitted arguments
+			// Check argument count and validate omitted arguments.
 			numOmittedArgs := 0
 			if len(resolvedExprs) < len(fnDef.Parameters) {
-				// Find first non-nullable parameter that's missing
 				for i := len(resolvedExprs); i < len(fnDef.Parameters); i++ {
-					if !parameterOmittable(fnDef.Parameters[i]) {
+					if !callableParameterOmittable(fnDef.Parameters, i) {
 						c.addMissingArgument(fnDef.Parameters[i], s.GetLocation())
 						return nil
 					}
 				}
 				numOmittedArgs = len(fnDef.Parameters) - len(resolvedExprs)
-			} else if len(resolvedExprs) > len(fnDef.Parameters) {
+			} else if len(resolvedExprs) > len(fnDef.Parameters) && !(len(fnDef.Parameters) > 0 && fnDef.Parameters[len(fnDef.Parameters)-1].Variadic) {
 				c.addArgumentCount(fmt.Sprint(len(fnDef.Parameters)), len(resolvedExprs), s.GetLocation(), "")
 				resolvedExprs = resolvedExprs[:len(fnDef.Parameters)]
 			}
@@ -8017,7 +8042,8 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 				return nil
 			}
 
-			// Check and process arguments (handles both generics and mutability)
+			fnDef = expandFunctionDefForRepeatedVariadic(fnDef, len(resolvedExprs))
+			fnDefCopy = expandFunctionDefForRepeatedVariadic(fnDefCopy, len(resolvedExprs))
 			args, fnToUse := c.checkAndProcessArguments(fnDef, resolvedExprs, fnDefCopy, genericScope, numOmittedArgs, contextualGenericReturn(expectedReturn, callTypeArgs), s.GetLocation())
 			if args == nil {
 				return nil
@@ -9111,22 +9137,11 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 						if typ := goPkg.Variables[prop.Name]; typ != nil {
 							return &ForeignValue{Target: "go", Namespace: goPkg.Path, Qualifier: goPkg.TypesName, Symbol: prop.Name, ValueType: typ, Assignable: true}
 						}
-						// An imported Go function is a first-class value with its
-						// Ard-facing signature. Unadapted shapes reference the Go
-						// function directly; adapted shapes (variadic, error and
-						// comma-ok results) get a compiler-synthesized boundary
-						// adapter so the value behaves exactly like a call.
+						// Imported Go functions are first-class values carrying their
+						// complete Ard-facing callable type. AIR preserves foreign ABI
+						// metadata so targets can synthesize a wrapper only when a
+						// parameter projection genuinely requires one.
 						if def := goPkg.Functions[prop.Name]; def != nil {
-							if reason := goPkg.AdaptedFunctions[prop.Name]; reason != "" {
-								valueType, variadic, ok := adaptedGoFunctionValueType(def)
-								if !ok {
-									qualified := id.Name + "::" + prop.Name
-									legacy := fmt.Sprintf("Go function %s cannot be referenced as a value: %s; wrap it in a closure", qualified, reason)
-									c.addDiagnostic(invalidGoFunctionValueDiagnostic{Name: qualified, Detail: reason, Span: c.sourceSpan(prop.GetLocation()), LegacyMessage: legacy}.build())
-									return nil
-								}
-								return &ForeignValue{Target: "go", Namespace: goPkg.Path, Qualifier: goPkg.TypesName, Symbol: prop.Name, ValueType: valueType, AdaptedFunction: true, ForeignResultShape: def.ForeignResultShape, VariadicAdapter: variadic}
-							}
 							return &ForeignValue{Target: "go", Namespace: goPkg.Path, Qualifier: goPkg.TypesName, Symbol: prop.Name, ValueType: def, ForeignResultShape: def.ForeignResultShape}
 						}
 						if _, isGeneric := goPkg.Generics[prop.Name]; isGeneric {
@@ -11210,15 +11225,16 @@ func (c *Checker) synthesizeMaybeSome(value Expression, maybeType Type) Expressi
 // Synthesizes Maybe::new() calls for omitted nullable arguments.
 // If any error occurs, it's added to the checker's diagnostics.
 
-// parameterOmittable reports whether a trailing parameter may be omitted at a
-// call site: nullable parameters default to none, and a Go variadic parameter
-// may receive zero arguments.
+// parameterOmittable reports whether an ordinary parameter may be omitted and
+// synthesized as none. Variadic arity is a callable-shape rule, not nullable
+// parameter sugar.
 func parameterOmittable(param Parameter) bool {
-	if param.Variadic {
-		return true
-	}
 	_, isMaybe := param.Type.(*Maybe)
 	return isMaybe
+}
+
+func callableParameterOmittable(params []Parameter, index int) bool {
+	return index >= 0 && index < len(params) && ((index == len(params)-1 && params[index].Variadic) || parameterOmittable(params[index]))
 }
 
 func variadicExpectedArgumentCount(fnDef *FunctionDef) int {
@@ -11237,10 +11253,16 @@ func expandFunctionDefForRepeatedVariadic(fnDef *FunctionDef, argCount int) *Fun
 	}
 	expanded := *fnDef
 	expanded.Parameters = append([]Parameter(nil), fnDef.Parameters...)
-	last := expanded.Parameters[len(expanded.Parameters)-1]
+	lastIndex := len(expanded.Parameters) - 1
+	last := expanded.Parameters[lastIndex]
+	expanded.Parameters[lastIndex].Variadic = false
+	last.Variadic = false
 	for len(expanded.Parameters) < argCount {
 		expanded.Parameters = append(expanded.Parameters, last)
 	}
+	// The expanded shape is call-local, but still maintains the invariant that
+	// only its final element parameter carries the variadic marker.
+	expanded.Parameters[len(expanded.Parameters)-1].Variadic = true
 	return &expanded
 }
 
@@ -12096,7 +12118,7 @@ func (c *Checker) resolveArguments(args []parse.Argument, params []Parameter) ([
 	}
 
 	for i, param := range params {
-		if !used[i] && !parameterOmittable(param) {
+		if !used[i] && !callableParameterOmittable(params, i) {
 			parameter := param
 			return nil, &argumentBindingError{Name: param.Name, Parameter: &parameter}
 		}

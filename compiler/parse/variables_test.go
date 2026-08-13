@@ -148,6 +148,26 @@ func TestFunctionTypes(t *testing.T) {
 			wantErrs: []string{},
 		},
 		{
+			name:  "Valid variadic callable type",
+			input: "let f: fn(Str, ...Str) Str = test",
+			output: Program{Statements: []Statement{
+				&VariableDeclaration{
+					Name: "f",
+					Type: &FunctionType{
+						Params:   []DeclaredType{&StringType{}, &StringType{}},
+						Variadic: true,
+						Return:   &StringType{},
+					},
+					Value: &Identifier{Name: "test"},
+				},
+			}},
+		},
+		{
+			name:     "Variadic callable parameter must be final",
+			input:    "let f: fn(...Str, Int) Str = test",
+			wantErrs: []string{"Variadic function type parameter must be final"},
+		},
+		{
 			name:  "Grouped nullable function type",
 			input: "let f: (fn(Int) Void)? = test",
 			output: Program{

@@ -187,7 +187,7 @@ func goSignatureHasPointerResult(sig *types.Signature, ret Type) bool {
 
 // functionDefFromGoSignatureBound maps a generic Go signature to an Ard
 // FunctionDef with every type parameter replaced by its bound Ard type. It
-// mirrors functionDefFromGoSignature, including the variadic-as-one-argument
+// mirrors functionDefFromGoSignature, including the repeated variadic element
 // rule and the (T, error) / (T, bool) result adaptations.
 func functionDefFromGoSignatureBound(name string, sig *types.Signature, bindings goTypeParamBindings) (*FunctionDef, string) {
 	params := make([]Parameter, 0, sig.Params().Len())
@@ -204,7 +204,8 @@ func functionDefFromGoSignatureBound(name string, sig *types.Signature, bindings
 			}
 			goType = slice.Elem()
 			variadic = true
-		} else if _, ok := goType.Underlying().(*types.Slice); ok {
+		}
+		if _, ok := goType.Underlying().(*types.Slice); ok {
 			mutable = true
 			foreignABI = ForeignParameterDescriptorValue
 		} else if _, ok := goType.Underlying().(*types.Map); ok {
@@ -218,7 +219,7 @@ func functionDefFromGoSignatureBound(name string, sig *types.Signature, bindings
 		if _, callback := ardType.(*FunctionDef); callback {
 			ardType = normalizeGoSliceResultType(ardType)
 		}
-		if !variadic && !isReferenceType(ardType) && isDescriptorBoundaryArdType(ardType) {
+		if !isReferenceType(ardType) && isDescriptorBoundaryArdType(ardType) {
 			// A descriptor-shaped instantiation is an explicit-reference-
 			// required boundary, matching non-generic Go slice/map parameters
 			// (ADR 0057).
@@ -423,18 +424,30 @@ func boundTypeFromGo(t types.Type, tparams *types.TypeParamList, bindings goType
 	case *types.Signature:
 		params := make([]Parameter, 0, typ.Params().Len())
 		for i := 0; i < typ.Params().Len(); i++ {
-			param, reason := boundTypeFromGo(typ.Params().At(i).Type(), tparams, bindings)
+			goParamType := typ.Params().At(i).Type()
+			variadic := typ.Variadic() && i == typ.Params().Len()-1
+			if variadic {
+				slice, ok := goParamType.(*types.Slice)
+				if !ok {
+					return nil, fmt.Sprintf("variadic callback parameter %d is not a slice", i+1)
+				}
+				goParamType = slice.Elem()
+			}
+			param, reason := boundTypeFromGo(goParamType, tparams, bindings)
 			if reason != "" {
 				return nil, fmt.Sprintf("callback parameter %d %s", i+1, reason)
 			}
 			if containsArdSlice(param) {
 				return nil, fmt.Sprintf("callback parameter %d resolves to Slice; generic Go callback slice parameters are not supported", i+1)
 			}
+			if variadic && isDescriptorBoundaryArdType(param) {
+				return nil, fmt.Sprintf("variadic callback parameter %d resolves to a descriptor element requiring an unsupported call adapter", i+1)
+			}
 			name := typ.Params().At(i).Name()
 			if name == "" {
 				name = fmt.Sprintf("arg%d", i+1)
 			}
-			params = append(params, Parameter{Name: name, Type: param})
+			params = append(params, Parameter{Name: name, Type: param, Variadic: variadic})
 		}
 		var ret Type = Void
 		if typ.Results().Len() == 1 {
