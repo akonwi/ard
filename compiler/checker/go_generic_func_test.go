@@ -103,7 +103,7 @@ struct DemoState {
 fn copy_state(c: mut ffi::StateCtx, c2: mut ffi::StateCtx) {
   let state = ffi::StateRef<DemoState>(c)
   let echoed: mut DemoState = ffi::Identity(state)
-  let snapshot: DemoState = ffi::Identity<DemoState>(deref state)
+  let snapshot: DemoState = ffi::Identity<DemoState>(state.@)
   ffi::StateSet(c2, snapshot)
   let ticks: Int = echoed.ticks
 }`,

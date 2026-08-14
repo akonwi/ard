@@ -4,13 +4,13 @@
 
 Accepted
 
-Superseded in part by ADR 0057. Explicit borrowing now depends on addressable
-storage rather than a `mut` binding, all reference destinations require actual
-reference values, and reference flow no longer dereferences implicitly; use
-`deref reference` to produce the shallow referent value. Reference copies share
-the current pointee, while rebinding affects only the writable destination slot.
-Whole-referent assignment remains rejected. Snapshot examples below without
-`deref` are historical.
+Superseded in part by ADR 0057 and amended by ADR 0060. Explicit borrowing now
+depends on addressable storage rather than a `mut` binding, all reference
+destinations require actual reference values, and reference flow no longer
+dereferences implicitly; use `reference.@` to produce the shallow referent
+value. Reference copies share the current pointee, while rebinding affects only
+the writable destination slot. Whole-referent assignment remains rejected.
+Snapshot examples below without `.@` are historical.
 
 ## Context
 
@@ -105,21 +105,21 @@ update_person(mut alice) // allowed: explicit reference creation
 
 ### Dereferencing
 
-Superseded by ADR 0057: `deref` is the explicit shallow reference-to-value
-operator. Observational reads still resolve through the referent, but a concrete
-`T` destination does not dereference implicitly:
+Superseded by ADR 0057 and amended by ADR 0060: postfix `.@` is the explicit
+shallow reference-to-value operator. Observational reads still resolve through
+the referent, but a concrete `T` destination does not dereference implicitly:
 
 ```ard
-let alias = person_ref              // copies reference handle, same pointee
-let snapshot: Person = person_ref   // rejected
-let snapshot: Person = deref person_ref // allowed shallow value
+let alias = person_ref             // copies reference handle, same pointee
+let snapshot: Person = person_ref  // rejected
+let snapshot: Person = person_ref.@ // allowed shallow value
 ```
 
 Reference copying follows pointer-value behavior. Pointee mutation is visible
 through every copied handle; assigning another reference to a writable binding
 or field replaces only that destination slot and does not affect earlier copies.
 Whole-referent assignment remains rejected. As further amended by ADR 0057,
-reference `==`/`!=` compares pointer identity; compare `deref` results when
+reference `==`/`!=` compares pointer identity; compare `.@` results when
 referent-value equality is intended.
 
 ### Lowering (Go backend)
@@ -143,7 +143,7 @@ Channel handles are intrinsic values rather than `mut T` references.
 - The checker gains an addressability judgment for expressions. Its rules are attached to explicit syntax, so violations produce local, teachable errors.
 - Initial reference creation is explicit with `mut`; subsequent reference flow
   copies the pointer-like handle, and shallow value extraction is explicit with
-  `deref`.
+  `.@`.
 - List elements and map values are deliberately not addressable; this is a smaller, stricter surface than Go's.
 
 ## Related

@@ -179,8 +179,8 @@ func (v Variable) Name() string {
 
 // Type returns the binding's stored type. A `mut T` binding is a first-class
 // reference value and reports `mut T`; observational reads resolve through the
-// referent at their use sites, and materializing `T` requires an explicit
-// `deref` (ADR 0057).
+// referent at their use sites, and materializing `T` requires explicit `.@`
+// (ADRs 0057 and 0060).
 func (v Variable) Type() Type {
 	return v.sym.Type
 }
@@ -220,8 +220,8 @@ func (m *MutableRefExpr) String() string {
 	return fmt.Sprintf("mut %s", m.Operand)
 }
 
-// DerefExpr is the explicit one-layer dereference `deref <operand>` (ADR
-// 0057). The operand must be an actual reference value; the result is a
+// DerefExpr is the explicit one-layer dereference `<operand>.@` (ADRs 0057
+// and 0060). The operand must be an actual reference value; the result is a
 // shallow, non-addressable copy of the current referent. Observational is set
 // for compiler-inserted referent reads (arithmetic, interpolation, matching),
 // which share the same shallow-load semantics.
@@ -236,7 +236,7 @@ func (d *DerefExpr) Type() Type {
 }
 
 func (d *DerefExpr) String() string {
-	return fmt.Sprintf("deref %s", d.Operand)
+	return fmt.Sprintf("%s.@", d.Operand)
 }
 
 // ReferenceTraitProjection is the explicit checked conversion from a concrete

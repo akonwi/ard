@@ -108,17 +108,19 @@ rename(reference, "Lin")
 
 Copy-producing accessors still produce fresh storage rather than a reference into the container.
 
-## Explicit shallow values with `deref`
+## Explicit shallow values with `.@`
 
-References remain references during ordinary value flow. Use `deref` when a destination needs the current `T` value:
+References remain references during ordinary value flow. Use the postfix **value-at** operator `.@` when a destination needs the current `T` value:
 
 ```ard
 let user = User{name: "Ada"}
 let reference = mut user
-let snapshot: User = deref reference
+let snapshot: User = reference.@
 ```
 
-`deref` removes exactly one outer reference layer and evaluates its operand once. The copy is **shallow**:
+`.@` removes exactly one outer reference layer and evaluates its operand once. The deprecated prefix spelling `deref reference` remains accepted for one migration release, and `ard format` rewrites it to `reference.@`.
+
+The copy is **shallow**:
 
 - structs, fixed arrays, and primitive values copy their current value;
 - reference-valued fields keep copied reference handles;
@@ -126,7 +128,7 @@ let snapshot: User = deref reference
 - maps continue sharing map contents;
 - channels and foreign handles retain their intrinsic sharing behavior.
 
-`deref` is not a deep-copy operation, and Ard does not provide one. Programs that need an independent deep copy construct it explicitly.
+`.@` is not a deep-copy operation, and Ard does not provide one. Programs that need an independent deep copy construct it explicitly.
 
 References compare by pointer identity. Compare referent values explicitly when their value types support equality:
 
@@ -135,8 +137,8 @@ let same_place = reference == mut user
 
 let count = 1
 let count_reference = mut count
-let count_snapshot = deref count_reference
-let same_value = deref count_reference == count_snapshot
+let count_snapshot = count_reference.@
+let same_value = count_reference.@ == count_snapshot
 ```
 
 ## Reference-valued fields

@@ -873,13 +873,13 @@ func (p printer) renderExpressionDoc(expression parse.Expression, parentPreceden
 	case parse.VoidLiteral:
 		return dText("()")
 	case *parse.MutRef:
-		return dConcat(dText("mut "), p.renderExpressionValueDoc(node.Operand, parentPrecedence))
+		return p.renderMutRefDoc(node.Operand, parentPrecedence)
 	case parse.MutRef:
-		return dConcat(dText("mut "), p.renderExpressionValueDoc(node.Operand, parentPrecedence))
+		return p.renderMutRefDoc(node.Operand, parentPrecedence)
 	case *parse.Deref:
-		return dText(p.renderDeref(node.Operand, parentPrecedence))
+		return p.renderDerefDoc(node.Operand, parentPrecedence)
 	case parse.Deref:
-		return dText(p.renderDeref(node.Operand, parentPrecedence))
+		return p.renderDerefDoc(node.Operand, parentPrecedence)
 	case *parse.UnaryExpression:
 		return dText(p.renderUnary(node, parentPrecedence))
 	case parse.UnaryExpression:
@@ -1278,17 +1278,28 @@ func (p printer) renderFunctionCallDoc(node *parse.FunctionCall) doc {
 }
 
 func (p printer) renderFunctionValueCallDoc(node *parse.FunctionValueCall) doc {
-	head := "(" + p.renderExpression(node.Callee, 0) + ")"
-	return p.renderCallDoc(head, node.TypeArgs, node.Args, node.Comments)
+	head := p.renderExpressionDoc(node.Callee, precedenceCall)
+	if _, ok := node.Callee.(*parse.Deref); !ok {
+		head = dConcat(dText("("), p.renderExpressionDoc(node.Callee, 0), dText(")"))
+	}
+	return p.renderCallHeadDoc(head, "", node.TypeArgs, node.Args, node.Comments)
 }
 
 func (p printer) renderCallDoc(head string, typeArgs []parse.DeclaredType, args []parse.Argument, comments []parse.Comment) doc {
+	return p.renderCallHeadDoc(dText(head), head, typeArgs, args, comments)
+}
+
+func (p printer) renderCallHeadDoc(head doc, headText string, typeArgs []parse.DeclaredType, args []parse.Argument, comments []parse.Comment) doc {
 	if len(typeArgs) > 0 {
 		types := make([]string, 0, len(typeArgs))
 		for _, item := range typeArgs {
 			types = append(types, p.renderType(item))
 		}
-		head += "<" + strings.Join(types, ", ") + ">"
+		suffix := "<" + strings.Join(types, ", ") + ">"
+		head = dConcat(head, dText(suffix))
+		if headText != "" {
+			headText += suffix
+		}
 	}
 	argDocs := make([]doc, 0, len(args))
 	for _, arg := range args {
@@ -1299,7 +1310,7 @@ func (p printer) renderCallDoc(head string, typeArgs []parse.DeclaredType, args 
 		argDocs = append(argDocs, dConcat(dText(prefix), p.renderExpressionValueDoc(arg.Value, 0)))
 	}
 	if len(argDocs) == 0 && len(comments) == 0 {
-		return dText(head + "()")
+		return dConcat(head, dText("()"))
 	}
 
 	body := dJoin(dConcat(dText(","), dLine()), argDocs)
@@ -1318,13 +1329,14 @@ func (p printer) renderCallDoc(head string, typeArgs []parse.DeclaredType, args 
 	}
 
 	fallback := dGroup(dConcat(
-		dText(head+"("),
+		head,
+		dText("("),
 		dIndent(dConcat(dSoftLine(), body)),
 		dSoftLine(),
 		dText(")"),
 	))
 
-	if len(comments) == 0 && len(args) > 0 {
+	if headText != "" && len(comments) == 0 && len(args) > 0 {
 		last := len(args) - 1
 		if closure, ok := args[last].Value.(*parse.AnonymousFunction); ok && len(closure.Body) > 0 {
 			prior := make([]string, 0, last)
@@ -1343,7 +1355,7 @@ func (p printer) renderCallDoc(head string, typeArgs []parse.DeclaredType, args 
 				canHug = false
 			}
 			if canHug {
-				prefix := head + "("
+				prefix := headText + "("
 				if len(prior) > 0 {
 					prefix += strings.Join(prior, ", ") + ", "
 				}
@@ -1529,12 +1541,41 @@ const (
 	precedenceCall
 )
 
-func (p printer) renderDeref(operand parse.Expression, parentPrecedence int) string {
-	text := "deref " + p.renderExpression(operand, precedenceUnary)
-	if precedenceUnary < parentPrecedence {
-		return "(" + text + ")"
+func (p printer) renderMutRefDoc(operand parse.Expression, parentPrecedence int) doc {
+	operandDoc := p.renderExpressionValueDoc(operand, precedenceUnary)
+	if requiresExplicitPostfixBaseParens(operand) {
+		operandDoc = dConcat(dText("("), operandDoc, dText(")"))
 	}
-	return text
+	result := dConcat(dText("mut "), operandDoc)
+	if precedenceUnary < parentPrecedence {
+		return dConcat(dText("("), result, dText(")"))
+	}
+	return result
+}
+
+func (p printer) renderDerefDoc(operand parse.Expression, parentPrecedence int) doc {
+	operandDoc := p.renderExpressionValueDoc(operand, precedenceCall)
+	if requiresExplicitPostfixBaseParens(operand) {
+		operandDoc = dConcat(dText("("), operandDoc, dText(")"))
+	}
+	result := dConcat(operandDoc, dText(".@"))
+	if precedenceCall < parentPrecedence {
+		return dConcat(dText("("), result, dText(")"))
+	}
+	return result
+}
+
+func requiresExplicitPostfixBaseParens(expression parse.Expression) bool {
+	switch expression.(type) {
+	case *parse.MatchExpression,
+		*parse.SelectExpression,
+		*parse.ConditionalMatchExpression,
+		*parse.AnonymousFunction,
+		parse.AnonymousFunction:
+		return true
+	default:
+		return false
+	}
 }
 
 func (p printer) renderUnary(node *parse.UnaryExpression, parentPrecedence int) string {

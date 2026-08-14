@@ -7,7 +7,7 @@ Accepted
 Clarified by ADR 0057. Ard may create an internal `mut ForeignInterface` that
 references addressable interface storage, but this does not add imported Go
 `*Interface` ABI support. A bare pointer-to-interface does not satisfy the value
-interface; use `deref` to copy the current interface descriptor. Exact imported
+interface; use `.@` to copy the current interface descriptor. Exact imported
 `*Interface` parameters remain unsupported.
 
 ## Context

@@ -135,7 +135,7 @@ func TestADR0057LowersDedicatedDereferenceExpression(t *testing.T) {
 		fn main() Box {
 			let value = Box{value: 1}
 			let reference = mut value
-			let copy = deref reference
+			let copy = reference.@
 			copy
 		}
 	`)
@@ -435,7 +435,7 @@ func TestADR0057DistinguishesObservationalAndExplicitDereference(t *testing.T) {
 	program := lowerSource(t, `
 		fn observe(reference: mut Int) Int {
 			let implicit = reference + 1
-			let explicit = deref reference
+			let explicit = reference.@
 			implicit + explicit
 		}
 	`)

@@ -57,6 +57,7 @@ const (
 	DiagnosticCodeBranchTypeMismatch            DiagnosticCode = "branch_type_mismatch"
 	DiagnosticCodeNonExhaustiveValueIf          DiagnosticCode = "non_exhaustive_value_if"
 	DiagnosticCodeInvalidDerefOperand           DiagnosticCode = "invalid_deref_operand"
+	DiagnosticCodeDeprecatedDerefSyntax         DiagnosticCode = "deprecated_deref_syntax"
 	DiagnosticCodeNonAddressableBorrow          DiagnosticCode = "non_addressable_borrow"
 	DiagnosticCodeValueInteriorMutation         DiagnosticCode = "value_interior_mutation"
 	DiagnosticCodeWholeReferentAssignment       DiagnosticCode = "whole_referent_assignment"
@@ -467,6 +468,32 @@ func (d unsupportedTraitReferenceCastDiagnostic) build() Diagnostic {
 	)
 }
 
+type deprecatedDerefSyntaxDiagnostic struct {
+	Span SourceSpan
+}
+
+func (d deprecatedDerefSyntaxDiagnostic) build() Diagnostic {
+	diagnostic := newLabeledDiagnostic(
+		Warn,
+		"Prefix `deref` syntax is deprecated; use postfix `.@`",
+		"Deprecated deref syntax",
+		"Prefix `deref reference` remains accepted during this migration release. Use `reference.@` instead; `ard format` rewrites the old syntax automatically.",
+		DiagnosticLabel{Span: d.Span, Message: "replace this prefix operator with postfix `.@`"},
+	)
+	diagnostic.Code = DiagnosticCodeDeprecatedDerefSyntax
+	return diagnostic
+}
+
+func (c *Checker) addDeprecatedDerefSyntax(location parse.Location) {
+	span := c.sourceSpan(location)
+	for _, diagnostic := range c.diagnostics {
+		if diagnostic.Code == DiagnosticCodeDeprecatedDerefSyntax && diagnostic.Primary.Span == span {
+			return
+		}
+	}
+	c.addDiagnostic(deprecatedDerefSyntaxDiagnostic{Span: span}.build())
+}
+
 type invalidDerefOperandDiagnostic struct {
 	Type Type
 	Span SourceSpan
@@ -476,8 +503,8 @@ func (d invalidDerefOperandDiagnostic) build() Diagnostic {
 	return mutationDiagnostic(
 		DiagnosticCodeInvalidDerefOperand,
 		fmt.Sprintf("Cannot dereference a value of type %s", formatTypeForDisplay(d.Type)),
-		"Invalid deref operand",
-		"`deref` removes one reference layer, so its operand must be an actual reference value.",
+		"Invalid dereference operand",
+		"`.@` removes one reference layer, so its operand must be an actual reference value.",
 		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("`%s` is not a reference", formatTypeForDisplay(d.Type))},
 		nil,
 		"",
@@ -564,8 +591,8 @@ func (d referenceValueMaterializationDiagnostic) build() Diagnostic {
 	return mutationDiagnostic(
 		DiagnosticCodeReferenceValueMaterialization,
 		fmt.Sprintf("Type mismatch: Expected %s, got %s", formatTypeForDisplay(d.Expected), formatTypeForDisplay(d.Actual)),
-		"Value destination requires deref",
-		"References preserve identity in value flow. Use `deref reference` to make an explicit shallow value copy.",
+		"Value destination requires dereference",
+		"References preserve identity in value flow. Use `reference.@` to make an explicit shallow value copy.",
 		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("`%s` is a reference; this destination expects `%s`", formatTypeForDisplay(d.Actual), formatTypeForDisplay(d.Expected))},
 		nil,
 		"",

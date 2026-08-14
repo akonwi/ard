@@ -2028,7 +2028,7 @@ fn recover_boxed(value: Any, fallback: mut $T) mut $T {
 fn main() {
   let fallback_name = "fallback"
   let name = recover_boxed(ffi::BoxName(), mut fallback_name)
-  if deref name != "Ada" { panic("mutable name did not match") }
+  if name.@ != "Ada" { panic("mutable name did not match") }
 
   let point = unsafe::cast<mut image::Point>(ffi::BoxPoint()).expect("point")
   point.X = 42
@@ -2895,7 +2895,7 @@ func TestRunProgramSpecializesGenericEmptyListLocal(t *testing.T) {
 					out.push(item)
 				}
 			}
-			deref out
+			out.@
 		}
 
 		fn main() Bool {
@@ -4850,7 +4850,7 @@ fn main() {
 	if not echoed_state.ticks == 99 { panic("expected Identity to preserve reference identity") }
 	// A value-typed annotation requires an explicit shallow snapshot.
 	let snap_reference = ffi::StateRef<DemoState>(c)
-	let snap: DemoState = deref snap_reference
+	let snap: DemoState = snap_reference.@
 	live.ticks = 123
 	if not snap.ticks == 99 { panic("expected value-typed binding to snapshot, got {snap.ticks}") }
 }

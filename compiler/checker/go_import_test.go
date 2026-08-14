@@ -152,7 +152,7 @@ struct Sink {}
 
 impl io::Writer for Sink {
   fn write(bytes: mut [Byte]) Int!Str {
-    let copy = mut deref bytes
+    let copy = mut bytes.@
     copy.push(bytes.at(0).expect("byte"))
     Result::ok(copy.size())
   }
@@ -1490,7 +1490,7 @@ fn peek(nums: sort::IntSlice) Int {
 			input: `use go:sort
 fn sorted(nums: mut sort::IntSlice) sort::IntSlice {
   nums.Sort()
-  deref nums
+  nums.@
 }`,
 		},
 		{

@@ -50,11 +50,11 @@ let alice_reference = mut alice
 grow_older(alice_reference)
 ```
 
-Reference parameters may mutate fields and call mutating methods, but Ard source does not support replacing a whole referent through the parameter. A function that needs an ordinary value must request `T`; callers with `mut T` use `deref` explicitly.
+Reference parameters may mutate fields and call mutating methods, but Ard source does not support replacing a whole referent through the parameter. A function that needs an ordinary value must request `T`; callers with `mut T` use postfix `.@` explicitly.
 
 ```ard
 fn snapshot(person: mut Person) Person {
-  deref person
+  person.@
 }
 ```
 

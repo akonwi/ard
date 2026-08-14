@@ -35,7 +35,7 @@ fn main() {
 
   mut running = true
   while running {
-    render(deref list)
+    render(list.@)
     fmt::Println("What's your next todo?")
     if scanner.Scan() {
       let title = strings::TrimSpace(scanner.Text())

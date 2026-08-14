@@ -181,7 +181,7 @@ func TestADR0057DerefIsSingleEvaluationAndShallow(t *testing.T) {
 			let child = Child{value: 1}
 			let payload = Payload{child: mut child, values: [1, 2]}
 			let reference = mut payload
-			let copy = deref load(reference)
+			let copy = load(reference).@
 			let copied_values = mut copy.values
 			copied_values.set(0, 9)
 			copied_values.push(3)
@@ -200,17 +200,36 @@ func TestADR0057DerefIsSingleEvaluationAndShallow(t *testing.T) {
 	}
 }
 
+func TestADR0057PostfixDerefResultCanBeCalled(t *testing.T) {
+	program := lowerParitySource(t, `
+		mut calls = 0
+
+		fn main() Int {
+			let reference = mut (fn() Int {
+				calls =+ 1
+				42
+			})
+			let result = reference.@()
+			if not calls == 1 { panic("dereferenced callable did not run exactly once") }
+			result
+		}
+	`)
+	if got := runGoTargetParityJSON(t, program); got != `42` {
+		t.Fatalf("result = %s, want 42", got)
+	}
+}
+
 func TestADR0057DerefCopiesFixedArraysAndSharesMapDescriptors(t *testing.T) {
 	program := lowerParitySource(t, `
 		fn main() [Int] {
 			mut fixed: [Int; 2] = [1, 2]
 			let fixed_reference = mut fixed
-			let fixed_copy = deref fixed_reference
+			let fixed_copy = fixed_reference.@
 			fixed = [3, 4]
 
 			let mapping = ["a": 1]
 			let map_reference = mut mapping
-			let map_copy = deref map_reference
+			let map_copy = map_reference.@
 			let map_copy_reference = mut map_copy
 			map_copy_reference.set("b", 2)
 
@@ -316,7 +335,7 @@ func TestADR0057DescriptorReferencesUseStorageIdentity(t *testing.T) {
 			let values = [1, 2]
 			let first = mut values
 			let second = mut values
-			let copied_values = deref first
+			let copied_values = first.@
 			let copied_reference = mut copied_values
 			let table: [mut [Int]: Str] = [first: "values"]
 			second.set(0, 9)
@@ -451,18 +470,18 @@ fn main() {
   ffi::Bump(echoed)
   if not first.N == 3 { panic("generic pointer identity lost") }
 
-  let copied: ffi::Item = ffi::Identity<ffi::Item>(deref first_pointer)
+  let copied: ffi::Item = ffi::Identity<ffi::Item>(first_pointer.@)
   ffi::Bump(first_pointer)
   if not copied.N == 3 { panic("explicit value generic did not copy") }
 
-  ffi::SaveReader(deref first_pointer)
+  ffi::SaveReader(first_pointer.@)
   ffi::Bump(first_pointer)
   if not ffi::SavedN() == 4 { panic("value interface did not own its shallow copy") }
   ffi::SaveReader(first_pointer)
   ffi::Bump(first_pointer)
   if not ffi::SavedN() == 6 { panic("reference interface lost shared pointee") }
 
-  let value_boxed: Any = deref first_pointer
+  let value_boxed: Any = first_pointer.@
   ffi::Bump(first_pointer)
   if not ffi::ReadValueAny(value_boxed) == 6 { panic("value Any did not copy") }
   if not ffi::ReadAny(boxed) == 7 { panic("reference Any copied the pointee instead of the pointer") }
@@ -473,7 +492,7 @@ fn main() {
   let interface_reference = mut interface_value
   let interface_pointer: Any = interface_reference
   if not ffi::ReadReaderPointer(interface_pointer) == 11 { panic("foreign interface pointer Any failed") }
-  ffi::SaveReader(deref interface_reference)
+  ffi::SaveReader(interface_reference.@)
   if not ffi::SavedN() == 11 { panic("foreign interface deref failed") }
 
   let count = 1
@@ -627,7 +646,7 @@ func NilItem() *Item { return nil }
 	if err := os.WriteFile(mainPath, []byte(`use go:nilderef/ffi
 
 fn main() {
-  let value = deref ffi::NilItem()
+  let value = ffi::NilItem().@
 }
 `), 0o644); err != nil {
 		t.Fatal(err)
@@ -744,7 +763,7 @@ func TestADR0057MutableTraitReferencesCopyComparableForwardingHandles(t *testing
 
 			let boxed: Any = view
 			let recovered = unsafe::cast<mut Box>(boxed).expect("concrete pointer")
-			let trait_copy: View = deref view
+			let trait_copy: View = view.@
 			recovered.number = 3
 
 			"{canonical}:{independently_rebound}:{table.get(independent).or(\"missing\")}:{copied.value()}:{trait_copy.value()}"

@@ -1,7 +1,6 @@
 package checker_test
 
 import (
-	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -218,7 +217,7 @@ take(mut [])`},
   for t in from {
     out.push(t)
   }
-  deref out
+  out.@
 }
 let kept = keep_all([1, 2])`},
 		{name: "generic annotation types empty map through mut", source: `fn index(values: [$V]) [Str: $V] {
@@ -226,7 +225,7 @@ let kept = keep_all([1, 2])`},
   for v, i in values {
     out.set("{i}", v)
   }
-  deref out
+  out.@
 }
 let indexed = index([1, 2])`},
 		{name: "generic return annotation types empty list through mut", source: `fn fresh(seed: $T) mut [$T] {
@@ -250,13 +249,13 @@ func TestADR0057ExplicitDereferenceContexts(t *testing.T) {
 		wantError bool
 	}{
 		{name: "ordinary value operand is rejected", source: `let value = Box{value: 1}
-let copy = deref value`, wantError: true},
+let copy = value.@`, wantError: true},
 		{name: "value binding requires deref", source: `let value = Box{value: 1}
 let reference = mut value
 let copy: Box = reference`, wantError: true},
 		{name: "value binding accepts deref", source: `let value = Box{value: 1}
 let reference = mut value
-let copy: Box = deref reference`},
+let copy: Box = reference.@`},
 		{name: "value argument rejects bare reference", source: `fn take(value: Box) {}
 let value = Box{value: 1}
 let reference = mut value
@@ -264,9 +263,9 @@ take(reference)`, wantError: true},
 		{name: "value argument accepts deref", source: `fn take(value: Box) {}
 let value = Box{value: 1}
 let reference = mut value
-take(deref reference)`},
+take(reference.@)`},
 		{name: "value return rejects bare reference", source: `fn copy(reference: mut Box) Box { reference }`, wantError: true},
-		{name: "value return accepts deref", source: `fn copy(reference: mut Box) Box { deref reference }`},
+		{name: "value return accepts deref", source: `fn copy(reference: mut Box) Box { reference.@ }`},
 		{name: "value field rejects bare reference", source: `struct Holder { item: Box }
 let value = Box{value: 1}
 let reference = mut value
@@ -280,7 +279,7 @@ let holder = Holder{item: (mut value)}`},
 		{name: "value field accepts deref", source: `struct Holder { item: Box }
 let value = Box{value: 1}
 let reference = mut value
-let holder = Holder{item: (deref reference)}`},
+let holder = Holder{item: reference.@}`},
 		{name: "value list rejects bare reference", source: `let value = Box{value: 1}
 let reference = mut value
 let list: [Box] = [reference]`, wantError: true},
@@ -289,17 +288,17 @@ let reference = mut value
 let maybe: Box? = Maybe::new(reference)`, wantError: true},
 		{name: "value container accepts deref", source: `let value = Box{value: 1}
 let reference = mut value
-let list: [Box] = [(deref reference)]
-let maybe: Box? = Maybe::new((deref reference))`},
+let list: [Box] = [reference.@]
+let maybe: Box? = Maybe::new(reference.@)`},
 		{name: "deref is not an assignment place", source: `let value = Box{value: 1}
 let reference = mut value
-deref reference = Box{value: 2}`, wantError: true},
+reference.@ = Box{value: 2}`, wantError: true},
 		{name: "field of deref temporary is not mutable", source: `let value = Box{value: 1}
 let reference = mut value
-(deref reference).value = 2`, wantError: true},
+reference.@.value = 2`, wantError: true},
 		{name: "mut deref creates independent top level storage", source: `let value = Box{value: 1}
 let reference = mut value
-let independent: mut Box = mut deref reference`},
+let independent: mut Box = mut reference.@`},
 	}
 
 	for _, tt := range tests {
@@ -508,7 +507,7 @@ func assertReferenceCheckerResult(t *testing.T, source string, wantError bool) {
 	if len(result.Errors) > 0 {
 		t.Fatalf("parse errors: %v", result.Errors)
 	}
-	if strings.Contains(source, "deref ") && !containsParsedDeref(reflect.ValueOf(result.Program)) {
+	if (strings.Contains(source, "deref ") || strings.Contains(source, ".@")) && !containsParsedDeref(reflect.ValueOf(result.Program)) {
 		t.Fatal("parser did not produce a dereference expression")
 	}
 	checked := checker.New("test.ard", result.Program, nil)
@@ -551,11 +550,9 @@ func containsParsedDeref(value reflect.Value) bool {
 		return false
 	}
 	if value.CanInterface() {
-		if expression, ok := value.Interface().(parse.Expression); ok {
-			text := fmt.Sprint(expression)
-			if strings.HasPrefix(text, "deref ") || strings.HasPrefix(text, "(deref ") {
-				return true
-			}
+		switch value.Interface().(type) {
+		case *parse.Deref, parse.Deref:
+			return true
 		}
 	}
 	if value.Kind() == reflect.Interface || value.Kind() == reflect.Pointer {

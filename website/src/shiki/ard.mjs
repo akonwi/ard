@@ -312,7 +312,11 @@ export default [
         patterns: [
           {
             name: 'keyword.operator.ard',
-            match: '(::|=>|->|\\.\\.|=\\+|=-|==|<=|>=|=|\\+|-|\\*|/|%|<|>|!|\\?)',
+            match: '\\b(deref)\\b',
+          },
+          {
+            name: 'keyword.operator.ard',
+            match: '(\\.@|::|=>|->|\\.\\.|=\\+|=-|==|<=|>=|=|\\+|-|\\*|/|%|<|>|!|\\?)',
           },
         ],
       },

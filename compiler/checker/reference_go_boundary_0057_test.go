@@ -85,7 +85,7 @@ let reference = mut value
 let echoed: ffi::Item = ffi::Identity<ffi::Item>(reference)`, wantError: true},
 		{name: "explicit value generic accepts deref", source: `let value = ffi::Item{N: 1}
 let reference = mut value
-let echoed: ffi::Item = ffi::Identity<ffi::Item>(deref reference)`},
+let echoed: ffi::Item = ffi::Identity<ffi::Item>(reference.@)`},
 		{name: "comparable generic accepts reference identity", source: `let value = ffi::Item{N: 1}
 let reference = mut value
 let ok = ffi::IsComparable(reference)`},
@@ -134,7 +134,7 @@ ffi::TakePtr(pointer)`},
 let pointer = ffi::ItemPtr()
 let n = use_reference(pointer)`},
 
-		{name: "foreign pointer explicitly dereferences", source: `let copy: ffi::Item = deref ffi::ItemPtr()`},
+		{name: "foreign pointer explicitly dereferences", source: `let copy: ffi::Item = ffi::ItemPtr().@`},
 		{name: "imported global is explicitly addressable", source: `let reference = mut ffi::Global
 reference.N = 2`},
 		{name: "ordinary mut Go value rejects field mutation", source: `mut value = ffi::Item{N: 1}
@@ -190,7 +190,7 @@ ffi::TakeBumper(reference)`, wantError: true},
 		{name: "foreign interface storage requires deref at value destination", source: `let value = ffi::BumperValue()
 let reference = mut value
 let boxed: Any = reference
-ffi::TakeBumper(deref reference)`},
+ffi::TakeBumper(reference.@)`},
 		{name: "pure Ard cannot construct double pointer", source: `let value = ffi::Item{N: 1}
 let reference = mut value
 ffi::TakeDoublePtr(mut reference)`, wantError: true},
@@ -198,7 +198,7 @@ ffi::TakeDoublePtr(mut reference)`, wantError: true},
 ffi::TakeDoublePtr(pointer)
 let value = ffi::ReadDoublePtr(pointer)`},
 		{name: "deref removes one foreign pointer layer", source: `let pointer = ffi::DoublePtr()
-let single: mut ffi::Item = deref pointer
+let single: mut ffi::Item = pointer.@
 ffi::TakePtr(single)`},
 		{name: "exact pointer to interface remains unsupported", source: `fn pass(value: ffi::Bumper) { ffi::TakeInterfacePtr(mut value) }`, wantError: true},
 	}
@@ -217,7 +217,7 @@ func assertGoReferenceCheckerResult(t *testing.T, source string, resolver *check
 	if len(result.Errors) > 0 {
 		t.Fatalf("parse errors: %v", result.Errors)
 	}
-	if strings.Contains(source, "deref ") && !containsParsedDeref(reflect.ValueOf(result.Program)) {
+	if (strings.Contains(source, "deref ") || strings.Contains(source, ".@")) && !containsParsedDeref(reflect.ValueOf(result.Program)) {
 		t.Fatal("parser did not produce a dereference expression")
 	}
 	checked := checker.New("test.ard", result.Program, nil, checker.CheckOptions{GoResolver: resolver})

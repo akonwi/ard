@@ -576,15 +576,19 @@ func (m MutRef) String() string {
 	return fmt.Sprintf("mut %s", m.Operand)
 }
 
-// Deref is the explicit one-layer dereference expression `deref <operand>`
-// (ADR 0057). The checker requires Operand to have reference type.
+// Deref is the explicit one-layer postfix dereference expression `<operand>.@`
+// (ADRs 0057 and 0060). The checker requires Operand to have reference type.
+// LegacyPrefix records the deprecated `deref <operand>` spelling during its
+// one-release migration window.
 type Deref struct {
 	Location
-	Operand Expression
+	Operand          Expression
+	OperatorLocation Location
+	LegacyPrefix     bool
 }
 
 func (d Deref) String() string {
-	return fmt.Sprintf("deref %s", d.Operand)
+	return fmt.Sprintf("%s.@", d.Operand)
 }
 
 type FunctionCall struct {

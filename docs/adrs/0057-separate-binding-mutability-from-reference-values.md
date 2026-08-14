@@ -4,10 +4,13 @@
 
 Accepted
 
+Surface syntax amended by ADR 0060. Postfix `.@` is canonical; prefix `deref`
+is accepted only during the one-release migration window.
+
 ## Implementation status
 
 Complete. Phase 1's semantic contracts are in place, and Phases 2–8 are
-done. `deref` is parsed, formatted, and grammar-supported; the checker
+done. `.@` is parsed, formatted, and grammar-supported; the checker
 implements first-class reference typing, capability judgments, explicit-borrow
 classification (`ExistingReference` / `AddressablePlace` / `FreshValue`), the
 uniform reference-destination policy, assignment target categories,
@@ -26,7 +29,7 @@ forbidden whole-referent writes, immutable slots, and reference-required
 receivers. The variables, functions, structs, generics, async, and Go interop
 guides document the new model and migration paths. Phase 8 migrated the
 compiler samples, the Go backend fixture corpus, and the vaxis-demo example to
-explicit references and `deref`; the full compiler test suite, formatter
+explicit references and `.@`; the full compiler test suite, formatter
 verification, and the LSP harness pass. Downstream migration also hardened the
 backend: the mutable-trait storage vtable dispatches through impl functions
 directly instead of assuming a native Go interface, foreign-method values
@@ -235,28 +238,33 @@ let snapshot: User = first // rejected
 ```
 
 There is no implicit `mut T -> T` conversion. Code must use the explicit
-`deref` expression defined below when it needs a top-level `T` value.
+postfix `.@` expression defined below when it needs a top-level `T` value.
 
 ### Explicit dereferencing
 
-`deref` is a unary expression keyword symmetric with `mut`:
+As amended by ADR 0060, postfix `.@` is the canonical explicit dereference
+syntax:
 
 ```ard
 let reference = mut user // T -> mut T
-let snapshot = deref reference // mut T -> T
+let snapshot = reference.@ // mut T -> T
 ```
 
-It accepts only an actual reference value, removes exactly one outer `mut`
-layer, evaluates its operand once, and produces a non-place value. It is the Ard
-equivalent of evaluating Go `*p` where `p` has type `*T`, then using the result
-as a value. The resulting copy is shallow, not deep.
+During the one-release migration window, prefix `deref reference` parses with
+identical semantics, produces a deprecation warning, and is rewritten to
+`reference.@` by the formatter.
+
+The operation accepts only an actual reference value, removes exactly one outer
+`mut` layer, evaluates its operand once, and produces a non-place value. It is
+the Ard equivalent of evaluating Go `*p` where `p` has type `*T`, then using the
+result as a value. The resulting copy is shallow, not deep.
 
 ```ard
-let snapshot: User = deref reference // allowed
-consume_value(deref reference)       // allowed when consume_value expects User
+let snapshot: User = reference.@ // allowed
+consume_value(reference.@)       // allowed when consume_value expects User
 
-deref reference = replacement         // rejected: deref is not an assignment place
-(deref reference).name = "Grace"      // rejected: temporary ordinary value
+reference.@ = replacement        // rejected: dereference is not an assignment place
+reference.@.name = "Grace"       // rejected: temporary ordinary value
 ```
 
 Shallow dereferencing means:
@@ -275,27 +283,26 @@ Shallow dereferencing means:
 - structs, fixed arrays, primitives, and other immediate values copy their
   current value representation.
 
-`deref` is a tight, right-associative unary expression at the same precedence
-level as `mut` and unary `-`. Calls and member access bind more tightly;
-arithmetic, comparison, and other binary operators bind less tightly. Existing
-`not` behavior remains broad and consumes the comparison expression. Therefore:
+`.@` has the same precedence as calls and member access. Postfix operations
+compose from left to right, while arithmetic, comparison, and other binary
+operators bind less tightly. Existing `not` behavior remains broad and consumes
+the comparison expression. Therefore:
 
 ```ard
-deref reference.field       // deref (reference.field)
-(deref reference).field     // select from the materialized value
-deref reference + value     // (deref reference) + value
-not deref reference == value // not ((deref reference) == value)
+reference.@.field        // select from the materialized value
+reference.field.@        // materialize the reference-valued field
+reference.@ + value      // (reference.@) + value
+not reference.@ == value // not ((reference.@) == value)
 
-let shallow_copy = deref mut value
-let independent_reference = mut deref reference
+let shallow_copy = (mut value).@
+let independent_reference = mut reference.@
 ```
 
-The compiler parser and Tree-sitter grammar must produce these same trees.
-Reserving `deref` affects expression-level identifiers, but member names remain
-legal in unambiguous member position, such as `reader.deref()` or
-`Type::deref(value)`.
+The compiler parser and Tree-sitter grammar must produce these same trees. The
+`.` and `@` are adjacent; bare `@` remains invalid and reserved. Dot-leading
+multiline chains remain valid.
 
-`deref mut value` explicitly makes a shallow value copy. `mut deref reference`
+`(mut value).@` explicitly makes a shallow value copy. `mut reference.@`
 materializes the current shallow value in fresh stable storage and returns a new
 reference to that top-level storage. Neither form recursively breaks identity
 inside reference-valued fields or shared descriptors.
@@ -323,19 +330,18 @@ and does not observe later top-level replacement or reference-slot rebinding.
 Reference-valued fields inside the dynamic concrete value retain normal shallow
 pointer sharing.
 
-Applying `deref` before an `Any` or Go-interface conversion deliberately selects
+Applying `.@` before an `Any` or Go-interface conversion deliberately selects
 the ordinary-value ownership path. Applying it before an explicitly
 value-shaped imported Go generic destination supplies that concrete value;
-without `deref`, reference-aware inference and projection follow the rules in
-this ADR.
+without `.@`, reference-aware inference and projection follow the rules in this
+ADR.
 
-ADR 0022's proposed `core::copy` has been dropped entirely: `deref` is a
-shallow one-layer reference load, and Ard provides no recursive deep-copy
-operation. Programs that need independent deep copies construct them
-explicitly.
+ADR 0022's proposed `core::copy` has been dropped entirely: `.@` is a shallow
+one-layer reference load, and Ard provides no recursive deep-copy operation.
+Programs that need independent deep copies construct them explicitly.
 
-Every operation that currently relies on an implicit dereference must migrate to
-an explicit `deref` or produce a diagnostic.
+Every operation that currently relies on an implicit dereference must migrate
+to explicit `.@` or produce a diagnostic.
 
 ### Observational reads remain implicit
 
@@ -374,7 +380,7 @@ a == c // true: both explicit borrows point at the same user storage
 To compare referent values, dereference explicitly:
 
 ```ard
-deref a == deref other
+a.@ == other.@
 ```
 
 References do not support relational ordering.
@@ -650,8 +656,8 @@ may relax this rule.
 
 A `mut ForeignInterface` is different: it points to storage whose value is
 already a Go interface descriptor. Passing it to that value interface requires
-`deref interface_reference`, because Go `*Interface` does not implement
-`Interface`. Passing it to `Any` without `deref` stores the pointer-to-interface
+`interface_reference.@`, because Go `*Interface` does not implement
+`Interface`. Passing it to `Any` without `.@` stores the pointer-to-interface
 handle as its dynamic value. Exact imported Go `*Interface` parameters remain
 unsupported as specified by ADR 0039.
 
@@ -662,7 +668,7 @@ through both sides.
 
 ADR 0056's interface ownership rule remains in force, but its broader implicit
 reference-to-value dereference rules are superseded. An ordinary concrete `T`
-destination requires `deref reference`, including imported Go generic calls.
+destination requires `reference.@`, including imported Go generic calls.
 
 #### Imported Go generic parameters
 
@@ -673,7 +679,7 @@ concrete Ard-owned `mut User` passed to `func Use[T any](T)` infers Go `T` as
 passes its current pointer handle. Later rebinding of the Ard reference slot is
 not visible through the Go value. If the Go type argument is explicitly or
 contextually fixed to value `User`, passing bare `mut User` is rejected and
-`deref reference` supplies the value.
+`reference.@` supplies the value.
 
 This is distinct from an actual `Any`/interface destination, which performs the
 interface conversion above while preserving dynamic type `*User`.
@@ -685,7 +691,7 @@ comparable and exposes generated forwarding methods needed to validate method
 constraints. If the instantiated destination is an actual interface, the
 interface conversion rule above projects the dynamic concrete pointer instead.
 A `mut ForeignInterface` similarly contributes its pointer-to-interface type to
-a bare generic and requires `deref` when the instantiated destination is the
+a bare generic and requires `.@` when the instantiated destination is the
 interface value type itself.
 
 Generic descriptor parameters use this precedence:
@@ -809,7 +815,7 @@ these questions.
 A variable or field whose stored type is `mut T` retains that reference type as
 an expression. It must not globally report `T` and rely on contextual recovery.
 Observational operations resolve against the referent. Materializing `T`
-without an explicit `deref` remains a type error.
+without an explicit `.@` remains a type error.
 
 Generic inference preserves reference types. A generic may bind to `mut T`, and
 compound types such as `Maybe<mut T>` retain that shape through checker, AIR,
@@ -846,7 +852,7 @@ FreshValue
 Invalid places are diagnosed before AIR. The Go backend lowers by mode instead
 of rediscovering ownership from expression shape.
 
-`deref` is represented separately as a checked/AIR dereference expression, not
+`.@` is represented separately as a checked/AIR dereference expression, not
 as another mutable-reference creation mode and not as an implicit contextual
 conversion. Its result type is the operand's referent type and its assignment-
 target classification is always non-place.
@@ -878,7 +884,7 @@ an existing reference's equality or hash.
 
 On the Go target, both fields must be strictly comparable so the handle itself
 can be a native map key and satisfy `comparable` without a custom equality path.
-Generated forwarding and `deref` use the vtable to operate on or copy the target
+Generated forwarding and `.@` use the vtable to operate on or copy the target
 storage. `VTableIdentity` is representation metadata, not an additional
 source-level identity; the canonicalization invariant ensures equal target
 references carry the same value.
@@ -917,11 +923,11 @@ Cover:
 - rejection of every implicit borrow into a `mut T` destination;
 - reference flow through bindings, parameters, returns, fields, containers,
   `Maybe`, generics, callbacks, and function values;
-- rejection of contextual `mut T -> T` materialization without `deref`;
-- acceptance of `deref` at value bindings, arguments, returns, fields,
+- rejection of contextual `mut T -> T` materialization without `.@`;
+- acceptance of `.@` at value bindings, arguments, returns, fields,
   containers, trait/interface boundaries, and explicitly value-shaped Go
   generic destinations;
-- one-layer typing, single evaluation, unary precedence/composition, non-place
+- one-layer typing, single evaluation, postfix precedence/composition, non-place
   assignment rejection, and deterministic shallow field/collection sharing;
 - observational fields, operators, interpolation, patterns, and methods;
 - reference-valued field rebinding;
@@ -933,7 +939,7 @@ Cover:
   pointer behavior, and comparable generic constraints for Ard-owned and foreign
   references.
 
-Add parser, formatter, and Tree-sitter tests for `deref` as a unary keyword. Add
+Add parser, formatter, and Tree-sitter tests for `.@` as a postfix operator. Add
 AIR tests for the three reference-creation modes, the dedicated dereference
 expression, and reference-shaped generic and compound types.
 
@@ -972,18 +978,18 @@ Add runtime/backend tests for:
   panic behavior;
 - shallow dereference of structs, arrays, lists/maps, traits, `Any`, and Go
   interfaces;
-- `unsafe::cast<T>` checked pointer materialization versus direct `deref` nil
+- `unsafe::cast<T>` checked pointer materialization versus direct `.@` nil
   behavior, supported concrete/descriptor `unsafe::cast<mut T>` pointer-copy
   behavior, and rejected `unsafe::cast<mut Trait>`;
 - explicit references to addressable foreign-interface storage, required
-  `deref` at value-interface destinations, `Any` pointer-to-interface behavior,
+  `.@` at value-interface destinations, `Any` pointer-to-interface behavior,
   and rejection of exact imported `*Interface` parameters;
 - FFI mutation of scalar pointees.
 
 ### Phase 2: Add dereference syntax and separate checker concepts
 
-- Reserve `deref` as an expression keyword and add parser, AST, formatter, and
-  Tree-sitter support at the same unary-expression level as `mut`.
+- Add parser, AST, formatter, and Tree-sitter support for `.@` at the same
+  postfix-expression level as calls and member access.
 - Add a checked dereference expression that accepts only actual references,
   strips one layer, evaluates once, and always produces a non-place value.
 - Replace broad mutability checks with the capability judgments above.
@@ -1050,11 +1056,11 @@ Add runtime/backend tests for:
   and as its static comparable forwarding handle at bare generic destinations;
   reject named nonempty interface conversion after static concrete provenance
   has been lost.
-- Lower `mut ForeignInterface` to `Any` as pointer-to-interface, require `deref`
+- Lower `mut ForeignInterface` to `Any` as pointer-to-interface, require `.@`
   for value-interface conversion, and continue rejecting exact imported
   `*Interface` parameters.
 - Reject bare references at explicitly value-shaped Go generic destinations and
-  accept `deref reference` as the explicit concrete-value source.
+  accept `reference.@` as the explicit concrete-value source.
 - Confirm later reference-slot rebinding does not affect existing boundary
   values.
 - Classify imported Go pointers and all named/unnamed slice/map parameters as
@@ -1078,9 +1084,9 @@ Add runtime/backend tests for:
   diagnostics as appropriate.
 - Update the variables, functions, structs, generics, async, and Go interop
   guides.
-- Document `deref` as the explicit shallow value operation and keep it distinct
+- Document `.@` as the explicit shallow value operation and keep it distinct
   from any deep-copy notion.
-- Add migration examples using `deref` for every formerly implicit
+- Add migration examples using `.@` for every formerly implicit
   reference-to-value conversion.
 
 ### Phase 8: Validate and migrate downstream code
@@ -1099,9 +1105,9 @@ Audit existing source for:
 - implicit passing of mutable bindings to `mut T`;
 - direct interior mutation through ordinary `mut T-value` bindings;
 - implicit dereferences from reference expressions that must become explicit
-  `deref` expressions;
+  `.@` expressions;
 - whole-referent writes through references;
-- referent-value equality on references that must become `deref a == deref b`.
+- referent-value equality on references that must become `a.@ == b.@`.
 
 Because these semantics are intentionally breaking, migration should be explicit
 rather than hidden in compatibility coercions.
@@ -1129,7 +1135,7 @@ Retained:
 - references may cross goroutine boundaries under ADR 0033's Go-like
   synchronization and data-race responsibilities;
 - explicit deep-copy semantics remain desirable but deferred; shallow
-  reference-to-value conversion is now the `deref` expression.
+  reference-to-value conversion is now the `.@` expression.
 
 ### ADR 0023: Represent Mutable Trait References with Forwarding Tables
 
@@ -1170,7 +1176,7 @@ or rebound.
 Under ADR 0057:
 
 - a Go pointer result remains a foreign reference value;
-- ordinary `T` destinations require an explicit `deref`;
+- ordinary `T` destinations require an explicit `.@`;
 - reference-preserving bindings, fields, returns, containers, captures, and
   generic contexts may store it when their types accept the foreign reference;
 - mutable bindings may rebind foreign pointers;
@@ -1211,7 +1217,7 @@ Clarified:
 
 - `unsafe::cast<T>(value)` is an explicit checked conversion and may continue to
   shallow-dereference a boxed non-nil `*T` into `T`;
-- unlike direct `deref`, a nil boxed pointer returns `none` because the cast is
+- unlike direct `.@`, a nil boxed pointer returns `none` because the cast is
   fallible by contract;
 - `unsafe::cast<mut T>` recovers the existing pointer handle for concrete and
   supported descriptor targets, and copying or rebinding that result follows
@@ -1228,7 +1234,7 @@ Clarified:
 - Ard may internally reference addressable foreign-interface storage as
   `mut ForeignInterface`;
 - the reference can flow to `Any` as a pointer-to-interface handle and can be
-  explicitly `deref`ed into the current interface descriptor;
+  explicitly `.@`ed into the current interface descriptor;
 - a bare `mut ForeignInterface` does not satisfy the corresponding value
   interface because Go `*Interface` has no interface method set;
 - this internal Ard capability does not add direct imported Go `*Interface` ABI
@@ -1283,7 +1289,7 @@ diagnostic family described as "mutable references to immutable values" is
 superseded. Diagnostics must instead distinguish:
 
 - non-addressable explicit-reference operands;
-- non-reference operands supplied to `deref`;
+- non-reference operands supplied to `.@`;
 - ordinary values supplied to reference destinations;
 - immutable binding-slot assignment;
 - forbidden whole-referent writes;
@@ -1307,13 +1313,13 @@ Superseded or clarified:
 - a writable ordinary binding is not an existing reference and cannot be
   treated as one without explicit `mut` syntax;
 - implicit `mut T -> T` dereferences in bindings, parameters, returns, fields,
-  and other value contexts are rejected; `deref reference` is the explicit
+  and other value contexts are rejected; `reference.@` is the explicit
   shallow value operation;
 - passing a reference to an inferred imported Go generic contributes its
   selected static boundary representation: concrete pointer, descriptor pointer,
   mutable-trait forwarding handle, or pointer-to-interface;
 - a generic explicitly fixed to value `User` rejects bare `mut User` and accepts
-  `deref reference`;
+  `reference.@`;
 - concrete references convert to compatible interfaces by copying `*T`;
   `mut Trait` and `mut ForeignInterface` follow the specialized static/dynamic
   boundary matrix defined above;
@@ -1334,7 +1340,7 @@ Superseded or clarified:
 - Existing source that mutates fields or calls mutating methods through an
   ordinary `mut T-value` binding will require an explicit reference.
 - Existing implicit reference-to-value conversions must migrate to explicit
-  `deref` expressions.
+  `.@` expressions.
 - Concrete references can generally lower to raw Go pointers; trait and
   descriptor references need only the representation required for forwarding
   or descriptor update, not shared retargeting cells.
@@ -1343,14 +1349,14 @@ Superseded or clarified:
 - Async tasks may share references and outer binding slots exactly like ordinary
   closures; Ard adds no data-race protection or implicit synchronization.
 - References use pointer identity for equality, map keys, hashing, and
-  comparable constraints; referent-value comparison requires `deref`.
+  comparable constraints; referent-value comparison requires `.@`.
 - Diagnostics become more precise because slot writability, addressability,
   reference type, and interior mutation are no longer conflated.
 
 ## Deferred work
 
 - Deep-copy semantics (ADR 0022's proposed `core::copy`) were considered and
-  dropped: `deref` is deliberately shallow, and programs that need independent
+  dropped: `.@` is deliberately shallow, and programs that need independent
   deep copies construct them explicitly.
 - Consider whether temporary selectors should materialize fresh projected
   storage.
@@ -1359,7 +1365,7 @@ Superseded or clarified:
   through the CLI is backlogged as issue #351.
 - Auto-deref at ordinary value destinations was considered and rejected
   (issue #348): Go never dereferences implicitly where a value is expected,
-  and the explicit `deref` keeps mutation-contract changes visible at every
+  and the explicit `.@` keeps mutation-contract changes visible at every
   call site. Implicit reads remain limited to the observational set (fields,
   non-mutating methods, arithmetic, interpolation, match subjects, and
   conditions).

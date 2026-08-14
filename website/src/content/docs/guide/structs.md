@@ -178,7 +178,7 @@ session.user.grow_older()
 session.user = mut second
 ```
 
-Copying `session.user` copies its current reference handle. Rebinding the field changes only that field slot; previously copied references keep their original pointee. Use `deref session.user` when an ordinary `Person` field or value is required.
+Copying `session.user` copies its current reference handle. Rebinding the field changes only that field slot; previously copied references keep their original pointee. Use `session.user.@` when an ordinary `Person` field or value is required.
 
 ## Method Privacy
 

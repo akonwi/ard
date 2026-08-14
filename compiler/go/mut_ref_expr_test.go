@@ -43,7 +43,7 @@ fn main() {
   if not alice.age == 32 { panic("reference copy lost pointee identity") }
 
   // Value materialization is explicit and shallow.
-  let snapshot: Person = deref alice_ref
+  let snapshot: Person = alice_ref.@
   alias.age =+ 1
   if not snapshot.age == 32 { panic("deref snapshot tracked later mutation") }
 

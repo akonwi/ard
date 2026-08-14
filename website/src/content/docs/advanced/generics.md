@@ -44,10 +44,10 @@ let alias = identity(reference) // $T is mut User
 alias.name = "Grace"
 ```
 
-A generic destination explicitly fixed to ordinary `User` does not silently copy the referent. Use `deref` to select a shallow value:
+A generic destination explicitly fixed to ordinary `User` does not silently copy the referent. Use `.@` to select a shallow value:
 
 ```ard
-let snapshot = identity<User>(deref reference)
+let snapshot = identity<User>(reference.@)
 ```
 
 The same rule applies when references appear inside generic lists, maps, `Maybe`, `Result`, channels, callbacks, and struct fields: the reference type remains part of the generic shape.

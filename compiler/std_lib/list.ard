@@ -10,7 +10,7 @@ fn concat(a: [$T], b: [$T]) [$T] {
   for i in b {
     res.push(i)
   }
-  deref res
+  res.@
 }
 
 // returns a new list of the items, dropping the elements before the given index
@@ -22,7 +22,7 @@ fn drop(from: [$T], till: Int) [$T] {
     }
   }
 
-  deref out
+  out.@
 }
 
 // given a list of items and a predicate, returns a new list of items matching the predicate
@@ -34,7 +34,7 @@ fn keep(list: [$T], where: fn($T) Bool) [$T] {
     }
   }
 
-  deref out
+  out.@
 }
 
 // transforms a list of items using a given function
@@ -44,7 +44,7 @@ fn map(list: [$A], transform: fn($A) $B) [$B] {
     out.push(transform(t))
   }
 
-  deref out
+  out.@
 }
 
 // look for the first item in a list matching the predicate
@@ -87,7 +87,7 @@ fn partition(list: [$T], where: fn($T) Bool) Partition<$T> {
     }
   }
 
-  Partition{selected: deref selected, others: deref others}
+  Partition{selected: selected.@, others: others.@}
 }
 
 fn partition_int(list: [Int], where: fn(Int) Bool) IntPartition {
@@ -101,7 +101,7 @@ fn partition_int(list: [Int], where: fn(Int) Bool) IntPartition {
     }
   }
 
-  IntPartition{selected: deref selected, others: deref others}
+  IntPartition{selected: selected.@, others: others.@}
 }
 
 test fn test_concat_combines_lists() Void!Str {

@@ -310,7 +310,7 @@ func TestGoTargetParityCoreCorpus(t *testing.T) {
 				fn main() [Int] {
 					let values = mut [5, 1, 3]
 					values.sort(fn(a: Int, b: Int) Bool { a < b })
-					deref values
+					values.@
 				}
 			`,
 		},
@@ -1786,7 +1786,7 @@ func TestGoTargetParityEscapedMutableTraitObjectUpcastAliasesConcrete(t *testing
 			let independently_rebound = node.view.value()
 			let rebound = active.value()
 
-			let snapshot: View = deref node.view
+			let snapshot: View = node.view.@
 			leaf_reference.n = 3
 			before + shared + independently_rebound + rebound + snapshot.value() + node.view.value()
 		}
@@ -1949,7 +1949,7 @@ func TestGoTargetParityMutableReferenceReturnUpdatesSharedStorage(t *testing.T) 
 
 		fn main() Str {
 			let user: mut User = forward_user()
-			let snapshot: User = deref user
+			let snapshot: User = user.@
 			user.name = "Joe"
 			snapshot.name + ":" + user.name
 		}

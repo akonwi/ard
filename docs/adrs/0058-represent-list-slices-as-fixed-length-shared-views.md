@@ -226,7 +226,7 @@ result := make([]T, len(source))
 copy(result, source)
 ```
 
-`deref` on `mut Slice<T>` produces an ordinary `Slice<T>` view value; it does
+`.@` on `mut Slice<T>` produces an ordinary `Slice<T>` view value; it does
 not convert the view into a list.
 
 `Slice<T>` is not implicitly interchangeable with `List<T>`. APIs requiring a
