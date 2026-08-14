@@ -47,6 +47,44 @@ func TestExplicitNullableVoidHasStructuredWarning(t *testing.T) {
 	}
 }
 
+func TestLegacyDerefSyntaxHasStructuredDeprecationWarning(t *testing.T) {
+	result := parse.Parse([]byte("let value = 1\nlet reference = mut value\nlet snapshot = deref reference\n"), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	declaration := result.Program.Statements[2].(*parse.VariableDeclaration)
+	dereference := declaration.Value.(*parse.Deref)
+	c := checker.New("main.ard", result.Program, nil)
+	c.Check()
+
+	if c.HasErrors() {
+		t.Fatalf("warning made checker fail: %#v", c.Diagnostics())
+	}
+	if len(c.Diagnostics()) != 1 {
+		t.Fatalf("diagnostics = %#v, want one warning", c.Diagnostics())
+	}
+	diagnostic := c.Diagnostics()[0]
+	if diagnostic.Kind != checker.Warn || diagnostic.Code != checker.DiagnosticCodeDeprecatedDerefSyntax {
+		t.Fatalf("diagnostic = %#v", diagnostic)
+	}
+	wantLocation := parse.Location{Start: parse.Point{Row: 3, Col: 16}, End: parse.Point{Row: 3, Col: 20}}
+	if diagnostic.Title != "Deprecated deref syntax" || diagnostic.Primary.Span.Location != dereference.OperatorLocation || diagnostic.Primary.Span.Location != wantLocation {
+		t.Fatalf("diagnostic = %#v", diagnostic)
+	}
+}
+
+func TestPostfixDerefSyntaxDoesNotWarn(t *testing.T) {
+	result := parse.Parse([]byte("let value = 1\nlet reference = mut value\nlet snapshot = reference.@\n"), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	c := checker.New("main.ard", result.Program, nil)
+	c.Check()
+	if len(c.Diagnostics()) != 0 {
+		t.Fatalf("diagnostics = %#v, want none", c.Diagnostics())
+	}
+}
+
 func TestInferredMaybeVoidAndVoidResultDoNotWarn(t *testing.T) {
 	result := parse.Parse([]byte(`
 		let inferred = Maybe::new(())
@@ -1348,7 +1386,7 @@ func TestReferenceParameterRequiresActualReference(t *testing.T) {
 	}
 }
 
-func TestReferenceValueDestinationSuggestsDeref(t *testing.T) {
+func TestReferenceValueDestinationSuggestsPostfixDereference(t *testing.T) {
 	source := "struct Box { value: Int }\nlet value = Box{value: 1}\nlet reference = mut value\nlet snapshot: Box = reference\n"
 	result := parse.Parse([]byte(source), "main.ard")
 	if len(result.Errors) > 0 {
@@ -1357,7 +1395,7 @@ func TestReferenceValueDestinationSuggestsDeref(t *testing.T) {
 	c := checker.New("main.ard", result.Program, nil)
 	c.Check()
 	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeReferenceValueMaterialization)
-	if diagnostic.Title != "Value destination requires deref" || !strings.Contains(diagnostic.Text, "shallow value copy") {
+	if diagnostic.Title != "Value destination requires dereference" || !strings.Contains(diagnostic.Text, "reference.@") || !strings.Contains(diagnostic.Text, "shallow value copy") {
 		t.Fatalf("diagnostic = %#v", diagnostic)
 	}
 }
@@ -1428,7 +1466,7 @@ func TestBorrowAndDerefFailuresUseDistinctDiagnostics(t *testing.T) {
 		code   checker.DiagnosticCode
 	}{
 		{name: "non-addressable borrow", source: "struct Box { value: Int }\nfn make() Box { Box{value: 1} }\nlet reference = mut make().value\n", code: checker.DiagnosticCodeNonAddressableBorrow},
-		{name: "ordinary deref operand", source: "let value = 1\nlet snapshot = deref value\n", code: checker.DiagnosticCodeInvalidDerefOperand},
+		{name: "ordinary deref operand", source: "let value = 1\nlet snapshot = value.@\n", code: checker.DiagnosticCodeInvalidDerefOperand},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

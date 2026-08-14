@@ -19,7 +19,7 @@ fn count_words(words: [Str]) [WordCount] {
   for word, count in counts {
     res.push(WordCount{word: word, count: count})
   }
-  deref res
+  res.@
 }
 
 fn main() {

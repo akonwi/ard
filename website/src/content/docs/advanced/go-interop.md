@@ -186,17 +186,17 @@ let bytes = read_all(strings::NewReader("hello")).expect("read")
 
 Interface-to-interface assignability also follows Go's rules, so a value such as `io::ReadCloser` can be used where `io::Reader` or `io::Closer` is expected when the required methods match. Go slices and maps remain invariant: `[mut strings::Reader]` is not automatically converted to `[]io.Reader`.
 
-At an interface destination—including Ard `Any` and named empty Go interfaces—an ordinary Ard value contributes a value copy, while an existing `mut T` contributes its current pointer identity. Use `deref reference` to deliberately select the ordinary shallow-value path instead. Every conversion copies the selected current pointer or value, so later rebinding of the Ard reference slot is not visible through an interface value already created.
+At an interface destination—including Ard `Any` and named empty Go interfaces—an ordinary Ard value contributes a value copy, while an existing `mut T` contributes its current pointer identity. Use `reference.@` to deliberately select the ordinary shallow-value path instead. Every conversion copies the selected current pointer or value, so later rebinding of the Ard reference slot is not visible through an interface value already created.
 
 A concrete `mut T` appears to Go as dynamic `*T`. A `mut Trait` projects its current dynamic concrete pointer at `Any` and named empty-interface boundaries. A flowed first-class `mut Trait` cannot be passed to a named nonempty Go interface because its runtime implementation is no longer statically provable. An immediate concrete-reference-to-trait expression may be accepted when the compiler still has concrete provenance and can prove the exact Go method set.
 
-A reference to foreign-interface storage is different: it contributes a pointer-to-interface to `Any` and requires `deref interface_reference` when the destination needs the interface value itself.
+A reference to foreign-interface storage is different: it contributes a pointer-to-interface to `Any` and requires `interface_reference.@` when the destination needs the interface value itself.
 
-A bare imported Go generic such as `func Identity[T any](T) T` infers a reference argument as its pointer-shaped representation. If `T` is explicitly fixed to an ordinary value type, use `deref`:
+A bare imported Go generic such as `func Identity[T any](T) T` infers a reference argument as its pointer-shaped representation. If `T` is explicitly fixed to an ordinary value type, use `.@`:
 
 ```ard
 let echoed_reference = ffi::Identity(reference)
-let copied_value = ffi::Identity<User>(deref reference)
+let copied_value = ffi::Identity<User>(reference.@)
 ```
 
 Exclusively slice/map-shaped generic parameters still require a reference but project the exact descriptor value required by the instantiated Go signature.
@@ -298,7 +298,7 @@ let missing: (mut gohttp::Request)? = Maybe::new()
 
 Use `(mut T)?` when an Ard API intentionally models an optional reference. Direct-Go pointer fields and pointer-returning calls are not automatically wrapped in `Maybe`; Go pointer values remain `mut go::T` and preserve Go nil behavior.
 
-Use `deref pointer` when an ordinary Go value is required. This makes a shallow value copy and panics with Go's normal behavior when the foreign pointer is nil. In contrast, `unsafe::cast<T>(boxed_pointer)` is a fallible checked conversion and returns `none` for nil.
+Use `pointer.@` when an ordinary Go value is required. This makes a shallow value copy and panics with Go's normal behavior when the foreign pointer is nil. In contrast, `unsafe::cast<T>(boxed_pointer)` is a fallible checked conversion and returns `none` for nil.
 
 ## Checking for Nil
 

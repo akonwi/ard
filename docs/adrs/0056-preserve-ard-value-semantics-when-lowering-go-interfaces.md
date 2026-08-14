@@ -4,10 +4,10 @@
 
 Accepted
 
-Amended by ADR 0057. Implicit `mut T -> T` dereferencing at value destinations
+Amended by ADRs 0057 and 0060. Implicit `mut T -> T` dereferencing at value destinations
 (the Go equivalent of using `*p` where `p` has type `*T`) is removed, including
 for concrete imported Go generic destinations. Ard now spells that operation
-`deref reference`. Binding or passing the resulting value makes the target's
+`reference.@`. Binding or passing the resulting value makes the target's
 normal shallow value copy; this is not a deep copy operation. Concrete
 references contribute `*T` at compatible boundaries. ADR 0057 separately
 specifies `mut Trait` forwarding handles/dynamic concrete interface conversion
@@ -40,7 +40,7 @@ The ordinary parameter rules are:
 | Parameter | Argument | Result |
 | --- | --- | --- |
 | `T` | `T` | allowed |
-| `T` | `mut T` | rejected; use `deref reference` to produce `T` |
+| `T` | `mut T` | rejected; use `reference.@` to produce `T` |
 | `mut T` | `T` | rejected |
 | `mut T` | `mut T` | allowed while preserving reference identity |
 
@@ -155,7 +155,7 @@ Under ADR 0057, a caller with `mut W` requests the ordinary-value ownership
 path by dereferencing explicitly:
 
 ```ard
-let value: W = deref reference
+let value: W = reference.@
 consume_response_writer(value)
 ```
 
@@ -221,7 +221,7 @@ let reference: mut W = mut W{}
 
 take_value(value)               // allowed
 take_value(reference)           // rejected
-take_value(deref reference)     // allowed by explicit shallow dereference
+take_value(reference.@)     // allowed by explicit shallow dereference
 take_reference(value)           // rejected
 take_reference(reference)       // allowed, pointee identity preserved
 ```
@@ -229,10 +229,10 @@ take_reference(reference)       // allowed, pointee identity preserved
 Addressable foreign-interface storage may itself be referenced explicitly with
 `mut interface_value`. The resulting `mut ForeignInterface` is a pointer-like
 reference to that interface storage and follows ADR 0057's copy/rebind rules.
-`deref` copies the current interface descriptor; it does not follow later
+`.@` copies the current interface descriptor; it does not follow later
 reference-slot rebinding, while its dynamic payload retains normal Go sharing.
 A bare `mut ForeignInterface` cannot satisfy the corresponding value interface,
-because Go `*Interface` has no interface method set; use `deref`. Passing the
+because Go `*Interface` has no interface method set; use `.@`. Passing the
 bare reference to `Any` stores the pointer-to-interface handle. Exact imported
 Go `*Interface` parameters remain unsupported by ADR 0039. This is distinct
 from converting a `mut W` source into an ordinary foreign interface value, which
@@ -264,7 +264,7 @@ A Go generic parameter constrained by `any` is different. Under ADR 0057, an
 inferred reference argument to `func accept[T any](value T)` contributes its
 selected static boundary representation—normally a concrete/descriptor pointer,
 or ADR 0057's generated forwarding handle for `mut Trait`. If `T` is explicitly
-fixed to the concrete value type, the caller must pass `deref reference`; bare
+fixed to the concrete value type, the caller must pass `reference.@`; bare
 `mut T` is rejected. If `T`
 is explicitly or contextually resolved to Ard `Any`, the destination is an
 actual interface and preserves reference identity.
@@ -296,7 +296,7 @@ At declared destinations, the checker should:
 6. classify interface sources before value conversion so an existing `mut T`
    can preserve its current pointee identity;
 7. reject bare references in non-interface value contexts, accepting only an
-   explicit checked `deref` expression as a shallow referent value;
+   explicit checked `.@` expression as a shallow referent value;
 8. plan owned-box or existing-reference interface representation;
 9. apply function or other adapters;
 10. validate the final destination type.
@@ -314,7 +314,7 @@ Binding-slot reassignability must never substitute for `mut T`.
 
 Conversion planning must not begin by calling the current broad
 `areCompatible`, because that relation already accepts some operations that
-require explicit representation, including `deref` and some foreign
+require explicit representation, including `.@` and some foreign
 conversions.
 
 Every representation-changing conversion should be explicit before backend
@@ -328,7 +328,7 @@ This decision supersedes ADR 0039's requirement that every pointer-receiver
 implementation source be mutable and addressable. It retains ADR 0045's
 identity-preserving explicit-reference behavior while also permitting ordinary
 values through owned boxing. As amended by ADR 0057, ordinary concrete value
-destinations reject bare `mut T`; `deref reference` explicitly produces `T`.
+destinations reject bare `mut T`; `reference.@` explicitly produces `T`.
 Go interfaces remain an existential conversion boundary that may instead
 preserve an actual reference's identity.
 
@@ -406,7 +406,7 @@ semantics. It was rejected in favor of an explicit interface-boxing adapter.
   the same value-versus-reference ownership policy.
 - Go generic parameters constrained by `any` remain concrete destinations after
   inference: bare references infer their selected static boundary representation,
-  while explicitly value-shaped destinations require `deref`.
+  while explicitly value-shaped destinations require `.@`.
 - Ard calls and direct imported Go calls use the same interface conversion
   policy.
 - A value-interface conversion may allocate compiler-owned storage when only a
@@ -435,7 +435,7 @@ semantics. It was rejected in favor of an explicit interface-boxing adapter.
 4. Introduce a contextual conversion classifier that separates identity,
    conversion-required compatibility, and final validation.
 5. Reject contextual `mut T -> T` reads and recognize ADR 0057's explicit
-   `deref` expression as the ordinary-value source before interface conversion.
+   `.@` expression as the ordinary-value source before interface conversion.
 6. Add explicit checker and AIR conversion modes for compiler-owned interface
    boxing and existing-reference interface conversion.
 7. Lower pointer-required `W` conversions through stable temporary storage with
@@ -454,7 +454,7 @@ semantics. It was rejected in favor of an explicit interface-boxing adapter.
 At minimum, implementation must cover:
 
 - `W -> W`;
-- rejection of bare `mut W -> W` and acceptance of `deref reference`;
+- rejection of bare `mut W -> W` and acceptance of `reference.@`;
 - rejection of `W -> mut W`;
 - identity preservation for `mut W -> mut W`;
 - immutable and reassignable `W` bindings flowing to a value Go interface;
@@ -465,7 +465,7 @@ At minimum, implementation must cover:
   pointer representation;
 - interface mutation affecting a boxed `W` copy but not caller storage;
 - interface mutation through `mut W` affecting the original referent;
-- `deref` of `mut W` selecting ordinary-value owned boxing;
+- `.@` of `mut W` selecting ordinary-value owned boxing;
 - interface-to-interface conversion preserving dynamic type, typed nils, and
   identity without nesting or re-boxing;
 - a Go function retaining the resulting interface beyond the call;

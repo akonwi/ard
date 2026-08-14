@@ -6,7 +6,7 @@ Accepted
 
 Clarified by ADR 0057. `unsafe::cast<T>` remains an explicit checked operation
 that may shallow-dereference a boxed non-nil `*T`; nil returns `none` under this
-fallible API rather than using direct `deref`'s panic behavior. For concrete and
+fallible API rather than using the direct `.@` dereference's panic behavior. For concrete and
 supported descriptor targets, `unsafe::cast<mut T>` recovers a pointer-like
 reference whose copies and rebinding follow ordinary pointer-value semantics.
 `unsafe::cast<mut Trait>` remains unsupported initially because it would need to

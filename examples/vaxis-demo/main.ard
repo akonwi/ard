@@ -156,7 +156,7 @@ fn command_palette_items(c: mut ffi::StateCtx) [ui::CommandPaletteItem] {
       },
     },
   )
-  deref items
+  items.@
 }
 
 // A modal command-palette overlay entry, shown when state.palette is set.
@@ -486,7 +486,7 @@ fn theme_swatch_row(spans: [ui::TextSpan]) ui::Widget {
     row.push(ui::TextSpan{Text: "  "})
     row.push(span)
   }
-  ui::RichText{Spans: deref row}
+  ui::RichText{Spans: row.@}
 }
 
 fn theme_group(name: Str, children: [ui::Widget]) ui::Widget {
@@ -499,7 +499,7 @@ fn theme_group(name: Str, children: [ui::Widget]) ui::Widget {
   ui::Flex{
     Axis: ui::Vertical,
     CrossAxisAlignment: ui::CrossAxisStart,
-    Children: deref kids,
+    Children: kids.@,
   }
 }
 
@@ -839,7 +839,7 @@ fn scroll_demo_lines() ui::Widget {
   ui::Flex{
     Axis: ui::Vertical,
     CrossAxisAlignment: ui::CrossAxisStart,
-    Children: deref rows,
+    Children: rows.@,
   }
 }
 
@@ -1229,7 +1229,7 @@ fn build(c: mut ffi::StateCtx, ctx: ui::BuildContext) ui::Widget {
         ui::EventHandled
       },
     ],
-    Child: ui::Shortcuts{Bindings: shortcuts, Child: ui::Overlay{Child: body, Entries: deref overlays}},
+    Child: ui::Shortcuts{Bindings: shortcuts, Child: ui::Overlay{Child: body, Entries: overlays.@}},
   }
 }
 

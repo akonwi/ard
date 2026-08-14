@@ -6,7 +6,7 @@ Proposed
 
 Superseded in part by accepted ADR 0057. A Go pointer result remains a foreign
 reference value when stored or propagated; it does not implicitly dereference
-into an annotated value type. `deref pointer` explicitly produces the shallow
+into an annotated value type. `pointer.@` explicitly produces the shallow
 value. Mutable bindings may store and rebind foreign pointer
 values using Go pointer-copy semantics. Binding a Go struct value in a `mut`
 slot does not make its fields or pointer-receiver methods interior-mutable; an
@@ -158,7 +158,7 @@ Go package functions may be generic (`func StateRef[T any](c *StateCtx) *T`, `fu
 - Explicit or inferred type arguments must satisfy the Go type parameter's constraint. An empty constraint (`any`) accepts every representable Ard type; other constraints are validated with the Go type checker when the argument has a direct Go representation, and rejected otherwise.
 - The instantiated signature maps through the same representability and boundary rules as concrete signatures. A generic result `*T` follows the instantiated type's mapping: `StateRef<DemoState>` returns `mut DemoState`, live mutable access to the Go-side storage. `(T, error)`, `(T, bool)`, and error-only result adaptations apply after instantiation.
 - The backend always lowers to an explicitly instantiated Go call (`pkg.Fn[T1, T2](args)`), never relying on Go-side inference, so the generated code is deterministic.
-- As amended by ADR 0057, a `mut T` result is a first-class foreign reference value. It may flow through bindings, fields, returns, containers, captures, and generic contexts that accept that reference type. A value-typed destination must dereference explicitly (`let snap: T = deref ffi::StateRef<T>(ctx)`). A `mut` binding may store and rebind the foreign pointer using normal Go pointer-copy semantics.
+- As amended by ADR 0057, a `mut T` result is a first-class foreign reference value. It may flow through bindings, fields, returns, containers, captures, and generic contexts that accept that reference type. A value-typed destination must dereference explicitly (`let snap: T = ffi::StateRef<T>(ctx).@`). A `mut` binding may store and rebind the foreign pointer using normal Go pointer-copy semantics.
 
 ### Nil semantics and direct-Go safety boundary
 

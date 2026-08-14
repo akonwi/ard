@@ -375,10 +375,13 @@ func referenceTypeForOperand(typ Type) Type {
 	return MakeMutableRef(typ)
 }
 
-// checkDeref checks the explicit one-layer `deref <operand>` expression
-// (ADR 0057). Only an actual reference value qualifies; the result is a
-// shallow, non-addressable copy of the current referent.
+// checkDeref checks the explicit one-layer `<operand>.@` expression (ADRs 0057
+// and 0060). Only an actual reference value qualifies; the result is a shallow,
+// non-addressable copy of the current referent.
 func (c *Checker) checkDeref(s *parse.Deref) Expression {
+	if s.LegacyPrefix {
+		c.addDeprecatedDerefSyntax(s.OperatorLocation)
+	}
 	operand := c.checkExpr(s.Operand)
 	if operand == nil {
 		return nil
@@ -499,7 +502,7 @@ func assignmentSubjectBase(expr Expression) Expression {
 // observeReference wraps a reference-valued expression in an observational
 // shallow referent load. Compiler-defined read-only operations (arithmetic,
 // interpolation, matching, conditions) resolve through the referent without
-// requiring an explicit deref (ADR 0057).
+// requiring explicit `.@` (ADRs 0057 and 0060).
 func observeReference(expr Expression) Expression {
 	if expr == nil {
 		return nil
@@ -2232,7 +2235,7 @@ func (c *Checker) areCompatible(expected Type, actual Type) bool {
 		if actualRef, ok := actual.(*MutableRef); ok {
 			if inner, ok := actualRef.Of().(*ForeignType); ok && inner.Interface {
 				// Go `*Interface` does not implement `Interface`; passing the
-				// stored interface value requires an explicit deref (ADR 0057).
+				// stored interface value requires explicit `.@` (ADRs 0057 and 0060).
 				return false
 			}
 		}
@@ -2250,7 +2253,7 @@ func (c *Checker) areCompatible(expected Type, actual Type) bool {
 		}
 	}
 	// There is no implicit `mut T -> T` conversion: a reference flows to a
-	// value destination only through an explicit `deref` (ADR 0057). A
+	// value destination only through explicit `.@` (ADRs 0057 and 0060). A
 	// reference satisfies a reference-typed destination only for the same
 	// referent identity or the sanctioned concrete-to-trait projection
 	// (`mut Box` -> `mut View`). General value coercions (Any, Go

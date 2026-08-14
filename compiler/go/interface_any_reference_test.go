@@ -116,7 +116,7 @@ func TestRunProgramPreservesMutableReferencesConvertedToAny(t *testing.T) {
 			if not maybe_reference_type(user_reference) == "*test.User" {
 				panic("Maybe<Any> conversion lost reference identity")
 			}
-			if not maybe_user_name(deref user_reference) == "Joe" {
+			if not maybe_user_name(user_reference.@) == "Joe" {
 				panic("explicit reference was not snapshotted before Maybe wrapping")
 			}
 			if not inferred_maybe_type(user_reference) == "*test.User" {

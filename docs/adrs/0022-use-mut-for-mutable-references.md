@@ -20,7 +20,7 @@ supersedes this ADR's conservative fiber restriction: references may cross
 responsibilities. ADRs 0033 and 0057 are normative where the decisions conflict.
 
 The `ard/core::copy` deep-copy operation proposed below was never implemented
-and has been dropped: `deref` (ADR 0057) is the only reference-to-value
+and has been dropped: `.@` (ADRs 0057 and 0060) is the only reference-to-value
 materialization and is deliberately shallow. Passages below describing
 `core::copy` are historical.
 

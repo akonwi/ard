@@ -3303,12 +3303,18 @@ func (p *parser) unary() (Expression, error) {
 		if err != nil {
 			return nil, err
 		}
+		operatorLocation := Location{
+			Start: Point{Row: keyword.line, Col: keyword.column},
+			End:   Point{Row: keyword.line, Col: keyword.column + len("deref") - 1},
+		}
 		return &Deref{
 			Location: Location{
-				Start: keyword.getLocation().Start,
+				Start: operatorLocation.Start,
 				End:   operand.GetLocation().End,
 			},
-			Operand: operand,
+			Operand:          operand,
+			OperatorLocation: operatorLocation,
+			LegacyPrefix:     true,
 		}, nil
 	}
 	if p.match(mut) {
@@ -3381,6 +3387,14 @@ func (p *parser) memberAccess() (Expression, error) {
 	}
 
 	for {
+		if p.check(left_paren) {
+			expr, err = p.finishCall(expr)
+			if err != nil {
+				return nil, err
+			}
+			continue
+		}
+
 		// Allow dot-chaining across newlines: skip newlines and check for a
 		// leading dot, but restore position if the next non-newline token
 		// isn't a dot (so we don't swallow newlines that act as statement
@@ -3393,6 +3407,24 @@ func (p *parser) memberAccess() (Expression, error) {
 		}
 
 		if p.previous().kind == dot {
+			dotToken := p.previous()
+			if p.check(at_sign) && adjacent(dotToken.getLocation(), p.peek()) {
+				atToken := p.advance()
+				operatorLocation := Location{
+					Start: Point{Row: dotToken.line, Col: dotToken.column},
+					End:   Point{Row: atToken.line, Col: atToken.column},
+				}
+				expr = &Deref{
+					Location: Location{
+						Start: expr.GetLocation().Start,
+						End:   operatorLocation.End,
+					},
+					Operand:          expr,
+					OperatorLocation: operatorLocation,
+				}
+				continue
+			}
+
 			call, err := p.memberCall()
 			if err != nil {
 				return nil, err
@@ -3632,8 +3664,8 @@ func (p *parser) call() (Expression, error) {
 		return nil, err
 	}
 
-	// todo: to support chaining, wrap in for loop
-	// ex: foo()()()
+	// Additional calls are consumed by memberAccess's postfix loop, allowing
+	// left-to-right chains such as reference.@() and foo()().
 
 	// Check if it's a function call with potential type arguments
 	// Only parse as type arguments if we have an identifier followed by <
@@ -3741,35 +3773,38 @@ func (p *parser) call() (Expression, error) {
 		}
 	}
 
-	if p.match(left_paren) {
-		p.match(new_line)
-		// Regular function call without type arguments
-		args, argComments, err := p.parseFunctionArguments()
-		if err != nil {
-			return nil, err
-		}
-
-		callEnd := Point{Row: p.previous().line, Col: p.previous().column}
-		if !p.check(right_paren) {
-			p.addError(p.peek(), "Expected ')' to close function call")
-			p.synchronizeToTokens(right_paren)
-			if !p.check(right_paren) {
-				// Could not find ')', return partial function call
-				return functionCallForCallee(expr, nil, args, argComments, Location{
-					Start: expr.GetLocation().Start,
-					End:   callEnd,
-				}), nil
-			}
-		}
-		p.advance() // consume the ')'
-
-		return functionCallForCallee(expr, nil, args, argComments, Location{
-			Start: expr.GetLocation().Start,
-			End:   Point{Row: p.previous().line, Col: p.previous().column},
-		}), nil
+	if p.check(left_paren) {
+		return p.finishCall(expr)
 	}
 
 	return expr, nil
+}
+
+func (p *parser) finishCall(callee Expression) (Expression, error) {
+	p.advance() // consume '('
+	p.match(new_line)
+	args, argComments, err := p.parseFunctionArguments()
+	if err != nil {
+		return nil, err
+	}
+
+	callEnd := Point{Row: p.previous().line, Col: p.previous().column}
+	if !p.check(right_paren) {
+		p.addError(p.peek(), "Expected ')' to close function call")
+		p.synchronizeToTokens(right_paren)
+		if !p.check(right_paren) {
+			return functionCallForCallee(callee, nil, args, argComments, Location{
+				Start: callee.GetLocation().Start,
+				End:   callEnd,
+			}), nil
+		}
+	}
+	p.advance() // consume ')'
+
+	return functionCallForCallee(callee, nil, args, argComments, Location{
+		Start: callee.GetLocation().Start,
+		End:   Point{Row: p.previous().line, Col: p.previous().column},
+	}), nil
 }
 
 func functionCallForCallee(callee Expression, typeArgs []DeclaredType, args []Argument, comments []Comment, location Location) Expression {

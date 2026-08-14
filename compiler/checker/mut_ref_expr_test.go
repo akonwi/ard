@@ -52,7 +52,7 @@ let copy: Int = reference`,
 			name: "explicit deref materializes a value",
 			source: `let counter = 0
 let reference = mut counter
-let copy: Int = deref reference`,
+let copy: Int = reference.@`,
 		},
 		{
 			name: "fresh literal storage remains supported",

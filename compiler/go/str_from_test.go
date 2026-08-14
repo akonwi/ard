@@ -37,7 +37,7 @@ func TestGoTargetStrFrom(t *testing.T) {
 			input: `fn main() Int {
   let partial: mut [Byte] = mut []
   partial.push("é".bytes().at(0).expect("first byte"))
-  Str::from(deref partial).size()
+  Str::from(partial.@).size()
 }`,
 			want: "1",
 		},

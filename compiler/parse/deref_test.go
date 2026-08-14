@@ -2,37 +2,26 @@ package parse
 
 import (
 	"fmt"
-	"reflect"
-	"strings"
 	"testing"
 )
 
-// TestDerefExpressionPrecedence locks ADR 0057's source-level dereference
-// trees before the syntax implementation lands. Reflection keeps this red test
-// buildable until parse.Deref is introduced in Phase 2.
-func TestDerefLexesAsKeyword(t *testing.T) {
-	tokens := NewLexer([]byte("deref value")).Scan()
-	if len(tokens) < 2 {
-		t.Fatalf("tokens = %#v", tokens)
-	}
-	if tokens[0].kind == identifier {
-		t.Fatalf("first token = %#v, want reserved deref keyword", tokens[0])
-	}
-}
-
-func TestDerefExpressionPrecedence(t *testing.T) {
+func TestPostfixDerefExpressionPrecedence(t *testing.T) {
 	tests := []struct {
 		name   string
 		source string
 		want   string
 	}{
-		{name: "identifier", source: "deref reference", want: "deref(reference)"},
-		{name: "postfix binds tighter", source: "deref reference.field", want: "deref(field(reference,field))"},
-		{name: "parentheses select from result", source: "(deref reference).field", want: "field(deref(reference),field)"},
-		{name: "binary binds less tightly", source: "deref reference + value", want: "add(deref(reference),value)"},
-		{name: "not remains broad", source: "not deref reference == value", want: "not(equal(deref(reference),value))"},
-		{name: "deref composes with mut", source: "deref mut value", want: "deref(mut(value))"},
-		{name: "mut composes with deref", source: "mut deref reference", want: "mut(deref(reference))"},
+		{name: "identifier", source: "reference.@", want: "deref(reference)"},
+		{name: "deref then field", source: "reference.@.field", want: "field(deref(reference),field)"},
+		{name: "field then deref", source: "reference.field.@", want: "deref(field(reference,field))"},
+		{name: "binary binds less tightly", source: "reference.@ + value", want: "add(deref(reference),value)"},
+		{name: "not remains broad", source: "not reference.@ == value", want: "not(equal(deref(reference),value))"},
+		{name: "borrow then deref", source: "(mut value).@", want: "deref(mut(value))"},
+		{name: "deref then borrow", source: "mut reference.@", want: "mut(deref(reference))"},
+		{name: "repeated deref", source: "reference.@.@", want: "deref(deref(reference))"},
+		{name: "call then deref", source: "load().@", want: "deref(call(load))"},
+		{name: "deref then call", source: "reference.@()", want: "invoke(deref(reference))"},
+		{name: "deref call then field", source: "reference.@().field", want: "field(invoke(deref(reference)),field)"},
 	}
 
 	for _, tt := range tests {
@@ -55,10 +44,108 @@ func TestDerefExpressionPrecedence(t *testing.T) {
 	}
 }
 
-func TestDerefKeywordIsReservedOnlyInExpressionPosition(t *testing.T) {
+func TestPostfixDerefLocationsIncludeOperator(t *testing.T) {
+	result := Parse([]byte("let result = reference.@\n"), "test.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	dereference := result.Program.Statements[0].(*VariableDeclaration).Value.(*Deref)
+	if want := (Location{Start: Point{Row: 1, Col: 14}, End: Point{Row: 1, Col: 24}}); dereference.Location != want {
+		t.Fatalf("location = %#v, want %#v", dereference.Location, want)
+	}
+	if want := (Location{Start: Point{Row: 1, Col: 23}, End: Point{Row: 1, Col: 24}}); dereference.OperatorLocation != want {
+		t.Fatalf("operator location = %#v, want %#v", dereference.OperatorLocation, want)
+	}
+}
+
+func TestPostfixDerefSupportsDotLeadingChain(t *testing.T) {
+	result := Parse([]byte("let result = reference\n  .@\n  .field\n"), "test.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	declaration := result.Program.Statements[0].(*VariableDeclaration)
+	if got := derefExpressionShape(t, declaration.Value); got != "field(deref(reference),field)" {
+		t.Fatalf("shape = %q", got)
+	}
+}
+
+func TestPostfixCallsStayOnTheSameSourceLine(t *testing.T) {
+	sameLine := Parse([]byte("reference.@ ()\n"), "test.ard")
+	if len(sameLine.Errors) > 0 {
+		t.Fatalf("same-line parse errors: %v", sameLine.Errors)
+	}
+	if len(sameLine.Program.Statements) != 1 {
+		t.Fatalf("same-line statement count = %d, want 1", len(sameLine.Program.Statements))
+	}
+	if got := derefExpressionShape(t, sameLine.Program.Statements[0]); got != "invoke(deref(reference))" {
+		t.Fatalf("same-line shape = %q", got)
+	}
+
+	separateLines := Parse([]byte("reference.@\n()\n"), "test.ard")
+	if len(separateLines.Errors) > 0 {
+		t.Fatalf("separate-line parse errors: %v", separateLines.Errors)
+	}
+	if len(separateLines.Program.Statements) != 2 {
+		t.Fatalf("separate-line statement count = %d, want 2", len(separateLines.Program.Statements))
+	}
+	if got := derefExpressionShape(t, separateLines.Program.Statements[0]); got != "deref(reference)" {
+		t.Fatalf("first separate-line shape = %q", got)
+	}
+}
+
+func TestPostfixDerefRequiresAdjacentDotAndAt(t *testing.T) {
+	for _, source := range []string{
+		"let result = reference. @\n",
+		"let result = reference@\n",
+		"let result = @reference\n",
+	} {
+		result := Parse([]byte(source), "test.ard")
+		if len(result.Errors) == 0 {
+			t.Fatalf("expected %q to be rejected", source)
+		}
+	}
+}
+
+func TestLegacyDerefSyntaxRemainsParsedForMigration(t *testing.T) {
+	tests := []struct {
+		source string
+		want   string
+	}{
+		{source: "deref reference", want: "deref(reference)"},
+		{source: "deref reference.field", want: "deref(field(reference,field))"},
+		{source: "(deref reference).field", want: "field(deref(reference),field)"},
+		{source: "deref mut value", want: "deref(mut(value))"},
+		{source: "mut deref reference", want: "mut(deref(reference))"},
+		{source: "deref deref reference", want: "deref(deref(reference))"},
+		{source: "deref load()", want: "deref(call(load))"},
+	}
+
+	for _, tt := range tests {
+		result := Parse([]byte("let result = "+tt.source+"\n"), "test.ard")
+		if len(result.Errors) > 0 {
+			t.Fatalf("parse %q: %v", tt.source, result.Errors)
+		}
+		declaration := result.Program.Statements[0].(*VariableDeclaration)
+		if got := derefExpressionShape(t, declaration.Value); got != tt.want {
+			t.Fatalf("shape for %q = %q, want %q", tt.source, got, tt.want)
+		}
+		dereference := findDeref(declaration.Value)
+		if dereference == nil || !dereference.LegacyPrefix {
+			t.Fatalf("%q did not retain legacy-prefix metadata: %#v", tt.source, dereference)
+		}
+		if tt.source == "deref reference" {
+			want := Location{Start: Point{Row: 1, Col: 14}, End: Point{Row: 1, Col: 18}}
+			if dereference.OperatorLocation != want {
+				t.Fatalf("legacy operator location = %#v, want %#v", dereference.OperatorLocation, want)
+			}
+		}
+	}
+}
+
+func TestDerefKeywordRemainsReservedDuringMigration(t *testing.T) {
 	result := Parse([]byte("let deref = 1\n"), "test.ard")
 	if len(result.Errors) == 0 {
-		t.Fatal("expected deref to be reserved as a binding name")
+		t.Fatal("expected deref to remain reserved as a binding name")
 	}
 
 	for _, source := range []string{
@@ -80,8 +167,14 @@ func derefExpressionShape(t *testing.T, expression Expression) string {
 		return value.Name
 	case *MutRef:
 		return "mut(" + derefExpressionShape(t, value.Operand) + ")"
+	case *Deref:
+		return "deref(" + derefExpressionShape(t, value.Operand) + ")"
 	case *InstanceProperty:
 		return "field(" + derefExpressionShape(t, value.Target) + "," + value.Property.Name + ")"
+	case *FunctionCall:
+		return "call(" + value.Name + ")"
+	case *FunctionValueCall:
+		return "invoke(" + derefExpressionShape(t, value.Callee) + ")"
 	case *BinaryExpression:
 		operator := fmt.Sprint(value.Operator)
 		switch value.Operator {
@@ -97,44 +190,21 @@ func derefExpressionShape(t *testing.T, expression Expression) string {
 			operator = "not"
 		}
 		return operator + "(" + derefExpressionShape(t, value.Operand) + ")"
+	default:
+		t.Fatalf("unexpected expression %T", expression)
+		return ""
 	}
-
-	if text := fmt.Sprint(expression); strings.HasPrefix(text, "deref ") || strings.HasPrefix(text, "(deref ") {
-		children := directParseExpressionChildren(reflect.ValueOf(expression))
-		if len(children) != 1 {
-			t.Fatalf("dereference expression %T has %d direct expression children, want 1", expression, len(children))
-		}
-		return "deref(" + derefExpressionShape(t, children[0]) + ")"
-	}
-
-	t.Fatalf("unexpected expression %T", expression)
-	return ""
 }
 
-func directParseExpressionChildren(value reflect.Value) []Expression {
-	if value.Kind() == reflect.Interface || value.Kind() == reflect.Pointer {
-		if value.IsNil() {
-			return nil
-		}
-		value = value.Elem()
-	}
-	if value.Kind() != reflect.Struct {
+func findDeref(expression Expression) *Deref {
+	switch value := expression.(type) {
+	case *Deref:
+		return value
+	case *MutRef:
+		return findDeref(value.Operand)
+	case *InstanceProperty:
+		return findDeref(value.Target)
+	default:
 		return nil
 	}
-	children := []Expression{}
-	for index := 0; index < value.NumField(); index++ {
-		field := value.Field(index)
-		if !field.CanInterface() {
-			continue
-		}
-		// The embedded source span satisfies Expression's method set but is
-		// positional metadata, not an operand.
-		if field.Type() == reflect.TypeOf(Location{}) {
-			continue
-		}
-		if child, ok := field.Interface().(Expression); ok {
-			children = append(children, child)
-		}
-	}
-	return children
 }

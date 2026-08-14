@@ -365,7 +365,7 @@ ADRs 0056 and 0057 adopt these invariants for Ard-owned explicit implementations
 7. Go does not need to distinguish owned and borrowed pointers; Ard source and
    conversion metadata do.
 8. A caller with `mut W` cannot implicitly request owned-value behavior. It
-   must use `deref reference` to produce the shallow `W` value before
+   must use `reference.@` to produce the shallow `W` value before
    conversion; Ard provides no deep-copy operation.
 9. Existing interface-to-interface conversions preserve the concrete dynamic
    value rather than nesting interfaces.
@@ -377,7 +377,7 @@ ADRs 0056 and 0057 adopt these invariants for Ard-owned explicit implementations
     interface-value destination. An inferred Ard reference contributes its
     current pointer-shaped Go boundary type (for example `*W`); an explicitly
     value-shaped `W` destination rejects bare `mut W` and accepts
-    `deref reference` as the explicit `W` value.
+    `reference.@` as the explicit `W` value.
 
 ## Related Ard documentation
 
