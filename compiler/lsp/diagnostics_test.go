@@ -85,9 +85,6 @@ func (c *recordingConn) lastDiagnostics(t *testing.T) *protocol.PublishDiagnosti
 // single document, with optional sibling overlays as open documents.
 func analyzeDiagnosticsForTest(t *testing.T, source string, filePath string, overlays map[string]string) []checker.Diagnostic {
 	t.Helper()
-	if filepath.Dir(filePath) == "/tmp" {
-		filePath = filepath.Join(t.TempDir(), filepath.Base(filePath))
-	}
 	if err := os.WriteFile(filePath, []byte(source), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +104,7 @@ func analyzeDiagnosticsForTest(t *testing.T, source string, filePath string, ove
 
 func TestParseAndCheckWithError(t *testing.T) {
 	source := `let x: Int = "hello"`
-	diags := analyzeDiagnosticsForTest(t, source, "/tmp/test.ard", nil)
+	diags := analyzeDiagnosticsForTest(t, source, filepath.Join(t.TempDir(), "test.ard"), nil)
 	if len(diags) == 0 {
 		t.Fatal("expected diagnostics for type error, got none")
 	}
@@ -128,7 +125,7 @@ func TestParseAndCheckWithError(t *testing.T) {
 // TestParseAndCheckWithValidCode verifies no diagnostics for valid code.
 func TestParseAndCheckWithValidCode(t *testing.T) {
 	source := `let x = 5`
-	diags := analyzeDiagnosticsForTest(t, source, "/tmp/test.ard", nil)
+	diags := analyzeDiagnosticsForTest(t, source, filepath.Join(t.TempDir(), "test.ard"), nil)
 	if len(diags) != 0 {
 		t.Errorf("expected no diagnostics for valid code, got %d: %v", len(diags), diags)
 	}
@@ -137,7 +134,7 @@ func TestParseAndCheckWithValidCode(t *testing.T) {
 // TestParseAndCheckWithParseError verifies diagnostics for parse errors.
 func TestParseAndCheckWithParseError(t *testing.T) {
 	source := `let x = `
-	diags := analyzeDiagnosticsForTest(t, source, "/tmp/test.ard", nil)
+	diags := analyzeDiagnosticsForTest(t, source, filepath.Join(t.TempDir(), "test.ard"), nil)
 	if len(diags) == 0 {
 		t.Fatal("expected diagnostics for parse error, got none")
 	}
@@ -393,7 +390,7 @@ func TestCheckerDiagnosticsToLSPUsesCapturedDocumentRevisionForRanges(t *testing
 func TestPublishDiagnosticsLifecycle(t *testing.T) {
 	server := NewServer()
 	ctx := context.Background()
-	docURI := uri.New("file:///tmp/test.ard")
+	docURI := uri.File(filepath.Join(t.TempDir(), "test.ard"))
 
 	// Open a document with valid code
 	server.cache.Open(docURI, "ard", 1, `let x = 5`)
@@ -411,7 +408,7 @@ func TestPublishDiagnosticsIncludesDocumentVersion(t *testing.T) {
 	server := NewServer()
 	conn := newRecordingConn()
 	server.conn = conn
-	docURI := uri.New("file:///tmp/test.ard")
+	docURI := uri.File(filepath.Join(t.TempDir(), "test.ard"))
 	server.cache.Open(docURI, "ard", 7, `let x = 5`)
 
 	server.publishDiagnostics(context.Background(), docURI)
@@ -428,7 +425,7 @@ func TestPublishDiagnosticsClearsClosedDocumentDiagnostics(t *testing.T) {
 	server := NewServer()
 	conn := newRecordingConn()
 	server.conn = conn
-	docURI := uri.New("file:///tmp/test.ard")
+	docURI := uri.File(filepath.Join(t.TempDir(), "test.ard"))
 
 	server.publishDiagnostics(context.Background(), docURI)
 
@@ -444,8 +441,9 @@ func TestPublishDiagnosticsDiscardsStaleOverlaySnapshot(t *testing.T) {
 	server := NewServer()
 	conn := newRecordingConn()
 	server.conn = conn
-	mainURI := uri.New("file:///tmp/main.ard")
-	toolsURI := uri.New("file:///tmp/tools.ard")
+	root := t.TempDir()
+	mainURI := uri.File(filepath.Join(root, "main.ard"))
+	toolsURI := uri.File(filepath.Join(root, "tools.ard"))
 	server.cache.Open(mainURI, "ard", 1, "use app/tools\nlet value = tools::value()\n")
 	server.cache.Open(toolsURI, "ard", 1, "fn value() Int { 1 }\n")
 
@@ -477,7 +475,7 @@ func TestPublishDiagnosticsSilentlyStopsCanceledAnalysis(t *testing.T) {
 	server := NewServer()
 	conn := newRecordingConn()
 	server.conn = conn
-	docURI := uri.New("file:///tmp/main.ard")
+	docURI := uri.File(filepath.Join(t.TempDir(), "main.ard"))
 	server.cache.Open(docURI, "ard", 1, "let value = 1\n")
 	started := make(chan struct{})
 	server.diagnosticsAnalyzer = func(ctx context.Context, source string, filePath string, overlays map[string]string) ([]checker.Diagnostic, error) {
@@ -526,7 +524,7 @@ func TestPublishDiagnosticsSkipsNonFileOverlays(t *testing.T) {
 	server := NewServer()
 	conn := newRecordingConn()
 	server.conn = conn
-	fileURI := uri.New("file:///tmp/test.ard")
+	fileURI := uri.File(filepath.Join(t.TempDir(), "test.ard"))
 	server.cache.Open(fileURI, "ard", 1, `let x = 5`)
 	server.cache.Open(uri.URI("untitled:Untitled-1"), "ard", 1, `let y = 10`)
 
@@ -544,7 +542,7 @@ func TestPublishDiagnosticsReportsAnalysisPanic(t *testing.T) {
 	server.diagnosticsAnalyzer = func(ctx context.Context, source string, filePath string, overlays map[string]string) ([]checker.Diagnostic, error) {
 		panic("checker exploded")
 	}
-	docURI := uri.New("file:///tmp/test.ard")
+	docURI := uri.File(filepath.Join(t.TempDir(), "test.ard"))
 	server.cache.Open(docURI, "ard", 9, `let x = 5`)
 
 	server.publishDiagnostics(context.Background(), docURI)
@@ -569,7 +567,7 @@ func TestPublishDiagnosticsEnginePathParseErrors(t *testing.T) {
 	server := NewServer()
 	conn := newRecordingConn()
 	server.conn = conn
-	docURI := uri.New("file:///tmp/engine_parse.ard")
+	docURI := uri.File(filepath.Join(t.TempDir(), "engine_parse.ard"))
 	server.cache.Open(docURI, "ard", 1, "fn main( {\n}\n")
 
 	server.publishDiagnostics(context.Background(), docURI)
@@ -586,7 +584,7 @@ func TestPublishDiagnosticsEnginePathTypeErrors(t *testing.T) {
 	server := NewServer()
 	conn := newRecordingConn()
 	server.conn = conn
-	docURI := uri.New("file:///tmp/engine_check.ard")
+	docURI := uri.File(filepath.Join(t.TempDir(), "engine_check.ard"))
 	server.cache.Open(docURI, "ard", 1, "fn main() {\n  let x: Str = 42\n}\n")
 
 	server.publishDiagnostics(context.Background(), docURI)
