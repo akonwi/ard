@@ -2475,7 +2475,7 @@ func TestGoTargetParityGenericClosureCapturePreservesArgumentIdentityAndOrder(t 
 		fn main() Bool {
 			let first = Pair<Int, Str>{left: 1, right: "two"}
 			let second = Pair<Str, Int>{left: "three", right: 4}
-			first.read_with_closure() == 1 && second.read_with_closure() == "three"
+			first.read_with_closure() == 1 and second.read_with_closure() == "three"
 		}
 	`)
 	if got := runGoTargetParityJSON(t, program); got != "true" {

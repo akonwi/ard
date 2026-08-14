@@ -1,8 +1,10 @@
 package parse
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 type kind string
@@ -444,6 +446,7 @@ func (l *lexer) take() (token, bool) {
 		if interpolation := l.currentInterpolation(); interpolation != nil && interpolation.form == StringFormQuoted && l.hasMore() && l.peek().raw == '"' {
 			return l.takeEscapedTemplateString(*currentChar)
 		}
+		l.addUnexpectedCharacter(*currentChar)
 		return token{}, false
 	default:
 		if currentChar.isAlpha() {
@@ -457,8 +460,22 @@ func (l *lexer) take() (token, bool) {
 			l.start = l.cursor - 1
 			return l.takeNumber(), true
 		}
+		l.addUnexpectedCharacter(*currentChar)
 		return token{}, false
 	}
+}
+
+func (l *lexer) addUnexpectedCharacter(start char) {
+	value, width := utf8.DecodeRune(l.source[start.index:])
+	if value == utf8.RuneError && width == 1 {
+		l.addLexError(start.getLocation(), fmt.Sprintf("Invalid UTF-8 byte 0x%02X", start.raw))
+		return
+	}
+
+	l.advanceN(width - 1)
+	location := start.getLocation()
+	location.End.Col += width - 1
+	l.addLexError(location, fmt.Sprintf("Unexpected character %q", value))
 }
 
 func (l *lexer) comment(start *char) token {
