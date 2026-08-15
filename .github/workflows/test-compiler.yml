@@ -63,3 +63,9 @@ jobs:
         working-directory: compiler
         run: go build -o "$RUNNER_TEMP/ard" .
 
+      - name: Check examples
+        run: |
+          for example in examples/*/main.ard; do
+            "$RUNNER_TEMP/ard" check "$example"
+          done
+

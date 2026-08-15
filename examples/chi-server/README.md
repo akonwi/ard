@@ -2,7 +2,7 @@
 
 A pure-Ard port of chi's [graceful-shutdown example](https://github.com/go-chi/chi/blob/master/_examples/graceful/main.go):
 an HTTP server built on [chi](https://github.com/go-chi/chi) that finishes in-flight
-requests before exiting on `SIGINT`.
+requests before exiting on `SIGINT` or `SIGTERM`.
 
 There is no Go shim — everything is direct `use go:` interop:
 
@@ -12,8 +12,8 @@ There is no Go shim — everything is direct `use go:` interop:
   (Go functions as first-class values)
 - Ard closures as `http.HandlerFunc` route handlers, with value-producing
   bodies discarded for the void callback
-- a keyed `http::Server` struct literal with omitted fields, and
-  pointer-receiver methods (`ListenAndServe`, `Shutdown`) on the `mut` binding
+- a keyed `http::Server` struct literal with omitted fields, stored as an
+  explicit reference for pointer-receiver methods (`ListenAndServe`, `Shutdown`)
 - OS signals through a built-in channel: `Chan::new<os::Signal>()` narrowed
   with `.sender()` for `signal::Notify`
 - `async::start` for the background serve goroutine
@@ -22,10 +22,9 @@ There is no Go shim — everything is direct `use go:` interop:
 ## Adaptations from the Go original
 
 - `signal.NotifyContext` and `context.WithTimeout` return non-error value
-  pairs, which Ard's Go interop does not map; the port waits on a signal
-  channel and shuts down with `context.Background()`.
-- Go variadic parameters take one Ard argument, so the server listens for
-  `SIGINT` (the original also registers `SIGTERM`).
+  pairs, which Ard's Go interop does not map; the port registers `SIGINT` and
+  `SIGTERM` through `signal.Notify`, waits on a channel, and shuts down with
+  `context.Background()`.
 - Go errors are stringified, so `errors.Is(err, http.ErrServerClosed)` becomes
   a message comparison.
 
@@ -40,7 +39,7 @@ Then, in another terminal:
 ```sh
 curl http://localhost:3333/        # "sup"
 curl http://localhost:3333/slow &  # takes 5 seconds
-kill -INT <server pid>             # graceful: /slow still completes
+kill -INT <server pid>             # SIGTERM also shuts down gracefully
 ```
 
 The server logs `shutting down`, the in-flight `/slow` request finishes with
