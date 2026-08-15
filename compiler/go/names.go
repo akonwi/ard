@@ -764,7 +764,7 @@ func (n *localNamer) reservedName(name string) bool {
 // when that enclosing local is actually referenced within the new local's
 // scope; an unused outer binding can be harmlessly shadowed. A nil scopeRefs is
 // conservative and rejects any shadow.
-func (n *localNamer) mustSuffix(name string, scopeRefs map[air.LocalID]int) bool {
+func (n *localNamer) mustSuffix(name string, scopeRefs []int) bool {
 	if n.reservedName(name) {
 		return true
 	}
@@ -775,13 +775,13 @@ func (n *localNamer) mustSuffix(name string, scopeRefs map[air.LocalID]int) bool
 		if outer, ok := n.frames[i][name]; ok {
 			// Only the innermost enclosing holder matters: any further-out holder
 			// of this name is already shadowed by it within this scope.
-			return scopeRefs == nil || scopeRefs[outer] > 0
+			return scopeRefs == nil || int(outer) < len(scopeRefs) && scopeRefs[outer] > 0
 		}
 	}
 	return false
 }
 
-func (n *localNamer) assign(id air.LocalID, scopeRefs map[air.LocalID]int) {
+func (n *localNamer) assign(id air.LocalID, scopeRefs []int) {
 	if _, ok := n.names[id]; ok {
 		return
 	}
@@ -822,7 +822,7 @@ func (n *localNamer) walkStmts(b air.Block) {
 		}
 		return
 	}
-	remainingRefs := map[air.LocalID]int{}
+	remainingRefs := make([]int, len(n.fn.Locals))
 	for i := range b.Stmts {
 		collectStmtRefCounts(b.Stmts[i], remainingRefs, 1)
 	}
@@ -852,7 +852,7 @@ func (n *localNamer) walkBindingBlock(bind bool, local air.LocalID, b air.Block)
 	if bind {
 		// A pattern-bound local is scoped to the whole block, so it shadows an
 		// enclosing local only if that local is referenced anywhere in the block.
-		scope := map[air.LocalID]int{}
+		scope := make([]int, len(n.fn.Locals))
 		collectBlockRefCounts(b, scope, 1)
 		n.assign(local, scope)
 	}
@@ -860,7 +860,7 @@ func (n *localNamer) walkBindingBlock(bind bool, local air.LocalID, b air.Block)
 	n.pop()
 }
 
-func (n *localNamer) walkStmt(s air.Stmt, scopeRefs map[air.LocalID]int) {
+func (n *localNamer) walkStmt(s air.Stmt, scopeRefs []int) {
 	switch s.Kind {
 	case air.StmtLet:
 		if s.Value != nil {
@@ -877,7 +877,7 @@ func (n *localNamer) walkStmt(s air.Stmt, scopeRefs map[air.LocalID]int) {
 			n.walkExpr(*s.Target)
 		}
 		n.push()
-		scope := map[air.LocalID]int{}
+		scope := make([]int, len(n.fn.Locals))
 		collectBlockRefCounts(s.Body, scope, 1)
 		n.assign(s.Local, scope)
 		n.assign(s.ValueLocal, scope)
@@ -966,7 +966,7 @@ func (n *localNamer) walkExpr(e air.Expr) {
 // captures (ExprMakeClosure.CaptureLocals); field-sets reference their local
 // through an ExprLoadLocal target. This must stay complete: a missed reference
 // could let a shadowing local keep a bare name that then captures the reference.
-func collectBlockRefCounts(b air.Block, into map[air.LocalID]int, delta int) {
+func collectBlockRefCounts(b air.Block, into []int, delta int) {
 	for i := range b.Stmts {
 		collectStmtRefCounts(b.Stmts[i], into, delta)
 	}
@@ -975,7 +975,7 @@ func collectBlockRefCounts(b air.Block, into map[air.LocalID]int, delta int) {
 	}
 }
 
-func collectStmtRefCounts(s air.Stmt, into map[air.LocalID]int, delta int) {
+func collectStmtRefCounts(s air.Stmt, into []int, delta int) {
 	if s.Kind == air.StmtAssign {
 		adjustLocalRefCount(into, s.Local, delta)
 	}
@@ -994,7 +994,7 @@ func collectStmtRefCounts(s air.Stmt, into map[air.LocalID]int, delta int) {
 	collectBlockRefCounts(s.Body, into, delta)
 }
 
-func collectExprRefCounts(e air.Expr, into map[air.LocalID]int, delta int) {
+func collectExprRefCounts(e air.Expr, into []int, delta int) {
 	if e.Kind == air.ExprLoadLocal {
 		adjustLocalRefCount(into, e.Local, delta)
 	}
@@ -1059,10 +1059,9 @@ func collectExprRefCounts(e air.Expr, into map[air.LocalID]int, delta int) {
 	}
 }
 
-func adjustLocalRefCount(counts map[air.LocalID]int, id air.LocalID, delta int) {
-	counts[id] += delta
-	if counts[id] == 0 {
-		delete(counts, id)
+func adjustLocalRefCount(counts []int, id air.LocalID, delta int) {
+	if id >= 0 && int(id) < len(counts) {
+		counts[id] += delta
 	}
 }
 
@@ -1086,6 +1085,9 @@ func isReservedLocalName(name string) bool {
 func sanitizeName(raw string) string {
 	if raw == "" {
 		return ""
+	}
+	if asciiSanitizedName(raw) {
+		return raw
 	}
 	var out []rune
 	for _, r := range raw {
@@ -1155,6 +1157,9 @@ func sanitizeGoIdentifier(raw string) string {
 	if raw == "" {
 		return ""
 	}
+	if asciiGoIdentifier(raw) {
+		return raw
+	}
 	var out []rune
 	lastUnderscore := false
 	for _, r := range raw {
@@ -1181,6 +1186,40 @@ func sanitizeGoIdentifier(raw string) string {
 		name = "_" + name
 	}
 	return name
+}
+
+func asciiSanitizedName(raw string) bool {
+	if raw[0] == '_' || raw[len(raw)-1] == '_' || raw[0] >= '0' && raw[0] <= '9' {
+		return false
+	}
+	for i := range len(raw) {
+		char := raw[i]
+		if char >= 'a' && char <= 'z' || char >= 'A' && char <= 'Z' || char >= '0' && char <= '9' || char == '_' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func asciiGoIdentifier(raw string) bool {
+	if raw[0] >= '0' && raw[0] <= '9' {
+		return false
+	}
+	lastUnderscore := false
+	for i := range len(raw) {
+		char := raw[i]
+		if char >= 'a' && char <= 'z' || char >= 'A' && char <= 'Z' || char >= '0' && char <= '9' {
+			lastUnderscore = false
+			continue
+		}
+		if char == '_' && !lastUnderscore {
+			lastUnderscore = true
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func goIdentifierParts(raw string) []string {

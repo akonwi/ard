@@ -51,11 +51,11 @@ func BenchmarkGoPipeline(b *testing.B) {
 	if warmChecker.HasErrors() {
 		b.Fatalf("check errors: %v", warmChecker.Diagnostics())
 	}
-	formatProgram, err := air.Lower(loaded.Module)
+	renderProgram, err := air.Lower(loaded.Module)
 	if err != nil {
 		b.Fatal(err)
 	}
-	generated, err := lowerProgram(formatProgram, Options{PackageName: "main", ProjectInfo: loaded.ProjectInfo})
+	generated, err := lowerProgram(renderProgram, Options{PackageName: "main", ProjectInfo: loaded.ProjectInfo})
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -114,7 +114,7 @@ func BenchmarkGoPipeline(b *testing.B) {
 			}
 		}
 	})
-	b.Run("go_format", func(b *testing.B) {
+	b.Run("go_render", func(b *testing.B) {
 		b.ReportAllocs()
 		for b.Loop() {
 			for _, file := range generated {
