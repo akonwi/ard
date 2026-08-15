@@ -3683,6 +3683,31 @@ func TestLowerProgramKeepsHelperForRetainedClosure(t *testing.T) {
 		t.Fatal("generated AST should keep helper for retained closure")
 	}
 }
+
+func TestLowerProgramInlinesCaptureFreeRetainedClosure(t *testing.T) {
+	program := lowerSource(t, `
+		use go:net/http
+
+		fn main() {
+			http::HandleFunc(
+				"/",
+				fn(w: http::ResponseWriter, r: mut http::Request) {
+					http::Error(w, r.Method, 400)
+				},
+			)
+		}
+	`)
+
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesHaveCall(files, "http.HandleFunc") {
+		t.Fatal("generated AST missing retained Go callback call")
+	}
+	if astFilesHaveFuncContaining(files, "anon_func") {
+		t.Fatal("generated AST should inline a capture-free retained closure")
+	}
+	buildProgramFromGeneratedSources(t, program, "capture-free-retained-closure")
+}
+
 func TestLowerProgramEmitsGoMethodWrapperForInherentImpl(t *testing.T) {
 	program := lowerSource(t, `
 		struct Box {

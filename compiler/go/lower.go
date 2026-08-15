@@ -8395,7 +8395,13 @@ func (l *lowerer) collectInlineClosureFunctions() map[air.FunctionID]bool {
 	inline := map[air.FunctionID]bool{}
 	for _, fn := range l.program.Functions {
 		use := uses[fn.ID]
-		if use == nil || use.total != 1 || use.local != 1 || use.retained || directRefs[fn.ID] {
+		if use == nil || use.total != 1 || directRefs[fn.ID] {
+			continue
+		}
+		// A capture-free closure has no Ard snapshot semantics to preserve, so its
+		// body can stay in a Go function literal even when an unknown callee retains
+		// it. Capturing closures remain limited to known immediate consumers.
+		if len(fn.Captures) > 0 && (use.local != 1 || use.retained) {
 			continue
 		}
 		if !l.canInlineClosureFunction(fn) {

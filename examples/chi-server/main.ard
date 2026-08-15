@@ -17,8 +17,7 @@ use go:time
 //   - `go func() { ... }` becomes `async::start`.
 //   - `signal.NotifyContext(ctx, SIGINT, SIGTERM)` returns a (Context,
 //     CancelFunc) pair, which Ard's Go interop does not map; a signal
-//     channel via `signal.Notify` expresses the same wait. Go variadics
-//     take one Ard argument, so the example listens for SIGINT.
+//     channel via `signal.Notify` expresses the same wait.
 //   - `context.WithTimeout` also returns a pair; shutdown uses
 //     `context.Background()` and waits for in-flight requests to drain.
 //   - Go errors arrive stringified (`Void!Str`), so `errors.Is(err,
@@ -33,7 +32,7 @@ fn service() mut chi::Mux {
   router.Get(
     "/",
     fn(w: http::ResponseWriter, r: mut http::Request) {
-      mut body = "sup".bytes()
+      let body = mut "sup".bytes()
       w.Write(body)
     },
   )
@@ -45,7 +44,7 @@ fn service() mut chi::Mux {
       // successfully during a shutdown signal.
       time::Sleep(5 * time::Second)
 
-      mut body = "all done.\n".bytes()
+      let body = mut "all done.\n".bytes()
       w.Write(body)
     },
   )
@@ -55,11 +54,11 @@ fn service() mut chi::Mux {
 
 fn main() {
   // The HTTP server
-  mut server = http::Server{Addr: "0.0.0.0:3333", Handler: service()}
+  let server = mut http::Server{Addr: "0.0.0.0:3333", Handler: service()}
 
-  // Listen for the interrupt signal
+  // Listen for shutdown signals
   let interrupts = Chan::new<os::Signal>()
-  signal::Notify(interrupts.sender(), syscall::SIGINT)
+  signal::Notify(interrupts.sender(), syscall::SIGINT, syscall::SIGTERM)
 
   // Run the server in the background
   async::start(
@@ -77,7 +76,7 @@ fn main() {
   )
   fmt::Println("listening on {server.Addr}")
 
-  // Wait for the interrupt signal
+  // Wait for a shutdown signal
   interrupts.recv()
 
   // Trigger graceful shutdown: in-flight requests (like /slow) finish first
