@@ -157,6 +157,10 @@ func TestADR0057EscapingReferencesKeepLocalParameterFieldAndContainerStorageAliv
 			[generic.value, parameter.value, field.value, listed.value, maybe.value, result.value, through_channel.value, channel_source.value, callback_value, closure()]
 		}
 	`)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if astFilesHaveFuncContaining(files, "anon_func") {
+		t.Fatal("generated AST should inline retained reference capture bodies")
+	}
 	if got := runGoTargetParityJSON(t, program); got != `[10,20,30,40,50,60,70,70,2,7]` {
 		t.Fatalf("result = %s, want escaping reference values", got)
 	}

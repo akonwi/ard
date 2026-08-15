@@ -6870,22 +6870,12 @@ func (l *lowerer) lowerMakeClosure(fn air.Function, expr air.Expr) (loweredExpr,
 	}
 	funcType, _ := closureType.(*ast.FuncType)
 	callArgs := make([]ast.Expr, 0, len(expr.CaptureLocals)+len(closureFn.Signature.Params))
-	stmts := []ast.Stmt{}
-	for i, local := range expr.CaptureLocals {
-		if i >= len(closureFn.Captures) {
-			return loweredExpr{}, fmt.Errorf("closure %s missing capture metadata %d", closureFn.Name, i)
-		}
-		capture := closureFn.Captures[i]
-		captured := l.localValueExpr(fn, local)
-		if capture.Mode == air.CaptureSlot {
-			captured = addressOfPlace(l.localAssignExpr(fn, local))
-		}
-		// Snapshot either the current value/handle or the stable slot pointer
-		// when the closure value is created. The wrapper must not reevaluate an
-		// outer variable on each invocation (ADR 0057).
-		temp := l.nextTemp()
-		stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{l.ident(temp)}, Tok: token.DEFINE, Rhs: []ast.Expr{captured}})
-		callArgs = append(callArgs, l.ident(temp))
+	captureNames, stmts, err := l.lowerClosureCaptureSnapshots(fn, expr, closureFn)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	for _, name := range captureNames {
+		callArgs = append(callArgs, l.ident(name))
 	}
 	params := []*ast.Field{}
 	for i, param := range closureFn.Signature.Params {
@@ -6919,25 +6909,44 @@ func (l *lowerer) lowerMakeClosure(fn air.Function, expr air.Expr) (loweredExpr,
 	return loweredExpr{stmts: stmts, expr: funcLit}, nil
 }
 
+func (l *lowerer) lowerClosureCaptureSnapshots(parent air.Function, expr air.Expr, closureFn air.Function) ([]string, []ast.Stmt, error) {
+	if len(expr.CaptureLocals) != len(closureFn.Captures) {
+		return nil, nil, fmt.Errorf("closure %s has %d capture locals, want %d", closureFn.Name, len(expr.CaptureLocals), len(closureFn.Captures))
+	}
+	names := make([]string, len(expr.CaptureLocals))
+	stmts := make([]ast.Stmt, 0, len(expr.CaptureLocals))
+	for i, local := range expr.CaptureLocals {
+		capture := closureFn.Captures[i]
+		captured := l.localValueExpr(parent, local)
+		if capture.Mode == air.CaptureSlot {
+			captured = addressOfPlace(l.localAssignExpr(parent, local))
+		}
+		// Ard captures snapshot either the current value/reference handle or the
+		// stable binding slot when the closure value is created (ADR 0057). Give
+		// the Go literal a fresh lexical local so later outer rebinding cannot
+		// change value/reference captures.
+		temp := l.nextTemp()
+		names[i] = temp
+		stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{l.ident(temp)}, Tok: token.DEFINE, Rhs: []ast.Expr{captured}})
+	}
+	return names, stmts, nil
+}
+
 func (l *lowerer) lowerInlineClosure(parent air.Function, expr air.Expr, closureFn air.Function) (loweredExpr, error) {
+	captureNames, stmts, err := l.lowerClosureCaptureSnapshots(parent, expr, closureFn)
+	if err != nil {
+		return loweredExpr{}, err
+	}
 	inlineFn := closureFn
 	inlineFn.Captures = append([]air.Capture(nil), closureFn.Captures...)
 	inlineFn.Locals = append([]air.Local(nil), closureFn.Locals...)
-	for i := range inlineFn.Captures {
-		if i >= len(expr.CaptureLocals) {
-			break
-		}
+	for i, name := range captureNames {
 		capture := &inlineFn.Captures[i]
 		if int(capture.Local) < 0 || int(capture.Local) >= len(inlineFn.Locals) {
-			continue
+			return loweredExpr{}, fmt.Errorf("closure %s has invalid capture local %d", closureFn.Name, capture.Local)
 		}
-		outerName := l.localName(parent, expr.CaptureLocals[i])
-		capture.Name = outerName
-		inlineFn.Locals[capture.Local].Name = outerName
-		// Inline closures directly close over the outer Go local. Do not treat
-		// captures as pointer parameters; mutable argument lowering can still take
-		// the address of the outer local when a callee requires it.
-		inlineFn.Locals[capture.Local].Mutable = false
+		capture.Name = name
+		inlineFn.Locals[capture.Local].Name = name
 	}
 	// inlineFn is a mutated copy sharing the original closure's FunctionID. Drop
 	// any cached name table (e.g. populated eagerly by buildReservedGoIdentifiers)
@@ -6953,6 +6962,13 @@ func (l *lowerer) lowerInlineClosure(parent air.Function, expr air.Expr, closure
 			delete(l.localNameCache, inlineFn.ID)
 		}
 	}()
+	allocatedNames := l.allocateLocalNames(inlineFn)
+	for i, capture := range inlineFn.Captures {
+		// Generated temps start with `_`, while Ard local names are sanitized to
+		// omit leading underscores. Pin captures to the exact outer snapshot name
+		// after allocating every source local so neither side can shadow the other.
+		allocatedNames[capture.Local] = captureNames[i]
+	}
 
 	closureType, err := l.goType(expr.Type)
 	if err != nil {
@@ -6988,7 +7004,23 @@ func (l *lowerer) lowerInlineClosure(parent air.Function, expr air.Expr, closure
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	return loweredExpr{expr: &ast.FuncLit{Type: funcType, Body: body}}, nil
+	funcLit := &ast.FuncLit{Type: funcType, Body: body}
+	if len(stmts) == 0 {
+		return loweredExpr{expr: funcLit}, nil
+	}
+	// Keep snapshot evaluation at the closure expression's exact position. If
+	// setup statements escaped to the surrounding expression, a later closure
+	// argument could snapshot before an earlier argument's side effects, and
+	// statement-restricted contexts such as while conditions could not use it.
+	factoryBody := append(stmts, &ast.ReturnStmt{Results: []ast.Expr{funcLit}})
+	factory := &ast.FuncLit{
+		Type: &ast.FuncType{
+			Params:  &ast.FieldList{},
+			Results: &ast.FieldList{List: []*ast.Field{{Type: closureType}}},
+		},
+		Body: &ast.BlockStmt{List: factoryBody},
+	}
+	return loweredExpr{expr: &ast.CallExpr{Fun: factory}}, nil
 }
 
 func (l *lowerer) lowerCallClosure(fn air.Function, expr air.Expr) (loweredExpr, error) {
@@ -8489,31 +8521,22 @@ func (l *lowerer) maybeValueExpr(expr ast.Expr) ast.Expr {
 	return &ast.CallExpr{Fun: selectorExpr(expr, "Value")}
 }
 
-type closureUseInfo struct {
-	total    int
-	local    int
-	retained bool
-}
-
 func (l *lowerer) collectInlineClosureFunctions() map[air.FunctionID]bool {
-	uses := map[air.FunctionID]*closureUseInfo{}
+	uses := map[air.FunctionID]int{}
 	directRefs := map[air.FunctionID]bool{}
 	for _, fn := range l.program.Functions {
-		l.collectClosureUsesInBlock(fn.Body, closureUseValue, uses, directRefs)
+		walkBlockExprs(fn.Body, func(expr air.Expr) {
+			switch expr.Kind {
+			case air.ExprMakeClosure:
+				uses[expr.Function]++
+			case air.ExprCall, air.ExprFunctionRef:
+				directRefs[expr.Function] = true
+			}
+		})
 	}
 	inline := map[air.FunctionID]bool{}
 	for _, fn := range l.program.Functions {
-		use := uses[fn.ID]
-		if use == nil || use.total != 1 || directRefs[fn.ID] {
-			continue
-		}
-		// A capture-free closure has no Ard snapshot semantics to preserve, so its
-		// body can stay in a Go function literal even when an unknown callee retains
-		// it. Capturing closures remain limited to known immediate consumers.
-		if len(fn.Captures) > 0 && (use.local != 1 || use.retained) {
-			continue
-		}
-		if !l.canInlineClosureFunction(fn) {
+		if uses[fn.ID] == 0 || directRefs[fn.ID] || !l.canInlineClosureFunction(fn) {
 			continue
 		}
 		inline[fn.ID] = true
@@ -8522,136 +8545,7 @@ func (l *lowerer) collectInlineClosureFunctions() map[air.FunctionID]bool {
 }
 
 func (l *lowerer) canInlineClosureFunction(fn air.Function) bool {
-	if !strings.HasPrefix(fn.Name, "anon_func_") {
-		return false
-	}
-	for _, capture := range fn.Captures {
-		if capture.Mode != air.CaptureValue {
-			// Reference-handle snapshots and slot pointers must consume finalized
-			// capture metadata through the lifted wrapper (ADR 0057).
-			return false
-		}
-		if int(capture.Local) >= 0 && int(capture.Local) < len(fn.Locals) && fn.Locals[capture.Local].Mutable {
-			return false
-		}
-	}
-	return !functionDirectlyReferences(fn.Body, fn.ID)
-}
-
-type closureUseContext uint8
-
-const (
-	closureUseValue closureUseContext = iota
-	closureUseLocal
-)
-
-func (l *lowerer) collectClosureUsesInBlock(block air.Block, context closureUseContext, uses map[air.FunctionID]*closureUseInfo, directRefs map[air.FunctionID]bool) {
-	for _, stmt := range block.Stmts {
-		if stmt.Value != nil {
-			l.collectClosureUsesInExpr(*stmt.Value, closureUseValue, uses, directRefs)
-		}
-		if stmt.Expr != nil {
-			l.collectClosureUsesInExpr(*stmt.Expr, closureUseValue, uses, directRefs)
-		}
-		if stmt.Target != nil {
-			l.collectClosureUsesInExpr(*stmt.Target, closureUseValue, uses, directRefs)
-		}
-		if stmt.Condition != nil {
-			l.collectClosureUsesInExpr(*stmt.Condition, closureUseValue, uses, directRefs)
-		}
-		l.collectClosureUsesInBlock(stmt.Body, closureUseValue, uses, directRefs)
-	}
-	if block.Result != nil {
-		l.collectClosureUsesInExpr(*block.Result, context, uses, directRefs)
-	}
-}
-
-func (l *lowerer) collectClosureUsesInExpr(expr air.Expr, context closureUseContext, uses map[air.FunctionID]*closureUseInfo, directRefs map[air.FunctionID]bool) {
-	switch expr.Kind {
-	case air.ExprMakeClosure:
-		use := uses[expr.Function]
-		if use == nil {
-			use = &closureUseInfo{}
-			uses[expr.Function] = use
-		}
-		use.total++
-		if context == closureUseLocal {
-			use.local++
-		} else {
-			use.retained = true
-		}
-	case air.ExprCall, air.ExprFunctionRef:
-		directRefs[expr.Function] = true
-	}
-
-	argContext := closureUseValue
-	if closureArgConsumedImmediately(expr.Kind) {
-		argContext = closureUseLocal
-	}
-	for i := range expr.Args {
-		l.collectClosureUsesInExpr(expr.Args[i], argContext, uses, directRefs)
-	}
-	for i := range expr.Entries {
-		l.collectClosureUsesInExpr(expr.Entries[i].Key, closureUseValue, uses, directRefs)
-		l.collectClosureUsesInExpr(expr.Entries[i].Value, closureUseValue, uses, directRefs)
-	}
-	for i := range expr.Fields {
-		l.collectClosureUsesInExpr(expr.Fields[i].Value, closureUseValue, uses, directRefs)
-	}
-	if expr.Target != nil {
-		targetContext := closureUseValue
-		if expr.Kind == air.ExprCallClosure {
-			targetContext = closureUseLocal
-		}
-		l.collectClosureUsesInExpr(*expr.Target, targetContext, uses, directRefs)
-	}
-	if expr.Left != nil {
-		l.collectClosureUsesInExpr(*expr.Left, closureUseValue, uses, directRefs)
-	}
-	if expr.Right != nil {
-		l.collectClosureUsesInExpr(*expr.Right, closureUseValue, uses, directRefs)
-	}
-	if expr.Condition != nil {
-		l.collectClosureUsesInExpr(*expr.Condition, closureUseValue, uses, directRefs)
-	}
-	l.collectClosureUsesInBlock(expr.Body, closureUseValue, uses, directRefs)
-	l.collectClosureUsesInBlock(expr.Then, closureUseValue, uses, directRefs)
-	l.collectClosureUsesInBlock(expr.Else, closureUseValue, uses, directRefs)
-	l.collectClosureUsesInBlock(expr.CatchAll, closureUseValue, uses, directRefs)
-	l.collectClosureUsesInBlock(expr.Some, closureUseValue, uses, directRefs)
-	l.collectClosureUsesInBlock(expr.None, closureUseValue, uses, directRefs)
-	l.collectClosureUsesInBlock(expr.Ok, closureUseValue, uses, directRefs)
-	l.collectClosureUsesInBlock(expr.Err, closureUseValue, uses, directRefs)
-	l.collectClosureUsesInBlock(expr.Catch, closureUseValue, uses, directRefs)
-	for i := range expr.EnumCases {
-		l.collectClosureUsesInBlock(expr.EnumCases[i].Body, closureUseValue, uses, directRefs)
-	}
-	for i := range expr.IntCases {
-		l.collectClosureUsesInBlock(expr.IntCases[i].Body, closureUseValue, uses, directRefs)
-	}
-	for i := range expr.StrCases {
-		l.collectClosureUsesInBlock(expr.StrCases[i].Body, closureUseValue, uses, directRefs)
-	}
-	for i := range expr.RangeCases {
-		l.collectClosureUsesInBlock(expr.RangeCases[i].Body, closureUseValue, uses, directRefs)
-	}
-	for i := range expr.UnionCases {
-		l.collectClosureUsesInBlock(expr.UnionCases[i].Body, closureUseValue, uses, directRefs)
-	}
-}
-
-func closureArgConsumedImmediately(kind air.ExprKind) bool {
-	switch kind {
-	case air.ExprListSort,
-		air.ExprMaybeMap,
-		air.ExprMaybeAndThen,
-		air.ExprResultMap,
-		air.ExprResultMapErr,
-		air.ExprResultAndThen:
-		return true
-	default:
-		return false
-	}
+	return strings.HasPrefix(fn.Name, "anon_func_") && !functionDirectlyReferences(fn.Body, fn.ID)
 }
 
 func functionDirectlyReferences(block air.Block, function air.FunctionID) bool {

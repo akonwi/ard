@@ -3662,7 +3662,7 @@ func TestLowerProgramInlinesNestedImmediateClosures(t *testing.T) {
 		t.Fatalf("generated AST missing nested function literals: got %d", funcLits)
 	}
 }
-func TestLowerProgramKeepsHelperForMutableCaptureClosure(t *testing.T) {
+func TestLowerProgramInlinesMutableCaptureClosureWithSlotSnapshot(t *testing.T) {
 	program := lowerSource(t, `
 
 		fn main() Int {
@@ -3676,11 +3676,27 @@ func TestLowerProgramKeepsHelperForMutableCaptureClosure(t *testing.T) {
 	`)
 
 	files := lowerProgramAST(t, program, Options{PackageName: "main"})
-	if !astFilesHaveFuncContaining(files, "anon_func") {
-		t.Fatal("generated AST should keep helper for mutable capture closure")
+	if astFilesHaveFuncContaining(files, "anon_func") {
+		t.Fatal("generated AST should inline mutable capture closure body")
 	}
+	if !astFilesContain(files, func(node ast.Node) bool {
+		assign, ok := node.(*ast.AssignStmt)
+		if !ok || assign.Tok != token.DEFINE || len(assign.Rhs) != 1 {
+			return false
+		}
+		address, ok := assign.Rhs[0].(*ast.UnaryExpr)
+		if !ok || address.Op != token.AND {
+			return false
+		}
+		ident, ok := address.X.(*ast.Ident)
+		return ok && ident.Name == "total"
+	}) {
+		t.Fatal("generated AST missing captured slot snapshot")
+	}
+	buildProgramFromGeneratedSources(t, program, "inline-mutable-capture-closure")
 }
-func TestLowerProgramKeepsHelperForRetainedClosure(t *testing.T) {
+
+func TestLowerProgramInlinesRetainedClosureWithValueSnapshot(t *testing.T) {
 	program := lowerSource(t, `
 		fn make_adder(offset: Int) fn(Int) Int {
 			fn(value: Int) Int {
@@ -3695,9 +3711,20 @@ func TestLowerProgramKeepsHelperForRetainedClosure(t *testing.T) {
 	`)
 
 	files := lowerProgramAST(t, program, Options{PackageName: "main"})
-	if !astFilesHaveFuncContaining(files, "anon_func") {
-		t.Fatal("generated AST should keep helper for retained closure")
+	if astFilesHaveFuncContaining(files, "anon_func") {
+		t.Fatal("generated AST should inline retained capturing closure body")
 	}
+	if !astFilesContain(files, func(node ast.Node) bool {
+		assign, ok := node.(*ast.AssignStmt)
+		if !ok || assign.Tok != token.DEFINE || len(assign.Rhs) != 1 {
+			return false
+		}
+		ident, ok := assign.Rhs[0].(*ast.Ident)
+		return ok && ident.Name == "offset"
+	}) {
+		t.Fatal("generated AST missing retained closure value snapshot")
+	}
+	buildProgramFromGeneratedSources(t, program, "inline-retained-capture-closure")
 }
 
 func TestLowerProgramInlinesCaptureFreeRetainedClosure(t *testing.T) {
@@ -4608,6 +4635,15 @@ func TestInlineClosureBuildsWhenParamCollidesWithCaptureRewrite(t *testing.T) {
   Maybe::new(1).map(fn(x) { x + x_0 }).or(0)
 }`)
 	buildProgramFromGeneratedSources(t, program, "inline-closure-capture-param-collision")
+}
+func TestInlineRetainedClosureSnapshotDoesNotCollideWithOuterLocal(t *testing.T) {
+	program := lowerSource(t, `fn make(tmp_0: Int) fn() Int {
+  fn() Int { tmp_0 }
+}
+fn main() Int {
+  make(42)()
+}`)
+	buildProgramFromGeneratedSources(t, program, "inline-retained-closure-snapshot-collision")
 }
 func TestLowererRenamesImportAliasPathConflicts(t *testing.T) {
 	l := &lowerer{currentImports: map[string]string{}}

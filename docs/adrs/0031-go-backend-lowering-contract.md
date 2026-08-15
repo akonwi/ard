@@ -315,7 +315,7 @@ A `mut` parameter lowers to a pointer parameter, and call sites pass the address
 
 #### Closures
 
-Closures lower to Go function literals with ordinary lexical capture. Go function literals capture variables by reference, which matches Ard's mutable-capture semantics, so no separate capture-parameter helper function is generated. The only exception is a closure that must be a named function for its own definition, such as a directly recursive local function; such cases may lower to a named local function rather than an inline literal.
+Closures lower to Go function literals with explicit creation-time capture snapshots. Value captures copy the current value, reference captures copy the current reference handle, and slot captures copy a pointer to the stable binding slot before constructing the literal. The literal body closes over those snapshot locals directly, so retained callbacks preserve Ard semantics without a lifted helper or trampoline. The only exception is a closure that must be named for its own definition, such as a directly recursive local function; such cases may retain a named helper or lower to a named local function.
 
 A reference to a top-level function as a value lowers to the Go function identifier; a reference to a method as a value lowers to a Go method value or method expression.
 
