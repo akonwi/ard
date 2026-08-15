@@ -44,7 +44,7 @@ type lowerer struct {
 	generatedModulePath     string
 	inlineClosures          map[air.FunctionID]bool
 	goMethodCollisions      map[string]bool
-	emittedGoMethods        map[string]bool
+	functionComparable      map[air.FunctionID]map[string]bool
 	functionModules         map[air.FunctionID]air.ModuleID
 	moduleByPath            map[string]air.ModuleID
 	typeModulePaths         []string
@@ -95,8 +95,8 @@ func lowerProgram(program *air.Program, options Options) (map[string]*ast.File, 
 	l := &lowerer{program: program, packageName: defaultPackageName(options.PackageName), runtimeHelpers: map[string]bool{}, projectInfo: options.ProjectInfo, generatedModulePath: generatedModulePath(options.ProjectInfo), suppressMain: options.SuppressMain, includeTests: options.IncludeTests, useModulePackages: true}
 	l.indexModuleOwnership()
 	l.inlineClosures = l.collectInlineClosureFunctions()
+	l.functionComparable = l.collectFunctionComparableTypeParams()
 	l.goMethodCollisions = l.collectGoMethodCollisions()
-	l.emittedGoMethods = map[string]bool{}
 	l.functionModules = l.collectFunctionEmitModules()
 	l.namePlan = newNamePlan(l)
 	l.topLevelReserved = l.namePlan.localReserved
@@ -230,13 +230,6 @@ func (l *lowerer) lowerModule(module air.Module) (*ast.File, error) {
 			return nil, fmt.Errorf("module %s function %s: %w", module.Path, fn.Name, err)
 		}
 		decls = append(decls, decl)
-		methodDecl, ok, err := l.lowerGoMethodWrapper(fn)
-		if err != nil {
-			return nil, fmt.Errorf("module %s function %s Go method wrapper: %w", module.Path, fn.Name, err)
-		}
-		if ok {
-			decls = append(decls, methodDecl)
-		}
 	}
 	mutableDecls, err := l.markedMutableTraitRefDecls()
 	if err != nil {
@@ -900,8 +893,7 @@ func (l *lowerer) usesNativeTraitInterface(typeID air.TypeID) bool {
 			if len(methodFn.Signature.Params) == 0 {
 				return false
 			}
-			key, _, ok := l.goMethodKey(methodFn)
-			if !ok || l.goMethodCollisions[key] {
+			if _, ok := l.directGoMethodName(methodFn); !ok {
 				return false
 			}
 		}
@@ -1125,7 +1117,7 @@ func (l *lowerer) mutableTraitImplVTableDecl(trait air.Trait, impl air.Impl, tra
 		for index := range traitMethod.Signature.Params {
 			callArgs = append(callArgs, l.ident(fmt.Sprintf("arg%d", index)))
 		}
-		call := &ast.CallExpr{Fun: l.functionExpr(methodFn), Args: callArgs}
+		call := l.functionCallExpr(methodFn, callArgs, nil)
 		body := []ast.Stmt{}
 		if l.isVoidType(traitMethod.Signature.Return) {
 			body = append(body, &ast.ExprStmt{X: call})
@@ -1256,7 +1248,7 @@ func (l *lowerer) mutableTraitStorageVTableDecl(trait air.Trait, traitTypeID air
 					callArgs = append(callArgs, receiver)
 				}
 				callArgs = append(callArgs, args...)
-				call := &ast.CallExpr{Fun: l.functionExpr(methodFn), Args: callArgs}
+				call := l.functionCallExpr(methodFn, callArgs, nil)
 				if l.isVoidType(method.Signature.Return) {
 					return &ast.ExprStmt{X: call}
 				}
@@ -1328,7 +1320,7 @@ func (l *lowerer) goTypeParamList(typ air.TypeInfo) *ast.FieldList {
 	for i, f := range typ.Fields {
 		fields[i] = air.Param{Type: f.Type}
 	}
-	comparable := l.comparableTypeParams(air.Signature{Params: fields}, nil)
+	comparable := l.comparableTypeParams(air.Signature{Params: fields}, nil, nil, nil)
 	return l.typeParamFieldList(typ.TypeParams, comparable)
 }
 
@@ -1518,6 +1510,7 @@ func (l *lowerer) lowerGlobal(global air.Global) (ast.Decl, error) {
 
 func (l *lowerer) lowerFunction(fn air.Function) (ast.Decl, error) {
 	l.declaredLocals = map[air.LocalID]bool{}
+	methodName, directMethod := l.directGoMethodName(fn)
 	params := []*ast.Field{}
 	for _, capture := range fn.Captures {
 		captureType, err := l.goType(capture.Type)
@@ -1533,8 +1526,21 @@ func (l *lowerer) lowerFunction(fn air.Function) (ast.Decl, error) {
 		})
 		l.declaredLocals[capture.Local] = true
 	}
-	for i, param := range fn.Signature.Params {
-		paramType, err := l.goFunctionParamType(fn, param)
+	paramStart := 0
+	var receiver *ast.FieldList
+	if directMethod {
+		receiverType, err := l.goMethodReceiverType(fn, nil)
+		if err != nil {
+			return nil, err
+		}
+		receiver = &ast.FieldList{List: []*ast.Field{{
+			Names: []*ast.Ident{l.ident(l.localName(fn, 0))},
+			Type:  receiverType,
+		}}}
+		paramStart = 1
+	}
+	for i := paramStart; i < len(fn.Signature.Params); i++ {
+		paramType, err := l.goFunctionParamType(fn, fn.Signature.Params[i])
 		if err != nil {
 			return nil, err
 		}
@@ -1553,7 +1559,10 @@ func (l *lowerer) lowerFunction(fn air.Function) (ast.Decl, error) {
 	if err != nil {
 		return nil, err
 	}
-	funcType := &ast.FuncType{Params: &ast.FieldList{List: params}, TypeParams: l.goFuncTypeParamList(fn)}
+	funcType := &ast.FuncType{Params: &ast.FieldList{List: params}}
+	if !directMethod {
+		funcType.TypeParams = l.goFuncTypeParamList(fn)
+	}
 	results, err := l.goSignatureReturnFields(fn.Signature, returnTypeID)
 	if err != nil {
 		return nil, err
@@ -1561,8 +1570,13 @@ func (l *lowerer) lowerFunction(fn air.Function) (ast.Decl, error) {
 	if len(results) > 0 {
 		funcType.Results = &ast.FieldList{List: results}
 	}
+	name := l.goFunctionName(fn)
+	if directMethod {
+		name = methodName
+	}
 	return &ast.FuncDecl{
-		Name: l.ident(l.goFunctionName(fn)),
+		Recv: receiver,
+		Name: l.ident(name),
 		Type: funcType,
 		Body: body,
 	}, nil
@@ -1600,7 +1614,7 @@ func (l *lowerer) goFuncTypeParamList(fn air.Function) *ast.FieldList {
 	if len(fn.TypeParams) == 0 {
 		return nil
 	}
-	comparable := l.comparableTypeParams(fn.Signature, fn.Locals)
+	comparable := l.functionComparableTypeParams(fn)
 	return l.typeParamFieldList(fn.TypeParams, comparable)
 }
 
@@ -1622,7 +1636,7 @@ func (l *lowerer) typeParamFieldList(typeParams []string, comparable map[string]
 // comparableTypeParams returns the set of type parameter names that appear as a
 // map key within the given signature and locals, and therefore require the
 // `comparable` constraint.
-func (l *lowerer) comparableTypeParams(signature air.Signature, locals []air.Local) map[string]bool {
+func (l *lowerer) comparableTypeParams(signature air.Signature, locals []air.Local, body *air.Block, comparableRoots []air.TypeID) map[string]bool {
 	result := map[string]bool{}
 	seen := map[air.TypeID]uint8{}
 	var walk func(id air.TypeID, requireComparable bool)
@@ -1681,79 +1695,178 @@ func (l *lowerer) comparableTypeParams(signature air.Signature, locals []air.Loc
 	for _, loc := range locals {
 		walk(loc.Type, false)
 	}
+	if body != nil {
+		walkBlockExprs(*body, func(expr air.Expr) {
+			walk(expr.Type, false)
+		})
+	}
+	for _, root := range comparableRoots {
+		walk(root, true)
+	}
 	return result
 }
 
-func (l *lowerer) lowerGoMethodWrapper(fn air.Function) (*ast.FuncDecl, bool, error) {
-	key, methodName, ok := l.goMethodKey(fn)
-	if !ok || l.goMethodCollisions[key] || l.emittedGoMethods[key] {
-		return nil, false, nil
+func (l *lowerer) functionComparableTypeParams(fn air.Function) map[string]bool {
+	if comparable, ok := l.functionComparable[fn.ID]; ok {
+		return comparable
 	}
+	return l.comparableTypeParams(fn.Signature, fn.Locals, &fn.Body, nil)
+}
+
+func (l *lowerer) collectFunctionComparableTypeParams() map[air.FunctionID]map[string]bool {
+	result := make(map[air.FunctionID]map[string]bool, len(l.program.Functions))
+	for _, fn := range l.program.Functions {
+		result[fn.ID] = l.comparableTypeParams(fn.Signature, fn.Locals, &fn.Body, nil)
+	}
+	for changed := true; changed; {
+		changed = false
+		for _, fn := range l.program.Functions {
+			walkBlockExprs(fn.Body, func(expr air.Expr) {
+				if expr.Kind != air.ExprCall && expr.Kind != air.ExprFunctionRef && expr.Kind != air.ExprMakeClosure {
+					return
+				}
+				if !validFunctionID(l.program, expr.Function) {
+					return
+				}
+				callee := l.program.Functions[expr.Function]
+				calleeComparable := result[callee.ID]
+				if expr.Kind == air.ExprMakeClosure {
+					// Lifted closures inherit the enclosing generic parameter names and
+					// are instantiated with those names at creation time.
+					for _, typeParam := range callee.TypeParams {
+						if calleeComparable[typeParam] && !result[fn.ID][typeParam] {
+							result[fn.ID][typeParam] = true
+							changed = true
+						}
+					}
+					return
+				}
+				comparableArgs := []air.TypeID{}
+				for i, typeParam := range callee.TypeParams {
+					if !calleeComparable[typeParam] || i >= len(expr.TypeArgs) {
+						continue
+					}
+					comparableArgs = append(comparableArgs, expr.TypeArgs[i])
+				}
+				mapped := l.comparableTypeParams(air.Signature{}, nil, nil, comparableArgs)
+				for typeParam := range mapped {
+					if !result[fn.ID][typeParam] {
+						result[fn.ID][typeParam] = true
+						changed = true
+					}
+				}
+			})
+		}
+	}
+	return result
+}
+
+func (l *lowerer) directGoMethodName(fn air.Function) (string, bool) {
+	key, methodName, ok := l.goMethodKey(fn)
+	if !ok || l.goMethodCollisions[key] || len(fn.Captures) != 0 {
+		return "", false
+	}
+	receiverTypeID := fn.Receiver
+	if receiverTypeID == air.NoType && len(fn.Signature.Params) > 0 {
+		receiverTypeID = fn.Signature.Params[0].Type
+	}
+	// Go receiver declarations may bind a generic definition's type
+	// parameters, but cannot attach methods to a concrete instantiation such as
+	// Box[int]. Keep the standalone fallback for that uncommon shape.
+	if validTypeID(l.program, receiverTypeID) {
+		receiver := l.program.Types[receiverTypeID-1]
+		if receiver.Generic != air.NoType && len(fn.TypeParams) == 0 {
+			return "", false
+		}
+	}
+	if !l.goMethodReceiverProvidesConstraints(fn, receiverTypeID) {
+		return "", false
+	}
+	return methodName, true
+}
+
+func (l *lowerer) goMethodReceiverProvidesConstraints(fn air.Function, receiverTypeID air.TypeID) bool {
+	required := l.functionComparableTypeParams(fn)
+	if len(required) == 0 {
+		return true
+	}
+	if !validTypeID(l.program, receiverTypeID) {
+		return false
+	}
+	receiver := l.program.Types[receiverTypeID-1]
+	if receiver.Generic != air.NoType && validTypeID(l.program, receiver.Generic) {
+		receiver = l.program.Types[receiver.Generic-1]
+	}
+	fields := make([]air.Param, len(receiver.Fields))
+	for i, field := range receiver.Fields {
+		fields[i] = air.Param{Type: field.Type}
+	}
+	available := l.comparableTypeParams(air.Signature{Params: fields}, nil, nil, nil)
+	for typeParam := range required {
+		if !available[typeParam] {
+			return false
+		}
+	}
+	return true
+}
+
+func (l *lowerer) goMethodReceiverType(fn air.Function, typeArgs []air.TypeID) (ast.Expr, error) {
 	if len(fn.Signature.Params) == 0 {
-		return nil, false, nil
+		return nil, fmt.Errorf("method %s has no receiver parameter", fn.Name)
 	}
 	receiverTypeID := fn.Receiver
 	if receiverTypeID == air.NoType {
 		receiverTypeID = fn.Signature.Params[0].Type
 	}
-	// A method on a generic struct is a real Go generic-receiver method
-	// (`func (self Foo[T]) M(...)`), where the receiver binds the type
-	// parameters. A method on a *concrete* instantiation cannot be expressed in
-	// Go (the receiver `Foo[int]` would bind a fresh type parameter named
-	// `int`); skip its wrapper and rely on the standalone function instead.
-	if validTypeID(l.program, receiverTypeID) && l.program.Types[receiverTypeID-1].Generic != air.NoType && len(fn.TypeParams) == 0 {
-		return nil, false, nil
-	}
 	receiverType, err := l.goType(receiverTypeID)
+	if len(typeArgs) > 0 && validTypeID(l.program, receiverTypeID) {
+		receiver := l.program.Types[receiverTypeID-1]
+		baseTypeID := receiverTypeID
+		if receiver.Generic != air.NoType {
+			baseTypeID = receiver.Generic
+		}
+		receiverType, err = l.goType(baseTypeID)
+		if err == nil {
+			receiverType = l.indexWithTypeArgs(receiverType, typeArgs)
+		}
+	}
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
 	if l.isReferenceType(fn.Signature.Params[0].Type) {
 		receiverType = &ast.StarExpr{X: receiverType}
 	}
+	return receiverType, nil
+}
 
-	params := make([]*ast.Field, 0, len(fn.Signature.Params)-1)
-	callArgs := []ast.Expr{l.ident(l.localName(fn, 0))}
-	for i, param := range fn.Signature.Params[1:] {
-		paramType, err := l.goFunctionParamType(fn, param)
-		if err != nil {
-			return nil, false, err
+func (l *lowerer) functionCallExpr(fn air.Function, args []ast.Expr, typeArgs []air.TypeID) *ast.CallExpr {
+	if methodName, ok := l.directGoMethodName(fn); ok && len(args) > 0 {
+		return &ast.CallExpr{
+			Fun:  &ast.SelectorExpr{X: args[0], Sel: l.ident(methodName)},
+			Args: args[1:],
 		}
-		localID := air.LocalID(i + 1)
-		name := l.localName(fn, localID)
-		params = append(params, &ast.Field{Names: []*ast.Ident{l.ident(name)}, Type: paramType})
-		callArgs = append(callArgs, l.ident(name))
 	}
+	fun := l.functionExpr(fn)
+	if len(typeArgs) > 0 {
+		fun = l.indexWithTypeArgs(fun, typeArgs)
+	}
+	return &ast.CallExpr{Fun: fun, Args: args}
+}
 
-	callFun := l.functionExpr(fn)
-	if len(fn.TypeParams) > 0 {
-		// Instantiate the standalone generic method function with the receiver's
-		// type parameters, which the receiver `Foo[T]` brings into scope.
-		callFun = l.indexWithTypeParamNames(callFun, fn.TypeParams)
+func (l *lowerer) functionReferenceExpr(fn air.Function, typeArgs []air.TypeID) (ast.Expr, error) {
+	methodName, ok := l.directGoMethodName(fn)
+	if !ok {
+		value := l.functionExpr(fn)
+		if len(typeArgs) > 0 {
+			value = l.indexWithTypeArgs(value, typeArgs)
+		}
+		return value, nil
 	}
-	call := &ast.CallExpr{Fun: callFun, Args: callArgs}
-	body := []ast.Stmt{}
-	if l.isVoidType(fn.Signature.Return) {
-		body = append(body, &ast.ExprStmt{X: call})
-	} else {
-		body = append(body, &ast.ReturnStmt{Results: l.unpackABIResultExprs(fn.Signature.Return, call)})
-	}
-	funcType := &ast.FuncType{Params: &ast.FieldList{List: params}}
-	results, err := l.goSignatureReturnFields(fn.Signature, fn.Signature.Return)
+	receiverType, err := l.goMethodReceiverType(fn, typeArgs)
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
-	if len(results) > 0 {
-		funcType.Results = &ast.FieldList{List: results}
-	}
-
-	l.emittedGoMethods[key] = true
-	return &ast.FuncDecl{
-		Recv: &ast.FieldList{List: []*ast.Field{{Names: []*ast.Ident{l.ident(l.localName(fn, 0))}, Type: receiverType}}},
-		Name: l.ident(methodName),
-		Type: funcType,
-		Body: &ast.BlockStmt{List: body},
-	}, true, nil
+	return &ast.SelectorExpr{X: receiverType, Sel: l.ident(methodName)}, nil
 }
 
 func (l *lowerer) collectGoMethodCollisions() map[string]bool {
@@ -2124,11 +2237,7 @@ func (l *lowerer) lowerRawCall(fn air.Function, expr air.Expr) (loweredExpr, err
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	fun := l.functionExpr(target)
-	if len(expr.TypeArgs) > 0 {
-		fun = l.indexWithTypeArgs(fun, expr.TypeArgs)
-	}
-	call := &ast.CallExpr{Fun: fun, Args: args}
+	call := l.functionCallExpr(target, args, expr.TypeArgs)
 	if len(writeback) > 0 {
 		return loweredExpr{}, fmt.Errorf("raw ABI call with writeback args is not supported")
 	}
@@ -2538,7 +2647,11 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		if !validFunctionID(l.program, expr.Function) {
 			return loweredExpr{}, fmt.Errorf("unknown function %d", expr.Function)
 		}
-		return loweredExpr{expr: l.functionExpr(l.program.Functions[expr.Function])}, nil
+		value, err := l.functionReferenceExpr(l.program.Functions[expr.Function], expr.TypeArgs)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		return loweredExpr{expr: value}, nil
 	case air.ExprUnionWrap:
 		return l.lowerUnionWrap(fn, expr)
 	case air.ExprMatchUnion:
@@ -3287,11 +3400,7 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		if err != nil {
 			return loweredExpr{}, err
 		}
-		fun := l.functionExpr(target)
-		if len(expr.TypeArgs) > 0 {
-			fun = l.indexWithTypeArgs(fun, expr.TypeArgs)
-		}
-		call := &ast.CallExpr{Fun: fun, Args: args}
+		call := l.functionCallExpr(target, args, expr.TypeArgs)
 		if l.abiReturnShapeAvailable(target.Signature.Return) && len(writeback) == 0 {
 			return l.packABICallResult(expr.Type, target.Signature.Return, stmts, call)
 		}
@@ -5084,7 +5193,7 @@ func (l *lowerer) mutableTraitImplForwardingCase(traitMethod air.TraitMethod, me
 	for i := range traitMethod.Signature.Params {
 		args = append(args, l.ident(fmt.Sprintf("arg%d", i)))
 	}
-	call := &ast.CallExpr{Fun: l.functionExpr(methodFn), Args: args}
+	call := l.functionCallExpr(methodFn, args, nil)
 	body := []ast.Stmt{}
 	if l.isVoidType(traitMethod.Signature.Return) {
 		body = append(body, &ast.ExprStmt{X: call})
@@ -5166,7 +5275,7 @@ func (l *lowerer) mutableTraitForwarderMethodExpr(traitMethod air.TraitMethod, m
 	for i := range traitMethod.Signature.Params {
 		args = append(args, l.ident(fmt.Sprintf("arg%d", i)))
 	}
-	call := &ast.CallExpr{Fun: l.functionExpr(methodFn), Args: args}
+	call := l.functionCallExpr(methodFn, args, nil)
 	body := []ast.Stmt{}
 	if l.isVoidType(traitMethod.Signature.Return) {
 		body = append(body, &ast.ExprStmt{X: call})
@@ -8047,7 +8156,7 @@ func (l *lowerer) lowerTraitObjectCall(fn air.Function, target loweredExpr, expr
 			}
 			args = append(args, argExpr)
 		}
-		callResult := ast.Expr(&ast.CallExpr{Fun: l.functionExpr(methodFn), Args: args})
+		callResult := ast.Expr(l.functionCallExpr(methodFn, args, nil))
 		if l.isBuiltinToStringTraitCall(expr, impl.ForType) && len(args) == 1 {
 			callResult = l.toStringExpr(impl.ForType, args[0])
 		}
