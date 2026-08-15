@@ -148,6 +148,10 @@ fn check(n: Int) Void!Str {
 	if err != nil {
 		t.Fatalf("lower: %v", err)
 	}
+	files := lowerProgramAST(t, program, Options{PackageName: "main", ProjectInfo: loaded.ProjectInfo})
+	if astFilesHaveFuncContaining(files, "anon_func") {
+		t.Fatal("generated AST should inline capturing foreign callback bodies")
+	}
 	if err := RunProgram(program, []string{"ard", "run", mainPath}, loaded.ProjectInfo); err != nil {
 		t.Fatalf("RunProgram error = %v", err)
 	}

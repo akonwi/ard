@@ -53,6 +53,10 @@ fn main() {
 	if err != nil {
 		t.Fatalf("lower: %v", err)
 	}
+	files := lowerProgramAST(t, program, Options{PackageName: "main", ProjectInfo: loaded.ProjectInfo})
+	if astFilesHaveFuncContaining(files, "anon_func") {
+		t.Fatal("generated AST should inline cross-module capturing closure bodies")
+	}
 	if err := RunProgram(program, []string{"ard", "run", mainPath}, loaded.ProjectInfo); err != nil {
 		t.Fatalf("RunProgram error = %v", err)
 	}

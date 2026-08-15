@@ -1610,6 +1610,144 @@ func TestGoTargetParityNestedClosureCaptures(t *testing.T) {
 	})
 }
 
+func TestGoTargetParityInlineClosureCaptureSnapshots(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		want   string
+	}{
+		{
+			name: "value snapshot ignores later outer reassignment",
+			source: `
+				fn main() Int {
+					mut value = 1
+					let read = fn() Int { value }
+					value = 2
+					read()
+				}
+			`,
+			want: "1",
+		},
+		{
+			name: "reference snapshot keeps original handle",
+			source: `
+				struct Box { value: Int }
+
+				fn main() Int {
+					let first = Box{value: 1}
+					let second = Box{value: 2}
+					mut reference = mut first
+					let read = fn() Int { reference.value }
+					reference = mut second
+					read()
+				}
+			`,
+			want: "1",
+		},
+		{
+			name: "retained slot survives creator return",
+			source: `
+				fn make_counter() fn() Int {
+					mut count = 0
+					fn() Int {
+						count = count + 1
+						count
+					}
+				}
+
+				fn main() Int {
+					let counter = make_counter()
+					counter() + counter()
+				}
+			`,
+			want: "3",
+		},
+		{
+			name: "nested retained closure shares propagated slot",
+			source: `
+				fn make_counter_factory() fn() fn() Int {
+					mut count = 0
+					fn() fn() Int {
+						fn() Int {
+							count = count + 1
+							count
+						}
+					}
+				}
+
+				fn main() Int {
+					let make_counter = make_counter_factory()
+					let counter = make_counter()
+					counter() + counter()
+				}
+			`,
+			want: "3",
+		},
+		{
+			name: "generic returned closure uses enclosing type parameter",
+			source: `
+				fn capture(value: $T) fn() $T {
+					fn() $T { value }
+				}
+
+				fn main() Int {
+					capture(42)()
+				}
+			`,
+			want: "42",
+		},
+		{
+			name: "later closure argument snapshots after earlier side effects",
+			source: `
+				fn consume(ignored: Int, read: fn() Int) Int {
+					read()
+				}
+
+				fn main() Int {
+					mut value = 1
+					let set = fn() Int {
+						value = 2
+						0
+					}
+					consume(set(), fn() Int { value })
+				}
+			`,
+			want: "2",
+		},
+		{
+			name: "capturing closure remains expression-local in while condition",
+			source: `
+				fn predicate(callback: fn() Bool) Bool {
+					callback()
+				}
+
+				fn main() Int {
+					let enabled = true
+					mut count = 0
+					while predicate(fn() Bool { enabled and count == 0 }) {
+						count = 1
+					}
+					count
+				}
+			`,
+			want: "1",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			program := lowerParitySource(t, tt.source)
+			files := lowerProgramAST(t, program, Options{PackageName: "main"})
+			if astFilesHaveFuncContaining(files, "anon_func") {
+				t.Fatal("generated AST should not emit a lifted closure helper")
+			}
+			if got := runGoTargetParityJSON(t, program); got != tt.want {
+				t.Fatalf("got %s, want %s", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestGoTargetParityClosureSnapshotsReassignedMutableLocal(t *testing.T) {
 	t.Run("scalar", func(t *testing.T) {
 		program := lowerParitySource(t, `

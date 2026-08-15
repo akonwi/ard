@@ -72,7 +72,7 @@ func newNamePlan(l *lowerer) *namePlan {
 	}
 	for _, fn := range l.program.Functions {
 		plan.functionNames[fn.ID] = planner.functionName(fn)
-		if fn.Name != "" {
+		if fn.Name != "" && !l.inlineClosures[fn.ID] {
 			plan.localReserved[plan.functionNames[fn.ID]] = true
 		}
 	}
@@ -83,7 +83,7 @@ func newNamePlan(l *lowerer) *namePlan {
 		}
 	}
 
-	plan.buildVariantNames(naturalTypeNames)
+	plan.buildVariantNames(l, naturalTypeNames)
 	plan.buildImportCollisionSets(l)
 	return plan
 }
@@ -265,7 +265,7 @@ type plannedTopLevelName struct {
 	hasOwner bool
 }
 
-func (p *namePlan) buildVariantNames(naturalTypeNames map[air.TypeID]string) {
+func (p *namePlan) buildVariantNames(l *lowerer, naturalTypeNames map[air.TypeID]string) {
 	actualNames := make([]plannedTopLevelName, 0, len(p.program.Types)+len(p.program.Traits)+len(p.program.Functions)+len(p.program.Globals))
 	for _, typ := range p.program.Types {
 		owner, ok := topLevelNameModule(p.program, topLevelNameType, int(typ.ID))
@@ -276,6 +276,9 @@ func (p *namePlan) buildVariantNames(naturalTypeNames map[air.TypeID]string) {
 		actualNames = append(actualNames, plannedTopLevelName{name: p.traitName(trait), owner: owner, hasOwner: ok})
 	}
 	for _, fn := range p.program.Functions {
+		if l.inlineClosures[fn.ID] {
+			continue
+		}
 		owner, ok := topLevelNameModule(p.program, topLevelNameFunction, int(fn.ID))
 		actualNames = append(actualNames, plannedTopLevelName{name: p.functionName(fn), owner: owner, hasOwner: ok})
 	}
@@ -360,7 +363,9 @@ func (p *namePlan) buildImportCollisionSets(l *lowerer) {
 		p.programTopLevel[p.globalName(global)] = true
 	}
 	for _, fn := range p.program.Functions {
-		p.programTopLevel[p.functionName(fn)] = true
+		if !l.inlineClosures[fn.ID] {
+			p.programTopLevel[p.functionName(fn)] = true
+		}
 	}
 
 	for _, module := range p.program.Modules {
@@ -391,7 +396,7 @@ func (p *namePlan) buildImportCollisionSets(l *lowerer) {
 			}
 		}
 		for _, functionID := range l.functionsForModule(module.ID) {
-			if validFunctionID(p.program, functionID) {
+			if validFunctionID(p.program, functionID) && !l.inlineClosures[functionID] {
 				occupied[p.functionName(p.program.Functions[functionID])] = true
 			}
 		}
