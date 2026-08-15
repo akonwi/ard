@@ -39,6 +39,14 @@ type TestOutcome struct {
 	Message     string `json:"message,omitempty"`
 }
 
+type artifactPurpose string
+
+const (
+	artifactPurposeRun   artifactPurpose = "run"
+	artifactPurposeBuild artifactPurpose = "build"
+	artifactPurposeTest  artifactPurpose = "test"
+)
+
 func GenerateSources(program *air.Program, options Options) (map[string][]byte, error) {
 	generated, err := lowerProgram(program, options)
 	if err != nil {
@@ -57,7 +65,8 @@ func GenerateSources(program *air.Program, options Options) (map[string][]byte, 
 
 func RunProgram(program *air.Program, args []string, projectInfo ...*checker.ProjectInfo) error {
 	info := optionalProjectInfo(projectInfo)
-	workspaceDir, err := artifactWorkspace(inputPathFromCLIArgs(args), "run")
+	pathHint := artifactPathHint(info, inputPathFromCLIArgs(args))
+	workspaceDir, err := artifactWorkspace(pathHint, artifactPurposeRun)
 	if err != nil {
 		return err
 	}
@@ -75,26 +84,27 @@ func RunProgram(program *air.Program, args []string, projectInfo ...*checker.Pro
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
-	if err := cmd.Run(); err != nil {
-		return err
-	}
-	return nil
+	return cmd.Run()
 }
 
 func BuildProgram(program *air.Program, outputPath string, projectInfo ...*checker.ProjectInfo) (string, error) {
 	info := optionalProjectInfo(projectInfo)
-	workspaceDir, err := artifactWorkspace(outputPath, "build")
-	if err != nil {
-		return "", err
-	}
-	if err := writeProgram(workspaceDir, program, Options{PackageName: "main", ProjectInfo: info}); err != nil {
-		return "", err
-	}
 	if outputPath == "" {
 		outputPath = "main"
 	}
 	absOutput, err := filepath.Abs(outputPath)
 	if err != nil {
+		return "", err
+	}
+	pathHint := artifactPathHint(info, outputPath)
+	if err := rejectManagedBuildOutput(pathHint, absOutput); err != nil {
+		return "", err
+	}
+	workspaceDir, err := artifactWorkspace(pathHint, artifactPurposeBuild)
+	if err != nil {
+		return "", err
+	}
+	if err := writeProgram(workspaceDir, program, Options{PackageName: "main", ProjectInfo: info}); err != nil {
 		return "", err
 	}
 	if err := buildGeneratedProgram(workspaceDir, absOutput, goBuildTags(info)...); err != nil {
@@ -105,7 +115,8 @@ func BuildProgram(program *air.Program, outputPath string, projectInfo ...*check
 
 func RunTests(program *air.Program, args []string, tests []TestCase, failFast bool, projectInfo ...*checker.ProjectInfo) ([]TestOutcome, error) {
 	info := optionalProjectInfo(projectInfo)
-	workspaceDir, err := artifactWorkspace(inputPathFromCLIArgs(args), "test")
+	pathHint := artifactPathHint(info, inputPathFromCLIArgs(args))
+	workspaceDir, err := artifactWorkspace(pathHint, artifactPurposeTest)
 	if err != nil {
 		return nil, err
 	}
@@ -137,6 +148,67 @@ func RunTests(program *air.Program, args []string, tests []TestCase, failFast bo
 		return nil, err
 	}
 	return outcomes, nil
+}
+
+func rejectManagedBuildOutput(pathHint string, outputPath string) error {
+	rootDir, err := artifactRootDir(pathHint)
+	if err != nil {
+		return err
+	}
+	ardOutRoot := filepath.Join(rootDir, "ard-out")
+	managedPaths := []string{
+		filepath.Join(ardOutRoot, "go"),
+		filepath.Join(ardOutRoot, ".go-module-cache"),
+	}
+	resolvedOutput, err := resolveExistingPathAncestors(outputPath)
+	if err != nil {
+		return err
+	}
+	for _, managedPath := range managedPaths {
+		resolvedManagedPath, err := resolveExistingPathAncestors(managedPath)
+		if err != nil {
+			return err
+		}
+		if pathWithin(resolvedOutput, resolvedManagedPath) {
+			return fmt.Errorf("build output %q is inside backend-managed path %q", outputPath, managedPath)
+		}
+	}
+	return nil
+}
+
+func resolveExistingPathAncestors(path string) (string, error) {
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	current := filepath.Clean(absolute)
+	missing := []string{}
+	for {
+		resolved, err := filepath.EvalSymlinks(current)
+		if err == nil {
+			for i := len(missing) - 1; i >= 0; i-- {
+				resolved = filepath.Join(resolved, missing[i])
+			}
+			return filepath.Clean(resolved), nil
+		}
+		if !os.IsNotExist(err) {
+			return "", err
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return "", err
+		}
+		missing = append(missing, filepath.Base(current))
+		current = parent
+	}
+}
+
+func pathWithin(path string, root string) bool {
+	relative, err := filepath.Rel(root, path)
+	if err != nil {
+		return false
+	}
+	return relative == "." || relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
 }
 
 func writeImportSpec(b *strings.Builder, alias string, defaultAlias string, importPath string) {
@@ -366,7 +438,7 @@ func generatedGoModBase(projectInfo *checker.ProjectInfo) (string, error) {
 			}
 			return string(rewritten), nil
 		}
-		if err != nil && !os.IsNotExist(err) {
+		if !os.IsNotExist(err) {
 			return "", err
 		}
 		if strings.TrimSpace(projectInfo.ProjectName) != "" {
@@ -770,31 +842,78 @@ func inputPathFromCLIArgs(args []string) string {
 	return "."
 }
 
-func artifactWorkspace(pathHint string, purpose string) (string, error) {
+func artifactPathHint(projectInfo *checker.ProjectInfo, fallback string) string {
+	if projectInfo != nil && strings.TrimSpace(projectInfo.RootPath) != "" {
+		return projectInfo.RootPath
+	}
+	return fallback
+}
+
+func artifactWorkspace(pathHint string, purpose artifactPurpose) (string, error) {
 	rootDir, err := artifactRootDir(pathHint)
 	if err != nil {
 		return "", err
 	}
-	base := filepath.Join(rootDir, "ard-out", "go", purpose)
-	preserved, err := readGoModuleFiles(base)
+	ardOutRoot := filepath.Join(rootDir, "ard-out")
+	artifactRoot := filepath.Join(ardOutRoot, "go")
+	moduleCacheRoot := filepath.Join(ardOutRoot, ".go-module-cache")
+	workspace := filepath.Join(artifactRoot, string(purpose))
+	if err := cacheArtifactGoModuleFiles(artifactRoot, moduleCacheRoot); err != nil {
+		return "", err
+	}
+	preserved, err := readGoModuleFiles(workspace)
 	if err != nil {
 		return "", err
 	}
-	if err := os.RemoveAll(base); err != nil {
+	cached, err := readGoModuleFiles(filepath.Join(moduleCacheRoot, string(purpose)))
+	if err != nil {
 		return "", err
 	}
-	if err := os.MkdirAll(base, 0o755); err != nil {
+	preserved.fillMissing(cached)
+	if err := os.RemoveAll(artifactRoot); err != nil {
 		return "", err
 	}
-	if err := preserved.write(base); err != nil {
+	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		return "", err
 	}
-	return base, nil
+	if err := preserved.write(workspace); err != nil {
+		return "", err
+	}
+	return workspace, nil
+}
+
+func cacheArtifactGoModuleFiles(artifactRoot string, cacheRoot string) error {
+	for _, purpose := range []artifactPurpose{artifactPurposeRun, artifactPurposeBuild, artifactPurposeTest} {
+		files, err := readGoModuleFiles(filepath.Join(artifactRoot, string(purpose)))
+		if err != nil {
+			return err
+		}
+		if files.goMod == nil && files.goSum == nil {
+			continue
+		}
+		cacheDir := filepath.Join(cacheRoot, string(purpose))
+		if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+			return err
+		}
+		if err := files.write(cacheDir); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 type goModuleFiles struct {
 	goMod []byte
 	goSum []byte
+}
+
+func (files *goModuleFiles) fillMissing(cached goModuleFiles) {
+	if files.goMod == nil {
+		files.goMod = cached.goMod
+	}
+	if files.goSum == nil {
+		files.goSum = cached.goSum
+	}
 }
 
 func readGoModuleFiles(dir string) (goModuleFiles, error) {

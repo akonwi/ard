@@ -3168,7 +3168,7 @@ func TestArtifactWorkspacePreservesGoModuleFiles(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	workspace, err := artifactWorkspace(dir, "run")
+	workspace, err := artifactWorkspace(dir, artifactPurposeRun)
 	if err != nil {
 		t.Fatalf("artifact workspace: %v", err)
 	}
@@ -3184,7 +3184,7 @@ func TestArtifactWorkspacePreservesGoModuleFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	workspace, err = artifactWorkspace(dir, "run")
+	workspace, err = artifactWorkspace(dir, artifactPurposeRun)
 	if err != nil {
 		t.Fatalf("artifact workspace: %v", err)
 	}
@@ -3198,6 +3198,145 @@ func TestArtifactWorkspacePreservesGoModuleFiles(t *testing.T) {
 		t.Fatal("artifact workspace kept stale generated file")
 	}
 }
+func TestArtifactWorkspaceKeepsOnlySelectedPurpose(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	goRoot := filepath.Join(dir, "ard-out", "go")
+	cachedRunGoMod := []byte("module cached-run\n\ngo 1.26.0\n")
+	for _, purpose := range []string{"run", "build", "test"} {
+		purposeDir := filepath.Join(goRoot, purpose)
+		if err := os.MkdirAll(purposeDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(purposeDir, "stale"), []byte(purpose), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if purpose == "run" {
+			if err := os.WriteFile(filepath.Join(purposeDir, "go.mod"), cachedRunGoMod, 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	workspace, err := artifactWorkspace(dir, artifactPurposeTest)
+	if err != nil {
+		t.Fatalf("artifact workspace: %v", err)
+	}
+	if workspace != filepath.Join(goRoot, "test") {
+		t.Fatalf("workspace = %q, want %q", workspace, filepath.Join(goRoot, "test"))
+	}
+	entries, err := os.ReadDir(goRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "test" || !entries[0].IsDir() {
+		t.Fatalf("artifact root entries = %v, want only test directory", entries)
+	}
+
+	runWorkspace, err := artifactWorkspace(dir, artifactPurposeRun)
+	if err != nil {
+		t.Fatalf("restore run workspace: %v", err)
+	}
+	if got, err := os.ReadFile(filepath.Join(runWorkspace, "go.mod")); err != nil || string(got) != string(cachedRunGoMod) {
+		t.Fatalf("restored run go.mod = %q, %v", got, err)
+	}
+	entries, err = os.ReadDir(goRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "run" || !entries[0].IsDir() {
+		t.Fatalf("artifact root entries = %v, want only run directory", entries)
+	}
+}
+
+func TestBuildProgramRejectsOutputInsideManagedWorkspace(t *testing.T) {
+	projectDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	managedRoot := filepath.Join(projectDir, "ard-out", "go")
+	if err := os.MkdirAll(managedRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	markerPath := filepath.Join(managedRoot, "keep")
+	if err := os.WriteFile(markerPath, []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	outputPath := filepath.Join(managedRoot, "release", "demo")
+	_, err := BuildProgram(nil, outputPath, &checker.ProjectInfo{RootPath: projectDir, ProjectName: "demo"})
+	if err == nil || !strings.Contains(err.Error(), "inside backend-managed path") {
+		t.Fatalf("BuildProgram error = %v, want backend-managed path rejection", err)
+	}
+	if !fileExists(markerPath) {
+		t.Fatal("managed workspace was cleared before invalid output was rejected")
+	}
+
+	t.Run("symlinked parent", func(t *testing.T) {
+		linkPath := filepath.Join(projectDir, "dist-link")
+		if err := os.Symlink(managedRoot, linkPath); err != nil {
+			t.Skipf("symlinks unavailable: %v", err)
+		}
+		outputPath := filepath.Join(linkPath, "demo")
+		_, err := BuildProgram(nil, outputPath, &checker.ProjectInfo{RootPath: projectDir, ProjectName: "demo"})
+		if err == nil || !strings.Contains(err.Error(), "inside backend-managed path") {
+			t.Fatalf("BuildProgram error = %v, want symlinked managed path rejection", err)
+		}
+		if !fileExists(markerPath) {
+			t.Fatal("managed workspace was cleared before symlinked output was rejected")
+		}
+	})
+
+	for _, reservedPath := range []string{
+		filepath.Join(projectDir, "ard-out", ".go-module-cache", "demo"),
+	} {
+		t.Run(filepath.Base(reservedPath), func(t *testing.T) {
+			_, err := BuildProgram(nil, reservedPath, &checker.ProjectInfo{RootPath: projectDir, ProjectName: "demo"})
+			if err == nil || !strings.Contains(err.Error(), "inside backend-managed path") {
+				t.Fatalf("BuildProgram error = %v, want backend-managed path rejection", err)
+			}
+		})
+	}
+}
+
+func TestBuildProgramUsesProjectWorkspaceWhenOutputIsElsewhere(t *testing.T) {
+	root := t.TempDir()
+	projectDir := filepath.Join(root, "project")
+	outputDir := filepath.Join(root, "dist")
+	if err := os.MkdirAll(projectDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(projectDir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte("fn main() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := frontend.LoadModule(mainPath)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	outputPath := filepath.Join(outputDir, "demo")
+	if _, err := BuildProgram(program, outputPath, loaded.ProjectInfo); err != nil {
+		t.Fatalf("BuildProgram error = %v", err)
+	}
+	if !fileExists(filepath.Join(projectDir, "ard-out", "go", "build", "go.mod")) {
+		t.Fatal("build workspace was not generated under the project root")
+	}
+	if fileExists(filepath.Join(outputDir, "ard-out")) {
+		t.Fatal("output directory unexpectedly contains a generated workspace")
+	}
+}
+
 func TestLowerProgramUsesRuntimeMaybeForRecursiveNullableFields(t *testing.T) {
 	program := lowerSource(t, `
 
@@ -4306,7 +4445,7 @@ func TestArtifactWorkspaceUsesProjectLocalArdOut(t *testing.T) {
 	if root != projectDir {
 		t.Fatalf("artifact root = %q, want %q", root, projectDir)
 	}
-	workspace, err := artifactWorkspace(mainPath, "build")
+	workspace, err := artifactWorkspace(mainPath, artifactPurposeBuild)
 	if err != nil {
 		t.Fatal(err)
 	}

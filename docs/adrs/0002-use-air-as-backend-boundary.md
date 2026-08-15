@@ -77,7 +77,7 @@ The Go backend should:
 - assemble one generated Go package per Ard project
 - emit one generated Go file per Ard module
 - render production generated code through `go/format`, not string templates
-- materialize generated workspaces under `ard-out/go/{run,build}` for inspection and debugging
+- materialize only the selected command workspace under `ard-out/go/{run,build,test}` for inspection and debugging, clearing sibling Go workspaces before each generation
 - use statement-oriented Go lowering when Ard expressions require temporaries, setup statements, or explicit control flow
 - keep generated helper functions small and backend-owned
 
