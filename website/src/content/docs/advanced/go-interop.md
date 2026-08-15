@@ -269,19 +269,37 @@ Construct direct Go structs with keyed literals.
 use go:image as image
 
 let point = image::Point{X: 10, Y: 20}
+let partial = image::Point{X: 7} // Y receives its Go zero value, 0
 let rect = image::Rectangle{
   Min: image::Point{X: 0, Y: 0},
   Max: image::Point{X: 80, Y: 24},
 }
 ```
 
+Generic Go structs support explicit type arguments and inference from supplied fields. Given a Go type such as:
+
+```go
+type Box[T any] struct {
+  Value T
+}
+```
+
+Ard can construct it either way:
+
+```ard
+let explicit = ffi::Box<Str>{Value: "hello"}
+let inferred = ffi::Box{Value: "hello"}
+```
+
+Use explicit type arguments when omitted fields leave a type parameter uninferred. Supplied type arguments and fields must satisfy the Go type's constraints.
+
 Rules:
 
-- all exported Ard-visible fields must be provided;
-- omitted fields do not default to Go zero values;
+- any subset of exported, Ard-visible fields may be provided;
+- omitted fields receive their Go zero values;
 - field names must match exported Go field names exactly;
 - unexported fields cannot be set;
-- embedded/promoted field lookup is not supported yet;
+- exported embedded fields use their declared field name; promoted child-field shorthand is not supported;
 - unsupported field types reject the literal.
 
 Prefer Go constructors or companion wrappers for structs whose zero value is unsafe or whose invariants live in unexported fields.
@@ -345,6 +363,5 @@ Direct Go interop is intentionally incremental. Current limitations include:
 - embedded/promoted Go fields are not resolved through promotion;
 - Ard functions and closures cannot implement Go callback-shaped interfaces directly yet;
 - spread/forwarding for Go variadics still needs companion wrappers;
-- generic Go struct construction is not supported yet;
 - exact Go `*Interface` parameters are unsupported;
 - pure Ard cannot construct multi-level Go pointers—an exact compatible foreign pointer must already exist.
