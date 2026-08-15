@@ -766,20 +766,28 @@ func TestLowerProgramPassesMutTraitArgsByPointer(t *testing.T) {
 	files := lowerProgramAST(t, program, Options{PackageName: "main"})
 	if !astFilesContain(files, func(node ast.Node) bool {
 		call, ok := node.(*ast.CallExpr)
-		if !ok || !strings.Contains(astCallName(call), "Doubler_Bumpable_poke") || len(call.Args) < 2 {
+		if !ok || len(call.Args) != 1 {
 			return false
 		}
-		ident, ok := call.Args[1].(*ast.Ident)
+		selector, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok || selector.Sel == nil || selector.Sel.Name != "Poke" {
+			return false
+		}
+		ident, ok := call.Args[0].(*ast.Ident)
 		return ok && ident.Name == "c"
 	}) {
 		t.Fatal("generated AST missing pointer trait dispatch arg")
 	}
 	if astFilesContain(files, func(node ast.Node) bool {
 		call, ok := node.(*ast.CallExpr)
-		if !ok || !strings.Contains(astCallName(call), "Doubler_Bumpable_poke") || len(call.Args) < 2 {
+		if !ok || len(call.Args) != 1 {
 			return false
 		}
-		star, ok := call.Args[1].(*ast.StarExpr)
+		selector, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok || selector.Sel == nil || selector.Sel.Name != "Poke" {
+			return false
+		}
+		star, ok := call.Args[0].(*ast.StarExpr)
 		if !ok {
 			return false
 		}
@@ -814,20 +822,28 @@ func TestLowerProgramDereferencesMutParamForNonMutMethodCall(t *testing.T) {
 	files := lowerProgramAST(t, program, Options{PackageName: "main"})
 	if !astFilesContain(files, func(node ast.Node) bool {
 		call, ok := node.(*ast.CallExpr)
-		if !ok || !strings.Contains(astCallName(call), "Box_bump") || len(call.Args) == 0 {
+		if !ok || len(call.Args) != 0 {
 			return false
 		}
-		ident, ok := call.Args[0].(*ast.Ident)
+		selector, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok || selector.Sel == nil || selector.Sel.Name != "Bump" {
+			return false
+		}
+		ident, ok := selector.X.(*ast.Ident)
 		return ok && ident.Name == "b"
 	}) {
 		t.Fatal("generated AST missing mut method pointer call")
 	}
 	if !astFilesContain(files, func(node ast.Node) bool {
 		call, ok := node.(*ast.CallExpr)
-		if !ok || !strings.Contains(astCallName(call), "Box_peek") || len(call.Args) == 0 {
+		if !ok || len(call.Args) != 0 {
 			return false
 		}
-		star, ok := call.Args[0].(*ast.StarExpr)
+		selector, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok || selector.Sel == nil || selector.Sel.Name != "Peek" {
+			return false
+		}
+		star, ok := selector.X.(*ast.StarExpr)
 		if !ok {
 			return false
 		}
@@ -3708,7 +3724,7 @@ func TestLowerProgramInlinesCaptureFreeRetainedClosure(t *testing.T) {
 	buildProgramFromGeneratedSources(t, program, "capture-free-retained-closure")
 }
 
-func TestLowerProgramEmitsGoMethodWrapperForInherentImpl(t *testing.T) {
+func TestLowerProgramEmitsGoMethodBodyForInherentImpl(t *testing.T) {
 	program := lowerSource(t, `
 		struct Box {
 			value: Int,
@@ -3732,21 +3748,65 @@ func TestLowerProgramEmitsGoMethodWrapperForInherentImpl(t *testing.T) {
 		if !ok || fn.Recv == nil || fn.Name == nil || fn.Name.Name != "Count" || len(fn.Recv.List) != 1 {
 			return false
 		}
-		foundCall := false
+		foundField := false
 		ast.Inspect(fn.Body, func(node ast.Node) bool {
-			call, ok := node.(*ast.CallExpr)
-			if ok && strings.Contains(astCallName(call), "Box_Count") {
-				foundCall = true
-				return false
+			selector, ok := node.(*ast.SelectorExpr)
+			if ok && selector.Sel != nil && selector.Sel.Name == "Value" {
+				foundField = true
 			}
 			return true
 		})
-		return foundCall
+		return foundField
 	}) {
-		t.Fatal("generated AST missing Go method wrapper for inherent impl")
+		t.Fatal("generated AST missing inherent Go method body")
 	}
+	if astFilesHaveFuncContaining(files, "Box_Count") {
+		t.Fatal("generated AST should not emit a standalone inherent method helper")
+	}
+	if !astFilesHaveCall(files, "box.Count") {
+		t.Fatal("generated AST should call the inherent Go method directly")
+	}
+	buildProgramFromGeneratedSources(t, program, "direct-inherent-method-body")
 }
-func TestLowerProgramEmitsGoMethodWrapperForTraitImpl(t *testing.T) {
+
+func TestLowerProgramDirectMethodBodyCallsSiblingMethod(t *testing.T) {
+	program := lowerSource(t, `
+		struct Box {
+			value: Int,
+		}
+
+		impl Box {
+			fn doubled() Int {
+				self.value * 2
+			}
+
+			fn quadrupled() Int {
+				self.doubled() * 2
+			}
+		}
+
+		fn main() Int {
+			let box = Box{value: 3}
+			box.quadrupled()
+		}
+	`)
+
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	for _, helper := range []string{"Box_doubled", "Box_quadrupled"} {
+		if astFilesHaveFuncContaining(files, helper) {
+			t.Fatalf("generated AST should not emit standalone method helper %s", helper)
+		}
+	}
+	if !astFilesHaveCall(files, "self.Doubled") {
+		t.Fatal("generated method body should call sibling receiver method directly")
+	}
+	if !astFilesHaveCall(files, "box.Quadrupled") {
+		t.Fatal("generated caller should call receiver method directly")
+	}
+	buildProgramFromGeneratedSources(t, program, "direct-sibling-method-call")
+}
+
+func TestLowerProgramEmitsGoMethodBodyForTraitImpl(t *testing.T) {
 	program := lowerSource(t, `
 		trait Labeled {
 			fn Label() Str
@@ -3773,19 +3833,22 @@ func TestLowerProgramEmitsGoMethodWrapperForTraitImpl(t *testing.T) {
 		if !ok || fn.Recv == nil || fn.Name == nil || fn.Name.Name != "Label" || len(fn.Recv.List) != 1 {
 			return false
 		}
-		foundCall := false
+		foundField := false
 		ast.Inspect(fn.Body, func(node ast.Node) bool {
-			call, ok := node.(*ast.CallExpr)
-			if ok && strings.Contains(astCallName(call), "Button_Labeled_Label") {
-				foundCall = true
-				return false
+			selector, ok := node.(*ast.SelectorExpr)
+			if ok && selector.Sel != nil && selector.Sel.Name == "Text" {
+				foundField = true
 			}
 			return true
 		})
-		return foundCall
+		return foundField
 	}) {
-		t.Fatal("generated AST missing Go method wrapper for trait impl")
+		t.Fatal("generated AST missing trait Go method body")
 	}
+	if astFilesHaveFuncContaining(files, "Button_Labeled_Label") {
+		t.Fatal("generated AST should not emit a standalone trait method helper")
+	}
+	buildProgramFromGeneratedSources(t, program, "direct-trait-method-body")
 }
 func TestLowerProgramEmitsGoInterfaceForTraitObject(t *testing.T) {
 	program := lowerSource(t, `
@@ -3873,7 +3936,7 @@ func TestLowerProgramEmitsGoInterfaceForTraitObject(t *testing.T) {
 		t.Fatal("generated AST should keep mutable trait reference type for mut trait use")
 	}
 }
-func TestLowerProgramSkipsGoMethodWrapperWhenStructFieldCollides(t *testing.T) {
+func TestLowerProgramRetainsStandaloneMethodWhenStructFieldCollides(t *testing.T) {
 	program := lowerSource(t, `
 		trait Named {
 			fn Name() Str
@@ -3895,10 +3958,14 @@ func TestLowerProgramSkipsGoMethodWrapperWhenStructFieldCollides(t *testing.T) {
 		fn, ok := node.(*ast.FuncDecl)
 		return ok && fn.Recv != nil && fn.Name != nil && fn.Name.Name == "Name"
 	}) {
-		t.Fatal("generated AST should not emit Go method wrapper that collides with a struct field")
+		t.Fatal("generated AST should not emit a Go method that collides with a struct field")
 	}
+	if !astFilesHaveFuncContaining(files, "User_Named_Name") {
+		t.Fatal("generated AST missing standalone fallback for field-colliding method")
+	}
+	buildProgramFromGeneratedSources(t, program, "field-colliding-method-fallback")
 }
-func TestLowerProgramSkipsGoMethodWrapperForReservedStructReceiverMethods(t *testing.T) {
+func TestLowerProgramRetainsStandaloneReservedStructMethods(t *testing.T) {
 	program := lowerSource(t, `
 		struct Payload {
 			value: Int,
@@ -3926,9 +3993,15 @@ func TestLowerProgramSkipsGoMethodWrapperForReservedStructReceiverMethods(t *tes
 			fn, ok := node.(*ast.FuncDecl)
 			return ok && fn.Recv != nil && fn.Name != nil && fn.Name.Name == reserved
 		}) {
-			t.Fatalf("generated AST should not emit Go method wrapper %s reserved for generated JSON helpers", reserved)
+			t.Fatalf("generated AST should not emit Go method %s reserved for generated JSON helpers", reserved)
 		}
 	}
+	for _, fallback := range []string{"Payload_MarshalJSONTo", "Payload_UnmarshalJSONFrom"} {
+		if !astFilesHaveFuncContaining(files, fallback) {
+			t.Fatalf("generated AST missing standalone fallback %s", fallback)
+		}
+	}
+	buildProgramFromGeneratedSources(t, program, "reserved-method-fallback")
 }
 func TestLowerProgramPassesPointerReceiverForMutatingTraitImpl(t *testing.T) {
 	program := lowerSource(t, `
@@ -3967,18 +4040,8 @@ func TestLowerProgramPassesPointerReceiverForMutatingTraitImpl(t *testing.T) {
 	}) {
 		t.Fatal("generated AST missing native Go interface for trait with mutating impl")
 	}
-	if !astFilesContain(files, func(node ast.Node) bool {
-		fn, ok := node.(*ast.FuncDecl)
-		if !ok || fn.Name == nil || !strings.Contains(fn.Name.Name, "Buffer_Writer_write") || fn.Type.Params == nil || len(fn.Type.Params.List) == 0 {
-			return false
-		}
-		if len(fn.Type.Params.List[0].Names) == 0 || fn.Type.Params.List[0].Names[0].Name != "self" {
-			return false
-		}
-		_, ok = fn.Type.Params.List[0].Type.(*ast.StarExpr)
-		return ok
-	}) {
-		t.Fatal("generated AST missing pointer receiver for mutating trait impl")
+	if astFilesHaveFuncContaining(files, "Buffer_Writer_write") {
+		t.Fatal("generated AST should not emit a standalone mutating trait method helper")
 	}
 	if !astFilesContain(files, func(node ast.Node) bool {
 		fn, ok := node.(*ast.FuncDecl)
@@ -3988,7 +4051,7 @@ func TestLowerProgramPassesPointerReceiverForMutatingTraitImpl(t *testing.T) {
 		_, ok = fn.Recv.List[0].Type.(*ast.StarExpr)
 		return ok
 	}) {
-		t.Fatal("generated AST missing pointer Go method wrapper for mutating trait impl")
+		t.Fatal("generated AST missing direct pointer Go method for mutating trait impl")
 	}
 	if !astFilesContain(files, func(node ast.Node) bool {
 		call, ok := node.(*ast.CallExpr)
@@ -4808,6 +4871,117 @@ fn main() Int {
 	}) {
 		t.Fatal("generated AST missing generic-receiver method func (self Box[T]) Get()")
 	}
+	if astFilesHaveFuncContaining(files, "Box_get") {
+		t.Fatal("generated AST should not emit a standalone generic method helper")
+	}
+	if !astFilesHaveCall(files, "b.Get") {
+		t.Fatal("generated AST should call the generic receiver method directly")
+	}
+	buildProgramFromGeneratedSources(t, program, "direct-generic-method-body")
+}
+
+func TestLowerGenericStructMethodRetainsHelperForStrongerConstraint(t *testing.T) {
+	program := lowerSource(t, `
+		struct Box<$T> {
+			value: $T,
+		}
+
+		impl Box {
+			fn contains(value: $T) Bool {
+				[value: true].has(value)
+			}
+		}
+
+		fn main() {
+			let box = Box<Int>{value: 1}
+			if not box.contains(1) { panic("bad") }
+		}
+	`)
+
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if astFilesContain(files, func(node ast.Node) bool {
+		fn, ok := node.(*ast.FuncDecl)
+		return ok && fn.Recv != nil && fn.Name != nil && fn.Name.Name == "Contains"
+	}) {
+		t.Fatal("generated AST should not emit a receiver method with an insufficient any constraint")
+	}
+	if !astFilesHaveFuncContaining(files, "Box_contains") {
+		t.Fatal("generated AST missing constrained standalone method fallback")
+	}
+	buildProgramFromGeneratedSources(t, program, "generic-method-constraint-fallback")
+}
+
+func TestLowerGenericStructMethodPropagatesSiblingConstraint(t *testing.T) {
+	program := lowerSource(t, `
+		struct Box<$T> {
+			value: $T,
+		}
+
+		impl Box {
+			fn contains(value: $T) Bool {
+				[value: true].has(value)
+			}
+
+			fn delegates(value: $T) Bool {
+				self.contains(value)
+			}
+		}
+
+		fn main() {
+			let box = Box<Int>{value: 1}
+			if not box.delegates(1) { panic("bad") }
+		}
+	`)
+
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	for _, method := range []string{"Contains", "Delegates"} {
+		if astFilesContain(files, func(node ast.Node) bool {
+			fn, ok := node.(*ast.FuncDecl)
+			return ok && fn.Recv != nil && fn.Name != nil && fn.Name.Name == method
+		}) {
+			t.Fatalf("generated AST should not emit receiver method %s with an indirect comparable requirement", method)
+		}
+	}
+	for _, helper := range []string{"Box_contains", "Box_delegates"} {
+		if !astFilesHaveFuncContaining(files, helper) {
+			t.Fatalf("generated AST missing constrained standalone fallback %s", helper)
+		}
+	}
+	buildProgramFromGeneratedSources(t, program, "generic-method-transitive-constraint-fallback")
+}
+
+func TestLowerGenericStructMethodPropagatesClosureConstraint(t *testing.T) {
+	program := lowerSource(t, `
+		struct Box<$T> {
+			value: $T,
+		}
+
+		impl Box {
+			fn contains(value: $T) Bool {
+				let check = fn() Bool {
+					[value: true].has(value)
+				}
+				check()
+			}
+		}
+
+		fn main() {
+			let box = Box<Int>{value: 1}
+			if not box.contains(1) { panic("bad") }
+		}
+	`)
+
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if astFilesContain(files, func(node ast.Node) bool {
+		fn, ok := node.(*ast.FuncDecl)
+		return ok && fn.Recv != nil && fn.Name != nil && fn.Name.Name == "Contains"
+	}) {
+		t.Fatal("generated AST should not emit receiver method with a closure-propagated comparable requirement")
+	}
+	if !astFilesHaveFuncContaining(files, "Box_contains") {
+		t.Fatal("generated AST missing constrained standalone fallback for closure requirement")
+	}
+	buildProgramFromGeneratedSources(t, program, "generic-method-closure-constraint-fallback")
 }
 
 // A Go struct literal may set a func-typed field; the Ard closure passes
@@ -4906,7 +5080,11 @@ func TestLowerProgramSupportsVoidTraitObjectDispatchWithoutStdlib(t *testing.T) 
 	files := lowerProgramAST(t, program, Options{PackageName: "main"})
 	if !astFilesContain(files, func(node ast.Node) bool {
 		call, ok := node.(*ast.CallExpr)
-		return ok && strings.Contains(astCallName(call), "Cat_Greet_say")
+		if !ok {
+			return false
+		}
+		selector, ok := call.Fun.(*ast.SelectorExpr)
+		return ok && selector.Sel != nil && selector.Sel.Name == "Say"
 	}) {
 		t.Fatal("generated AST missing void trait dispatch call")
 	}
@@ -4917,7 +5095,11 @@ func TestLowerProgramSupportsVoidTraitObjectDispatchWithoutStdlib(t *testing.T) 
 		}
 		for _, rhs := range assign.Rhs {
 			call, ok := rhs.(*ast.CallExpr)
-			if ok && strings.Contains(astCallName(call), "Cat_Greet_say") {
+			if !ok {
+				continue
+			}
+			selector, ok := call.Fun.(*ast.SelectorExpr)
+			if ok && selector.Sel != nil && selector.Sel.Name == "Say" {
 				return true
 			}
 		}

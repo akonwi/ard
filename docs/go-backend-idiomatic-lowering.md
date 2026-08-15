@@ -19,11 +19,11 @@ The key idea is not to make Ard "just Go". The goal is to lower Ard constructs t
 
 ## Current gaps that matter most
 
-### Ard impl methods need Go method-set support
+### Some impl methods still require standalone fallbacks
 
-Ard impl methods have historically lowered as standalone functions with explicit receiver parameters. That preserves execution semantics, but it does not add methods to the generated Go type's method set. As a result, Ard-defined structs cannot naturally satisfy Go interfaces.
+Compatible Ard impl methods lower directly as Go receiver methods, and internal Ard calls and trait dispatch use those methods. The backend no longer emits a duplicate standalone helper plus a receiver wrapper for the common case.
 
-Current direction: when an Ard impl method has a Go-representable receiver and signature, also lower it as a real Go method while keeping the standalone helper for existing internal call paths.
+Standalone lowering remains only when Go cannot legally or safely attach the natural method: selector collisions with fields or other methods, names reserved for generated behavior, methods on concrete generic instantiations, and generic methods that require stronger constraints than their receiver type provides. Eliminating those fallbacks requires explicit collision diagnostics or a stable method-name policy rather than duplicate declarations.
 
 ### Ard traits are not Go interfaces
 
@@ -63,11 +63,11 @@ If Go-facing adapters are needed later, they should be wrappers at the boundary,
    - Generate real receiver methods for compatible impls.
    - Preserve existing standalone helper lowering where method lowering is not possible or would change semantics.
    - Ensure pointer/value receivers match Ard `mut` receiver behavior.
-   - Initial implementation notes:
-     - AIR now records receiver/method metadata for impl methods.
-     - The Go target emits wrapper methods around existing standalone impl helpers for eligible local struct/enum/union receivers.
-     - Wrappers are skipped when Go cannot legally attach the method, when a struct field has the same Go selector name, or when multiple Ard impl methods would collide on one Go method name.
-     - Internal Ard calls and trait dispatch still use the existing standalone helper functions.
+   - Implementation notes:
+     - AIR records receiver/method metadata for impl methods.
+     - Eligible local struct/enum/union methods emit their bodies directly as Go receiver methods, using value or pointer receivers according to Ard receiver mutability.
+     - Internal Ard calls, trait dispatch, and mutable-trait forwarding call those receiver methods directly.
+     - Standalone fallbacks remain when Go cannot legally attach the method, when a struct field or reserved generated method has the same selector name, when multiple Ard methods collide on one Go method name, when the receiver is a concrete generic instantiation, or when a method requires stronger generic constraints than the receiver type provides.
 
 2. **Generate Go interfaces for Go-representable Ard traits.**
    - Emit the canonical interface in the package that defines the Ard trait.
@@ -78,8 +78,8 @@ If Go-facing adapters are needed later, they should be wrappers at the boundary,
    - Avoid changing traits whose method signatures need Ard-only runtime adaptation.
    - Initial implementation notes:
      - The Go target now emits a native Go interface declaration for each Go-representable Ard trait object type.
-     - Immutable trait object types use that interface when every known implementation can satisfy it with generated Go method wrappers.
-     - Traits with mutating receiver implementations now remain eligible for native interface lowering when there are no `mut Trait` use sites that still require the transitional forwarding-table representation; pointer receiver method wrappers let `*T` satisfy the same trait interface.
+     - Immutable trait object types use that interface when every known implementation can satisfy it with generated Go receiver methods.
+     - Traits with mutating receiver implementations now remain eligible for native interface lowering when there are no `mut Trait` use sites that still require the transitional forwarding-table representation; pointer receiver methods let `*T` satisfy the same trait interface.
      - Project/dependency FFI boundaries adapt top-level `Trait`, `Trait?`, and `Trait!E` returns where practical, but fall back to the old `any` representation for container-shaped FFI signatures that are not recursively adapted yet.
      - ADR 0023's forwarding-table design is now considered a transitional Go-target implementation detail to retire, not the desired long-term trait representation.
 
@@ -88,7 +88,7 @@ If Go-facing adapters are needed later, they should be wrappers at the boundary,
    - This should enable Ard-defined adapter types for Go APIs without handwritten Go companion wrappers in common cases.
    - Initial implementation notes:
      - The checker now derives a Go-compatible method set for Ard-defined structs and uses it when checking assignability to direct-Go interfaces.
-     - The Go target declares and lowers uncalled inherent impl methods so their generated Go method wrappers exist even when the method is only needed by pure Go interface dispatch.
+     - The Go target declares and lowers uncalled inherent impl methods so their generated Go receiver methods exist even when the method is only needed by pure Go interface dispatch.
      - Trait impl methods continue to use the existing trait-impl declaration path to avoid duplicate wrapper collisions.
 
 4. **Generate natural Go packages for Ard modules.**
@@ -116,7 +116,7 @@ If Go-facing adapters are needed later, they should be wrappers at the boundary,
 
 ## Open questions
 
-- Should Go method lowering eventually replace standalone impl functions, or should both forms remain permanently for internal call stability?
+- How should selector collisions and concrete generic-instantiation methods be diagnosed or represented so the remaining standalone method fallbacks can be removed?
 - How should Ard visibility map to exported Go identifiers in a single generated package?
 - Should generated Go interfaces for traits be exported only for public traits?
 - How should method name collisions be handled when multiple Ard traits define the same method name for one type?
