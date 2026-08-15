@@ -837,7 +837,7 @@ func TestLowerProgramDereferencesMutParamForNonMutMethodCall(t *testing.T) {
 		t.Fatal("generated AST missing deref for non-mut method call on mut param")
 	}
 }
-func TestGenerateSourcesFormatsSimpleProgram(t *testing.T) {
+func TestGenerateSourcesRendersSimpleProgram(t *testing.T) {
 	program := lowerSource(t, `
 		fn add(a: Int, b: Int) Int {
 			a + b

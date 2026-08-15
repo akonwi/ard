@@ -32,16 +32,25 @@ type enumVariantKey struct {
 }
 
 func newNamePlan(l *lowerer) *namePlan {
+	program := l.program
+	typeCount, traitCount, functionCount, globalCount, moduleCount := 0, 0, 0, 0, 0
+	if program != nil {
+		typeCount = len(program.Types)
+		traitCount = len(program.Traits)
+		functionCount = len(program.Functions)
+		globalCount = len(program.Globals)
+		moduleCount = len(program.Modules)
+	}
 	plan := &namePlan{
-		program:         l.program,
-		typeNames:       map[air.TypeID]string{},
-		traitNames:      map[air.TraitID]string{},
-		functionNames:   map[air.FunctionID]string{},
-		globalNames:     map[air.GlobalID]string{},
-		variantNames:    map[enumVariantKey]string{},
-		programTopLevel: map[string]bool{},
-		moduleTopLevel:  map[air.ModuleID]map[string]bool{},
-		localReserved:   map[string]bool{},
+		program:         program,
+		typeNames:       make(map[air.TypeID]string, typeCount),
+		traitNames:      make(map[air.TraitID]string, traitCount),
+		functionNames:   make(map[air.FunctionID]string, functionCount),
+		globalNames:     make(map[air.GlobalID]string, globalCount),
+		variantNames:    make(map[enumVariantKey]string, variantCount(program)),
+		programTopLevel: make(map[string]bool, topLevelNameCount(program)),
+		moduleTopLevel:  make(map[air.ModuleID]map[string]bool, moduleCount),
+		localReserved:   make(map[string]bool, typeCount+functionCount+globalCount),
 	}
 	if l.program == nil {
 		return plan
@@ -355,9 +364,25 @@ func (p *namePlan) buildImportCollisionSets(l *lowerer) {
 	}
 
 	for _, module := range p.program.Modules {
-		occupied := map[string]bool{}
+		types := l.typesByModule[module.ID]
+		ownerless := l.ownerlessTypes
+		if l.typesByModule == nil {
+			types = l.typesForModule(module.ID, module.ID)
+			ownerless = nil
+		}
+		capacity := len(types) + len(ownerless) + len(module.Globals) + len(module.Functions)
+		for _, typ := range types {
+			capacity += len(typ.Variants)
+		}
+		for _, typ := range ownerless {
+			capacity += len(typ.Variants)
+		}
+		occupied := make(map[string]bool, capacity)
 		p.moduleTopLevel[module.ID] = occupied
-		for _, typ := range l.typesForModule(module.ID, module.ID) {
+		for _, typ := range types {
+			p.addTypeNames(occupied, *typ)
+		}
+		for _, typ := range ownerless {
 			p.addTypeNames(occupied, *typ)
 		}
 		for _, globalID := range module.Globals {
@@ -434,6 +459,24 @@ func (p *namePlan) enumVariantName(typ air.TypeInfo, variant air.VariantInfo) st
 		return name
 	}
 	return enumVariantName(p.program, typ, variant)
+}
+
+func variantCount(program *air.Program) int {
+	if program == nil {
+		return 0
+	}
+	count := 0
+	for _, typ := range program.Types {
+		count += len(typ.Variants)
+	}
+	return count
+}
+
+func topLevelNameCount(program *air.Program) int {
+	if program == nil {
+		return 0
+	}
+	return len(program.Types) + variantCount(program) + len(program.Traits) + len(program.Functions) + len(program.Globals)
 }
 
 func variantPlanKey(typ air.TypeInfo, variant air.VariantInfo) enumVariantKey {
