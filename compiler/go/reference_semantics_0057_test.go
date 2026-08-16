@@ -727,7 +727,7 @@ func TestADR0057MixedConcreteAndTraitReferencesCompareTargetIdentity(t *testing.
 	}
 }
 
-func TestADR0057MutableTraitReferencesCopyComparableForwardingHandles(t *testing.T) {
+func TestADR0057MutableTraitReferencesPreserveComparableRawPointers(t *testing.T) {
 	program := lowerParitySource(t, `
 		use ard/unsafe
 
@@ -774,6 +774,6 @@ func TestADR0057MutableTraitReferencesCopyComparableForwardingHandles(t *testing
 		}
 	`)
 	if got := runGoTargetParityJSON(t, program); got != `"true:true:box:3:1"` {
-		t.Fatalf("result = %s, want canonical comparable forwarding handle result", got)
+		t.Fatalf("result = %s, want canonical comparable raw-pointer result", got)
 	}
 }

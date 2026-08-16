@@ -95,6 +95,34 @@ func (c *Checker) instantiateGoFunctionCall(modName, name string, goFn *types.Fu
 		}
 	}
 
+	for i, arg := range args {
+		if !containsMutableTraitReference(arg) {
+			continue
+		}
+		tparam := tparams.At(i)
+		direct := false
+		if ref, ok := arg.(*MutableRef); ok {
+			_, direct = ref.Of().(*Trait)
+		}
+		typeVar, unresolved := arg.(*TypeVar)
+		unresolved = unresolved && typeVar.actual == nil
+		if ref, ok := arg.(*MutableRef); ok {
+			if referentVar, ok := ref.Of().(*TypeVar); ok && referentVar.actual == nil {
+				unresolved = true
+			}
+		}
+		unsafeResult := goResultsMentionTypeParam(sig.Results(), tparam)
+		unsafeParameter := goParametersNestTypeParam(sig.Params(), tparam) || (!direct && !unresolved)
+		if !unsafeResult && !unsafeParameter {
+			continue
+		}
+		qualified := modName + "::" + name
+		reason := fmt.Sprintf("raw-pointer mut Trait cannot flow through writable or returned Go type parameter %s", tparam.Obj().Name())
+		legacy := fmt.Sprintf("Unsupported Go function %s: %s", qualified, reason)
+		c.addDiagnostic(unsupportedGoEntityDiagnostic{Kind: "function", Name: qualified, Reason: reason, Span: c.sourceSpan(s.GetLocation()), LegacyMessage: legacy}.build())
+		return nil, nil, false
+	}
+
 	bindings := goTypeParamBindings{}
 	constraintSpan := func(i int) SourceSpan {
 		span := c.sourceSpan(s.GetLocation())
@@ -462,6 +490,142 @@ func boundTypeFromGo(t types.Type, tparams *types.TypeParamList, bindings goType
 		return &FunctionDef{Name: "<function>", Parameters: params, ReturnType: ret}, ""
 	}
 	return nil, fmt.Sprintf("generic type %s is not supported yet", t.String())
+}
+
+func containsMutableTraitReference(t Type) bool {
+	return containsMutableTraitReferenceSeen(t, map[Type]bool{})
+}
+
+func containsMutableTraitReferenceSeen(t Type, seen map[Type]bool) bool {
+	if t == nil || seen[t] {
+		return false
+	}
+	seen[t] = true
+	switch typ := t.(type) {
+	case *TypeVar:
+		if typ.actual == nil {
+			return true
+		}
+		return containsMutableTraitReferenceSeen(typ.actual, seen)
+	case *MutableRef:
+		if _, ok := typ.Of().(*Trait); ok {
+			return true
+		}
+		return containsMutableTraitReferenceSeen(typ.Of(), seen)
+	case *List:
+		return containsMutableTraitReferenceSeen(typ.Of(), seen)
+	case *Slice:
+		return containsMutableTraitReferenceSeen(typ.Of(), seen)
+	case *FixedArray:
+		return containsMutableTraitReferenceSeen(typ.Of(), seen)
+	case *Map:
+		return containsMutableTraitReferenceSeen(typ.Key(), seen) || containsMutableTraitReferenceSeen(typ.Value(), seen)
+	case *Chan:
+		return containsMutableTraitReferenceSeen(typ.Of(), seen)
+	case *Receiver:
+		return containsMutableTraitReferenceSeen(typ.Of(), seen)
+	case *Sender:
+		return containsMutableTraitReferenceSeen(typ.Of(), seen)
+	case *Maybe:
+		return containsMutableTraitReferenceSeen(typ.Of(), seen)
+	case *Result:
+		return containsMutableTraitReferenceSeen(typ.Val(), seen) || containsMutableTraitReferenceSeen(typ.Err(), seen)
+	case *FunctionDef:
+		for _, param := range typ.Parameters {
+			if containsMutableTraitReferenceSeen(param.Type, seen) {
+				return true
+			}
+		}
+		return containsMutableTraitReferenceSeen(typ.ReturnType, seen)
+	case *StructDef:
+		for _, field := range structFields(typ) {
+			if containsMutableTraitReferenceSeen(field, seen) {
+				return true
+			}
+		}
+	case *Union:
+		for _, member := range typ.Types {
+			if containsMutableTraitReferenceSeen(member, seen) {
+				return true
+			}
+		}
+	case *ForeignType:
+		if containsMutableTraitReferenceSeen(typ.Underlying, seen) || containsMutableTraitReferenceSeen(typ.MapKey, seen) || containsMutableTraitReferenceSeen(typ.MapValue, seen) || containsMutableTraitReferenceSeen(typ.Elem, seen) {
+			return true
+		}
+		for _, arg := range typ.TypeArgs {
+			if containsMutableTraitReferenceSeen(arg, seen) {
+				return true
+			}
+		}
+		for _, field := range typ.Fields {
+			if containsMutableTraitReferenceSeen(field, seen) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func goParametersNestTypeParam(params *types.Tuple, target *types.TypeParam) bool {
+	for i := 0; i < params.Len(); i++ {
+		if goTypeNestsSpecificTypeParam(params.At(i).Type(), target, true) {
+			return true
+		}
+	}
+	return false
+}
+
+func goTypeNestsSpecificTypeParam(t types.Type, target *types.TypeParam, root bool) bool {
+	if param, ok := t.(*types.TypeParam); ok {
+		return param == target && !root
+	}
+	if !goTypeMentionsSpecificTypeParam(t, target) {
+		return false
+	}
+	return true
+}
+
+func goResultsMentionTypeParam(results *types.Tuple, target *types.TypeParam) bool {
+	for i := 0; i < results.Len(); i++ {
+		if goTypeMentionsSpecificTypeParam(results.At(i).Type(), target) {
+			return true
+		}
+	}
+	return false
+}
+
+func goTypeMentionsSpecificTypeParam(t types.Type, target *types.TypeParam) bool {
+	switch typ := t.(type) {
+	case *types.TypeParam:
+		return typ == target
+	case *types.Slice:
+		return goTypeMentionsSpecificTypeParam(typ.Elem(), target)
+	case *types.Map:
+		return goTypeMentionsSpecificTypeParam(typ.Key(), target) || goTypeMentionsSpecificTypeParam(typ.Elem(), target)
+	case *types.Pointer:
+		return goTypeMentionsSpecificTypeParam(typ.Elem(), target)
+	case *types.Array:
+		return goTypeMentionsSpecificTypeParam(typ.Elem(), target)
+	case *types.Signature:
+		for i := 0; i < typ.Params().Len(); i++ {
+			if goTypeMentionsSpecificTypeParam(typ.Params().At(i).Type(), target) {
+				return true
+			}
+		}
+		return goResultsMentionTypeParam(typ.Results(), target)
+	case *types.Chan:
+		return goTypeMentionsSpecificTypeParam(typ.Elem(), target)
+	case *types.Named:
+		if args := typ.TypeArgs(); args != nil {
+			for i := 0; i < args.Len(); i++ {
+				if goTypeMentionsSpecificTypeParam(args.At(i), target) {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 // isDescriptorBoundaryArdType reports whether an instantiated parameter type

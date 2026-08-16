@@ -172,18 +172,62 @@ impl ffi::Reader for Native {
 let value = Native{N: 1}
 let view: mut View = mut value
 ffi::TakeReader(view)`, wantError: true},
-		{name: "bare generic preserves mutable trait forwarding handle", source: `trait View {
+		{name: "bare generic rejects mutable trait round trip without typed carrier", source: `trait View {
   fn value() Int
 }
 struct Native { N: Int }
 impl View for Native {
   fn value() Int { self.N }
 }
-fn take(value: mut View) {}
 let value = Native{N: 1}
 let view: mut View = mut value
-let echoed = ffi::Identity(view)
-take(echoed)`},
+ffi::Identity(view)`, wantError: true},
+		{name: "nested generic rejects mutable trait round trip without typed carrier", source: `trait View {
+  fn value() Int
+}
+struct Native { N: Int }
+impl View for Native {
+  fn value() Int { self.N }
+}
+let value = Native{N: 1}
+let view: mut View = mut value
+ffi::Wrap(view)`, wantError: true},
+		{name: "nested Ard carrier rejects erased generic result", source: `trait View {
+  fn value() Int
+}
+struct Native { N: Int }
+impl View for Native {
+  fn value() Int { self.N }
+}
+let value = Native{N: 1}
+let view: mut View = mut value
+let wrapped: (mut View)!Str = Result::ok(view)
+ffi::Identity(wrapped)`, wantError: true},
+		{name: "union carrier rejects erased generic result", source: `trait View {
+  fn value() Int
+}
+struct Native { N: Int }
+struct Holder { view: mut View }
+type Carrier = Holder | Int
+impl View for Native {
+  fn value() Int { self.N }
+}
+let value = Native{N: 1}
+let view: mut View = mut value
+let carrier: Carrier = Holder{view: view}
+ffi::Identity(carrier)`, wantError: true},
+		{name: "writable generic container rejects mutable trait element", source: `trait View {
+  fn value() Int
+}
+struct Native { N: Int }
+impl View for Native {
+  fn value() Int { self.N }
+}
+let value = Native{N: 1}
+let view: mut View = mut value
+let values: [mut View] = [view]
+ffi::Poison(mut values)`, wantError: true},
+		{name: "Ard generic wrapper rejects potentially erased mutable trait result", source: `fn poison(value: $T) $T { ffi::Identity(value) }`, wantError: true},
 		{name: "foreign interface storage rejects bare reference at value destination", source: `let value = ffi::BumperValue()
 let reference = mut value
 ffi::TakeBumper(reference)`, wantError: true},
@@ -291,6 +335,8 @@ func TakeDoublePtr(value **Item) {}
 func TakeInterfacePtr(value *Bumper) {}
 
 func Identity[T any](value T) T { return value }
+func Wrap[T any](value T) []T { return []T{value} }
+func Poison[T any](values []T) { values[0] = values[0] }
 func IsComparable[T comparable](value T) bool { return value == value }
 func Two[T comparable, U any](t T, u U) {}
 func UseBumper[T interface{ Bump() }](value T) { value.Bump() }

@@ -1966,6 +1966,31 @@ func TestGoTargetParityFallbackTraitMutableStorage(t *testing.T) {
 		}
 	})
 
+	t.Run("fallback ABI-shaped returns", func(t *testing.T) {
+		program := lowerParitySource(t, `
+			trait View {
+				fn result() Int!Str
+				fn maybe() Int?
+			}
+
+			struct Box { result: Int, maybe: Int }
+
+			impl View for Box {
+				fn result() Int!Str { Result::ok(self.result) }
+				fn maybe() Int? { Maybe::new(self.maybe) }
+			}
+
+			fn main() Int {
+				let box = Box{result: 40, maybe: 2}
+				let reference: mut View = mut box
+				reference.result().or(0) + reference.maybe().or(0)
+			}
+		`)
+		if got := runGoTargetParityJSON(t, program); got != `42` {
+			t.Fatalf("got %s, want fallback Result and Maybe returns to preserve their ABI", got)
+		}
+	})
+
 	t.Run("value implementation promoted by Any projection", func(t *testing.T) {
 		program := lowerParitySource(t, `
 			use ard/unsafe
