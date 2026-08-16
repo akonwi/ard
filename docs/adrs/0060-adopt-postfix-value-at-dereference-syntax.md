@@ -4,6 +4,10 @@
 
 Accepted
 
+Amended by ADR 0061: `mut Trait` is no longer represented by a Go pointer layer
+and is therefore not a valid `.@` operand. Mutable-to-ordinary trait conversion
+is an ordinary representation-free source conversion.
+
 ## Context
 
 ADR 0057 introduced `deref expression` as Ard's explicit operation for

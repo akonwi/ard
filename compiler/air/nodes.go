@@ -79,8 +79,8 @@ const (
 	// ExprDeref performs one shallow read through a reference. It is distinct
 	// from reference creation and is never an assignment place (ADR 0057).
 	ExprDeref
-	// ExprTraitRefProject constructs a mutable trait forwarding handle from a
-	// concrete reference using Trait and Impl metadata (ADR 0057).
+	// ExprTraitRefProject widens a concrete mutable reference to the trait's
+	// native interface while preserving its concrete pointer (ADR 0061).
 	ExprTraitRefProject
 	ExprMatchForeignType
 	// ExprScalarConvert converts Target's foreign named scalar value to the

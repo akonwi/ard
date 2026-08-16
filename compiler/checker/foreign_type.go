@@ -184,6 +184,12 @@ func (f *ForeignType) PointerForm() *ForeignType {
 		return nil
 	}
 	pointer, _ := foreignNamedTypeFromGo(named, true, false).(*ForeignType)
+	if pointer != nil && len(f.TypeArgs) > 0 {
+		pointer.TypeArgs = append([]Type(nil), f.TypeArgs...)
+		pointer.Fields = f.Fields
+		pointer.UnsupportedFields = f.UnsupportedFields
+		pointer.FieldsLoaded = f.FieldsLoaded
+	}
 	return pointer
 }
 

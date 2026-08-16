@@ -439,6 +439,7 @@ func Send(channel chan int) bool {
 }
 func Identity[T any](value T) T { return value }
 func IsComparable[T comparable](value T) bool { return value == value }
+func ReplaceFirst[S ~[]E, E any](values S, replacement E) E { values[0] = replacement; return values[0] }
 func ReadGeneric[T interface{ Read() int }](value T) int { return value.Read() }
 func SliceSize[S ~[]E, E any](value S) int { return len(value) }
 func Rebuffer[S ~[]int](value S) S {
@@ -457,6 +458,21 @@ func MixedSize[S ~[]E | string, E any](value S) int { return len(value) }
 	}
 	mainPath := filepath.Join(projectDir, "main.ard")
 	if err := os.WriteFile(mainPath, []byte(`use go:boundary/ffi
+
+trait LocalView {
+  fn read() Int
+}
+
+struct LocalBox { number: Int }
+struct LocalOther { number: Int }
+
+impl LocalView for LocalBox {
+  fn read() Int { self.number }
+}
+
+impl LocalView for LocalOther {
+  fn read() Int { self.number }
+}
 
 fn main() {
   let first = ffi::Item{N: 1}
@@ -491,6 +507,28 @@ fn main() {
   if not ffi::ReadAny(boxed) == 7 { panic("reference Any copied the pointee instead of the pointer") }
   if not ffi::IsComparable(first_pointer) { panic("reference did not satisfy comparable") }
   if not ffi::ReadGeneric(first_pointer) == 7 { panic("method-constrained reference failed") }
+
+  let local = LocalBox{number: 13}
+  let local_direct: LocalView = mut local
+  if not local_direct.read() == 13 { panic("direct mutable concrete to ordinary trait failed") }
+  let local_reference: mut LocalView = mut local
+  let local_echoed = ffi::Identity(local_reference)
+  if not local_echoed.read() == 13 { panic("mutable trait generic identity lost") }
+  if not ffi::IsComparable(local_echoed) { panic("mutable trait interface was not comparable") }
+  if not ffi::ReadGeneric(local_echoed) == 13 { panic("mutable trait interface missed Go method constraint") }
+
+  mut local_current: LocalView = LocalBox{number: 14}
+  let local_captured = mut local_current
+  let local_captured_echoed = ffi::Identity(local_captured)
+  local_current = LocalOther{number: 15}
+  if not local_captured_echoed.read() == 14 { panic("captured trait object followed slot replacement") }
+
+  let local_replacement = LocalOther{number: 16}
+  let local_replacement_reference: mut LocalView = mut local_replacement
+  let local_references: [mut LocalView] = [local_reference]
+  let local_replaced = ffi::ReplaceFirst(mut local_references, local_replacement_reference)
+  if not local_replaced.read() == 16 { panic("mutable trait writable generic result lost") }
+  if not local_references.at(0).expect("reference").read() == 16 { panic("mutable trait writable generic container lost") }
 
   let interface_value = ffi::ReaderValue()
   let interface_reference = mut interface_value
@@ -673,35 +711,34 @@ fn main() {
 	}
 }
 
-func TestADR0057TraitTypedStorageReferencesDispatchThroughCurrentValue(t *testing.T) {
+func TestADR0061TraitBorrowCapturesCurrentGoInterfaceValue(t *testing.T) {
 	program := lowerParitySource(t, `
-		use ard/unsafe
-
 		trait View {
 			fn value() Int
+			fn set(value: Int)
 		}
 		struct Box { number: Int }
 		struct Other { number: Int }
 		impl View for Box {
 			fn value() Int { self.number }
+			fn mut set(value: Int) { self.number = value }
 		}
 		impl View for Other {
 			fn value() Int { self.number }
+			fn mut set(value: Int) { self.number = value }
 		}
 
 		fn main() [Int] {
 			mut current: View = Box{number: 4}
-			let reference = mut current
-			let boxed: Any = reference
-			let recovered = unsafe::cast<mut Box>(boxed).expect("box pointer")
-			recovered.number = 6
-			let before = reference.value()
+			let captured = mut current
+			captured.set(6)
+			let before = captured.value()
 			current = Other{number: 9}
-			[before, reference.value()]
+			[before, captured.value(), current.value()]
 		}
 	`)
-	if got := runGoTargetParityJSON(t, program); got != `[6,9]` {
-		t.Fatalf("result = %s, want trait storage forwarding and pointer projection", got)
+	if got := runGoTargetParityJSON(t, program); got != `[6,6,9]` {
+		t.Fatalf("result = %s, want captured Go interface value independent of slot rebinding", got)
 	}
 }
 
@@ -727,7 +764,7 @@ func TestADR0057MixedConcreteAndTraitReferencesCompareTargetIdentity(t *testing.
 	}
 }
 
-func TestADR0057MutableTraitReferencesCopyComparableForwardingHandles(t *testing.T) {
+func TestADR0061MutableTraitValuesUseNativeInterfaceIdentity(t *testing.T) {
 	program := lowerParitySource(t, `
 		use ard/unsafe
 
@@ -767,13 +804,14 @@ func TestADR0057MutableTraitReferencesCopyComparableForwardingHandles(t *testing
 
 			let boxed: Any = view
 			let recovered = unsafe::cast<mut Box>(boxed).expect("concrete pointer")
-			let trait_copy: View = view.@
+			let recovered_view = unsafe::cast<mut View>(boxed).expect("native trait interface")
+			let ordinary: View = view
 			recovered.number = 3
 
-			"{canonical}:{independently_rebound}:{table.get(independent).or(\"missing\")}:{copied.value()}:{trait_copy.value()}"
+			"{canonical and recovered_view == view}:{independently_rebound}:{table.get(independent).or(\"missing\")}:{copied.value()}:{ordinary.value()}"
 		}
 	`)
-	if got := runGoTargetParityJSON(t, program); got != `"true:true:box:3:1"` {
-		t.Fatalf("result = %s, want canonical comparable forwarding handle result", got)
+	if got := runGoTargetParityJSON(t, program); got != `"true:true:box:3:3"` {
+		t.Fatalf("result = %s, want native interface pointer identity", got)
 	}
 }

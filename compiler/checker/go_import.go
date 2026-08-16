@@ -578,6 +578,51 @@ func foreignNamedTypeFromGo(named *types.Named, pointer bool, includeMethods boo
 	return foreign
 }
 
+func goFieldsForInstantiatedGenericNamedType(instantiated, origin *types.Named, args []Type) (map[string]Type, map[string]string) {
+	fields, unsupported := goFieldsForNamedType(instantiated)
+	bound, _ := goFieldsForBoundGenericNamedType(origin, args)
+	if fields == nil {
+		fields = map[string]Type{}
+	}
+	if unsupported == nil {
+		unsupported = map[string]string{}
+	}
+	for name, typ := range bound {
+		fields[name] = typ
+		delete(unsupported, name)
+	}
+	return fields, unsupported
+}
+
+func goFieldsForBoundGenericNamedType(named *types.Named, args []Type) (map[string]Type, map[string]string) {
+	if named == nil || named.TypeParams() == nil || named.TypeParams().Len() != len(args) {
+		return nil, nil
+	}
+	strct, ok := named.Underlying().(*types.Struct)
+	if !ok {
+		return nil, nil
+	}
+	bindings := goTypeParamBindings{}
+	for i := 0; i < named.TypeParams().Len(); i++ {
+		bindings[named.TypeParams().At(i)] = args[i]
+	}
+	fields := map[string]Type{}
+	unsupported := map[string]string{}
+	for i := 0; i < strct.NumFields(); i++ {
+		field := strct.Field(i)
+		if !field.Exported() {
+			continue
+		}
+		bound, reason := boundTypeFromGo(field.Type(), named.TypeParams(), bindings)
+		if reason == "" {
+			fields[field.Name()] = bound
+		} else {
+			unsupported[field.Name()] = reason
+		}
+	}
+	return fields, unsupported
+}
+
 func goFieldsForNamedType(named *types.Named) (map[string]Type, map[string]string) {
 	strct, ok := named.Underlying().(*types.Struct)
 	if !ok {

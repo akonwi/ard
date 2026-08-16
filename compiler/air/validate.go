@@ -609,15 +609,23 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 		if traitType.Trait != expr.Trait {
 			return fmt.Errorf("trait upcast expression trait %d does not match type trait %d", expr.Trait, traitType.Trait)
 		}
-		if !validImplID(program, expr.Impl) {
-			return fmt.Errorf("trait upcast has invalid impl id %d", expr.Impl)
+		targetImplType := expr.Target.Type
+		erasedMutableTrait := false
+		if targetType, err := typeInfo(program, expr.Target.Type); err == nil && targetType.Kind == TypeReference {
+			targetImplType = targetType.Elem
+			erasedMutableTrait = targetImplType == expr.Type && expr.Impl < 0
 		}
-		impl := program.Impls[expr.Impl]
-		if impl.Trait != expr.Trait {
-			return fmt.Errorf("trait upcast impl %d has trait %d, want %d", expr.Impl, impl.Trait, expr.Trait)
-		}
-		if impl.ForType != expr.Target.Type {
-			return fmt.Errorf("trait upcast impl %d is for type %d, got target type %d", expr.Impl, impl.ForType, expr.Target.Type)
+		if !erasedMutableTrait {
+			if !validImplID(program, expr.Impl) {
+				return fmt.Errorf("trait upcast has invalid impl id %d", expr.Impl)
+			}
+			impl := program.Impls[expr.Impl]
+			if impl.Trait != expr.Trait {
+				return fmt.Errorf("trait upcast impl %d has trait %d, want %d", expr.Impl, impl.Trait, expr.Trait)
+			}
+			if impl.ForType != targetImplType {
+				return fmt.Errorf("trait upcast impl %d is for type %d, got target type %d", expr.Impl, impl.ForType, targetImplType)
+			}
 		}
 	}
 	for _, local := range expr.CaptureLocals {
@@ -945,6 +953,9 @@ func typesAssignable(program *Program, destination TypeID, source TypeID) bool {
 	}
 	destinationInfo := program.Types[destination-1]
 	sourceInfo := program.Types[source-1]
+	if destinationInfo.Kind == TypeTraitObject && sourceInfo.Kind == TypeReference && sourceInfo.Elem == destination {
+		return true
+	}
 	return foreignTypeAssignableTo(program, destinationInfo, source, sourceInfo) ||
 		foreignTypeAssignableTo(program, sourceInfo, destination, destinationInfo) ||
 		typesStructurallyEquivalent(program, destination, source, map[[2]TypeID]bool{})

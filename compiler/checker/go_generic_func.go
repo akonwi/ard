@@ -106,10 +106,11 @@ func (c *Checker) instantiateGoFunctionCall(modName, name string, goFn *types.Fu
 		return span
 	}
 	goArgs := make([]types.Type, tparams.Len())
+	goTypeContext := newCheckerGoTypeContext()
 	allRepresentable := true
 	for i := 0; i < tparams.Len(); i++ {
 		tparam := tparams.At(i)
-		goArg, representable := checkerTypeToGoType(args[i])
+		goArg, representable := checkerTypeToGoTypeWithContext(args[i], goTypeContext)
 		if representable {
 			goArgs[i] = goArg
 		} else {
@@ -377,19 +378,33 @@ func boundTypeFromGo(t types.Type, tparams *types.TypeParamList, bindings goType
 			return bound, ""
 		}
 		return nil, fmt.Sprintf("type parameter %s requires instantiation", typ.Obj().Name())
-	case *types.Pointer:
-		if tp, ok := typ.Elem().(*types.TypeParam); ok {
-			bound, ok := bindings[tp]
-			if !ok {
-				return nil, fmt.Sprintf("type parameter %s requires instantiation", tp.Obj().Name())
-			}
-			mutable, reason := mutableBoundType(bound)
-			if reason != "" {
-				return nil, reason
-			}
-			return mutable, ""
+	case *types.Named:
+		if typ.TypeArgs() == nil || typ.TypeArgs().Len() == 0 {
+			return typeFromGo(typ)
 		}
-		return nil, fmt.Sprintf("generic pointer type %s is not supported yet", typ.String())
+		args := make([]Type, typ.TypeArgs().Len())
+		for i := 0; i < typ.TypeArgs().Len(); i++ {
+			arg, reason := boundTypeFromGo(typ.TypeArgs().At(i), tparams, bindings)
+			if reason != "" {
+				return nil, fmt.Sprintf("generic argument %d %s", i+1, reason)
+			}
+			args[i] = arg
+		}
+		foreign, ok := foreignNamedTypeFromGo(typ.Origin(), false, true).(*ForeignType)
+		if !ok {
+			return nil, fmt.Sprintf("generic named type %s is not supported yet", typ.String())
+		}
+		return foreignTypeWithArgs(foreign, args), ""
+	case *types.Pointer:
+		bound, reason := boundTypeFromGo(typ.Elem(), tparams, bindings)
+		if reason != "" {
+			return nil, "pointer element " + reason
+		}
+		mutable, reason := mutableBoundType(bound)
+		if reason != "" {
+			return nil, reason
+		}
+		return mutable, ""
 	case *types.Slice:
 		elem, reason := boundTypeFromGo(typ.Elem(), tparams, bindings)
 		if reason != "" {

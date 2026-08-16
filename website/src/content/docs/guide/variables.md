@@ -120,6 +120,8 @@ let snapshot: User = reference.@
 
 `.@` removes exactly one outer reference layer and evaluates its operand once. The deprecated prefix spelling `deref reference` remains accepted for one migration release, and `ard format` rewrites it to `reference.@`.
 
+`mut Trait` is the exception: it shares the trait's native Go interface representation and has no pointer layer to dereference. It converts directly to ordinary `Trait`, while `trait_reference.@` is rejected. Copying or narrowing a mutable trait preserves the same current dynamic object.
+
 The copy is **shallow**:
 
 - structs, fixed arrays, and primitive values copy their current value;
