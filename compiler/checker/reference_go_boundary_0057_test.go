@@ -172,7 +172,7 @@ impl ffi::Reader for Native {
 let value = Native{N: 1}
 let view: mut View = mut value
 ffi::TakeReader(view)`, wantError: true},
-		{name: "bare generic preserves mutable trait forwarding handle", source: `trait View {
+		{name: "bare generic preserves mutable trait wrapper", source: `trait View {
   fn value() Int
 }
 struct Native { N: Int }
@@ -184,6 +184,103 @@ let value = Native{N: 1}
 let view: mut View = mut value
 let echoed = ffi::Identity(view)
 take(echoed)`},
+		{name: "mutable trait wrapper satisfies Go method constraint", source: `trait Bumpable {
+  fn bump()
+}
+struct Native { N: Int }
+impl Bumpable for Native {
+  fn mut bump() { self.N = self.N + 1 }
+}
+let value = Native{N: 1}
+let reference: mut Bumpable = mut value
+ffi::UseBumper(reference)`},
+		{name: "mutable trait wrapper satisfies Result ABI method constraint", source: `trait Parser {
+  fn parse() Int!Str
+}
+struct Native { N: Int }
+impl Parser for Native {
+  fn parse() Int!Str { Result::ok(self.N) }
+}
+let value = Native{N: 1}
+let reference: mut Parser = mut value
+let result = ffi::UseParser(reference)`},
+		{name: "mutable trait wrapper satisfies Maybe ABI method constraint", source: `trait Finder {
+  fn find() Int?
+}
+struct Native { N: Int }
+impl Finder for Native {
+  fn find() Int? { Maybe::new(self.N) }
+}
+let value = Native{N: 1}
+let reference: mut Finder = mut value
+let result = ffi::UseFinder(reference)`},
+		{name: "recursive mutable trait wrapper satisfies Go method constraint", source: `trait Link {
+  fn next(value: mut Link) mut Link
+}
+struct Node { N: Int }
+impl Link for Node {
+  fn next(value: mut Link) mut Link { value }
+}
+let value = Node{N: 1}
+let reference: mut Link = mut value
+let returned = ffi::UseLink(reference)`},
+		{name: "related recursive mutable trait wrapper Go struct arguments stay canonical", source: `trait Link {
+  fn next(value: mut Link) mut Link
+}
+struct Node { N: Int }
+impl Link for Node {
+  fn next(value: mut Link) mut Link { value }
+}
+let value = Node{N: 1}
+let reference: mut Link = mut value
+let pair = ffi::LinkPair<mut Link, mut Link>{First: reference, Second: reference}`},
+		{name: "inferred related recursive mutable trait wrapper Go struct arguments stay canonical", source: `trait Link {
+  fn next(value: mut Link) mut Link
+}
+struct Node { N: Int }
+impl Link for Node {
+  fn next(value: mut Link) mut Link { value }
+}
+let value = Node{N: 1}
+let reference: mut Link = mut value
+let pair = ffi::LinkPair{First: reference, Second: reference}`},
+		{name: "nested generic Go struct fields preserve mutable trait binding", source: `trait Link {
+  fn next(value: mut Link) mut Link
+}
+struct Node { N: Int }
+impl Link for Node {
+  fn next(value: mut Link) mut Link { value }
+}
+let value = Node{N: 1}
+let reference: mut Link = mut value
+let inner = ffi::GenericBox<mut Link>{Value: reference}
+let outer = ffi::GenericOuter<mut Link>{Box: inner}`},
+		{name: "pointer nested generic Go struct fields preserve mutable trait binding", source: `trait Link {
+  fn next(value: mut Link) mut Link
+}
+struct Node { N: Int }
+impl Link for Node {
+  fn next(value: mut Link) mut Link { value }
+}
+let value = Node{N: 1}
+let reference: mut Link = mut value
+let inner = ffi::GenericBox<mut Link>{Value: reference}
+let outer = ffi::GenericPointerOuter<mut Link>{Box: mut inner}
+let rebound: mut Link = outer.Box.Value
+let linked = rebound.next(reference)`},
+		{name: "representable wrapper method satisfies constraint beside Ard-only method", source: `struct Payload { N: Int }
+trait View {
+  fn read() Int
+  fn payload() Payload
+}
+struct Native { N: Int }
+impl View for Native {
+  fn read() Int { self.N }
+  fn payload() Payload { Payload{N: self.N} }
+}
+let value = Native{N: 1}
+let reference: mut View = mut value
+let result = ffi::UseReader(reference)`},
 		{name: "foreign interface storage rejects bare reference at value destination", source: `let value = ffi::BumperValue()
 let reference = mut value
 ffi::TakeBumper(reference)`, wantError: true},
@@ -267,6 +364,10 @@ type Reader interface { Read() int }
 type Numbers []int
 type Scores map[string]int
 type Sink struct{}
+type LinkPair[T any, U interface{ Next(T) T }] struct { First T; Second U }
+type GenericBox[T any] struct { Value T }
+type GenericOuter[T any] struct { Box GenericBox[T] }
+type GenericPointerOuter[T any] struct { Box *GenericBox[T] }
 func (Sink) Take(values []int) {}
 
 var Global Item
@@ -294,6 +395,10 @@ func Identity[T any](value T) T { return value }
 func IsComparable[T comparable](value T) bool { return value == value }
 func Two[T comparable, U any](t T, u U) {}
 func UseBumper[T interface{ Bump() }](value T) { value.Bump() }
+func UseReader[T interface{ Read() int }](value T) int { return value.Read() }
+func UseParser[T interface{ Parse() (int, error) }](value T) (int, error) { return value.Parse() }
+func UseFinder[T interface{ Find() (int, bool) }](value T) (int, bool) { return value.Find() }
+func UseLink[T interface{ Next(T) T }](value T) T { return value.Next(value) }
 func SliceSize[S ~[]E, E any](value S) int { return len(value) }
 func SliceConsumer[S ~[]int]() func(S) { return func(value S) {} }
 func MapSize[M ~map[K]V, K comparable, V any](value M) int { return len(value) }

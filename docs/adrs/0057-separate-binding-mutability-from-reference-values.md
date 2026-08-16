@@ -21,8 +21,9 @@ observational dereferences, canonical recursive `TypeReference` identity,
 concrete-to-trait projection metadata, creation-time reference-handle captures,
 and writable/address-taken slot captures. The Go backend lowers concrete and
 descriptor references as pointer-copy handles, preserves slot rebinding and
-escaping storage, emits comparable canonical mutable-trait forwarding handles,
-and projects exact pointer, descriptor, generic, `Any`, and Go-interface ABIs.
+escaping storage, represents mutable-trait references with sealed comparable
+interface adapters, and projects exact pointer, descriptor, generic, `Any`, and
+Go-interface ABIs.
 All ADR 0057 Go runtime/FFI contracts pass. Diagnostics now distinguish
 addressability, actual-reference destinations, explicit value materialization,
 forbidden whole-referent writes, immutable slots, and reference-required
@@ -31,10 +32,11 @@ guides document the new model and migration paths. Phase 8 migrated the
 compiler samples, the Go backend fixture corpus, and the vaxis-demo example to
 explicit references and `.@`; the full compiler test suite, formatter
 verification, and the LSP harness pass. Downstream migration also hardened the
-backend: the mutable-trait storage vtable dispatches through impl functions
-directly instead of assuming a native Go interface, foreign-method values
-project descriptor arguments through the exact Go ABI, and unused mutable-trait
-handle machinery is no longer emitted for traits without any reference use.
+backend: fallback mutable-trait adapters dispatch through collision-proof
+implementation methods instead of assuming a native Go interface,
+foreign-method values project descriptor arguments through the exact Go ABI,
+and mutable-trait wrapper machinery is not emitted for traits without any
+reference use.
 Contextual typing flows into container literals through `mut` at reference
 destinations, including declaration-scope generics (`let out: mut [$T] =
 mut []`); only unresolved call-inference variables still require an explicit
@@ -318,9 +320,9 @@ when that pointer is nil. This does not reintroduce contextual dereferencing:
 the cast call explicitly requests value type `T`. For concrete and supported
 descriptor types, `unsafe::cast<mut T>` recovers the pointer handle and follows
 the same pointer-copy/rebind behavior as every other reference.
-`unsafe::cast<mut Trait>` remains unsupported initially because reconstructing a
-trait forwarding table from every possible dynamic pointer requires a separate
-open-world registration design.
+`unsafe::cast<mut Trait>` remains unsupported initially because an arbitrary
+dynamic pointer does not identify the intended trait contract or whether its
+source identity is concrete storage or a replaceable trait slot.
 
 Dereferencing `mut Trait` copies the current dynamic concrete value into
 compiler-owned storage before constructing the ordinary `Trait` value. The
@@ -545,8 +547,8 @@ rebound because the containing value is not interior mutable.
 
 References are identity-comparable and hash by the address of their current
 target storage, matching Go pointers. Pointee mutation does not change that
-identity or hash. Backend wrapper or forwarding-handle allocation must not create
-a different source-level identity for two references to the same storage.
+identity or hash. Backend adapter boxing must not create a different
+source-level identity for two references to the same storage.
 Therefore:
 
 - `mut T` may be a map key;
@@ -640,10 +642,10 @@ pointer method-set satisfaction, and the mutation behavior required by ADR 0056
 and issue #344. A descriptor reference similarly contributes its pointer-shaped
 handle when the destination is `Any`.
 
-A `mut Trait` has no meaningful Go `*Trait` representation. At `Any` or a named
-empty-interface boundary, its forwarding table projects the current dynamic
-concrete pointer, so Go observes dynamic `*Concrete`; the interface copies that
-pointer and does not retain the forwarding wrapper.
+A `mut Trait` wrapper is an internal Ard ABI value rather than Go `*Trait`. At
+an `Any` or named empty-interface boundary, its projection method returns the
+current dynamic concrete pointer, so Go observes dynamic `*Concrete`; the
+interface copies that pointer and does not retain the wrapper adapter.
 
 A general first-class `mut Trait` is rejected at named nonempty Go interface
 destinations because conformance cannot depend on its runtime implementation.
@@ -685,11 +687,13 @@ This is distinct from an actual `Any`/interface destination, which performs the
 interface conversion above while preserving dynamic type `*User`.
 
 For a bare unconstrained Go generic parameter, `mut Trait` contributes its
-static generated forwarding-handle type because Go must choose `T` at compile
-time; it cannot infer the runtime concrete pointer type. That handle is
-comparable and exposes generated forwarding methods needed to validate method
-constraints. If the instantiated destination is an actual interface, the
-interface conversion rule above projects the dynamic concrete pointer instead.
+static sealed wrapper-interface type because Go must choose `T` at compile time;
+it cannot infer the runtime concrete pointer type. That wrapper is comparable,
+retains its concrete/storage adapter through generic results and writable
+generic containers, and exposes natural forwarding methods for compatible Go
+method constraints. If the instantiated destination is an actual interface,
+the interface conversion rule above projects the dynamic concrete pointer
+instead.
 A `mut ForeignInterface` similarly contributes its pointer-to-interface type to
 a bare generic and requires `.@` when the instantiated destination is the
 interface value type itself.
@@ -703,7 +707,7 @@ Generic descriptor parameters use this precedence:
    the current descriptor, not a pointer to the descriptor.
 2. For a bare unconstrained type parameter such as `T any`, an inferred
    reference argument contributes its selected static boundary representation:
-   a concrete or descriptor pointer, a `mut Trait` forwarding handle, or a
+   a concrete or descriptor pointer, a sealed `mut Trait` wrapper, or a
    pointer-to-interface for `mut ForeignInterface`. Thus `mut [Int]` infers
    `T = *[]int` and passes the current pointer-shaped target.
 3. Explicit type arguments instantiate the signature first. If bare `T` is
@@ -718,7 +722,7 @@ constraints. For other bare constrained parameters:
 - a method/interface-constrained bare parameter infers the selected static
   boundary representation and validates that representation against the Go
   constraint: concrete references validate their pointer type, while `mut Trait`
-  validates its generated forwarding-handle methods;
+  validates the natural methods exposed by its wrapper interface;
 - a mixed type set containing both descriptor and non-descriptor alternatives
   is not preclassified as a descriptor boundary. It uses the argument's selected
   static boundary representation and ordinary constraint validation. A caller
@@ -861,40 +865,37 @@ target classification is always non-place.
 
 Concrete references use their Go pointer directly as identity. List/map and
 other descriptor references use a pointer to the referenced descriptor slot.
-Mutable trait references use a physically Go-comparable generated handle with
-conceptual fields:
+Mutable trait references use a sealed trait-owned interface with one of two
+dynamic adapter shapes:
 
 ```text
-TargetIdentity  // comparable address of target storage
-VTableIdentity  // canonical table for projected trait and target storage shape
+ConcreteAdapter[T]{Target: *T}     // borrow of concrete storage
+StorageAdapter{Target: *Trait}     // borrow of native-interface trait storage
+StorageAdapter{Target: *any}       // borrow of fallback trait storage
 ```
 
-The callable forwarding functions live behind `VTableIdentity`, never directly
-inside the comparable handle. Two independent conversions of the same target to
-the same mutable trait produce equal `(TargetIdentity, VTableIdentity)` handles;
-copying preserves that pair. The backend must guarantee that a target storage
-location has one canonical vtable identity for each projected trait. On the Go
-target, the trait-owning package declares the canonical handle and vtable types.
-Concrete implementation vtables are canonical in the implementation type's
-package and register their dynamic concrete types with the trait owner. The
-trait owner supplies one canonical trait-storage vtable that dispatches through
-that registry, avoiding reverse dependencies on implementation packages.
-Generated users qualify those declarations across package boundaries rather
-than recreating package-local named handle types or vtable identities.
+Each adapter contains only one pointer and is therefore comparable. Go interface
+comparison and hashing compare the canonical adapter type plus that pointer.
+Independent conversions of the same concrete target instantiate the same
+generic adapter type and pointer; independent borrows of the same trait slot use
+the same storage-adapter type and pointer. Borrowing the concrete pointee and
+borrowing a trait slot that currently contains it remain distinct identities,
+as required by the source storage model.
 
-For concrete-typed storage that vtable is specialized to the fixed concrete
-storage type. For trait-typed storage that may replace its current concrete
-implementation, the vtable is specialized to the stable trait storage shape and
-dynamically dispatches through the current interface value; it does not change
-when the stored implementation changes. Thus target replacement never changes
-an existing reference's equality or hash.
+The wrapper interface exposes sealed identity, shallow-load, and `Any`
+projection methods plus the trait's natural Go methods when representable.
+Concrete adapters forward through `*T`; storage adapters load the current trait
+value on each call, so replacing a trait-typed slot remains observable. Native
+traits dispatch through their ordinary Go interface. Fallback traits use a
+trait-owned dispatch interface and collision-proof generated receiver methods,
+which also avoids naming private implementation types across package boundaries.
 
-On the Go target, both fields must be strictly comparable so the handle itself
-can be a native map key and satisfy `comparable` without a custom equality path.
-Generated forwarding and `.@` use the vtable to operate on or copy the target
-storage. `VTableIdentity` is representation metadata, not an additional
-source-level identity; the canonicalization invariant ensures equal target
-references carry the same value.
+Dereferencing a concrete adapter copies `*T` directly. Dereferencing storage
+uses reflection to shallow-copy the current dynamic value. `Any` projection
+returns the concrete pointer; when trait storage currently contains a value
+implementation, the storage adapter promotes it to compiler-owned pointer
+storage and writes that pointer back before returning it. There is no generated
+function table, registry, or registration initializer.
 
 ### Assignment targets
 
@@ -961,12 +962,12 @@ Add runtime/backend tests for:
   affects only the rebound slot;
 - later ordinary target-slot replacement observed through existing references;
 - reference-valued field copying and rebinding;
-- concrete-to-trait reference projections, canonical comparable vtable/target
-  identities, copied forwarding handles, independent trait-reference rebinding,
-  and escape;
+- concrete-to-trait reference projections, canonical comparable adapter/target
+  identities, copied wrappers, independent trait-reference rebinding, and
+  escape;
 - `mut Trait` conversion to `Any`/empty interfaces as dynamic `*Concrete`,
   immediate statically proven versus flowed named-nonempty interface conversion,
-  bare generic forwarding-handle inference, and rejected
+  bare generic wrapper inference, writable generic round trips, and rejected
   `unsafe::cast<mut Trait>`;
 - sanctioned list, map, `Maybe`, and channel operations;
 - rejected whole replacement;
@@ -1030,13 +1031,12 @@ Add runtime/backend tests for:
   fields, parameters, returns, containers, and generics.
 - Lower reference-to-reference assignment as ordinary destination-slot handle
   replacement; never update previously copied handles.
-- Generate trait forwarding handles that capture concrete target storage for a
-  concrete projection, or the stable trait storage slot for a trait-typed
-  projection; use the corresponding canonical storage-shape vtable and
-  pointer-copy/rebind behavior.
+- Generate sealed trait wrapper interfaces with generic concrete adapters that
+  capture `*Concrete` and storage adapters that capture the stable `*Trait` or
+  `*any` slot; preserve pointer-copy/rebind behavior without function tables.
 - Give every concrete, trait, and descriptor reference handle the target
   storage's stable comparable pointer identity for `==`, map keys, and generic
-  constraints; forwarding-wrapper allocation must not change identity.
+  constraints; adapter boxing must not change identity.
 - Preserve pointer-shaped native list references where sanctioned list methods
   must update the referenced descriptor.
 - Do not introduce union/find, shared retargeting cells, or reference-group
@@ -1060,7 +1060,7 @@ Add runtime/backend tests for:
 - Lower concrete references as current `*T` pointers at `Any`, pointer-shaped Go
   generic, and compatible Go interface boundaries.
 - Lower `mut Trait` as dynamic `*Concrete` at `Any`/empty-interface boundaries
-  and as its static comparable forwarding handle at bare generic destinations;
+  and as its static sealed comparable wrapper at bare generic destinations;
   reject named nonempty interface conversion after static concrete provenance
   has been lost.
 - Lower `mut ForeignInterface` to `Any` as pointer-to-interface, require `.@`
@@ -1152,28 +1152,28 @@ Superseded or clarified:
 - backend-private whole-value `assign` and implicit mutable-to-immutable trait
   coercion are not source-level reference operations;
 - whole-referent assignment through `mut Trait` is rejected in Ard source;
-- mutable trait reference handles use the same pointer-copy and destination-slot
+- mutable trait wrapper adapters use the same pointer-copy and destination-slot
   rebinding rules as concrete references.
 
 A concrete-to-trait reference conversion is a type-widening boundary. Upcasting
-`mut Leaf` to `mut View` creates a forwarding handle that captures the concrete
-reference's current target storage. Copying that trait reference copies the
-forwarding handle and preserves the same pointee. Rebinding either the original
-concrete reference slot or a trait-reference slot does not change handles that
-were copied previously. Rebinding a writable `mut View` slot may select another
-`View` implementation without changing narrower `mut Leaf` aliases.
+`mut Leaf` to `mut View` creates a comparable concrete adapter that captures the
+reference's current `*Leaf` storage. Copying that trait reference copies the
+adapter and preserves the same pointee. Rebinding either the original concrete
+reference slot or a trait-reference slot does not change wrappers copied
+previously. Rebinding a writable `mut View` slot may select another `View`
+implementation without changing narrower `mut Leaf` aliases.
 
 Retained:
 
-- mutable trait references require trait-specific forwarding for interior method
-  dispatch;
+- mutable trait references require trait-specific adapter forwarding for
+  interior method dispatch;
 - forwarding must reach stable original storage and remain sound when escaping;
 - copy-in/copy-out pointers to temporary interface values are unsound;
 - foreign and immutable trait-object representations remain separate concerns.
 
 The implementation test matrix must cover concrete-to-trait upcast, copied trait
-forwarding handles, later concrete-reference rebinding, heterogeneous trait-slot
-rebinding, escaping handles, and pointee mutation through every copy.
+wrappers, later concrete-reference rebinding, heterogeneous trait-slot
+rebinding, escaping adapters, and pointee mutation through every copy.
 
 ### ADR 0030: Use Direct Go Struct Values and Fields
 
@@ -1324,7 +1324,7 @@ Superseded or clarified:
   shallow value operation;
 - passing a reference to an inferred imported Go generic contributes its
   selected static boundary representation: concrete pointer, descriptor pointer,
-  mutable-trait forwarding handle, or pointer-to-interface;
+  mutable-trait wrapper interface, or pointer-to-interface;
 - a generic explicitly fixed to value `User` rejects bare `mut User` and accepts
   `reference.@`;
 - concrete references convert to compatible interfaces by copying `*T`;

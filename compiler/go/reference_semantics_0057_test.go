@@ -439,7 +439,11 @@ func Send(channel chan int) bool {
 }
 func Identity[T any](value T) T { return value }
 func IsComparable[T comparable](value T) bool { return value == value }
+func ReplaceFirst[S ~[]E, E any](values S, replacement E) E { values[0] = replacement; return values[0] }
 func ReadGeneric[T interface{ Read() int }](value T) int { return value.Read() }
+func ParseGeneric[T interface{ Parse() (int, error) }](value T) (int, error) { return value.Parse() }
+func FindGeneric[T interface{ Find() (int, bool) }](value T) (int, bool) { return value.Find() }
+func LinkGeneric[T interface{ Next(T) T }](value T) T { return value.Next(value) }
 func SliceSize[S ~[]E, E any](value S) int { return len(value) }
 func Rebuffer[S ~[]int](value S) S {
 	out := make(S, 1, 3)
@@ -457,6 +461,37 @@ func MixedSize[S ~[]E | string, E any](value S) int { return len(value) }
 	}
 	mainPath := filepath.Join(projectDir, "main.ard")
 	if err := os.WriteFile(mainPath, []byte(`use go:boundary/ffi
+
+trait LocalView {
+  fn read() Int
+  fn parse() Int!Str
+  fn find() Int?
+}
+
+struct LocalBox { read: Int }
+struct LocalOther { number: Int }
+
+impl LocalView for LocalBox {
+  fn read() Int { self.read }
+  fn parse() Int!Str { Result::ok(self.read) }
+  fn find() Int? { Maybe::new(self.read) }
+}
+
+impl LocalView for LocalOther {
+  fn read() Int { self.number }
+  fn parse() Int!Str { Result::ok(self.number) }
+  fn find() Int? { Maybe::new(self.number) }
+}
+
+trait LocalLink {
+  fn next(value: mut LocalLink) mut LocalLink
+}
+
+struct LocalNode { number: Int }
+
+impl LocalLink for LocalNode {
+  fn next(value: mut LocalLink) mut LocalLink { value }
+}
 
 fn main() {
   let first = ffi::Item{N: 1}
@@ -491,6 +526,33 @@ fn main() {
   if not ffi::ReadAny(boxed) == 7 { panic("reference Any copied the pointee instead of the pointer") }
   if not ffi::IsComparable(first_pointer) { panic("reference did not satisfy comparable") }
   if not ffi::ReadGeneric(first_pointer) == 7 { panic("method-constrained reference failed") }
+
+  let local = LocalBox{read: 13}
+  let local_reference: mut LocalView = mut local
+  let local_echoed = ffi::Identity(local_reference)
+  if not local_echoed.read() == 13 { panic("mutable trait generic identity lost") }
+  if not ffi::IsComparable(local_echoed) { panic("mutable trait wrapper was not comparable") }
+  if not ffi::ReadGeneric(local_echoed) == 13 { panic("mutable trait wrapper missed Go method constraint") }
+  if not ffi::ParseGeneric(local_echoed).or(0) == 13 { panic("mutable trait wrapper missed Result ABI constraint") }
+  if not ffi::FindGeneric(local_echoed).or(0) == 13 { panic("mutable trait wrapper missed Maybe ABI constraint") }
+
+  mut local_current: LocalView = LocalBox{read: 14}
+  let local_storage = mut local_current
+  let local_storage_echoed = ffi::Identity(local_storage)
+  local_current = LocalOther{number: 15}
+  if not local_storage_echoed.read() == 15 { panic("mutable trait storage generic forwarding lost") }
+
+  let local_replacement = LocalOther{number: 16}
+  let local_replacement_reference: mut LocalView = mut local_replacement
+  let local_references: [mut LocalView] = [local_reference]
+  let local_replaced = ffi::ReplaceFirst(mut local_references, local_replacement_reference)
+  if not local_replaced.read() == 16 { panic("mutable trait writable generic result lost") }
+  if not local_references.at(0).expect("reference").read() == 16 { panic("mutable trait writable generic container lost") }
+
+  let local_node = LocalNode{number: 17}
+  let local_link: mut LocalLink = mut local_node
+  let local_linked = ffi::LinkGeneric(local_link)
+  if not local_linked == local_link { panic("recursive mutable trait generic constraint lost identity") }
 
   let interface_value = ffi::ReaderValue()
   let interface_reference = mut interface_value
@@ -727,7 +789,7 @@ func TestADR0057MixedConcreteAndTraitReferencesCompareTargetIdentity(t *testing.
 	}
 }
 
-func TestADR0057MutableTraitReferencesCopyComparableForwardingHandles(t *testing.T) {
+func TestADR0057MutableTraitReferencesCopyComparableWrapperAdapters(t *testing.T) {
 	program := lowerParitySource(t, `
 		use ard/unsafe
 
@@ -774,6 +836,6 @@ func TestADR0057MutableTraitReferencesCopyComparableForwardingHandles(t *testing
 		}
 	`)
 	if got := runGoTargetParityJSON(t, program); got != `"true:true:box:3:1"` {
-		t.Fatalf("result = %s, want canonical comparable forwarding handle result", got)
+		t.Fatalf("result = %s, want canonical comparable wrapper-adapter result", got)
 	}
 }

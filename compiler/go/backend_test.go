@@ -3974,8 +3974,20 @@ func TestLowerProgramEmitsGoInterfaceForTraitObject(t *testing.T) {
 		}
 	`)
 	mutFiles := lowerProgramAST(t, mutProgram, Options{PackageName: "main"})
-	if !astFilesHaveTypeSpec(mutFiles, "ArdMutTrait_Renderable_0") {
-		t.Fatal("generated AST should keep mutable trait reference type for mut trait use")
+	if !astFilesContain(mutFiles, func(node ast.Node) bool {
+		typeSpec, ok := node.(*ast.TypeSpec)
+		if !ok || typeSpec.Name == nil || typeSpec.Name.Name != "ArdMutTrait_Renderable_0" {
+			return false
+		}
+		_, ok = typeSpec.Type.(*ast.InterfaceType)
+		return ok
+	}) {
+		t.Fatal("mutable trait reference should use a sealed Go interface wrapper")
+	}
+	for _, name := range []string{"ArdMutTraitVTable_Renderable_0", "ardMutTraitRegistry_Renderable_0"} {
+		if astFilesHaveTypeSpec(mutFiles, name) {
+			t.Fatalf("generated AST should not emit mutable trait vtable type %s", name)
+		}
 	}
 	if !astFilesContain(mutFiles, func(node ast.Node) bool {
 		fn, ok := node.(*ast.FuncDecl)
@@ -4155,12 +4167,12 @@ use canonicaltraits/models
 fn main() {
   let direct_concrete: mut views::View = mut models::shared
   let returned_concrete = models::concrete_ref()
-  if not views::same(direct_concrete, returned_concrete) { panic("concrete vtable identity") }
+  if not views::same(direct_concrete, returned_concrete) { panic("concrete adapter identity") }
 
   let holder = mut models::holder
   let direct_storage: mut views::View = mut holder.current
   let returned_storage = models::storage_ref()
-  if not views::same(direct_storage, returned_storage) { panic("storage vtable identity") }
+  if not views::same(direct_storage, returned_storage) { panic("storage adapter identity") }
 }
 `), 0o644); err != nil {
 		t.Fatal(err)
@@ -4190,9 +4202,14 @@ fn main() {
 			return true
 		})
 	}
-	for _, name := range []string{"ArdMutTrait_View_0", "ArdMutTraitVTable_View_0_impl_0", "ArdMutTraitVTable_View_0_storage"} {
+	for _, name := range []string{"ArdMutTrait_View_0", "ardMutTraitConcrete_View_0", "ardMutTraitStorage_View_0"} {
 		if declarations[name] != 1 {
-			t.Fatalf("generated declaration %s count = %d, want one canonical owner", name, declarations[name])
+			t.Fatalf("generated wrapper declaration %s count = %d, want one canonical trait owner", name, declarations[name])
+		}
+	}
+	for _, name := range []string{"ArdMutTraitVTable_View_0_impl_0", "ArdMutTraitVTable_View_0_storage"} {
+		if declarations[name] != 0 {
+			t.Fatalf("generated vtable declaration %s count = %d, want none", name, declarations[name])
 		}
 	}
 	if err := RunProgram(program, []string{"ard", "run", mainPath}, loaded.ProjectInfo); err != nil {
@@ -4210,6 +4227,7 @@ func TestLowerProgramMutableTraitStorageAvoidsImplementationImportCycles(t *test
   fn value() Int
 }
 
+fn read(value: View) Int { value.value() }
 fn read_mut(value: mut View) Int { value.value() }
 `,
 		"holder.ard": `use privateimpl/views
@@ -4221,13 +4239,13 @@ fn borrow(value: mut Holder) mut views::View { (mut value.current) }
 		"models.ard": `use privateimpl/views
 use privateimpl/holder
 
-private struct Secret { number: Int }
+private struct Secret { value: Int }
 
 impl views::View for Secret {
-  fn value() Int { self.number }
+  fn value() Int { self.value }
 }
 
-fn make() holder::Holder { holder::Holder{current: Secret{number: 42}} }
+fn make() holder::Holder { holder::Holder{current: Secret{value: 42}} }
 `,
 	}
 	for name, source := range files {
@@ -4243,6 +4261,7 @@ use privateimpl/models
 fn main() {
   let value = models::make()
   let reference = holder::borrow(mut value)
+  if not views::read(reference.@) == 42 { panic("ordinary private implementation") }
   if not views::read_mut(reference) == 42 { panic("private implementation") }
 }
 `), 0o644); err != nil {
@@ -4289,7 +4308,7 @@ func TestLowerProgramRetainsStandaloneMethodWhenStructFieldCollides(t *testing.T
 	files := lowerProgramAST(t, program, Options{PackageName: "main"})
 	if astFilesContain(files, func(node ast.Node) bool {
 		fn, ok := node.(*ast.FuncDecl)
-		return ok && fn.Recv != nil && fn.Name != nil && fn.Name.Name == "Name"
+		return ok && fn.Recv != nil && len(fn.Recv.List) == 1 && fn.Name != nil && fn.Name.Name == "Name" && astExprName(fn.Recv.List[0].Type) == "User"
 	}) {
 		t.Fatal("generated AST should not emit a Go method that collides with a struct field")
 	}

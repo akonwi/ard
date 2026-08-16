@@ -1,6 +1,7 @@
 package checker
 
 import (
+	"errors"
 	"fmt"
 	gotypes "go/types"
 	"maps"
@@ -5483,6 +5484,7 @@ func (c *Checker) instantiateForeignStructForLiteral(foreign *ForeignType, typeA
 
 	args := make([]Type, params.Len())
 	goArgs := make([]gotypes.Type, params.Len())
+	goTypeContext := newCheckerGoTypeContext()
 	inferenceSpans := make([]SourceSpan, params.Len())
 	if len(typeArgs) > 0 {
 		if len(typeArgs) != params.Len() {
@@ -5501,7 +5503,7 @@ func (c *Checker) instantiateForeignStructForLiteral(foreign *ForeignType, typeA
 			if arg == nil {
 				return nil
 			}
-			goArg, ok := checkerTypeToGoType(arg)
+			goArg, ok := checkerTypeToGoTypeWithContext(arg, goTypeContext)
 			if !ok {
 				legacy := fmt.Sprintf("Type argument %s cannot be used as a Go type argument", arg)
 				c.addDiagnostic(invalidGoStructTypeArgumentsDiagnostic{
@@ -5528,7 +5530,7 @@ func (c *Checker) instantiateForeignStructForLiteral(foreign *ForeignType, typeA
 			if value == nil {
 				continue
 			}
-			goValue, ok := checkerTypeToGoType(value.Type())
+			goValue, ok := checkerTypeToGoTypeWithContext(value.Type(), goTypeContext)
 			if !ok {
 				continue
 			}
@@ -5549,22 +5551,25 @@ func (c *Checker) instantiateForeignStructForLiteral(foreign *ForeignType, typeA
 		}
 	}
 
-	for i, goArg := range goArgs {
-		constraint, ok := params.At(i).Constraint().Underlying().(*gotypes.Interface)
-		if ok && !gotypes.Satisfies(goArg, constraint) {
-			legacy := fmt.Sprintf("Type argument %s does not satisfy Go constraint %s", args[i], params.At(i).Constraint())
-			span := c.sourceSpan(loc)
-			if len(typeArgs) > i {
-				span = c.sourceSpan(declaredTypeLocation(typeArgs[i], loc))
-			} else if inferenceSpans[i].FilePath != "" {
-				span = inferenceSpans[i]
-			}
-			c.addDiagnostic(goConstraintDiagnostic{Argument: args[i], Constraint: params.At(i).Constraint().String(), Span: span, LegacyMessage: legacy}.build())
-			return nil
-		}
-	}
 	instantiated, err := gotypes.Instantiate(c.goTypesContext, named, goArgs, true)
 	if err != nil {
+		index := 0
+		var argErr *gotypes.ArgumentError
+		if errors.As(err, &argErr) {
+			index = argErr.Index
+		}
+		if index >= 0 && index < len(args) {
+			constraint := params.At(index).Constraint()
+			legacy := fmt.Sprintf("Type argument %s does not satisfy Go constraint %s", args[index], constraint)
+			span := c.sourceSpan(loc)
+			if len(typeArgs) > index {
+				span = c.sourceSpan(declaredTypeLocation(typeArgs[index], loc))
+			} else if inferenceSpans[index].FilePath != "" {
+				span = inferenceSpans[index]
+			}
+			c.addDiagnostic(goConstraintDiagnostic{Argument: args[index], Constraint: constraint.String(), Span: span, LegacyMessage: legacy}.build())
+			return nil
+		}
 		legacy := fmt.Sprintf("Could not instantiate Go type %s: %s", foreign, err)
 		c.addDiagnostic(goTypeInstantiationDiagnostic{Name: foreign.String(), Cause: err.Error(), Span: c.sourceSpan(loc), LegacyMessage: legacy}.build())
 		return nil
@@ -5577,6 +5582,8 @@ func (c *Checker) instantiateForeignStructForLiteral(foreign *ForeignType, typeA
 	}
 	inst := foreignNamedTypeFromGo(instNamed, false, true).(*ForeignType)
 	inst.TypeArgs = args
+	inst.Fields, inst.UnsupportedFields = goFieldsForInstantiatedGenericNamedType(instNamed, named, args)
+	inst.FieldsLoaded = true
 	return inst
 }
 
@@ -5683,7 +5690,19 @@ func (c *Checker) inferGoStructTypeArgs(pattern gotypes.Type, actual Type, goAct
 	return true
 }
 
+type checkerGoTypeContext struct {
+	traits map[*Trait]gotypes.Type
+}
+
+func newCheckerGoTypeContext() *checkerGoTypeContext {
+	return &checkerGoTypeContext{traits: map[*Trait]gotypes.Type{}}
+}
+
 func checkerTypeToGoType(t Type) (gotypes.Type, bool) {
+	return checkerTypeToGoTypeWithContext(t, newCheckerGoTypeContext())
+}
+
+func checkerTypeToGoTypeWithContext(t Type, context *checkerGoTypeContext) (gotypes.Type, bool) {
 	switch t {
 	case Bool:
 		return gotypes.Typ[gotypes.Bool], true
@@ -5720,11 +5739,18 @@ func checkerTypeToGoType(t Type) (gotypes.Type, bool) {
 	}
 	switch typ := t.(type) {
 	case *MutableRef:
-		// A reference validates its pointer-shaped boundary representation
-		// against Go constraints (ADR 0057). When the referent itself has no
-		// Go representation (an Ard-owned struct), the pointer is still
-		// comparable and method-free, so an opaque named referent stands in.
-		if referent, ok := checkerTypeToGoType(typ.Of()); ok {
+		// Mutable trait references lower to a sealed wrapper interface whose
+		// natural methods can satisfy compatible Go generic constraints.
+		if trait, ok := typ.Of().(*Trait); ok {
+			if wrapper, ok := checkerTraitWrapperGoType(trait, context); ok {
+				return wrapper, true
+			}
+		}
+		// Other references validate their pointer-shaped boundary
+		// representation against Go constraints (ADR 0057). When the referent
+		// itself has no Go representation (an Ard-owned struct), an opaque named
+		// referent stands in.
+		if referent, ok := checkerTypeToGoTypeWithContext(typ.Of(), context); ok {
 			return gotypes.NewPointer(referent), true
 		}
 		opaque := gotypes.NewNamed(gotypes.NewTypeName(0, nil, "ArdReferent", nil), gotypes.NewStruct(nil, nil), nil)
@@ -5734,27 +5760,114 @@ func checkerTypeToGoType(t Type) (gotypes.Type, bool) {
 			return typ.GoType, true
 		}
 	case *List:
-		elem, ok := checkerTypeToGoType(typ.Of())
+		elem, ok := checkerTypeToGoTypeWithContext(typ.Of(), context)
 		if ok {
 			return gotypes.NewSlice(elem), true
 		}
 	case *Slice:
-		elem, ok := checkerTypeToGoType(typ.Of())
+		elem, ok := checkerTypeToGoTypeWithContext(typ.Of(), context)
 		if ok {
 			return gotypes.NewSlice(elem), true
 		}
 	case *Map:
-		key, ok := checkerTypeToGoType(typ.Key())
+		key, ok := checkerTypeToGoTypeWithContext(typ.Key(), context)
 		if !ok {
 			return nil, false
 		}
-		value, ok := checkerTypeToGoType(typ.Value())
+		value, ok := checkerTypeToGoTypeWithContext(typ.Value(), context)
 		if !ok {
 			return nil, false
 		}
 		return gotypes.NewMap(key, value), true
 	}
 	return nil, false
+}
+
+func checkerTraitWrapperGoResults(result Type, context *checkerGoTypeContext) ([]*gotypes.Var, bool) {
+	if result == Void {
+		return nil, true
+	}
+	if maybe, ok := result.(*Maybe); ok {
+		if maybe.Of() == Void {
+			return []*gotypes.Var{gotypes.NewVar(0, nil, "", gotypes.Typ[gotypes.Bool])}, true
+		}
+		value, ok := checkerTypeToGoTypeWithContext(maybe.Of(), context)
+		if !ok {
+			return nil, false
+		}
+		return []*gotypes.Var{
+			gotypes.NewVar(0, nil, "", value),
+			gotypes.NewVar(0, nil, "", gotypes.Typ[gotypes.Bool]),
+		}, true
+	}
+	if resultValue, ok := result.(*Result); ok && (resultValue.Err() == Str || IsBuiltinError(resultValue.Err())) {
+		errorType := gotypes.Universe.Lookup("error").Type()
+		if resultValue.Val() == Void {
+			return []*gotypes.Var{gotypes.NewVar(0, nil, "", errorType)}, true
+		}
+		value, ok := checkerTypeToGoTypeWithContext(resultValue.Val(), context)
+		if !ok {
+			return nil, false
+		}
+		return []*gotypes.Var{
+			gotypes.NewVar(0, nil, "", value),
+			gotypes.NewVar(0, nil, "", errorType),
+		}, true
+	}
+	resultType, ok := checkerTypeToGoTypeWithContext(result, context)
+	if !ok {
+		return nil, false
+	}
+	return []*gotypes.Var{gotypes.NewVar(0, nil, "", resultType)}, true
+}
+
+func checkerTraitWrapperGoType(trait *Trait, context *checkerGoTypeContext) (gotypes.Type, bool) {
+	if trait == nil {
+		return nil, false
+	}
+	if cached := context.traits[trait]; cached != nil {
+		return cached, true
+	}
+	name := "ArdMutTrait" + goname.NaturalIdentifier(trait.Name, true)
+	placeholder := gotypes.NewNamed(gotypes.NewTypeName(0, nil, name, nil), nil, nil)
+	context.traits[trait] = placeholder
+	fail := func() (gotypes.Type, bool) {
+		delete(context.traits, trait)
+		return nil, false
+	}
+	methods := make([]*gotypes.Func, 0, len(trait.GetMethods()))
+	seen := map[string]bool{}
+methodsLoop:
+	for _, method := range trait.GetMethods() {
+		name := goname.NaturalIdentifier(method.Name, true)
+		if name == "" || seen[name] {
+			return fail()
+		}
+		seen[name] = true
+		params := make([]*gotypes.Var, 0, len(method.Parameters))
+		variadic := false
+		for index, param := range method.Parameters {
+			paramType, ok := checkerTypeToGoTypeWithContext(param.Type, context)
+			if !ok {
+				continue methodsLoop
+			}
+			if param.Variadic {
+				paramType = gotypes.NewSlice(paramType)
+				variadic = index == len(method.Parameters)-1
+			}
+			params = append(params, gotypes.NewVar(0, nil, param.Name, paramType))
+		}
+		results, ok := checkerTraitWrapperGoResults(method.ReturnType, context)
+		if !ok {
+			continue methodsLoop
+		}
+		signature := gotypes.NewSignatureType(nil, nil, nil, gotypes.NewTuple(params...), gotypes.NewTuple(results...), variadic)
+		methods = append(methods, gotypes.NewFunc(0, nil, name, signature))
+	}
+	wrapper := gotypes.NewInterfaceType(methods, nil)
+	wrapper.Complete()
+	placeholder.SetUnderlying(wrapper)
+	return placeholder, true
 }
 
 // resolveStructTypeArgs resolves explicit struct literal type arguments
