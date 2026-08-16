@@ -1511,6 +1511,9 @@ func (l *lowerer) lowerGlobal(global air.Global) (ast.Decl, error) {
 func (l *lowerer) lowerFunction(fn air.Function) (ast.Decl, error) {
 	l.declaredLocals = map[air.LocalID]bool{}
 	methodName, directMethod := l.directGoMethodName(fn)
+	if fn.RequiredGoMethodName != "" && !directMethod {
+		return nil, fmt.Errorf("required Go interface method %s.%s cannot be emitted as a receiver method", fn.Name, fn.RequiredGoMethodName)
+	}
 	params := []*ast.Field{}
 	for _, capture := range fn.Captures {
 		captureType, err := l.goType(capture.Type)
@@ -1897,7 +1900,11 @@ func (l *lowerer) goMethodKey(fn air.Function) (string, string, bool) {
 	if !l.canEmitGoMethodOnType(receiverTypeID) {
 		return "", "", false
 	}
-	methodName, ok := goMethodName(fn.MethodName)
+	methodName := fn.RequiredGoMethodName
+	ok := methodName != "" && token.IsIdentifier(methodName)
+	if methodName == "" {
+		methodName, ok = goMethodName(fn.MethodName)
+	}
 	if !ok || l.goMethodNameUnavailableOnType(receiverTypeID, methodName) {
 		return "", "", false
 	}

@@ -89,6 +89,7 @@ const (
 	DiagnosticCodeImplReturnType                DiagnosticCode = "implementation_return_type"
 	DiagnosticCodeMissingImplMethod             DiagnosticCode = "missing_implementation_method"
 	DiagnosticCodeDuplicateMethod               DiagnosticCode = "duplicate_method"
+	DiagnosticCodeGoMethodFieldCollision        DiagnosticCode = "go_method_field_collision"
 	DiagnosticCodeMutatingEnumMethod            DiagnosticCode = "mutating_enum_method"
 	DiagnosticCodeEmptyEnum                     DiagnosticCode = "empty_enum"
 	DiagnosticCodeDuplicateEnumVariant          DiagnosticCode = "duplicate_enum_variant"
@@ -1101,6 +1102,38 @@ func (d missingImplementationMethodDiagnostic) build() Diagnostic {
 		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("missing method `%s` required by %s `%s`", d.Method, d.ContractKind, d.Contract)},
 	)
 	diagnostic.Code = DiagnosticCodeMissingImplMethod
+	return diagnostic
+}
+
+type goMethodFieldCollisionDiagnostic struct {
+	Type       string
+	Field      string
+	Method     string
+	MethodSpan SourceSpan
+	FieldSpan  *SourceSpan
+}
+
+func (d goMethodFieldCollisionDiagnostic) build() Diagnostic {
+	legacy := fmt.Sprintf("Ard property '%s.%s' lowers to Go field '%s', which conflicts with Go interface method '%s'", d.Type, d.Field, d.Method, d.Method)
+	secondary := []DiagnosticLabel{}
+	if d.FieldSpan != nil {
+		secondary = append(secondary, DiagnosticLabel{
+			Span:    *d.FieldSpan,
+			Message: fmt.Sprintf("Ard property `%s` lowers to Go field `%s`", d.Field, d.Method),
+		})
+	}
+	diagnostic := newLabeledDiagnostic(
+		Error,
+		legacy,
+		"Ard property conflicts with Go interface method",
+		"Rename the Ard property or remove this Go interface implementation.",
+		DiagnosticLabel{
+			Span:    d.MethodSpan,
+			Message: fmt.Sprintf("this implementation requires Go method `%s`, but that name is already used by the generated Go field", d.Method),
+		},
+		secondary...,
+	)
+	diagnostic.Code = DiagnosticCodeGoMethodFieldCollision
 	return diagnostic
 }
 

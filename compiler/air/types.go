@@ -68,6 +68,10 @@ type Function struct {
 	// standalone function lowering used by AIR calls.
 	Receiver   TypeID
 	MethodName string
+	// RequiredGoMethodName is set for explicit imported Go interface impls.
+	// Targets must emit this exact receiver method or reject lowering; a
+	// standalone helper cannot satisfy the foreign interface.
+	RequiredGoMethodName string
 }
 
 type Signature struct {

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/akonwi/ard/goname"
 	"github.com/akonwi/ard/parse"
 )
 
@@ -2433,6 +2434,15 @@ func (c *Checker) checkForeignInterfaceImplementation(s *parse.TraitImplementati
 			continue
 		}
 		implementedMethods[method.Name] = true
+		if fieldName, fieldSpan, collision := c.generatedGoFieldCollision(targetType, interfaceMethodName); collision {
+			validImpl = false
+			invalidImplementedMethods[method.Name] = true
+			c.addDiagnostic(goMethodFieldCollisionDiagnostic{
+				Type: targetType.Name, Field: fieldName, Method: interfaceMethodName,
+				MethodSpan: c.sourceSpan(method.GetLocation()), FieldSpan: fieldSpan,
+			}.build())
+			continue
+		}
 		if reason := unsupportedArdGoInterfaceImplementationMethod(interfaceMethod); reason != "" {
 			validImpl = false
 			invalidImplementedMethods[method.Name] = true
@@ -2546,6 +2556,7 @@ func (c *Checker) checkForeignInterfaceImplementation(s *parse.TraitImplementati
 		fnDef.Receiver = s.Receiver.Name
 		fnDef.Mutates = method.Mutates
 		fnDef.Name = goMethodNameToArdName(interfaceMethodName)
+		fnDef.RequiredGoMethodName = interfaceMethodName
 		if _, exists := c.structMethod(targetType, fnDef.Name); exists {
 			validImpl = false
 			invalidImplementedMethods[method.Name] = true
@@ -2582,6 +2593,29 @@ func (c *Checker) checkForeignInterfaceImplementation(s *parse.TraitImplementati
 	owner := StructMethodOwner(targetType)
 	c.program.ForeignInterfaceImpls[owner] = append(c.program.ForeignInterfaceImpls[owner], iface)
 	return &Statement{Stmt: targetType}
+}
+
+func (c *Checker) generatedGoFieldCollision(def *StructDef, methodName string) (string, *SourceSpan, bool) {
+	if def == nil || methodName == "" {
+		return "", nil, false
+	}
+	c.ensureStructDefinitionResolved(def)
+	if decl := c.topLevelStructDeclarations[def.Name]; decl != nil {
+		for _, field := range decl.Fields {
+			if goname.NaturalIdentifier(field.Name.Name, true) == methodName {
+				span := c.sourceSpan(field.Name.GetLocation())
+				return field.Name.Name, &span, true
+			}
+		}
+	}
+	// Keep the semantic check sound even when a synthesized or imported checker
+	// context has no parse declaration available for a secondary source span.
+	for fieldName := range def.Fields {
+		if goname.NaturalIdentifier(fieldName, true) == methodName {
+			return fieldName, nil, true
+		}
+	}
+	return "", nil, false
 }
 
 func (c *Checker) structImplementsForeignInterface(def *StructDef, iface *ForeignType) bool {

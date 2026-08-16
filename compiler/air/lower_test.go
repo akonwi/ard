@@ -1557,6 +1557,29 @@ func checkedModuleWithPath(t *testing.T, modulePath string, input string) checke
 	return c.Module()
 }
 
+func TestLowerPreservesRequiredGoInterfaceMethodName(t *testing.T) {
+	program := lowerSource(t, `
+		use go:fmt
+
+		struct Label {
+			value: $T,
+		}
+
+		impl fmt::Stringer for Label {
+			fn string() Str { "label" }
+		}
+	`)
+	for _, fn := range program.Functions {
+		if fn.MethodName == "string" {
+			if fn.RequiredGoMethodName != "String" {
+				t.Fatalf("required Go method = %q, want String", fn.RequiredGoMethodName)
+			}
+			return
+		}
+	}
+	t.Fatal("lowered program missing Stringer method")
+}
+
 func lowerSource(t *testing.T, input string) *Program {
 	t.Helper()
 	result := parse.Parse([]byte(input), "test.ard")

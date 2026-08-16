@@ -46,6 +46,18 @@ type EmptyResult interface {
 type EmptyMaybe interface {
 	Lookup() (struct{}, bool)
 }
+
+type Namer interface {
+	Name() string
+}
+
+type URLer interface {
+	URL() string
+}
+
+type EmbeddedNamer interface {
+	Namer
+}
 `
 	if err := os.WriteFile(filepath.Join(ffiDir, "ffi.go"), []byte(contents), 0o644); err != nil {
 		t.Fatal(err)
@@ -128,6 +140,88 @@ impl ffi::EmptyMaybe for Impl {
 			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Unsupported Go interface method ffi::EmptyMaybe.Lookup: Go interface methods returning (struct{}, bool) require an unsupported empty-success ABI adapter"}},
 		},
 		{
+			name: "generated field rejects required Go method selector collision",
+			input: `use go:example.com/app/ffi
+
+struct User { name: Str }
+
+impl ffi::Namer for User {
+  fn name() Str { self.name }
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Ard property 'User.name' lowers to Go field 'Name', which conflicts with Go interface method 'Name'"}},
+		},
+		{
+			name: "colliding implementation is not recorded as interface conformance",
+			input: `use go:example.com/app/ffi
+
+struct User { name: Str }
+
+impl ffi::Namer for User {
+  fn name() Str { self.name }
+}
+
+fn consume(value: ffi::Namer) {}
+fn main() { consume(User{name: "Ada"}) }`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Ard property 'User.name' lowers to Go field 'Name', which conflicts with Go interface method 'Name'"},
+				{Kind: checker.Error, Message: "Type mismatch: Expected ffi::Namer, got User"},
+			},
+		},
+		{
+			name: "acronym field rejects exact Go method selector collision",
+			input: `use go:example.com/app/ffi
+
+struct Resource { u_r_l: Str }
+
+impl ffi::URLer for Resource {
+  fn u_r_l() Str { self.u_r_l }
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Ard property 'Resource.u_r_l' lowers to Go field 'URL', which conflicts with Go interface method 'URL'"}},
+		},
+		{
+			name: "differently cased field does not collide with acronym method",
+			input: `use go:example.com/app/ffi
+
+struct Resource { url: Str }
+
+impl ffi::URLer for Resource {
+  fn u_r_l() Str { self.url }
+}`,
+		},
+		{
+			name: "embedded Go interface method rejects field collision",
+			input: `use go:example.com/app/ffi
+
+struct User { name: Str }
+
+impl ffi::EmbeddedNamer for User {
+  fn name() Str { self.name }
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Ard property 'User.name' lowers to Go field 'Name', which conflicts with Go interface method 'Name'"}},
+		},
+		{
+			name: "private struct field still occupies exported Go selector",
+			input: `use go:example.com/app/ffi
+
+private struct user { name: Str }
+
+impl ffi::Namer for user {
+  fn name() Str { self.name }
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Ard property 'user.name' lowers to Go field 'Name', which conflicts with Go interface method 'Name'"}},
+		},
+		{
+			name: "generic struct field rejects method selector collision",
+			input: `use go:example.com/app/ffi
+
+struct Record { name: $T }
+
+impl ffi::Namer for Record {
+  fn name() Str { "record" }
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Ard property 'Record.name' lowers to Go field 'Name', which conflicts with Go interface method 'Name'"}},
+		},
+		{
 			name: "native mut parameter still trips the ABI diagnostic",
 			input: `use go:example.com/app/ffi
 
@@ -158,5 +252,47 @@ impl ffi::ValueTaker for Impl {
 				}
 			}
 		})
+	}
+}
+
+func TestGoMethodFieldCollisionHasStructuredDiagnostic(t *testing.T) {
+	root := t.TempDir()
+	writeGoInterfaceABIPackage(t, root)
+	resolver := checker.NewGoPackagesResolver(root, nil)
+	result := parse.Parse([]byte(`use go:example.com/app/ffi
+
+struct User { name: Str }
+
+impl ffi::Namer for User {
+  fn name() Str { self.name }
+}`), "test.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse error: %s", result.Errors[0].Message)
+	}
+	var fieldLocation parse.Location
+	var methodLocation parse.Location
+	for _, stmt := range result.Program.Statements {
+		switch stmt := stmt.(type) {
+		case *parse.StructDefinition:
+			fieldLocation = stmt.Fields[0].Name.GetLocation()
+		case *parse.TraitImplementation:
+			methodLocation = stmt.Methods[0].GetLocation()
+		}
+	}
+
+	c := checker.New("test.ard", result.Program, nil, checker.CheckOptions{GoResolver: resolver})
+	c.Check()
+	if len(c.Diagnostics()) != 1 {
+		t.Fatalf("diagnostics = %#v, want one", c.Diagnostics())
+	}
+	diagnostic := c.Diagnostics()[0]
+	if diagnostic.Code != checker.DiagnosticCodeGoMethodFieldCollision || diagnostic.Title != "Ard property conflicts with Go interface method" {
+		t.Fatalf("diagnostic = %#v", diagnostic)
+	}
+	if diagnostic.Primary.Span.Location != methodLocation {
+		t.Fatalf("primary location = %#v, want %#v", diagnostic.Primary.Span.Location, methodLocation)
+	}
+	if len(diagnostic.Secondary) != 1 || diagnostic.Secondary[0].Span.Location != fieldLocation {
+		t.Fatalf("secondary labels = %#v, want field at %#v", diagnostic.Secondary, fieldLocation)
 	}
 }

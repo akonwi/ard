@@ -1243,6 +1243,10 @@ type FunctionDef struct {
 	Body                    *Block
 	Private                 bool
 	GenericBindings         map[string]Type
+	// RequiredGoMethodName records an exact imported Go interface method name.
+	// Unlike ordinary Ard methods, this method may not fall back to a standalone
+	// helper because it must participate in a Go method set.
+	RequiredGoMethodName string
 }
 
 // String renders the function's *type* in Ard syntax (`fn(Str) Int`), never
