@@ -275,6 +275,9 @@ func (l *lowerer) lowerModule(module checker.Module) error {
 		switch node := stmt.Stmt.(type) {
 		case *checker.StructDef:
 			if typeHasUnresolvedTypeVar(node) {
+				if err := l.declareRequiredGenericGoMethods(modID, node); err != nil {
+					return err
+				}
 				continue
 			}
 			if err := l.declareTraitImplsForType(modID, node); err != nil {
@@ -1481,6 +1484,36 @@ func (fl *functionLowerer) internCompositeType(t checker.Type) (TypeID, error) {
 	}
 }
 
+func (l *lowerer) declareRequiredGenericGoMethods(module ModuleID, def *checker.StructDef) error {
+	if def == nil || len(def.GenericParams) == 0 {
+		return nil
+	}
+	defType, err := l.internGenericStructDef(def)
+	if err != nil {
+		return err
+	}
+	selfType, err := l.genericSelfInstance(defType)
+	if err != nil {
+		return err
+	}
+	methods := l.structMethods(def)
+	names := make([]string, 0, len(methods))
+	for name, method := range methods {
+		if method != nil && method.RequiredGoMethodName != "" {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	fl := &functionLowerer{l: l}
+	for _, name := range names {
+		method := methods[name]
+		if _, _, err := fl.declareGenericInstanceMethodFunction(module, selfType, def, method); err != nil {
+			return fmt.Errorf("declare required Go method %s.%s: %w", def.Name, method.RequiredGoMethodName, err)
+		}
+	}
+	return nil
+}
+
 func (l *lowerer) declareInherentImplMethodsForStruct(module ModuleID, def *checker.StructDef) error {
 	if def == nil {
 		return nil
@@ -1697,11 +1730,12 @@ func (l *lowerer) declareMethodFunction(module ModuleID, owner checker.Type, tra
 	id := FunctionID(len(l.program.Functions))
 	l.functions[key] = id
 	l.program.Functions = append(l.program.Functions, Function{
-		ID:         id,
-		Module:     module,
-		Name:       owner.String() + "." + traitName + "." + def.Name,
-		Receiver:   ownerType,
-		MethodName: def.Name,
+		ID:                   id,
+		Module:               module,
+		Name:                 owner.String() + "." + traitName + "." + def.Name,
+		Receiver:             ownerType,
+		MethodName:           def.Name,
+		RequiredGoMethodName: def.RequiredGoMethodName,
 		Signature: Signature{
 			Params: params,
 			Return: returnType,
@@ -1774,12 +1808,13 @@ func (l *lowerer) declareInstanceMethodFunction(module ModuleID, ownerName strin
 	id := FunctionID(len(l.program.Functions))
 	l.functions[key] = id
 	l.program.Functions = append(l.program.Functions, Function{
-		ID:         id,
-		Module:     module,
-		Name:       ownerName + "." + def.Name,
-		Receiver:   ownerType,
-		MethodName: def.Name,
-		Signature:  signature,
+		ID:                   id,
+		Module:               module,
+		Name:                 ownerName + "." + def.Name,
+		Receiver:             ownerType,
+		MethodName:           def.Name,
+		RequiredGoMethodName: def.RequiredGoMethodName,
+		Signature:            signature,
 	})
 	l.program.Modules[module].Functions = appendUniqueFunction(l.program.Modules[module].Functions, id)
 	return id, nil
@@ -1830,12 +1865,13 @@ func (fl *functionLowerer) declareInstanceMethodFunction(module ModuleID, ownerN
 	fl.l.functions[key] = id
 	fl.l.setFunctionTypeVars(id, typeVars)
 	fl.l.program.Functions = append(fl.l.program.Functions, Function{
-		ID:         id,
-		Module:     module,
-		Name:       ownerName + "." + def.Name,
-		Receiver:   ownerType,
-		MethodName: def.Name,
-		Signature:  signature,
+		ID:                   id,
+		Module:               module,
+		Name:                 ownerName + "." + def.Name,
+		Receiver:             ownerType,
+		MethodName:           def.Name,
+		RequiredGoMethodName: def.RequiredGoMethodName,
+		Signature:            signature,
 	})
 	fl.l.program.Modules[module].Functions = appendUniqueFunction(fl.l.program.Modules[module].Functions, id)
 	return id, nil
@@ -1974,13 +2010,14 @@ func (fl *functionLowerer) declareGenericInstanceMethodFunction(module ModuleID,
 	fl.l.genericMethodDefs[key] = id
 	fl.l.functions[concreteFunctionKey(module, structDef.Name+"."+callDef.Name, signature, "genericmethod")] = id
 	fl.l.program.Functions = append(fl.l.program.Functions, Function{
-		ID:         id,
-		Module:     module,
-		Name:       structDef.Name + "." + callDef.Name,
-		Receiver:   recvType,
-		MethodName: callDef.Name,
-		Signature:  signature,
-		TypeParams: paramNames,
+		ID:                   id,
+		Module:               module,
+		Name:                 structDef.Name + "." + callDef.Name,
+		Receiver:             recvType,
+		MethodName:           callDef.Name,
+		RequiredGoMethodName: orig.RequiredGoMethodName,
+		Signature:            signature,
+		TypeParams:           paramNames,
 	})
 	fl.l.program.Modules[module].Functions = appendUniqueFunction(fl.l.program.Modules[module].Functions, id)
 	typeVars := make(map[string]TypeID, len(paramNames))

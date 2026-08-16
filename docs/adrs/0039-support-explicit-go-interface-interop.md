@@ -157,7 +157,7 @@ func (s *Sink) Write(bytes []byte) (int, error) {
 
 Because ADR 0038 makes `Int!Str` lower to `(int, error)` in method return position, no special result wrapper is needed for this common case.
 
-If an Ard type has multiple methods that would lower to the same Go receiver method name/signature, the checker or backend must reject the duplicate rather than emitting invalid Go. Inherent method naming and foreign-interface impl method naming share the same generated Go method namespace.
+If an Ard type has multiple methods that would lower to the same Go receiver method name/signature, the checker or backend must reject the duplicate rather than emitting invalid Go. Inherent method naming and foreign-interface impl method naming share the same generated Go method namespace. The checker also rejects a required Go interface method when an Ard struct field lowers to the same exported Go selector; the implementation is not recorded as interface conformance because a standalone method helper cannot satisfy a Go method set.
 
 ### Interface assignment and call compatibility
 

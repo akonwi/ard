@@ -194,6 +194,9 @@ func validateGlobal(program *Program, global Global) error {
 }
 
 func validateFunction(program *Program, fn Function) error {
+	if fn.RequiredGoMethodName != "" && (fn.Receiver == NoType || fn.MethodName == "") {
+		return fmt.Errorf("function %s requires Go method %s without method receiver metadata", fn.Name, fn.RequiredGoMethodName)
+	}
 	if int(fn.Module) < 0 || int(fn.Module) >= len(program.Modules) {
 		return fmt.Errorf("function %s has invalid module id %d", fn.Name, fn.Module)
 	}

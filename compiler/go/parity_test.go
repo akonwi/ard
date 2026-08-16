@@ -2203,6 +2203,27 @@ func TestGoTargetParityMutableReferenceReturnUpdatesSharedStorage(t *testing.T) 
 	})
 }
 
+func TestGoTargetParityGenericStructEmitsUncalledRequiredGoMethod(t *testing.T) {
+	program := lowerParitySource(t, `
+		use go:fmt
+
+		struct Label {
+			value: $T,
+		}
+
+		impl fmt::Stringer for Label {
+			fn string() Str { "label" }
+		}
+
+		fn main() Str {
+			fmt::Sprint(Label<Int>{value: 1})
+		}
+	`)
+	if got := runGoTargetParityJSON(t, program); got != `"label"` {
+		t.Fatalf("got %s, want label", got)
+	}
+}
+
 func TestGoTargetParityMutableReferenceParameterUpdatesCaller(t *testing.T) {
 	t.Run("struct", func(t *testing.T) {
 		program := lowerParitySource(t, `

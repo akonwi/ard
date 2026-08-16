@@ -9,6 +9,7 @@ import (
 	"unicode"
 
 	"github.com/akonwi/ard/air"
+	"github.com/akonwi/ard/goname"
 )
 
 func moduleFileName(program *air.Program, module air.Module) string {
@@ -1125,32 +1126,7 @@ func sanitizeGoPackageIdentifier(raw string) string {
 }
 
 func naturalGoIdentifier(raw string, exported bool) string {
-	parts := goIdentifierParts(raw)
-	if len(parts) == 0 {
-		if exported {
-			return "Exported"
-		}
-		return "name"
-	}
-	var b strings.Builder
-	for i, part := range parts {
-		if i == 0 && !exported {
-			b.WriteString(lowerFirst(part))
-			continue
-		}
-		b.WriteString(upperFirst(part))
-	}
-	name := b.String()
-	if name == "" {
-		if exported {
-			return "Exported"
-		}
-		return "name"
-	}
-	if !exported && token.Lookup(name) != token.IDENT {
-		name += "_"
-	}
-	return name
+	return goname.NaturalIdentifier(raw, exported)
 }
 
 func sanitizeGoIdentifier(raw string) string {

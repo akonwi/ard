@@ -3992,6 +3992,38 @@ func TestLowerProgramRetainsStandaloneMethodWhenStructFieldCollides(t *testing.T
 	}
 	buildProgramFromGeneratedSources(t, program, "field-colliding-method-fallback")
 }
+func TestLowerProgramRejectsRequiredGoMethodFieldCollision(t *testing.T) {
+	program := lowerSource(t, `
+		trait Named {
+			fn Name() Str
+		}
+
+		struct User {
+			name: Str,
+		}
+
+		impl Named for User {
+			fn Name() Str {
+				self.name
+			}
+		}
+	`)
+	marked := false
+	for i := range program.Functions {
+		if program.Functions[i].MethodName == "Name" {
+			program.Functions[i].RequiredGoMethodName = "Name"
+			marked = true
+		}
+	}
+	if !marked {
+		t.Fatal("test program missing method function")
+	}
+	_, err := lowerProgram(program, Options{PackageName: "main"})
+	if err == nil || !strings.Contains(err.Error(), "required Go interface method") {
+		t.Fatalf("lowerProgram error = %v, want required Go interface method rejection", err)
+	}
+}
+
 func TestLowerProgramRetainsStandaloneReservedStructMethods(t *testing.T) {
 	program := lowerSource(t, `
 		struct Payload {
