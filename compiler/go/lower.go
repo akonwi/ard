@@ -874,11 +874,14 @@ func (l *lowerer) traitInterfaceAvailable(traitID air.TraitID) bool {
 }
 
 func (l *lowerer) usesNativeTraitInterface(typeID air.TypeID) bool {
+	// Ordinary Trait values and mut Trait references have distinct AIR types and
+	// Go representations. Mutable use requires a forwarding handle, but must not
+	// force otherwise representable ordinary values back to any/type switches.
 	if !l.isTraitObjectType(typeID) {
 		return false
 	}
 	traitID := l.program.Types[typeID-1].Trait
-	if !l.traitInterfaceAvailable(traitID) || l.traitHasMutableTraitUse(traitID) {
+	if !l.traitInterfaceAvailable(traitID) {
 		return false
 	}
 	for _, impl := range l.program.Impls {

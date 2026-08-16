@@ -3948,13 +3948,22 @@ func TestLowerProgramEmitsGoInterfaceForTraitObject(t *testing.T) {
 			title: Str,
 		}
 
+		struct Scene {
+			view: Renderable,
+			views: [Renderable],
+		}
+
 		impl Renderable for Block {
 			fn render() Str {
 				self.title
 			}
 		}
 
-		fn draw(value: mut Renderable) Str {
+		fn draw(value: Renderable) Str {
+			value.render()
+		}
+
+		fn update(value: mut Renderable) Str {
 			value.render()
 		}
 	`)
@@ -3962,7 +3971,82 @@ func TestLowerProgramEmitsGoInterfaceForTraitObject(t *testing.T) {
 	if !astFilesHaveTypeSpec(mutFiles, "ardMutTrait_Renderable_0") {
 		t.Fatal("generated AST should keep mutable trait reference type for mut trait use")
 	}
+	if !astFilesContain(mutFiles, func(node ast.Node) bool {
+		fn, ok := node.(*ast.FuncDecl)
+		return ok && fn.Name != nil && strings.EqualFold(fn.Name.Name, "draw") && fn.Type != nil && fn.Type.Params != nil && len(fn.Type.Params.List) == 1 && astExprName(fn.Type.Params.List[0].Type) == "Renderable"
+	}) {
+		t.Fatal("ordinary trait parameter should remain a native Go interface when mut trait is used elsewhere")
+	}
+	if !astFilesContain(mutFiles, func(node ast.Node) bool {
+		typeSpec, ok := node.(*ast.TypeSpec)
+		if !ok || typeSpec.Name == nil || typeSpec.Name.Name != "Scene" {
+			return false
+		}
+		structType, ok := typeSpec.Type.(*ast.StructType)
+		if !ok || structType.Fields == nil || len(structType.Fields.List) != 2 {
+			return false
+		}
+		fields := map[string]string{}
+		for _, field := range structType.Fields.List {
+			if len(field.Names) == 1 {
+				fields[field.Names[0].Name] = astExprName(field.Type)
+			}
+		}
+		return fields["View"] == "Renderable" && fields["Views"] == "[]Renderable"
+	}) {
+		t.Fatal("ordinary trait fields and containers should remain native Go interfaces when mut trait is used elsewhere")
+	}
 }
+func TestLowerProgramKeepsImportedOrdinaryTraitNativeWhenDefiningModuleUsesMutableTrait(t *testing.T) {
+	projectDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"splittraits\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "views.ard"), []byte(`trait View {
+  fn value() Int
+}
+
+struct Box { number: Int }
+
+impl View for Box {
+  fn value() Int { self.number }
+}
+
+fn read(value: View) Int { value.value() }
+fn read_mut(value: mut View) Int { value.value() }
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(projectDir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`use splittraits/views
+
+fn main() {
+  let value: views::View = views::Box{number: 4}
+  if not views::read(value) == 4 { panic("ordinary trait dispatch") }
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := frontend.LoadModule(mainPath)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	files := lowerProgramAST(t, program, Options{PackageName: "main", ProjectInfo: loaded.ProjectInfo})
+	if !astFilesContain(files, func(node ast.Node) bool {
+		fn, ok := node.(*ast.FuncDecl)
+		return ok && fn.Name != nil && fn.Name.Name == "Read" && fn.Type != nil && fn.Type.Params != nil && len(fn.Type.Params.List) == 1 && astExprName(fn.Type.Params.List[0].Type) == "View"
+	}) {
+		t.Fatal("imported ordinary trait parameter should use its native Go interface despite mutable use in the defining module")
+	}
+	if err := RunProgram(program, []string{"ard", "run", mainPath}, loaded.ProjectInfo); err != nil {
+		t.Fatalf("RunProgram: %v", err)
+	}
+}
+
 func TestLowerProgramRetainsStandaloneMethodWhenStructFieldCollides(t *testing.T) {
 	program := lowerSource(t, `
 		trait Named {
@@ -3978,6 +4062,14 @@ func TestLowerProgramRetainsStandaloneMethodWhenStructFieldCollides(t *testing.T
 				self.name
 			}
 		}
+
+		fn read(value: Named) Str {
+			value.Name()
+		}
+
+		fn read_mut(value: mut Named) Str {
+			value.Name()
+		}
 	`)
 
 	files := lowerProgramAST(t, program, Options{PackageName: "main"})
@@ -3989,6 +4081,12 @@ func TestLowerProgramRetainsStandaloneMethodWhenStructFieldCollides(t *testing.T
 	}
 	if !astFilesHaveFuncContaining(files, "User_Named_Name") {
 		t.Fatal("generated AST missing standalone fallback for field-colliding method")
+	}
+	if !astFilesContain(files, func(node ast.Node) bool {
+		fn, ok := node.(*ast.FuncDecl)
+		return ok && fn.Name != nil && strings.EqualFold(fn.Name.Name, "read") && fn.Type != nil && fn.Type.Params != nil && len(fn.Type.Params.List) == 1 && astExprName(fn.Type.Params.List[0].Type) == "any"
+	}) {
+		t.Fatal("ordinary nonrepresentable trait should retain any fallback when mut trait is used elsewhere")
 	}
 	buildProgramFromGeneratedSources(t, program, "field-colliding-method-fallback")
 }
