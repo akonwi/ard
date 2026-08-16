@@ -296,7 +296,7 @@ func isReservedTopLevelName(name string) bool {
 }
 
 func isSpecialGoTopLevelName(name string) bool {
-	if name == "main" || name == "ardRunTest" || name == "ardTestOutcome" {
+	if name == "main" || name == "ardRunTest" || name == "ardTestOutcome" || strings.HasPrefix(name, "ArdMutTrait") || strings.HasPrefix(name, "ardMutTrait") {
 		return true
 	}
 	if isPredeclaredGoIdentifier(name) {

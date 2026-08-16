@@ -29,7 +29,7 @@ Standalone lowering remains only when Go cannot legally or safely attach the nat
 
 Go-representable ordinary Ard trait values lower to canonical Go interfaces and dispatch through receiver methods. A `mut Trait` use elsewhere does not change that ordinary representation.
 
-Mutable trait references retain a separate forwarding handle because they must preserve identity and aliasing with their original, potentially replaceable storage. A Go interface or pointer to an interface cannot represent that behavior for escaping references. This specialized representation is local to `mut Trait`; ordinary traits fall back to `any` and generated dispatch only when one of their implementations cannot satisfy the native interface.
+Mutable trait references retain a separate forwarding handle because they must preserve identity and aliasing with their original, potentially replaceable storage. A Go interface or pointer to an interface cannot represent that behavior for escaping references. The trait-owning package declares the canonical handle and vtable types plus one canonical trait-storage vtable. Implementation packages provide canonical concrete vtables and register them with the trait owner, so storage dispatch does not introduce reverse package dependencies and references remain assignable and identity-stable across generated package boundaries. This specialized representation is local to `mut Trait`; ordinary traits fall back to `any` and generated dispatch only when one of their implementations cannot satisfy the native interface.
 
 ### Generated names and packages are artifact-oriented
 

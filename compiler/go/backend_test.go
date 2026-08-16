@@ -80,6 +80,12 @@ func TestTraitInterfaceTypeNameUsesNaturalVisibility(t *testing.T) {
 	if got := l.traitInterfaceTypeName(l.program.Traits[2]); got != "ToString" {
 		t.Fatalf("stdlib trait interface name = %q, want ToString", got)
 	}
+	if got := mutableTraitRefTypeName(l.program.Traits[0]); got != "ArdMutTrait_Renderable_0" {
+		t.Fatalf("public mutable trait handle name = %q, want exported canonical name", got)
+	}
+	if got := mutableTraitRefTypeName(l.program.Traits[1]); got != "ardMutTrait_internal_drawable_1" {
+		t.Fatalf("private mutable trait handle name = %q, want package-private name", got)
+	}
 }
 func TestTraitInterfaceTypeNameFallsBackOnCrossModuleTraitCollision(t *testing.T) {
 	l := &lowerer{program: &air.Program{Traits: []air.Trait{
@@ -3935,7 +3941,7 @@ func TestLowerProgramEmitsGoInterfaceForTraitObject(t *testing.T) {
 	}
 	// A program without any `mut Renderable` use emits no handle machinery;
 	// ordinary trait dispatch stays on the native Go interface (ADR 0057).
-	if astFilesHaveTypeSpec(files, "ardMutTrait_Renderable_0") {
+	if astFilesHaveTypeSpec(files, "ArdMutTrait_Renderable_0") {
 		t.Fatal("generated AST should not emit unused mutable trait reference type")
 	}
 
@@ -3968,7 +3974,7 @@ func TestLowerProgramEmitsGoInterfaceForTraitObject(t *testing.T) {
 		}
 	`)
 	mutFiles := lowerProgramAST(t, mutProgram, Options{PackageName: "main"})
-	if !astFilesHaveTypeSpec(mutFiles, "ardMutTrait_Renderable_0") {
+	if !astFilesHaveTypeSpec(mutFiles, "ArdMutTrait_Renderable_0") {
 		t.Fatal("generated AST should keep mutable trait reference type for mut trait use")
 	}
 	if !astFilesContain(mutFiles, func(node ast.Node) bool {
@@ -4002,18 +4008,41 @@ func TestLowerProgramKeepsImportedOrdinaryTraitNativeWhenDefiningModuleUsesMutab
 	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"splittraits\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(projectDir, "views.ard"), []byte(`trait View {
+	if err := os.WriteFile(filepath.Join(projectDir, "views.ard"), []byte(`use ard/unsafe
+
+trait View {
   fn value() Int
+  fn set(number: Int)
 }
 
 struct Box { number: Int }
+struct Other { number: Int }
 
 impl View for Box {
   fn value() Int { self.number }
+  fn mut set(number: Int) { self.number = number }
 }
+
+impl View for Other {
+  fn value() Int { self.number }
+  fn mut set(number: Int) { self.number = number }
+}
+
+let shared = Box{number: 7}
 
 fn read(value: View) Int { value.value() }
 fn read_mut(value: mut View) Int { value.value() }
+fn set_mut(value: mut View, number: Int) { value.set(number) }
+fn forward(value: mut View) mut View { value }
+fn snapshot(value: mut View) View { value.@ }
+fn same(left: mut View, right: mut View) Bool { left == right }
+fn lookup(values: [mut View: Str], key: mut View) Str { values.get(key).or("missing") }
+fn shared_ref() mut View { (mut shared) }
+fn set_from_any(value: mut View, number: Int) {
+  let boxed: Any = value
+  let recovered = unsafe::cast<mut Box>(boxed).expect("box pointer")
+  recovered.number = number
+}
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -4021,8 +4050,37 @@ fn read_mut(value: mut View) Int { value.value() }
 	if err := os.WriteFile(mainPath, []byte(`use splittraits/views
 
 fn main() {
-  let value: views::View = views::Box{number: 4}
+  let box = views::Box{number: 4}
+  let value: views::View = box
+  let reference: mut views::View = mut box
+  let returned = views::forward(reference)
   if not views::read(value) == 4 { panic("ordinary trait dispatch") }
+  if not views::read_mut(returned) == 4 { panic("mutable trait dispatch") }
+  if not views::same(reference, returned) { panic("round-trip identity") }
+  if not views::lookup([reference: "box"], returned) == "box" { panic("map key identity") }
+
+  let snapshot = views::snapshot(reference)
+  let concrete = mut box
+  concrete.number = 5
+  if not snapshot.value() == 4 { panic("snapshot changed") }
+  if not returned.value() == 5 { panic("forwarding lost") }
+  views::set_from_any(returned, 6)
+  if not box.number == 6 { panic("Any projection lost") }
+  views::set_mut(returned, 7)
+  if not box.number == 7 { panic("mutable method forwarding") }
+
+  mut current: views::View = views::Box{number: 8}
+  let storage_reference = mut current
+  if not views::read_mut(storage_reference) == 8 { panic("trait storage read") }
+  views::set_mut(storage_reference, 10)
+  if not views::read_mut(storage_reference) == 10 { panic("trait storage mutation") }
+  current = views::Other{number: 9}
+  views::set_mut(storage_reference, 11)
+  if not views::read_mut(storage_reference) == 11 { panic("trait storage replacement") }
+
+  let shared_left = views::shared_ref()
+  let shared_right = views::shared_ref()
+  if not views::same(shared_left, shared_right) { panic("owner storage identity") }
 }
 `), 0o644); err != nil {
 		t.Fatal(err)
@@ -4041,6 +4099,162 @@ fn main() {
 		return ok && fn.Name != nil && fn.Name.Name == "Read" && fn.Type != nil && fn.Type.Params != nil && len(fn.Type.Params.List) == 1 && astExprName(fn.Type.Params.List[0].Type) == "View"
 	}) {
 		t.Fatal("imported ordinary trait parameter should use its native Go interface despite mutable use in the defining module")
+	}
+	handleDecls := 0
+	for _, file := range files {
+		ast.Inspect(file, func(node ast.Node) bool {
+			typeSpec, ok := node.(*ast.TypeSpec)
+			if ok && typeSpec.Name != nil && typeSpec.Name.Name == "ArdMutTrait_View_0" {
+				handleDecls++
+			}
+			return true
+		})
+	}
+	if handleDecls != 1 {
+		t.Fatalf("mutable trait handle declarations = %d, want one canonical declaration in the trait-owning package", handleDecls)
+	}
+	if err := RunProgram(program, []string{"ard", "run", mainPath}, loaded.ProjectInfo); err != nil {
+		t.Fatalf("RunProgram: %v", err)
+	}
+}
+
+func TestLowerProgramCanonicalizesMutableTraitIdentityAcrossModules(t *testing.T) {
+	projectDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"canonicaltraits\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "views.ard"), []byte(`trait View {
+  fn value() Int
+}
+
+fn same(left: mut View, right: mut View) Bool { left == right }
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "models.ard"), []byte(`use canonicaltraits/views
+
+struct Box { number: Int }
+struct Holder { current: views::View }
+
+impl views::View for Box {
+  fn value() Int { self.number }
+}
+
+let shared = Box{number: 4}
+let holder = Holder{current: Box{number: 5}}
+
+fn concrete_ref() mut views::View { (mut shared) }
+fn storage_ref() mut views::View { (mut holder.current) }
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(projectDir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`use canonicaltraits/views
+use canonicaltraits/models
+
+fn main() {
+  let direct_concrete: mut views::View = mut models::shared
+  let returned_concrete = models::concrete_ref()
+  if not views::same(direct_concrete, returned_concrete) { panic("concrete vtable identity") }
+
+  let holder = mut models::holder
+  let direct_storage: mut views::View = mut holder.current
+  let returned_storage = models::storage_ref()
+  if not views::same(direct_storage, returned_storage) { panic("storage vtable identity") }
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := frontend.LoadModule(mainPath)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	files := lowerProgramAST(t, program, Options{PackageName: "main", ProjectInfo: loaded.ProjectInfo})
+	declarations := map[string]int{}
+	for _, file := range files {
+		ast.Inspect(file, func(node ast.Node) bool {
+			switch node := node.(type) {
+			case *ast.TypeSpec:
+				if node.Name != nil {
+					declarations[node.Name.Name]++
+				}
+			case *ast.ValueSpec:
+				for _, name := range node.Names {
+					declarations[name.Name]++
+				}
+			}
+			return true
+		})
+	}
+	for _, name := range []string{"ArdMutTrait_View_0", "ArdMutTraitVTable_View_0_impl_0", "ArdMutTraitVTable_View_0_storage"} {
+		if declarations[name] != 1 {
+			t.Fatalf("generated declaration %s count = %d, want one canonical owner", name, declarations[name])
+		}
+	}
+	if err := RunProgram(program, []string{"ard", "run", mainPath}, loaded.ProjectInfo); err != nil {
+		t.Fatalf("RunProgram: %v", err)
+	}
+}
+
+func TestLowerProgramMutableTraitStorageAvoidsImplementationImportCycles(t *testing.T) {
+	projectDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"privateimpl\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{
+		"views.ard": `trait View {
+  fn value() Int
+}
+
+fn read_mut(value: mut View) Int { value.value() }
+`,
+		"holder.ard": `use privateimpl/views
+
+struct Holder { current: views::View }
+
+fn borrow(value: mut Holder) mut views::View { (mut value.current) }
+`,
+		"models.ard": `use privateimpl/views
+use privateimpl/holder
+
+private struct Secret { number: Int }
+
+impl views::View for Secret {
+  fn value() Int { self.number }
+}
+
+fn make() holder::Holder { holder::Holder{current: Secret{number: 42}} }
+`,
+	}
+	for name, source := range files {
+		if err := os.WriteFile(filepath.Join(projectDir, name), []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mainPath := filepath.Join(projectDir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`use privateimpl/views
+use privateimpl/holder
+use privateimpl/models
+
+fn main() {
+  let value = models::make()
+  let reference = holder::borrow(mut value)
+  if not views::read_mut(reference) == 42 { panic("private implementation") }
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := frontend.LoadModule(mainPath)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower: %v", err)
 	}
 	if err := RunProgram(program, []string{"ard", "run", mainPath}, loaded.ProjectInfo); err != nil {
 		t.Fatalf("RunProgram: %v", err)

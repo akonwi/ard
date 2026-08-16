@@ -873,7 +873,14 @@ The callable forwarding functions live behind `VTableIdentity`, never directly
 inside the comparable handle. Two independent conversions of the same target to
 the same mutable trait produce equal `(TargetIdentity, VTableIdentity)` handles;
 copying preserves that pair. The backend must guarantee that a target storage
-location has one canonical vtable identity for each projected trait.
+location has one canonical vtable identity for each projected trait. On the Go
+target, the trait-owning package declares the canonical handle and vtable types.
+Concrete implementation vtables are canonical in the implementation type's
+package and register their dynamic concrete types with the trait owner. The
+trait owner supplies one canonical trait-storage vtable that dispatches through
+that registry, avoiding reverse dependencies on implementation packages.
+Generated users qualify those declarations across package boundaries rather
+than recreating package-local named handle types or vtable identities.
 
 For concrete-typed storage that vtable is specialized to the fixed concrete
 storage type. For trait-typed storage that may replace its current concrete
