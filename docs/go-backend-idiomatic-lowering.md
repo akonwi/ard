@@ -29,7 +29,7 @@ Standalone lowering remains only when Go cannot legally or safely attach the nat
 
 ADR 0061 makes `Trait` and `mut Trait` share one canonical Go interface. Mutable trait values capture the current dynamic object rather than forwarding replacement of a trait-typed storage slot. Copying, rebinding, equality, hashing, `Any`, and generic behavior therefore follow Go interface semantics directly.
 
-Natural implementations expose the trait's natural Go methods. Selector collisions and other legal Ard implementations use collision-proof generated receiver methods behind the same native interface. The backend emits no mutable-trait handle, adapter, vtable, registry, registration initializer, storage projection hook, or reflection-based snapshot machinery. `mut Trait -> Trait` is representation-free, and `.@` is invalid because an interface has no generic pointee to materialize.
+Natural implementations expose the trait's natural Go methods. Selector collisions and other legal Ard implementations use collision-proof generated receiver methods behind the same native interface. The backend emits no mutable-trait handle, adapter, vtable, registry, registration initializer, or storage projection hook. `mut Trait -> Trait` is representation-free. Explicit `.@` uses one isolated reflective helper to shallow-copy the hidden dynamic concrete value into an ordinary trait; reflection is not involved in normal storage, copying, or dispatch.
 
 ### Generated names and packages are artifact-oriented
 

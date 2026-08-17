@@ -126,21 +126,39 @@ qualification drop.
 
 ### Dereferencing
 
-Postfix `.@` is not defined for `mut Trait`.
+Postfix `.@` is defined for `mut Trait`. Applying dereference to the existential
+interpretation produces the opposite ordinary trait value:
 
-A Go interface has no generic pointee to materialize. Copying the interface
-would preserve the same dynamic pointer rather than produce the shallow value
-copy promised by ADRs 0057 and 0060, while cloning the dynamic pointee would
-require reflection or a compiler-defined clone protocol. Neither behavior is a
-faithful dereference.
+```text
+(∃ T implementing Trait. mut T).@ = ∃ T implementing Trait. T = Trait
+```
 
-Code that needs an independent dynamic object copy must request that operation
-explicitly through a trait/library cloning API or narrow to a known concrete
-reference before using `.@`.
+The source-level result type is therefore `Trait`; the hidden concrete `T`
+remains existential. The operation shallow-copies the current dynamic concrete
+value and does not preserve the original pointer identity:
 
-This amends ADR 0060: `.@` remains the canonical one-layer dereference syntax,
-but `mut Trait` is no longer an eligible operand because it has no Go pointer
-layer in the target representation.
+```ard
+let reference: mut View = mut box
+let snapshot: View = reference.@
+```
+
+At the Go target, explicit trait dereference performs one isolated dynamic
+snapshot operation. If the dynamic value is `*T` and `T` satisfies the trait's
+Go interface, the result interface contains the copied `T` value. If only
+`*T` satisfies the interface because the implementation needs pointer receiver
+methods, the result contains a pointer to fresh storage holding a shallow copy
+of `T`. A dynamic non-pointer value is already a value snapshot and is copied
+with ordinary Go interface assignment. Dereferencing a nil dynamic pointer
+panics like other direct reference dereferences.
+
+The target uses reflection only for this explicit `.@` operation because Go has
+no generic interface-pointee operation. Reflection is not part of trait storage,
+ordinary copying, method dispatch, equality, hashing, or generic boundaries;
+trait values remain plain native Go interfaces.
+
+Representation-free `mut Trait -> Trait` conversion is distinct: conversion
+preserves the current dynamic object and pointer identity, while `.@` creates an
+independent shallow dynamic snapshot.
 
 ### Calls and method mutability
 
@@ -231,13 +249,15 @@ No `any` erasure or wrapper reconstruction is required.
 - Go assignment, copying, rebinding, equality, hashing, generics, and method
   dispatch retain their native semantics.
 - The backend removes mutable-trait handles, vtables, registries, adapters,
-  storage forwarding, projection hooks, and related reflection.
+  storage forwarding, projection hooks, and reflection from ordinary trait
+  operations; only explicit `.@` calls the snapshot helper.
 - Go has better opportunities to inline, devirtualize, and reason about escape
   behavior because dynamic values are the implementing values themselves.
 - Generated APIs are easier for Go programmers to understand and adopt.
 - Existing references to trait-typed storage no longer observe later slot
   replacement.
-- `.@` on `mut Trait` becomes a compile-time error.
+- `.@` on `mut Trait` returns ordinary `Trait` with an independent shallow
+  dynamic snapshot and pays reflection cost only when explicitly requested.
 - `mut Trait -> Trait` becomes an implicit, representation-free conversion.
 - Trait identity and comparability follow Go interfaces rather than a separate
   Ard storage-identity protocol.
@@ -257,14 +277,16 @@ let view: mut View = box_reference
 ```
 
 Code using `reference.@` only to pass a mutable trait to an ordinary trait
-parameter should remove `.@`; the conversion is now implicit:
+parameter should remove `.@` when aliasing is intended; the representation-free
+conversion is now implicit. Keep `.@` when an independent shallow snapshot is
+required:
 
 ```ard
-inspect(reference)
+inspect(reference)                 // preserves the same dynamic object
+let snapshot: View = reference.@  // independent shallow dynamic value
 ```
 
-Code requiring an independent dynamic value copy must introduce an explicit
-clone operation.
+Code requiring a deep copy must still introduce an explicit clone operation.
 
 The compiler test matrix must replace forwarding-specific expectations with Go
 interface expectations for copying, rebinding, equality, map keys, `Any`, Go
@@ -294,12 +316,13 @@ interface, does not satisfy ordinary method constraints, exposes dynamic
 `*Trait` through `any`, and gives concrete projections the wrong identity.
 Pointers to interfaces are also non-idiomatic in Go.
 
-### Keep `.@` as capability narrowing
+### Treat `.@` as representation-free qualification narrowing
 
 Converting `mut Trait` to `Trait` while preserving the same interface value is
 useful, but calling that operation dereferencing would conflict with `.@`'s
-shallow-value materialization contract. The conversion is therefore ordinary
-source assignability rather than a postfix operation.
+shallow-value materialization contract. Representation-free narrowing is
+therefore ordinary source assignability; `.@` remains the explicit independent
+snapshot operation.
 
 ## Related
 

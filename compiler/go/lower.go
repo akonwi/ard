@@ -2463,7 +2463,14 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		if l.isReferenceType(expr.Target.Type) {
 			reference := l.program.Types[expr.Target.Type-1]
 			if l.isTraitObjectType(reference.Elem) {
-				return loweredExpr{}, fmt.Errorf("mutable trait values do not support dereference")
+				traitType, err := l.goType(reference.Elem)
+				if err != nil {
+					return loweredExpr{}, err
+				}
+				return loweredExpr{stmts: target.stmts, expr: &ast.CallExpr{
+					Fun:  &ast.IndexExpr{X: l.runtimeQualified("TraitSnapshot"), Index: traitType},
+					Args: []ast.Expr{target.expr},
+				}}, nil
 			}
 		}
 		return loweredExpr{stmts: target.stmts, expr: &ast.StarExpr{X: target.expr}}, nil

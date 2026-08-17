@@ -312,7 +312,7 @@ let observed = inspect(reference)
 let direct = inspect(mut value)
 let ordinary: View = reference
 let ordinary_direct: View = mut value`},
-		{name: "mutable trait dereference is rejected", source: `trait View {
+		{name: "mutable trait dereference produces ordinary trait", source: `trait View {
   fn get() Int
 }
 impl View for Box {
@@ -320,7 +320,7 @@ impl View for Box {
 }
 let value = Box{value: 1}
 let reference: mut View = mut value
-let snapshot = reference.@`, wantError: true},
+let snapshot: View = reference.@`},
 	}
 
 	for _, tt := range tests {

@@ -742,6 +742,31 @@ func TestADR0061TraitBorrowCapturesCurrentGoInterfaceValue(t *testing.T) {
 	}
 }
 
+func TestADR0061MutableTraitDereferenceCreatesShallowDynamicSnapshot(t *testing.T) {
+	program := lowerParitySource(t, `
+		trait View {
+			fn value() Int
+			fn set(value: Int)
+		}
+		struct Box { number: Int }
+		impl View for Box {
+			fn value() Int { self.number }
+			fn mut set(value: Int) { self.number = value }
+		}
+
+		fn main() [Int] {
+			let box = Box{number: 1}
+			let reference: mut View = mut box
+			let snapshot: View = reference.@
+			reference.set(2)
+			[snapshot.value(), reference.value(), box.number]
+		}
+	`)
+	if got := runGoTargetParityJSON(t, program); got != `[1,2,2]` {
+		t.Fatalf("result = %s, want independent shallow trait snapshot", got)
+	}
+}
+
 func TestADR0057MixedConcreteAndTraitReferencesCompareTargetIdentity(t *testing.T) {
 	program := lowerParitySource(t, `
 		trait View {

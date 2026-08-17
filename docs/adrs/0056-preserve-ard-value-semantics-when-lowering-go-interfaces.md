@@ -11,8 +11,9 @@ for concrete imported Go generic destinations. Ard now spells that operation
 normal shallow value copy; this is not a deep copy operation. Concrete
 references contribute `*T` at compatible boundaries. ADR 0061 supersedes ADR
 0057's mutable-trait forwarding rules: `Trait` and `mut Trait` share one native
-Go interface, mutable-to-ordinary trait conversion is representation-free, and
-`.@` is invalid for mutable traits. `mut ForeignInterface` retains its separate
+Go interface and mutable-to-ordinary trait conversion is representation-free.
+Explicit `.@` still creates an independent shallow dynamic trait snapshot.
+`mut ForeignInterface` retains its separate
 pointer-to-interface behavior. Later rebinding of the
 source reference slot is not visible through a boundary value already created.
 Ard-owned and foreign references use the same pointer-copy/rebind behavior.

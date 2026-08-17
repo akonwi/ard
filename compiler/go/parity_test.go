@@ -1955,14 +1955,15 @@ func TestGoTargetParityFallbackTraitMutableStorage(t *testing.T) {
 				let reference = mut current
 				reference.set(2)
 				let ordinary: Counter = reference
+				let snapshot: Counter = reference.@
 				let boxed: Any = reference
 				let recovered = unsafe::cast<mut Box>(boxed).expect("box pointer")
 				recovered.value = 3
-				"{ordinary.value()}:{current.value()}:{reference.value()}"
+				"{snapshot.value()}:{ordinary.value()}:{current.value()}:{reference.value()}"
 			}
 		`)
-		if got := runGoTargetParityJSON(t, program); got != `"3:3:3"` {
-			t.Fatalf("got %s, want native interface alias and projection behavior", got)
+		if got := runGoTargetParityJSON(t, program); got != `"2:3:3:3"` {
+			t.Fatalf("got %s, want fallback snapshot, alias, and projection behavior", got)
 		}
 	})
 

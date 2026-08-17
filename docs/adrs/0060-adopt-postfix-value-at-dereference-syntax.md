@@ -4,9 +4,10 @@
 
 Accepted
 
-Amended by ADR 0061: `mut Trait` is no longer represented by a Go pointer layer
-and is therefore not a valid `.@` operand. Mutable-to-ordinary trait conversion
-is an ordinary representation-free source conversion.
+Amended by ADR 0061: `mut Trait` shares the ordinary trait's native Go interface
+representation. Mutable-to-ordinary conversion preserves the current dynamic
+object, while explicit `.@` returns an ordinary trait containing an independent
+shallow snapshot of the hidden dynamic concrete value.
 
 ## Context
 

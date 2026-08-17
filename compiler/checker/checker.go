@@ -390,9 +390,6 @@ func (c *Checker) checkDeref(s *parse.Deref) Expression {
 	}
 	switch t := operand.Type().(type) {
 	case *MutableRef:
-		if _, trait := t.Of().(*Trait); trait {
-			break
-		}
 		return &DerefExpr{Operand: operand, _type: t.Of()}
 	case *ForeignType:
 		if t.Pointer {

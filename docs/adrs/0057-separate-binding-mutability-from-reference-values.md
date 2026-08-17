@@ -7,8 +7,9 @@ Accepted
 Surface syntax amended by ADR 0060. Mutable-trait storage identity, forwarding,
 comparability, boundary projection, and dereference rules are superseded by ADR
 0061. `Trait` and `mut Trait` now share one native Go interface; trait-valued
-borrows capture the current interface value, and `.@` is invalid for `mut Trait`.
-The mutable-trait portions of this ADR are historical.
+borrows capture the current interface value, while explicit `.@` returns an
+ordinary trait containing an independent shallow dynamic snapshot. The
+mutable-trait portions of this ADR are historical.
 
 ## Implementation status
 
