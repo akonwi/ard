@@ -562,6 +562,12 @@ type Argument struct {
 	Location
 	Name  string
 	Value Expression
+
+	// Spread marks the final argument of a variadic call as a referenced slice
+	// descriptor forwarded with postfix `...` (ADR 0062). The ellipsis is call
+	// metadata rather than a standalone expression.
+	Spread           bool
+	EllipsisLocation Location
 }
 
 // MutRef is the explicit mutable-reference expression `mut <operand>`

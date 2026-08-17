@@ -1307,7 +1307,15 @@ func (p printer) renderCallHeadDoc(head doc, headText string, typeArgs []parse.D
 		if arg.Name != "" {
 			prefix += arg.Name + ": "
 		}
-		argDocs = append(argDocs, dConcat(dText(prefix), p.renderExpressionValueDoc(arg.Value, 0)))
+		value := p.renderExpressionValueDoc(arg.Value, 0)
+		if arg.Spread {
+			switch arg.Value.(type) {
+			case *parse.MutRef, parse.MutRef:
+				value = dConcat(dText("("), value, dText(")"))
+			}
+			value = dConcat(value, dText("..."))
+		}
+		argDocs = append(argDocs, dConcat(dText(prefix), value))
 	}
 	if len(argDocs) == 0 && len(comments) == 0 {
 		return dConcat(head, dText("()"))
@@ -1338,7 +1346,7 @@ func (p printer) renderCallHeadDoc(head doc, headText string, typeArgs []parse.D
 
 	if headText != "" && len(comments) == 0 && len(args) > 0 {
 		last := len(args) - 1
-		if closure, ok := args[last].Value.(*parse.AnonymousFunction); ok && len(closure.Body) > 0 {
+		if closure, ok := args[last].Value.(*parse.AnonymousFunction); ok && !args[last].Spread && len(closure.Body) > 0 {
 			prior := make([]string, 0, last)
 			canHug := true
 			for _, argDoc := range argDocs[:last] {
