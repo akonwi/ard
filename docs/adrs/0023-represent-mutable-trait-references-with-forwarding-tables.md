@@ -2,17 +2,14 @@
 
 ## Status
 
-Accepted
+Superseded by ADR 0061
 
-Superseded in part by ADR 0057. Trait-specific forwarding remains the interior
-dispatch representation for `mut Trait`, but ordinary values no longer
-implicitly borrow into it, ordinary `mut T-value` bindings are not
-interior-mutable, references do not materialize trait values implicitly, and
-Ard source no longer performs whole-referent assignment through the forwarding
-table. The motivating example below uses historical implicit-borrow and
-direct-field-mutation forms; ADR 0057 requires explicit references at those
-sites. Forwarding handles copy and rebind with the pointer-value behavior defined
-by ADR 0057.
+ADR 0057 previously narrowed this decision. ADR 0061 removes the forwarding
+representation entirely: `Trait` and `mut Trait` now share one native Go
+interface and trait-valued borrows capture the current interface value.
+
+ADR 0057's intermediate restrictions and the forwarding examples below are
+historical rather than normative.
 
 ## Context
 

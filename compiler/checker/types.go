@@ -98,10 +98,11 @@ func derefMutableRef(t Type) Type {
 }
 
 type Trait struct {
-	Name       string
-	ModulePath string
-	methods    []FunctionDef
-	private    bool
+	Name                string
+	ModulePath          string
+	methods             []FunctionDef
+	private             bool
+	goInterfaceFallback bool
 }
 
 // Error is Ard's builtin contract for values that intentionally implement
@@ -126,6 +127,10 @@ func (t Trait) String() string {
 
 func (t Trait) IsPrivate() bool {
 	return t.private
+}
+
+func (t Trait) UsesNaturalGoInterface() bool {
+	return !t.goInterfaceFallback
 }
 
 func (t Trait) name() string {

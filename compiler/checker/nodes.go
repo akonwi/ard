@@ -239,10 +239,9 @@ func (d *DerefExpr) String() string {
 	return fmt.Sprintf("%s.@", d.Operand)
 }
 
-// ReferenceTraitProjection is the explicit checked conversion from a concrete
-// reference to a trait reference. Targets need this metadata to construct a
-// forwarding handle rather than treating the conversion as a pointer copy
-// (ADR 0057).
+// ReferenceTraitProjection is the checked widening from a concrete reference
+// to a trait-qualified value. The Go target preserves the concrete pointer as
+// the native interface's dynamic value (ADR 0061).
 type ReferenceTraitProjection struct {
 	Value       Expression
 	Destination Type

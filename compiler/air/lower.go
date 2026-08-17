@@ -2636,12 +2636,13 @@ func (l *lowerer) internTrait(trait *checker.Trait) (TraitID, error) {
 		loweredMethods[i] = TraitMethod{Name: method.Name, Signature: sig}
 	}
 	l.program.Traits[id] = Trait{
-		ID:           id,
-		Name:         trait.Name,
-		ModulePath:   trait.ModulePath,
-		Private:      trait.IsPrivate(),
-		BuiltinError: checker.IsBuiltinError(trait),
-		Methods:      loweredMethods,
+		ID:                  id,
+		Name:                trait.Name,
+		ModulePath:          trait.ModulePath,
+		Private:             trait.IsPrivate(),
+		BuiltinError:        checker.IsBuiltinError(trait),
+		GoInterfaceFallback: !trait.UsesNaturalGoInterface(),
+		Methods:             loweredMethods,
 	}
 	return id, nil
 }
@@ -3657,18 +3658,30 @@ func (fl *functionLowerer) lowerTraitUpcastIfNeeded(expr checker.Expression, exp
 	if actual == expected {
 		return nil, false, nil
 	}
+	actualImplType := actual
+	actualInfo, _ := fl.l.typeInfo(actual)
+	if actualInfo.Kind == TypeReference {
+		actualImplType = actualInfo.Elem
+		if actualImplType == expected {
+			value, err := fl.lowerExpr(expr)
+			if err != nil {
+				return nil, true, err
+			}
+			return &Expr{Kind: ExprTraitUpcast, Type: expected, Target: value, Impl: -1, Trait: expectedInfo.Trait}, true, nil
+		}
+	}
 	if err := fl.l.ensureModuleImportTraitImplsDeclared(fl.fn.Module); err != nil {
 		return nil, false, err
 	}
-	if actualInfo, ok := fl.l.typeInfo(actual); ok && actualInfo.ModulePath != "" {
+	if actualInfo, ok := fl.l.typeInfo(actualImplType); ok && actualInfo.ModulePath != "" {
 		if err := fl.l.ensureModuleTraitImplsDeclared(actualInfo.ModulePath); err != nil {
 			return nil, false, err
 		}
 	}
-	impl, ok := fl.l.lookupImpl(expectedInfo.Trait, actual)
+	impl, ok := fl.l.lookupImpl(expectedInfo.Trait, actualImplType)
 	if !ok {
 		var err error
-		impl, ok, err = fl.l.declareBuiltinTraitImpl(fl.fn.Module, expectedInfo.Trait, actual)
+		impl, ok, err = fl.l.declareBuiltinTraitImpl(fl.fn.Module, expectedInfo.Trait, actualImplType)
 		if err != nil {
 			return nil, false, err
 		}
@@ -4495,8 +4508,9 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		targetType := e.TargetType
 		mutable := false
 		if ref, ok := targetType.(*checker.MutableRef); ok {
-			mutable = true
 			targetType = ref.Of()
+			_, trait := targetType.(*checker.Trait)
+			mutable = !trait
 		}
 		if foreign, ok := targetType.(*checker.ForeignType); ok && foreign.Pointer {
 			// A `mut pkg::T` target resolves to the pointer-shaped foreign type;

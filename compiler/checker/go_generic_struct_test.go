@@ -42,6 +42,58 @@ let list_box = ffi::ListBox{Values: [1, 2]}`,
 let radio = ffi::Radio{Value: "compact", GroupValue: "cozy"}`,
 		},
 		{
+			name: "generic named callback field accepts matching closure",
+			input: `use go:example.com/app/ffi
+
+let radio = ffi::Radio<Str>{
+  Value: "compact",
+  GroupValue: "cozy",
+  OnChanged: fn(event: ffi::EventContext, value: Str) {},
+}`,
+		},
+		{
+			name: "generic named callback fields preserve result ABI adaptation",
+			input: `use go:example.com/app/ffi
+
+let callbacks = ffi::Callbacks<Str>{
+  Error: fn(value: Str) Void!Str { Result::ok(()) },
+  Result: fn(value: Str) Str!Str { Result::ok(value) },
+  Maybe: fn(value: Str) Str? { Maybe::new(value) },
+}`,
+		},
+		{
+			name: "generic named callback classifies substituted result ABI shapes",
+			input: `use go:example.com/app/ffi
+
+let returned = ffi::ReturnCallbacks<Str, Error>{
+  Return: fn(value: Str) Void!Str { Result::ok(()) },
+}
+let mutable_returned = ffi::ReturnCallbacks<Str, mut Error>{
+  Return: fn(value: Str) Void!Str { Result::ok(()) },
+}
+let paired = ffi::PairCallbacks<Str, Bool>{
+  Pair: fn(value: Str) Str? { Maybe::new(value) },
+}`,
+		},
+		{
+			name: "generic named callback rejects substituted empty struct result",
+			input: `use go:example.com/app/ffi
+
+let callbacks = ffi::ReturnCallbacks<Str, Void>{
+  Return: fn(value: Str) {},
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Unsupported foreign field ffi::ReturnCallbacks<Str, Void>.Return: callback result struct{} requires an ABI adapter"}},
+		},
+		{
+			name: "generic named callback rejects value-position empty struct result",
+			input: `use go:example.com/app/ffi
+
+let callbacks = ffi::Callbacks<Str>{
+  Empty: fn(value: Str) {},
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Unsupported foreign field ffi::Callbacks<Str>.Empty: callback result struct{} requires an ABI adapter"}},
+		},
+		{
 			name: "reject conflicting inferred type args",
 			input: `use go:example.com/app/ffi
 
@@ -104,9 +156,41 @@ type Box[T any] struct {
 	Label string
 }
 
+type EventContext struct{}
+
+type ValueChangedCallback[T any] func(EventContext, T)
+
 type Radio[T comparable] struct {
 	Value T
 	GroupValue T
+	OnChanged ValueChangedCallback[T]
+}
+
+type ErrorCallback[T any] func(T) error
+
+type ResultCallback[T any] func(T) (T, error)
+
+type MaybeCallback[T any] func(T) (T, bool)
+
+type EmptyCallback[T any] func(T) struct{}
+
+type ReturnCallback[T, R any] func(T) R
+
+type PairCallback[T, R any] func(T) (T, R)
+
+type ReturnCallbacks[T, R any] struct {
+	Return ReturnCallback[T, R]
+}
+
+type PairCallbacks[T, R any] struct {
+	Pair PairCallback[T, R]
+}
+
+type Callbacks[T any] struct {
+	Error ErrorCallback[T]
+	Result ResultCallback[T]
+	Maybe MaybeCallback[T]
+	Empty EmptyCallback[T]
 }
 
 type ListBox[T any] struct {

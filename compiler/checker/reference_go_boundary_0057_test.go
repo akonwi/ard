@@ -172,7 +172,7 @@ impl ffi::Reader for Native {
 let value = Native{N: 1}
 let view: mut View = mut value
 ffi::TakeReader(view)`, wantError: true},
-		{name: "bare generic preserves mutable trait forwarding handle", source: `trait View {
+		{name: "bare generic preserves native mutable trait interface", source: `trait View {
   fn value() Int
 }
 struct Native { N: Int }
@@ -184,6 +184,142 @@ let value = Native{N: 1}
 let view: mut View = mut value
 let echoed = ffi::Identity(view)
 take(echoed)`},
+		{name: "mutable trait interface satisfies Go method constraint", source: `trait Bumpable {
+  fn bump()
+}
+struct Native { N: Int }
+impl Bumpable for Native {
+  fn mut bump() { self.N = self.N + 1 }
+}
+let value = Native{N: 1}
+let reference: mut Bumpable = mut value
+ffi::UseBumper(reference)`},
+		{name: "mutable trait interface satisfies Result ABI method constraint", source: `trait Parser {
+  fn parse() Int!Str
+}
+struct Native { N: Int }
+impl Parser for Native {
+  fn parse() Int!Str { Result::ok(self.N) }
+}
+let value = Native{N: 1}
+let reference: mut Parser = mut value
+let result = ffi::UseParser(reference)`},
+		{name: "mutable trait interface satisfies Maybe ABI method constraint", source: `trait Finder {
+  fn find() Int?
+}
+struct Native { N: Int }
+impl Finder for Native {
+  fn find() Int? { Maybe::new(self.N) }
+}
+let value = Native{N: 1}
+let reference: mut Finder = mut value
+let result = ffi::UseFinder(reference)`},
+		{name: "recursive mutable trait interface satisfies Go method constraint", source: `trait Link {
+  fn next(value: mut Link) mut Link
+}
+struct Node { N: Int }
+impl Link for Node {
+  fn next(value: mut Link) mut Link { value }
+}
+let value = Node{N: 1}
+let reference: mut Link = mut value
+let returned = ffi::UseLink(reference)`},
+		{name: "related recursive mutable trait interface Go struct arguments stay canonical", source: `trait Link {
+  fn next(value: mut Link) mut Link
+}
+struct Node { N: Int }
+impl Link for Node {
+  fn next(value: mut Link) mut Link { value }
+}
+let value = Node{N: 1}
+let reference: mut Link = mut value
+let pair = ffi::LinkPair<mut Link, mut Link>{First: reference, Second: reference}`},
+		{name: "inferred related recursive mutable trait interface Go struct arguments stay canonical", source: `trait Link {
+  fn next(value: mut Link) mut Link
+}
+struct Node { N: Int }
+impl Link for Node {
+  fn next(value: mut Link) mut Link { value }
+}
+let value = Node{N: 1}
+let reference: mut Link = mut value
+let pair = ffi::LinkPair{First: reference, Second: reference}`},
+		{name: "nested generic Go struct fields preserve mutable trait binding", source: `trait Link {
+  fn next(value: mut Link) mut Link
+}
+struct Node { N: Int }
+impl Link for Node {
+  fn next(value: mut Link) mut Link { value }
+}
+let value = Node{N: 1}
+let reference: mut Link = mut value
+let inner = ffi::GenericBox<mut Link>{Value: reference}
+let outer = ffi::GenericOuter<mut Link>{Box: inner}`},
+		{name: "pointer nested generic Go struct fields preserve mutable trait binding", source: `trait Link {
+  fn next(value: mut Link) mut Link
+}
+struct Node { N: Int }
+impl Link for Node {
+  fn next(value: mut Link) mut Link { value }
+}
+let value = Node{N: 1}
+let reference: mut Link = mut value
+let inner = ffi::GenericBox<mut Link>{Value: reference}
+let outer = ffi::GenericPointerOuter<mut Link>{Box: mut inner}
+let rebound: mut Link = outer.Box.Value
+let linked = rebound.next(reference)`},
+		{name: "representable wrapper method satisfies constraint beside Ard-only method", source: `struct Payload { N: Int }
+trait View {
+  fn read() Int
+  fn payload() Payload
+}
+struct Native { N: Int }
+impl View for Native {
+  fn read() Int { self.N }
+  fn payload() Payload { Payload{N: self.N} }
+}
+let value = Native{N: 1}
+let reference: mut View = mut value
+let result = ffi::UseReader(reference)`},
+		{name: "fallback trait rejects incompatible natural Go method constraint", source: `trait Named {
+  fn name() Str
+}
+struct Native { name: Str }
+impl Named for Native {
+  fn name() Str { self.name }
+}
+let value = Native{name: "ard"}
+let reference: mut Named = mut value
+let result = ffi::UseNamed(reference)`, wantError: true},
+		{name: "receiver method collision across traits rejects natural Go constraint", source: `trait FirstName {
+  fn name() Str
+}
+trait SecondName {
+  fn name() Str
+}
+struct Native { value: Str }
+impl FirstName for Native {
+  fn name() Str { self.value }
+}
+impl SecondName for Native {
+  fn name() Str { self.value }
+}
+fn pass(value: mut FirstName) Str { ffi::UseNamed(value) }`, wantError: true},
+		{name: "receiver alias collision across traits rejects natural Go constraint", source: `trait FirstName {
+  fn name() Str
+}
+trait SecondName {
+  fn name() Str
+}
+struct Native { value: Str }
+type Alias = Native
+impl FirstName for Native {
+  fn name() Str { self.value }
+}
+impl SecondName for Alias {
+  fn name() Str { self.value }
+}
+fn pass(value: mut FirstName) Str { ffi::UseNamed(value) }`, wantError: true},
 		{name: "foreign interface storage rejects bare reference at value destination", source: `let value = ffi::BumperValue()
 let reference = mut value
 ffi::TakeBumper(reference)`, wantError: true},
@@ -209,6 +345,34 @@ ffi::TakePtr(single)`},
 			assertGoReferenceCheckerResult(t, source, resolver, tt.wantError)
 		})
 	}
+}
+
+func TestADR0061FallbackTraitPlanningIsDeclarationOrderIndependent(t *testing.T) {
+	root := t.TempDir()
+	writeADR0057GoBoundaryPackage(t, root)
+	resolver := checker.NewGoPackagesResolver(root, nil)
+	source := `use go:example.com/app/ffi
+
+trait Named {
+  fn name() Str
+}
+fn pass(value: mut Named) Str { ffi::UseNamed(value) }
+struct Native { name: Str }
+impl Named for Native {
+  fn name() Str { self.name }
+}`
+	result := parse.Parse([]byte(source), "test.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	checked := checker.New("test.ard", result.Program, nil, checker.CheckOptions{GoResolver: resolver})
+	checked.Check()
+	for _, diagnostic := range checked.Diagnostics() {
+		if diagnostic.Code == checker.DiagnosticCodeGoConstraintViolation {
+			return
+		}
+	}
+	t.Fatalf("expected fallback trait constraint rejection, got %#v", checked.Diagnostics())
 }
 
 func assertGoReferenceCheckerResult(t *testing.T, source string, resolver *checker.GoPackagesResolver, wantError bool) {
@@ -267,6 +431,10 @@ type Reader interface { Read() int }
 type Numbers []int
 type Scores map[string]int
 type Sink struct{}
+type LinkPair[T any, U interface{ Next(T) T }] struct { First T; Second U }
+type GenericBox[T any] struct { Value T }
+type GenericOuter[T any] struct { Box GenericBox[T] }
+type GenericPointerOuter[T any] struct { Box *GenericBox[T] }
 func (Sink) Take(values []int) {}
 
 var Global Item
@@ -294,6 +462,11 @@ func Identity[T any](value T) T { return value }
 func IsComparable[T comparable](value T) bool { return value == value }
 func Two[T comparable, U any](t T, u U) {}
 func UseBumper[T interface{ Bump() }](value T) { value.Bump() }
+func UseReader[T interface{ Read() int }](value T) int { return value.Read() }
+func UseNamed[T interface{ Name() string }](value T) string { return value.Name() }
+func UseParser[T interface{ Parse() (int, error) }](value T) (int, error) { return value.Parse() }
+func UseFinder[T interface{ Find() (int, bool) }](value T) (int, bool) { return value.Find() }
+func UseLink[T interface{ Next(T) T }](value T) T { return value.Next(value) }
 func SliceSize[S ~[]E, E any](value S) int { return len(value) }
 func SliceConsumer[S ~[]int]() func(S) { return func(value S) {} }
 func MapSize[M ~map[K]V, K comparable, V any](value M) int { return len(value) }

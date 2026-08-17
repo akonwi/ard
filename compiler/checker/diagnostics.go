@@ -63,7 +63,6 @@ const (
 	DiagnosticCodeWholeReferentAssignment       DiagnosticCode = "whole_referent_assignment"
 	DiagnosticCodeReferenceDestination          DiagnosticCode = "reference_destination_requires_reference"
 	DiagnosticCodeReferenceValueMaterialization DiagnosticCode = "reference_value_requires_deref"
-	DiagnosticCodeUnsupportedTraitReferenceCast DiagnosticCode = "unsupported_trait_reference_cast"
 	DiagnosticCodeUnsupportedMutableReference   DiagnosticCode = "unsupported_mutable_reference"
 	DiagnosticCodeInvalidForeignPointerBinding  DiagnosticCode = "invalid_foreign_pointer_binding"
 	DiagnosticCodeUnreachableReferentAssignment DiagnosticCode = "unreachable_referent_assignment"
@@ -447,23 +446,6 @@ func (d unsupportedMutableReferenceDiagnostic) build() Diagnostic {
 		"Unsupported mutable reference",
 		"This foreign value has no supported pointer form.",
 		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("`%s` cannot be referenced mutably", d.Type)},
-		nil,
-		"",
-	)
-}
-
-type unsupportedTraitReferenceCastDiagnostic struct {
-	Type Type
-	Span SourceSpan
-}
-
-func (d unsupportedTraitReferenceCastDiagnostic) build() Diagnostic {
-	return mutationDiagnostic(
-		DiagnosticCodeUnsupportedTraitReferenceCast,
-		fmt.Sprintf("unsafe::cast cannot reconstruct %s", formatTypeForDisplay(d.Type)),
-		"Cannot cast to a mutable trait reference",
-		"Reconstructing a trait forwarding table from a dynamic value is not supported.",
-		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("`%s` cannot be a cast target", formatTypeForDisplay(d.Type))},
 		nil,
 		"",
 	)

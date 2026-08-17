@@ -299,6 +299,28 @@ reference.@.value = 2`, wantError: true},
 		{name: "mut deref creates independent top level storage", source: `let value = Box{value: 1}
 let reference = mut value
 let independent: mut Box = mut reference.@`},
+		{name: "mutable trait implicitly narrows to ordinary trait", source: `trait View {
+  fn get() Int
+}
+impl View for Box {
+  fn get() Int { self.value }
+}
+fn inspect(value: View) Int { value.get() }
+let value = Box{value: 1}
+let reference: mut View = mut value
+let observed = inspect(reference)
+let direct = inspect(mut value)
+let ordinary: View = reference
+let ordinary_direct: View = mut value`},
+		{name: "mutable trait dereference produces ordinary trait", source: `trait View {
+  fn get() Int
+}
+impl View for Box {
+  fn get() Int { self.value }
+}
+let value = Box{value: 1}
+let reference: mut View = mut value
+let snapshot: View = reference.@`},
 	}
 
 	for _, tt := range tests {
@@ -445,7 +467,7 @@ let recovered: mut Box = unsafe::cast<mut Box>(boxed).expect("reference")`},
 let reference = mut value
 let boxed: Any = reference
 let copy: Box = unsafe::cast<Box>(boxed).expect("value")`},
-		{name: "mutable trait reconstruction is rejected", source: `trait View {
+		{name: "mutable trait cast uses native interface assertion", source: `trait View {
   fn get() Int
 }
 impl View for Box {
@@ -453,7 +475,7 @@ impl View for Box {
 }
 let view: mut View = mut Box{value: 1}
 let boxed: Any = view
-let recovered = unsafe::cast<mut View>(boxed)`, wantError: true},
+let recovered = unsafe::cast<mut View>(boxed)`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -4,13 +4,14 @@
 
 Accepted
 
-Clarified by ADR 0057. `unsafe::cast<T>` remains an explicit checked operation
+Clarified by ADRs 0057 and 0061. `unsafe::cast<T>` remains an explicit checked operation
 that may shallow-dereference a boxed non-nil `*T`; nil returns `none` under this
 fallible API rather than using the direct `.@` dereference's panic behavior. For concrete and
 supported descriptor targets, `unsafe::cast<mut T>` recovers a pointer-like
 reference whose copies and rebinding follow ordinary pointer-value semantics.
-`unsafe::cast<mut Trait>` remains unsupported initially because it would need to
-reconstruct a forwarding table from an open set of dynamic pointer types.
+Under ADR 0061, `unsafe::cast<mut Trait>` is supported as the same checked Go
+interface assertion used for ordinary `Trait`; no forwarding metadata is
+required.
 
 ## Context
 

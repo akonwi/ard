@@ -80,11 +80,8 @@ func TestTraitInterfaceTypeNameUsesNaturalVisibility(t *testing.T) {
 	if got := l.traitInterfaceTypeName(l.program.Traits[2]); got != "ToString" {
 		t.Fatalf("stdlib trait interface name = %q, want ToString", got)
 	}
-	if got := mutableTraitRefTypeName(l.program.Traits[0]); got != "ArdMutTrait_Renderable_0" {
-		t.Fatalf("public mutable trait handle name = %q, want exported canonical name", got)
-	}
-	if got := mutableTraitRefTypeName(l.program.Traits[1]); got != "ardMutTrait_internal_drawable_1" {
-		t.Fatalf("private mutable trait handle name = %q, want package-private name", got)
+	if got := traitDispatchMethodName(l.program.Traits[0].ID, 2); got != "ArdTraitMethod_0_2" {
+		t.Fatalf("fallback trait dispatch method name = %q, want collision-proof exported name", got)
 	}
 }
 func TestTraitInterfaceTypeNameFallsBackOnCrossModuleTraitCollision(t *testing.T) {
@@ -3974,8 +3971,14 @@ func TestLowerProgramEmitsGoInterfaceForTraitObject(t *testing.T) {
 		}
 	`)
 	mutFiles := lowerProgramAST(t, mutProgram, Options{PackageName: "main"})
-	if !astFilesHaveTypeSpec(mutFiles, "ArdMutTrait_Renderable_0") {
-		t.Fatal("generated AST should keep mutable trait reference type for mut trait use")
+	if astFilesHaveTypeSpec(mutFiles, "ArdMutTrait_Renderable_0") {
+		t.Fatal("mutable trait use should not emit a distinct Go type")
+	}
+	if !astFilesContain(mutFiles, func(node ast.Node) bool {
+		fn, ok := node.(*ast.FuncDecl)
+		return ok && fn.Name != nil && strings.EqualFold(fn.Name.Name, "update") && fn.Type != nil && fn.Type.Params != nil && len(fn.Type.Params.List) == 1 && astExprName(fn.Type.Params.List[0].Type) == "Renderable"
+	}) {
+		t.Fatal("mutable trait parameter should use the same Go interface as ordinary Trait")
 	}
 	if !astFilesContain(mutFiles, func(node ast.Node) bool {
 		fn, ok := node.(*ast.FuncDecl)
@@ -4034,7 +4037,7 @@ fn read(value: View) Int { value.value() }
 fn read_mut(value: mut View) Int { value.value() }
 fn set_mut(value: mut View, number: Int) { value.set(number) }
 fn forward(value: mut View) mut View { value }
-fn snapshot(value: mut View) View { value.@ }
+fn ordinary(value: mut View) View { value }
 fn same(left: mut View, right: mut View) Bool { left == right }
 fn lookup(values: [mut View: Str], key: mut View) Str { values.get(key).or("missing") }
 fn shared_ref() mut View { (mut shared) }
@@ -4059,10 +4062,10 @@ fn main() {
   if not views::same(reference, returned) { panic("round-trip identity") }
   if not views::lookup([reference: "box"], returned) == "box" { panic("map key identity") }
 
-  let snapshot = views::snapshot(reference)
+  let ordinary = views::ordinary(reference)
   let concrete = mut box
   concrete.number = 5
-  if not snapshot.value() == 4 { panic("snapshot changed") }
+  if not ordinary.value() == 5 { panic("ordinary trait did not preserve object identity") }
   if not returned.value() == 5 { panic("forwarding lost") }
   views::set_from_any(returned, 6)
   if not box.number == 6 { panic("Any projection lost") }
@@ -4076,7 +4079,8 @@ fn main() {
   if not views::read_mut(storage_reference) == 10 { panic("trait storage mutation") }
   current = views::Other{number: 9}
   views::set_mut(storage_reference, 11)
-  if not views::read_mut(storage_reference) == 11 { panic("trait storage replacement") }
+  if not views::read_mut(storage_reference) == 11 { panic("captured trait object changed after slot replacement") }
+  if not views::read(current) == 9 { panic("trait slot replacement changed captured object") }
 
   let shared_left = views::shared_ref()
   let shared_right = views::shared_ref()
@@ -4110,8 +4114,8 @@ fn main() {
 			return true
 		})
 	}
-	if handleDecls != 1 {
-		t.Fatalf("mutable trait handle declarations = %d, want one canonical declaration in the trait-owning package", handleDecls)
+	if handleDecls != 0 {
+		t.Fatalf("mutable trait handle declarations = %d, want none for native interface lowering", handleDecls)
 	}
 	if err := RunProgram(program, []string{"ard", "run", mainPath}, loaded.ProjectInfo); err != nil {
 		t.Fatalf("RunProgram: %v", err)
@@ -4155,12 +4159,12 @@ use canonicaltraits/models
 fn main() {
   let direct_concrete: mut views::View = mut models::shared
   let returned_concrete = models::concrete_ref()
-  if not views::same(direct_concrete, returned_concrete) { panic("concrete vtable identity") }
+  if not views::same(direct_concrete, returned_concrete) { panic("concrete interface identity") }
 
   let holder = mut models::holder
   let direct_storage: mut views::View = mut holder.current
   let returned_storage = models::storage_ref()
-  if not views::same(direct_storage, returned_storage) { panic("storage vtable identity") }
+  if not views::same(direct_storage, returned_storage) { panic("captured interface equality") }
 }
 `), 0o644); err != nil {
 		t.Fatal(err)
@@ -4191,8 +4195,8 @@ fn main() {
 		})
 	}
 	for _, name := range []string{"ArdMutTrait_View_0", "ArdMutTraitVTable_View_0_impl_0", "ArdMutTraitVTable_View_0_storage"} {
-		if declarations[name] != 1 {
-			t.Fatalf("generated declaration %s count = %d, want one canonical owner", name, declarations[name])
+		if declarations[name] != 0 {
+			t.Fatalf("generated mutable trait declaration %s count = %d, want none", name, declarations[name])
 		}
 	}
 	if err := RunProgram(program, []string{"ard", "run", mainPath}, loaded.ProjectInfo); err != nil {
@@ -4210,6 +4214,7 @@ func TestLowerProgramMutableTraitStorageAvoidsImplementationImportCycles(t *test
   fn value() Int
 }
 
+fn read(value: View) Int { value.value() }
 fn read_mut(value: mut View) Int { value.value() }
 `,
 		"holder.ard": `use privateimpl/views
@@ -4221,13 +4226,13 @@ fn borrow(value: mut Holder) mut views::View { (mut value.current) }
 		"models.ard": `use privateimpl/views
 use privateimpl/holder
 
-private struct Secret { number: Int }
+private struct Secret { value: Int }
 
 impl views::View for Secret {
-  fn value() Int { self.number }
+  fn value() Int { self.value }
 }
 
-fn make() holder::Holder { holder::Holder{current: Secret{number: 42}} }
+fn make() holder::Holder { holder::Holder{current: Secret{value: 42}} }
 `,
 	}
 	for name, source := range files {
@@ -4243,6 +4248,7 @@ use privateimpl/models
 fn main() {
   let value = models::make()
   let reference = holder::borrow(mut value)
+  if not views::read(reference) == 42 { panic("ordinary private implementation") }
   if not views::read_mut(reference) == 42 { panic("private implementation") }
 }
 `), 0o644); err != nil {
@@ -4298,9 +4304,15 @@ func TestLowerProgramRetainsStandaloneMethodWhenStructFieldCollides(t *testing.T
 	}
 	if !astFilesContain(files, func(node ast.Node) bool {
 		fn, ok := node.(*ast.FuncDecl)
-		return ok && fn.Name != nil && strings.EqualFold(fn.Name.Name, "read") && fn.Type != nil && fn.Type.Params != nil && len(fn.Type.Params.List) == 1 && astExprName(fn.Type.Params.List[0].Type) == "any"
+		return ok && fn.Name != nil && strings.EqualFold(fn.Name.Name, "read") && fn.Type != nil && fn.Type.Params != nil && len(fn.Type.Params.List) == 1 && astExprName(fn.Type.Params.List[0].Type) == "Named"
 	}) {
-		t.Fatal("ordinary nonrepresentable trait should retain any fallback when mut trait is used elsewhere")
+		t.Fatal("fallback trait should use its native collision-proof Go interface")
+	}
+	if !astFilesContain(files, func(node ast.Node) bool {
+		fn, ok := node.(*ast.FuncDecl)
+		return ok && fn.Recv != nil && fn.Name != nil && fn.Name.Name == "ArdTraitMethod_0_0"
+	}) {
+		t.Fatal("fallback trait should emit a collision-proof receiver method")
 	}
 	buildProgramFromGeneratedSources(t, program, "field-colliding-method-fallback")
 }

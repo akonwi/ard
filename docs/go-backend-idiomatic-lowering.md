@@ -25,11 +25,11 @@ Compatible Ard impl methods lower directly as Go receiver methods, and internal 
 
 Standalone lowering remains only when Go cannot legally or safely attach the natural method: selector collisions with fields or other methods, names reserved for generated behavior, methods on concrete generic instantiations, and generic methods that require stronger constraints than their receiver type provides. Eliminating those fallbacks requires explicit collision diagnostics or a stable method-name policy rather than duplicate declarations.
 
-### Mutable trait references require specialized handles
+### Trait values use native Go interfaces
 
-Go-representable ordinary Ard trait values lower to canonical Go interfaces and dispatch through receiver methods. A `mut Trait` use elsewhere does not change that ordinary representation.
+ADR 0061 makes `Trait` and `mut Trait` share one canonical Go interface. Mutable trait values capture the current dynamic object rather than forwarding replacement of a trait-typed storage slot. Copying, rebinding, equality, hashing, `Any`, and generic behavior therefore follow Go interface semantics directly.
 
-Mutable trait references retain a separate forwarding handle because they must preserve identity and aliasing with their original, potentially replaceable storage. A Go interface or pointer to an interface cannot represent that behavior for escaping references. The trait-owning package declares the canonical handle and vtable types plus one canonical trait-storage vtable. Implementation packages provide canonical concrete vtables and register them with the trait owner, so storage dispatch does not introduce reverse package dependencies and references remain assignable and identity-stable across generated package boundaries. This specialized representation is local to `mut Trait`; ordinary traits fall back to `any` and generated dispatch only when one of their implementations cannot satisfy the native interface.
+Natural implementations expose the trait's natural Go methods. Selector collisions and other legal Ard implementations use collision-proof generated receiver methods behind the same native interface. The backend emits no mutable-trait handle, adapter, vtable, registry, registration initializer, or storage projection hook. `mut Trait -> Trait` is representation-free. Explicit `.@` uses one isolated reflective helper to shallow-copy the hidden dynamic concrete value into an ordinary trait; reflection is not involved in normal storage, copying, or dispatch.
 
 ### Generated names and packages are artifact-oriented
 
@@ -74,14 +74,14 @@ If Go-facing adapters are needed later, they should be wrappers at the boundary,
    - Treat trait definitions as method requirements only; do not encode implementation mutability in the trait interface.
    - Represent mutating implementations with pointer receiver methods, so `*T` satisfies the same interface when mutation is required.
    - Keep `mut Trait` valid at use sites as an addressability/mutability requirement for the instance being used.
-   - Keep the mutable trait-reference forwarding handle where stable storage identity and aliasing cannot be represented by a Go interface.
+   - Lower `Trait` and `mut Trait` to the same canonical Go interface and use Go interface copying/rebinding semantics.
    - Avoid changing traits whose method signatures need Ard-only runtime adaptation.
    - Initial implementation notes:
      - The Go target now emits a native Go interface declaration for each Go-representable Ard trait object type.
      - Immutable trait object types use that interface when every known implementation can satisfy it with generated Go receiver methods.
-     - Traits with mutating receiver implementations remain eligible for native interface lowering even when `mut Trait` is used elsewhere; pointer receiver methods let `*T` satisfy the ordinary trait interface while mutable references retain their forwarding handles.
+     - Traits with mutating receiver implementations use pointer receiver methods, so `*T` satisfies the same interface used by ordinary and mutable trait source types.
      - Project/dependency FFI boundaries adapt top-level `Trait`, `Trait?`, and `Trait!E` returns where practical, but fall back to the old `any` representation for container-shaped FFI signatures that are not recursively adapted yet.
-     - ADR 0023 and ADR 0057's forwarding-table design remains the Go-target representation for `mut Trait`; it does not determine the representation of ordinary trait values.
+     - ADR 0061 supersedes the forwarding-table design. Fallback traits remain native interfaces by using collision-proof generated methods rather than `any` and concrete type switches.
 
 3. **Let Ard structs satisfy Go interfaces naturally.**
    - Once methods are real Go methods, direct-Go interface assignability can rely on Go method sets.

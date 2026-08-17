@@ -56,9 +56,9 @@ Ard uses `Any` for opaque boxed values, especially at FFI boundaries. `Any` can 
 
 Go is Ard's default target language and the current practical runtime platform. Ard should interoperate with Go directly and well, especially because access to existing Go libraries is one of the language's major strengths.
 
-However, Go is a target, not the definition of Ard. The compiler should not reject or reshape valuable Ard features solely because Go lacks a direct equivalent. Instead:
+However, Go is a target, not the definition of Ard. The compiler should not reject or reshape valuable Ard features solely because Go lacks a direct equivalent. Ard should also avoid inventing a parallel runtime semantics for concepts Go already represents faithfully: source syntax and checking should add guarantees where useful while leaving native Go value, pointer, interface, assignment, and dispatch behavior intact. Instead:
 
-- If an Ard feature maps naturally to Go, lower it naturally.
+- If an Ard feature maps naturally to Go, adopt that native behavior and lower it directly.
 - If an Ard feature does not map naturally to Go, preserve Ard semantics with generated helper code or lower-level translation.
 - If a Go API exposes Go-specific concepts such as nil pointers, package state, interfaces, panics, or zero values, make that interop boundary explicit rather than pretending those concepts are native Ard semantics.
 

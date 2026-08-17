@@ -1924,13 +1924,13 @@ func TestGoTargetParityEscapedMutableTraitObjectUpcastAliasesConcrete(t *testing
 			let independently_rebound = node.view.value()
 			let rebound = active.value()
 
-			let snapshot: View = node.view.@
+			let ordinary: View = node.view
 			leaf_reference.n = 3
-			before + shared + independently_rebound + rebound + snapshot.value() + node.view.value()
+			before + shared + independently_rebound + rebound + ordinary.value() + node.view.value()
 		}
 	`)
-	if got := runGoTargetParityJSON(t, program); got != "20" {
-		t.Fatalf("got %s, want 20", got)
+	if got := runGoTargetParityJSON(t, program); got != "21" {
+		t.Fatalf("got %s, want 21", got)
 	}
 }
 func TestGoTargetParityFallbackTraitMutableStorage(t *testing.T) {
@@ -1954,19 +1954,45 @@ func TestGoTargetParityFallbackTraitMutableStorage(t *testing.T) {
 				mut current: Counter = Box{value: 1}
 				let reference = mut current
 				reference.set(2)
-				let snapshot = reference.@
+				let ordinary: Counter = reference
+				let snapshot: Counter = reference.@
 				let boxed: Any = reference
 				let recovered = unsafe::cast<mut Box>(boxed).expect("box pointer")
 				recovered.value = 3
-				"{snapshot.value()}:{current.value()}:{reference.value()}"
+				"{snapshot.value()}:{ordinary.value()}:{current.value()}:{reference.value()}"
 			}
 		`)
-		if got := runGoTargetParityJSON(t, program); got != `"2:3:3"` {
-			t.Fatalf("got %s, want fallback mutation, snapshot, and projection behavior", got)
+		if got := runGoTargetParityJSON(t, program); got != `"2:3:3:3"` {
+			t.Fatalf("got %s, want fallback snapshot, alias, and projection behavior", got)
 		}
 	})
 
-	t.Run("value implementation promoted by Any projection", func(t *testing.T) {
+	t.Run("fallback ABI-shaped returns", func(t *testing.T) {
+		program := lowerParitySource(t, `
+			trait View {
+				fn result() Int!Str
+				fn maybe() Int?
+			}
+
+			struct Box { result: Int, maybe: Int }
+
+			impl View for Box {
+				fn result() Int!Str { Result::ok(self.result) }
+				fn maybe() Int? { Maybe::new(self.maybe) }
+			}
+
+			fn main() Int {
+				let box = Box{result: 40, maybe: 2}
+				let reference: mut View = mut box
+				reference.result().or(0) + reference.maybe().or(0)
+			}
+		`)
+		if got := runGoTargetParityJSON(t, program); got != `42` {
+			t.Fatalf("got %s, want fallback Result and Maybe returns to preserve their ABI", got)
+		}
+	})
+
+	t.Run("value implementation follows Go interface capture", func(t *testing.T) {
 		program := lowerParitySource(t, `
 			use ard/unsafe
 
@@ -1984,13 +2010,13 @@ func TestGoTargetParityFallbackTraitMutableStorage(t *testing.T) {
 				mut current: View = Box{value: 1}
 				let reference = mut current
 				let boxed: Any = reference
-				let recovered = unsafe::cast<mut Box>(boxed).expect("box pointer")
-				recovered.value = 2
-				current.value() + reference.value()
+				let recovered = unsafe::cast<Box>(boxed).expect("box value")
+				current = Box{value: 2}
+				recovered.value + current.value() + reference.value()
 			}
 		`)
 		if got := runGoTargetParityJSON(t, program); got != `4` {
-			t.Fatalf("got %s, want promoted fallback trait storage to remain dispatchable", got)
+			t.Fatalf("got %s, want captured Go interface value semantics", got)
 		}
 	})
 }

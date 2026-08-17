@@ -188,7 +188,7 @@ Interface-to-interface assignability also follows Go's rules, so a value such as
 
 At an interface destination—including Ard `Any` and named empty Go interfaces—an ordinary Ard value contributes a value copy, while an existing `mut T` contributes its current pointer identity. Use `reference.@` to deliberately select the ordinary shallow-value path instead. Every conversion copies the selected current pointer or value, so later rebinding of the Ard reference slot is not visible through an interface value already created.
 
-A concrete `mut T` appears to Go as dynamic `*T`. A `mut Trait` projects its current dynamic concrete pointer at `Any` and named empty-interface boundaries. A flowed first-class `mut Trait` cannot be passed to a named nonempty Go interface because its runtime implementation is no longer statically provable. An immediate concrete-reference-to-trait expression may be accepted when the compiler still has concrete provenance and can prove the exact Go method set.
+A concrete `mut T` appears to Go as dynamic `*T`. `Trait` and `mut Trait` use the same native Go interface; mutable trait values widened from concrete references therefore carry dynamic `*T` directly. Copying a trait captures its current interface value, and later rebinding of the source trait variable is not observed. Mutable trait values pass through compatible Go generic arguments, results, containers, and method constraints without a wrapper representation.
 
 A reference to foreign-interface storage is different: it contributes a pointer-to-interface to `Any` and requires `interface_reference.@` when the destination needs the interface value itself.
 

@@ -4,14 +4,17 @@
 
 Accepted
 
-Amended by ADRs 0057 and 0060. Implicit `mut T -> T` dereferencing at value destinations
+Amended by ADRs 0057, 0060, and 0061. Implicit `mut T -> T` dereferencing at value destinations
 (the Go equivalent of using `*p` where `p` has type `*T`) is removed, including
 for concrete imported Go generic destinations. Ard now spells that operation
 `reference.@`. Binding or passing the resulting value makes the target's
 normal shallow value copy; this is not a deep copy operation. Concrete
-references contribute `*T` at compatible boundaries. ADR 0057 separately
-specifies `mut Trait` forwarding handles/dynamic concrete interface conversion
-and `mut ForeignInterface` pointer-to-interface behavior. Later rebinding of the
+references contribute `*T` at compatible boundaries. ADR 0061 supersedes ADR
+0057's mutable-trait forwarding rules: `Trait` and `mut Trait` share one native
+Go interface and mutable-to-ordinary trait conversion is representation-free.
+Explicit `.@` still creates an independent shallow dynamic trait snapshot.
+`mut ForeignInterface` retains its separate
+pointer-to-interface behavior. Later rebinding of the
 source reference slot is not visible through a boundary value already created.
 Ard-owned and foreign references use the same pointer-copy/rebind behavior.
 Examples below that pass a reference to an ordinary value destination or assert
@@ -260,10 +263,10 @@ fn forward(value: mut $T) {
 }
 ```
 
-A Go generic parameter constrained by `any` is different. Under ADR 0057, an
-inferred reference argument to `func accept[T any](value T)` contributes its
-selected static boundary representation—normally a concrete/descriptor pointer,
-or ADR 0057's generated forwarding handle for `mut Trait`. If `T` is explicitly
+A Go generic parameter constrained by `any` is different. An inferred reference
+argument to `func accept[T any](value T)` contributes its selected static
+boundary representation: a concrete/descriptor pointer, or under ADR 0061 the
+same native Go interface for `Trait` and `mut Trait`. If `T` is explicitly
 fixed to the concrete value type, the caller must pass `reference.@`; bare
 `mut T` is rejected. If `T`
 is explicitly or contextually resolved to Ard `Any`, the destination is an

@@ -1037,8 +1037,9 @@ func foreignTypeWithArgs(typ *ForeignType, args []Type) *ForeignType {
 		return &copy
 	}
 	goArgs := make([]gotypes.Type, len(args))
+	goTypeContext := newCheckerGoTypeContext()
 	for i, arg := range args {
-		converted, ok := checkerTypeToGoType(arg)
+		converted, ok := checkerTypeToGoTypeWithContext(arg, goTypeContext)
 		if !ok {
 			return &copy
 		}
@@ -1057,6 +1058,8 @@ func foreignTypeWithArgs(typ *ForeignType, args []Type) *ForeignType {
 		return &copy
 	}
 	refreshed.TypeArgs = append([]Type(nil), args...)
+	refreshed.Fields, refreshed.UnsupportedFields = goFieldsForInstantiatedGenericNamedType(instNamed, named.Origin(), args)
+	refreshed.FieldsLoaded = true
 	return refreshed
 }
 
