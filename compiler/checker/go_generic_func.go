@@ -390,6 +390,40 @@ func boundTypeFromGo(t types.Type, tparams *types.TypeParamList, bindings goType
 			}
 			args[i] = arg
 		}
+		if signature, ok := typ.Underlying().(*types.Signature); ok {
+			goArgs := make([]types.Type, len(args))
+			context := newCheckerGoTypeContext()
+			for i, arg := range args {
+				converted, ok := checkerTypeToGoTypeWithContext(arg, context)
+				if !ok {
+					return nil, fmt.Sprintf("generic argument %d %s cannot be represented as a Go type", i+1, arg)
+				}
+				goArgs[i] = converted
+			}
+			instantiated, err := types.Instantiate(nil, typ.Origin(), goArgs, true)
+			if err != nil {
+				return nil, fmt.Sprintf("generic named function %s cannot be instantiated: %s", typ.String(), err)
+			}
+			instNamed, ok := instantiated.(*types.Named)
+			if !ok {
+				return nil, fmt.Sprintf("generic named function %s did not produce a named Go type", typ.String())
+			}
+			instSignature, ok := instNamed.Underlying().(*types.Signature)
+			if !ok {
+				return nil, fmt.Sprintf("generic named function %s lost its signature", typ.String())
+			}
+			fn, reason := boundFunctionDefFromGoCallbackSignature(typ.Obj().Name(), signature, instSignature, tparams, bindings)
+			if reason != "" {
+				return nil, reason
+			}
+			foreign, ok := foreignNamedTypeFromGo(instNamed, false, true).(*ForeignType)
+			if !ok {
+				return nil, fmt.Sprintf("generic named function %s is not supported yet", typ.String())
+			}
+			foreign.Underlying = fn
+			foreign.TypeArgs = append([]Type(nil), args...)
+			return foreign, ""
+		}
 		foreign, ok := foreignNamedTypeFromGo(typ.Origin(), false, true).(*ForeignType)
 		if !ok {
 			return nil, fmt.Sprintf("generic named type %s is not supported yet", typ.String())
@@ -437,46 +471,91 @@ func boundTypeFromGo(t types.Type, tparams *types.TypeParamList, bindings goType
 			return nil, "unsupported channel direction"
 		}
 	case *types.Signature:
-		params := make([]Parameter, 0, typ.Params().Len())
-		for i := 0; i < typ.Params().Len(); i++ {
-			goParamType := typ.Params().At(i).Type()
-			variadic := typ.Variadic() && i == typ.Params().Len()-1
-			if variadic {
-				slice, ok := goParamType.(*types.Slice)
-				if !ok {
-					return nil, fmt.Sprintf("variadic callback parameter %d is not a slice", i+1)
-				}
-				goParamType = slice.Elem()
-			}
-			param, reason := boundTypeFromGo(goParamType, tparams, bindings)
-			if reason != "" {
-				return nil, fmt.Sprintf("callback parameter %d %s", i+1, reason)
-			}
-			if containsArdSlice(param) {
-				return nil, fmt.Sprintf("callback parameter %d resolves to Slice; generic Go callback slice parameters are not supported", i+1)
-			}
-			if variadic && isDescriptorBoundaryArdType(param) {
-				return nil, fmt.Sprintf("variadic callback parameter %d resolves to a descriptor element requiring an unsupported call adapter", i+1)
-			}
-			name := typ.Params().At(i).Name()
-			if name == "" {
-				name = fmt.Sprintf("arg%d", i+1)
-			}
-			params = append(params, Parameter{Name: name, Type: param, Variadic: variadic})
-		}
-		var ret Type = Void
-		if typ.Results().Len() == 1 {
-			result, reason := boundTypeFromGo(typ.Results().At(0).Type(), tparams, bindings)
-			if reason != "" {
-				return nil, "callback result " + reason
-			}
-			ret = result
-		} else if typ.Results().Len() > 1 {
-			return nil, fmt.Sprintf("callback multi-result shape %s is not supported yet", typ.Results().String())
-		}
-		return &FunctionDef{Name: "<function>", Parameters: params, ReturnType: ret}, ""
+		return boundFunctionDefFromGoCallbackSignature("<function>", typ, typ, tparams, bindings)
 	}
 	return nil, fmt.Sprintf("generic type %s is not supported yet", t.String())
+}
+
+// boundFunctionDefFromGoCallbackSignature maps a generic Go callback
+// signature after substituting its Ard type arguments. It preserves the same
+// conversion-free result ABI rules as functionDefFromGoCallbackSignature.
+func boundFunctionDefFromGoCallbackSignature(name string, sig, instantiated *types.Signature, tparams *types.TypeParamList, bindings goTypeParamBindings) (*FunctionDef, string) {
+	params := make([]Parameter, 0, sig.Params().Len())
+	for i := 0; i < sig.Params().Len(); i++ {
+		goParamType := sig.Params().At(i).Type()
+		variadic := sig.Variadic() && i == sig.Params().Len()-1
+		if variadic {
+			slice, ok := goParamType.(*types.Slice)
+			if !ok {
+				return nil, fmt.Sprintf("variadic callback parameter %d is not a slice", i+1)
+			}
+			goParamType = slice.Elem()
+		}
+		param, reason := boundTypeFromGo(goParamType, tparams, bindings)
+		if reason != "" {
+			return nil, fmt.Sprintf("callback parameter %d %s", i+1, reason)
+		}
+		if containsArdSlice(param) {
+			return nil, fmt.Sprintf("callback parameter %d resolves to Slice; generic Go callback slice parameters are not supported", i+1)
+		}
+		if variadic && isDescriptorBoundaryArdType(param) {
+			return nil, fmt.Sprintf("variadic callback parameter %d resolves to a descriptor element requiring an unsupported call adapter", i+1)
+		}
+		paramName := sig.Params().At(i).Name()
+		if paramName == "" {
+			paramName = fmt.Sprintf("arg%d", i+1)
+		}
+		params = append(params, Parameter{Name: paramName, Type: param, Variadic: variadic})
+	}
+
+	ret, reason := boundCallbackReturnTypeFromGo(sig.Results(), instantiated.Results(), tparams, bindings)
+	if reason != "" {
+		return nil, reason
+	}
+	return &FunctionDef{Name: name, Parameters: params, ReturnType: ret}, ""
+}
+
+func boundCallbackReturnTypeFromGo(results, instantiated *types.Tuple, tparams *types.TypeParamList, bindings goTypeParamBindings) (Type, string) {
+	if results.Len() != instantiated.Len() {
+		return nil, "instantiated callback result shape does not match its generic declaration"
+	}
+	switch results.Len() {
+	case 0:
+		return Void, ""
+	case 1:
+		resultType := results.At(0).Type()
+		instantiatedResult := instantiated.At(0).Type()
+		if isGoError(instantiatedResult) {
+			return MakeResult(Void, Str), ""
+		}
+		if isGoEmptyStruct(types.Unalias(instantiatedResult)) {
+			return nil, "callback result struct{} requires an ABI adapter"
+		}
+		result, reason := boundTypeFromGo(resultType, tparams, bindings)
+		if reason != "" {
+			return nil, "callback result " + reason
+		}
+		return result, ""
+	case 2:
+		second := instantiated.At(1).Type()
+		if !isGoError(second) && !isGoBool(second) {
+			return nil, fmt.Sprintf("callback multi-result shape %s is not supported yet", results.String())
+		}
+		first := results.At(0).Type()
+		if isGoEmptyStruct(types.Unalias(instantiated.At(0).Type())) {
+			return nil, "callback result 1 struct{} requires an ABI adapter"
+		}
+		value, reason := boundTypeFromGo(first, tparams, bindings)
+		if reason != "" {
+			return nil, fmt.Sprintf("callback result 1 %s", reason)
+		}
+		if isGoError(second) {
+			return MakeResult(value, Str), ""
+		}
+		return MakeMaybe(value), ""
+	default:
+		return nil, fmt.Sprintf("callback multi-result shape %s is not supported yet", results.String())
+	}
 }
 
 // isDescriptorBoundaryArdType reports whether an instantiated parameter type

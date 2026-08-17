@@ -5851,12 +5851,20 @@ func checkerTypeToGoTypeWithContext(t Type, context *checkerGoTypeContext) (goty
 		return gotypes.Typ[gotypes.Float64], true
 	case Any:
 		return gotypes.NewInterfaceType(nil, nil), true
+	case Void:
+		return gotypes.NewStruct(nil, nil), true
+	}
+	if IsBuiltinError(t) {
+		return gotypes.Universe.Lookup("error").Type(), true
 	}
 	switch typ := t.(type) {
 	case *MutableRef:
 		// Trait and mut Trait lower to the same native Go interface, whose natural
 		// methods can satisfy compatible Go generic constraints (ADR 0061).
 		if trait, ok := typ.Of().(*Trait); ok {
+			if IsBuiltinError(trait) {
+				return gotypes.Universe.Lookup("error").Type(), true
+			}
 			if wrapper, ok := checkerTraitInterfaceGoType(trait, context); ok {
 				return wrapper, true
 			}
