@@ -37,6 +37,43 @@ func TestVariadicCallableTypeSurvivesAIRInterning(t *testing.T) {
 	}
 }
 
+func TestVariadicSpreadSurvivesAIRLowering(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"spread\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module spread\n\ngo 1.26\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	program := lowerProjectSource(t, root, `use go:os/exec
+fn main() {
+  let args = ["a", "b"]
+  let command = exec::Command("echo", (mut args)...)
+}`)
+	mainFn := findFunction(t, program, "main")
+	for _, stmt := range mainFn.Body.Stmts {
+		if stmt.Value == nil || stmt.Value.Kind != ExprForeignCall {
+			continue
+		}
+		call := stmt.Value
+		if !call.TailSpread {
+			t.Fatal("foreign call lost tail spread metadata")
+		}
+		if typeKind(t, program, call.SpreadElement) != TypeStr {
+			t.Fatalf("spread element kind = %v, want Str", typeKind(t, program, call.SpreadElement))
+		}
+		callable := program.Types[call.SpreadCallable-1]
+		if callable.Kind != TypeFunction || !callable.Variadic || len(callable.Params) != 2 {
+			t.Fatalf("spread callable = %#v, want two-parameter variadic function", callable)
+		}
+		if len(call.Args) != 2 || typeKind(t, program, call.Args[1].Type) != TypeReference {
+			t.Fatalf("spread args = %#v, want fixed arg and reference", call.Args)
+		}
+		return
+	}
+	t.Fatal("main body missing spread foreign call")
+}
+
 func TestLowerTinyProgram(t *testing.T) {
 	program := lowerSource(t, `
 		fn add(a: Int, b: Int) Int {
@@ -1516,6 +1553,52 @@ func TestValidateAcceptsDescriptorABIForListReference(t *testing.T) {
 	}}
 	if err := validateABIParamMode(program, 3, ABIParamDescriptorValue); err != nil {
 		t.Fatalf("descriptor-value ABI rejected list reference: %v", err)
+	}
+}
+
+func TestValidateRejectsSpreadOnDirectArdCall(t *testing.T) {
+	program := &Program{Types: []TypeInfo{
+		{ID: 1, Kind: TypeStr, Name: "Str"},
+		{ID: 2, Kind: TypeList, Name: "[Str]", Elem: 1},
+		{ID: 3, Kind: TypeReference, Name: "mut [Str]", Elem: 2},
+		{ID: 4, Kind: TypeFunction, Name: "fn(...Str)", Params: []TypeID{1}, Return: 1, Variadic: true},
+	}}
+	expr := Expr{Kind: ExprCall, Type: 1, TailSpread: true, SpreadElement: 1, SpreadCallable: 4, Args: []Expr{{Kind: ExprLoadLocal, Type: 3}}}
+	if err := validateTailSpread(program, expr); err == nil {
+		t.Fatal("direct Ard call accepted variadic spread")
+	}
+}
+
+func TestValidateBindsSpreadCallableToClosureTarget(t *testing.T) {
+	program := &Program{Types: []TypeInfo{
+		{ID: 1, Kind: TypeInt, Name: "Int"},
+		{ID: 2, Kind: TypeStr, Name: "Str"},
+		{ID: 3, Kind: TypeList, Name: "[Str]", Elem: 2},
+		{ID: 4, Kind: TypeReference, Name: "mut [Str]", Elem: 3},
+		{ID: 5, Kind: TypeFunction, Name: "fn(...Int)", Params: []TypeID{1}, Return: 1, Variadic: true},
+		{ID: 6, Kind: TypeFunction, Name: "fn(...Str)", Params: []TypeID{2}, Return: 2, Variadic: true},
+	}}
+	expr := Expr{
+		Kind: ExprCallClosure, Type: 2,
+		Target:     &Expr{Kind: ExprLoadLocal, Type: 5},
+		TailSpread: true, SpreadElement: 2, SpreadCallable: 6,
+		Args: []Expr{{Kind: ExprLoadLocal, Type: 4}},
+	}
+	if err := validateTailSpread(program, expr); err == nil {
+		t.Fatal("spread callable metadata was not bound to closure target")
+	}
+}
+
+func TestValidateRejectsGenericDependentSpreadElement(t *testing.T) {
+	program := &Program{Types: []TypeInfo{
+		{ID: 1, Kind: TypeParam, Name: "T"},
+		{ID: 2, Kind: TypeList, Name: "[T]", Elem: 1},
+		{ID: 3, Kind: TypeReference, Name: "mut [T]", Elem: 2},
+		{ID: 4, Kind: TypeFunction, Name: "fn(...T)", Params: []TypeID{1}, Return: 1, Variadic: true},
+	}}
+	expr := Expr{Kind: ExprCallClosure, Type: 1, TailSpread: true, SpreadElement: 1, SpreadCallable: 4, Args: []Expr{{Kind: ExprLoadLocal, Type: 3}}}
+	if err := validateTailSpread(program, expr); err == nil {
+		t.Fatal("generic-dependent spread element passed AIR validation")
 	}
 }
 

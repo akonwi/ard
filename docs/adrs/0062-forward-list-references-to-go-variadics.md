@@ -122,6 +122,8 @@ collect((mut ints)...)
 
 Explicit type arguments are applied first. The instantiated whole-slice type must still pass the exact compatibility rule. A context-free empty list cannot infer the element type by itself; an explicit type argument or earlier fixed-parameter evidence is required.
 
+Spread inside an Ard generic definition is rejected while its element type remains generic. The backend cannot prove that a later specialization will not become one of the descriptor-reference shapes whose foreign ABI is erased. Imported generic Go calls remain supported because their signatures are concretely instantiated before spread eligibility is checked.
+
 ### Evaluation and aliasing
 
 A spread call evaluates:

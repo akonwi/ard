@@ -206,7 +206,7 @@ let printer: fn(Str) = shout
 let generator: fn() Int = get_random_number
 ```
 
-A captured variadic Go callable uses `...T` for its final element type, such as `fn(Str, ...Str) Str`. This type-only syntax does not declare an Ard variadic function or enable list spreading. See [Go interop](../advanced/go-interop/#variadic-calls).
+A captured variadic Go callable uses `...T` for its final element type, such as `fn(Str, ...Str) Str`. This type-only syntax does not declare an Ard variadic function. Calls may forward a referenced list as one final spread argument; see [Go interop](../advanced/go-interop/#variadic-calls).
 
 Use `?` after the function type for nullable function values. If the function type has an explicit return type, wrap the whole type in parentheses so the `?` applies to the function instead of the return type:
 

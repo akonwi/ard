@@ -60,6 +60,37 @@ func Join(prefix string, parts ...string) string {
 	return out
 }
 
+func Mutate(values ...string) {
+	if len(values) > 0 { values[0] = "changed" }
+}
+func VariadicNil(values ...string) bool { return values == nil }
+func VariadicAppendReuses(values ...string) bool {
+	if len(values) == 0 { return false }
+	before := &values[0]
+	values = append(values, "appended")
+	return before == &values[0]
+}
+func NilStrings() []string { return nil }
+func EmptyStrings() []string { return []string{} }
+type Strings []string
+func NamedStrings() Strings { return Strings{"named", "slice"} }
+func StringsRef() *Strings { values := Strings{"pointer", "slice"}; return &values }
+type Item struct { Value string }
+func NewItem(value string) *Item { return &Item{Value: value} }
+func JoinItems(items ...*Item) string {
+	out := ""
+	for _, item := range items { out += item.Value }
+	return out
+}
+
+var spreadOrder string
+func ResetSpreadOrder() { spreadOrder = "" }
+func MarkFixed(value string) string { spreadOrder += "f"; return value }
+func SpreadValues() []string { spreadOrder += "s"; return []string{"spread"} }
+func SpreadOrder() string { return spreadOrder }
+func OrderedJoiner() *Joiner { spreadOrder += "r"; return &Joiner{prefix: "ordered"} }
+func OrderedJoinFunc() func(string, ...string) string { spreadOrder += "c"; return Join }
+
 func JoinResult(prefix string, parts ...string) (string, error) {
 	return Join(prefix, parts...), nil
 }
@@ -182,6 +213,49 @@ fn main() {
   let named_join = ffi::NamedJoin()
   if not named_join("n", "o", "p") == "n:o:p" { panic("named variadic function case failed") }
 
+  // Referenced lists spread without copying through direct, captured, rebound,
+  // field, result-adapted, generic, named-function, and named-slice call paths.
+  let spread_values = ["b", "c"]
+  let spread_reference = mut spread_values
+  if not ffi::Join("a", spread_reference...) == "a:b:c" { panic("direct spread failed") }
+  if not join("a", spread_reference...) == "a:b:c" { panic("captured spread failed") }
+  if not rebound("a", spread_reference...) == "a:b:c" { panic("rebound spread failed") }
+  if not callables.join("a", spread_reference...) == "a:b:c" { panic("field spread failed") }
+  if not join_result("a", spread_reference...).or("") == "a:b:c" { panic("result spread failed") }
+  if not ffi::Invoke<Str>(ffi::CountStrings, spread_reference...) == ":b:c" { panic("generic spread failed") }
+  if not named_join("a", spread_reference...) == "a:b:c" { panic("named function spread failed") }
+  let named_values = ffi::NamedStrings()
+  if not ffi::Join("a", (mut named_values)...) == "a:named:slice" { panic("named slice spread failed") }
+  let named_reference = ffi::StringsRef()
+  if not ffi::Join("a", named_reference...) == "a:pointer:slice" { panic("named slice pointer spread failed") }
+  let items = [ffi::NewItem("pointer"), ffi::NewItem("s")]
+  if not ffi::JoinItems((mut items)...) == "pointers" { panic("pointer element spread failed") }
+
+  // Spread preserves backing storage and nil versus nonnil-empty descriptors.
+  let mutable_values = ["before"]
+  ffi::Mutate((mut mutable_values)...)
+  if not mutable_values.at(0).or("") == "changed" { panic("spread mutation was copied") }
+  let nil_values = ffi::NilStrings()
+  if not ffi::VariadicNil((mut nil_values)...) { panic("nil spread lost nil descriptor") }
+  let empty_values = ffi::EmptyStrings()
+  if ffi::VariadicNil((mut empty_values)...) { panic("empty spread became nil") }
+  let view_source = ["visible", "hidden"]
+  let view = view_source.slice(0, 1).expect("view")
+  ffi::Mutate((mut view)...)
+  if not view_source.at(0).or("") == "changed" { panic("Slice spread lost shared storage") }
+  if ffi::VariadicAppendReuses((mut view)...) { panic("Slice spread exposed hidden capacity") }
+
+  // Fixed arguments and the spread operand retain source evaluation order.
+  ffi::ResetSpreadOrder()
+  if not ffi::Join(ffi::MarkFixed("ordered"), (mut ffi::SpreadValues())...) == "ordered:spread" { panic("ordered direct spread failed") }
+  if not ffi::SpreadOrder() == "fs" { panic("fixed/spread evaluation order failed") }
+  ffi::ResetSpreadOrder()
+  if not ffi::OrderedJoiner().Join((mut ffi::SpreadValues())...) == "ordered:spread" { panic("ordered receiver spread failed") }
+  if not ffi::SpreadOrder() == "rs" { panic("receiver/spread evaluation order failed") }
+  ffi::ResetSpreadOrder()
+  if not ffi::OrderedJoinFunc()("ordered", (mut ffi::SpreadValues())...) == "ordered:spread" { panic("ordered callee spread failed") }
+  if not ffi::SpreadOrder() == "cs" { panic("callee/spread evaluation order failed") }
+
   // Variadic descriptor elements remain explicit references and are
   // projected into the generated Go forwarding slice.
   if not ffi::SlicesNil() { panic("direct variadic descriptor nil tail lost") }
@@ -209,8 +283,12 @@ fn main() {
   let method = joiner.Join
   if not method() == "m" { panic("method variadic zero case failed") }
   if not method("n", "o") == "m:n:o" { panic("method variadic repeated case failed") }
+  let method_values = ["n", "o"]
+  if not method((mut method_values)...) == "m:n:o" { panic("bound method spread failed") }
+  if not joiner.Join((mut method_values)...) == "m:n:o" { panic("direct method spread failed") }
   let method_result = joiner.JoinResult
   if not method_result("p", "q").or("") == "m:p:q" { panic("method variadic result case failed") }
+  if not method_result((mut method_values)...).or("") == "m:n:o" { panic("method result spread failed") }
   let empty_method_result = joiner.EmptyResult
   if empty_method_result("x").is_err() { panic("empty method result case failed") }
   let empty_method_maybe = joiner.EmptyMaybe

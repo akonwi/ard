@@ -106,6 +106,7 @@
 
 ; Operators
 (dereference_operator) @operator
+(spread_operator) @operator
 
 [
   "="

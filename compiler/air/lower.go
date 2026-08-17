@@ -1124,8 +1124,44 @@ func (l *lowerer) internForeignApplicationWithInterner(typ *checker.ForeignType,
 		GenericArgs:       genericArgs,
 		GenericComparable: typ.ComparableTypeArgs(),
 	}
+	// Reserve the ID before interning recursive shape metadata.
 	l.typeByKey[key] = id
 	l.program.Types = append(l.program.Types, info)
+	shape := typ
+	if typ.Pointer {
+		if value := typ.ValueForm(); value != nil {
+			shape = value
+		}
+	}
+	if shape.Underlying != nil {
+		underlying, err := l.internGenericArgument(shape.Underlying, intern)
+		if err != nil {
+			return NoType, err
+		}
+		info.Value = underlying
+	}
+	if shape.MapKey != nil {
+		mapKey, err := l.internGenericArgument(shape.MapKey, intern)
+		if err != nil {
+			return NoType, err
+		}
+		info.Key = mapKey
+	}
+	if shape.MapValue != nil {
+		mapValue, err := l.internGenericArgument(shape.MapValue, intern)
+		if err != nil {
+			return NoType, err
+		}
+		info.Value = mapValue
+	}
+	if shape.Elem != nil {
+		elem, err := l.internGenericArgument(shape.Elem, intern)
+		if err != nil {
+			return NoType, err
+		}
+		info.Elem = elem
+	}
+	l.program.Types[id-1] = info
 	return id, nil
 }
 
@@ -2047,6 +2083,28 @@ func (fl *functionLowerer) typeArgsForCall(call *checker.FunctionCall) ([]TypeID
 	return typeArgsForCallWithInterner(call, fl.internType)
 }
 
+func (fl *functionLowerer) spreadElementTypeForCall(call *checker.FunctionCall) (TypeID, error) {
+	if call == nil || !call.TailSpread {
+		return NoType, nil
+	}
+	definition := call.Definition()
+	if definition == nil || len(definition.Parameters) == 0 || !definition.Parameters[len(definition.Parameters)-1].Variadic {
+		return NoType, fmt.Errorf("spread call is missing a variadic parameter")
+	}
+	return fl.internContextualCheckerType(definition.Parameters[len(definition.Parameters)-1].Type)
+}
+
+func (fl *functionLowerer) spreadCallableTypeForCall(call *checker.FunctionCall) (TypeID, error) {
+	if call == nil || !call.TailSpread {
+		return NoType, nil
+	}
+	definition := call.Definition()
+	if definition == nil {
+		return NoType, fmt.Errorf("spread call is missing its callable definition")
+	}
+	return fl.internContextualCheckerType(definition)
+}
+
 func typeArgsForCallWithInterner(call *checker.FunctionCall, intern func(checker.Type) (TypeID, error)) ([]TypeID, error) {
 	if len(call.TypeArgs) == 0 {
 		return nil, nil
@@ -2429,6 +2487,12 @@ func (l *lowerer) internType(t checker.Type) (TypeID, error) {
 		info.ForeignSymbol = typ.Name
 		info.ForeignPointer = typ.Pointer
 		info.ForeignInterface = typ.Interface
+		shape := typ
+		if typ.Pointer {
+			if value := typ.ValueForm(); value != nil {
+				shape = value
+			}
+		}
 		for _, arg := range typ.TypeArgs {
 			argID, err := l.internType(arg)
 			if err != nil {
@@ -2436,29 +2500,29 @@ func (l *lowerer) internType(t checker.Type) (TypeID, error) {
 			}
 			info.GenericArgs = append(info.GenericArgs, argID)
 		}
-		if typ.Underlying != nil {
-			underlying, err := l.internType(typ.Underlying)
+		if shape.Underlying != nil {
+			underlying, err := l.internType(shape.Underlying)
 			if err != nil {
 				return NoType, err
 			}
 			info.Value = underlying
 		}
-		if typ.MapKey != nil {
-			key, err := l.internType(typ.MapKey)
+		if shape.MapKey != nil {
+			key, err := l.internType(shape.MapKey)
 			if err != nil {
 				return NoType, err
 			}
 			info.Key = key
 		}
-		if typ.Elem != nil {
-			elem, err := l.internType(typ.Elem)
+		if shape.Elem != nil {
+			elem, err := l.internType(shape.Elem)
 			if err != nil {
 				return NoType, err
 			}
 			info.Elem = elem
 		}
-		if typ.MapValue != nil {
-			value, err := l.internType(typ.MapValue)
+		if shape.MapValue != nil {
+			value, err := l.internType(shape.MapValue)
 			if err != nil {
 				return NoType, err
 			}
@@ -4106,7 +4170,7 @@ func (fl *functionLowerer) lowerForLoop(loop *checker.ForLoop) ([]Stmt, error) {
 	return []Stmt{*init, Stmt{Kind: StmtWhile, Condition: condition, Body: body}}, nil
 }
 
-func (fl *functionLowerer) lowerFunctionTypeCall(name string, args []checker.Expression, target *Expr) (*Expr, error) {
+func (fl *functionLowerer) lowerFunctionTypeCall(name string, args []checker.Expression, target *Expr, tailSpread bool) (*Expr, error) {
 	if target == nil {
 		return nil, fmt.Errorf("function value call %s missing target", name)
 	}
@@ -4114,12 +4178,21 @@ func (fl *functionLowerer) lowerFunctionTypeCall(name string, args []checker.Exp
 	if !ok {
 		return nil, fmt.Errorf("%s is not a function", name)
 	}
-	loweredArgs, err := fl.lowerArgsForFunctionType(args, functionTypeID)
+	loweredArgs, err := fl.lowerArgsForFunctionType(args, functionTypeID, tailSpread)
 	if err != nil {
 		return nil, err
 	}
 	typeInfo, _ := fl.l.typeInfo(functionTypeID)
-	return &Expr{Kind: ExprCallClosure, Type: typeInfo.Return, Target: target, Args: loweredArgs}, nil
+	spreadElement := NoType
+	spreadCallable := NoType
+	if tailSpread {
+		if !typeInfo.Variadic || len(typeInfo.Params) == 0 {
+			return nil, fmt.Errorf("function value spread call %s is not variadic", name)
+		}
+		spreadElement = typeInfo.Params[len(typeInfo.Params)-1]
+		spreadCallable = functionTypeID
+	}
+	return &Expr{Kind: ExprCallClosure, Type: typeInfo.Return, Target: target, Args: loweredArgs, TailSpread: tailSpread, SpreadElement: spreadElement, SpreadCallable: spreadCallable}, nil
 }
 
 // functionTypeIDForCallable resolves a callee type to its function type: a
@@ -4297,13 +4370,13 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		}
 		if ok && fl.localKind(local) == TypeFunction {
 			target := &Expr{Kind: ExprLoadLocal, Type: fl.fn.Locals[local].Type, Local: local}
-			return fl.lowerFunctionTypeCall(e.Name, e.Args, target)
+			return fl.lowerFunctionTypeCall(e.Name, e.Args, target, e.TailSpread)
 		}
 		if global, ok := fl.l.lookupGlobalInModule(fl.fn.Module, e.Name); ok {
 			globalType := fl.l.program.Globals[global].Type
 			if typeInfo, ok := fl.l.typeInfo(globalType); ok && typeInfo.Kind == TypeFunction {
 				target := &Expr{Kind: ExprLoadGlobal, Type: globalType, Global: global}
-				return fl.lowerFunctionTypeCall(e.Name, e.Args, target)
+				return fl.lowerFunctionTypeCall(e.Name, e.Args, target, e.TailSpread)
 			}
 		}
 	}
@@ -4346,19 +4419,19 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		if err != nil {
 			return nil, err
 		}
-		return fl.lowerFunctionTypeCall("function value", e.Args, target)
+		return fl.lowerFunctionTypeCall("function value", e.Args, target, e.TailSpread)
 	case *checker.FunctionCall:
 		if local, ok := fl.locals[e.Name]; ok {
 			if _, callable := fl.functionTypeIDForCallable(fl.fn.Locals[local].Type); callable {
 				target := &Expr{Kind: ExprLoadLocal, Type: fl.fn.Locals[local].Type, Local: local}
-				return fl.lowerFunctionTypeCall(e.Name, e.Args, target)
+				return fl.lowerFunctionTypeCall(e.Name, e.Args, target, e.TailSpread)
 			}
 		}
 		if global, ok := fl.l.lookupGlobalInModule(fl.fn.Module, e.Name); ok {
 			globalType := fl.l.program.Globals[global].Type
 			if typeInfo, ok := fl.l.typeInfo(globalType); ok && typeInfo.Kind == TypeFunction {
 				target := &Expr{Kind: ExprLoadGlobal, Type: globalType, Global: global}
-				return fl.lowerFunctionTypeCall(e.Name, e.Args, target)
+				return fl.lowerFunctionTypeCall(e.Name, e.Args, target, e.TailSpread)
 			}
 		}
 		if def := e.Definition(); def != nil {
@@ -4382,7 +4455,7 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 				}
 				if hasLocal && fl.localKind(local) == TypeFunction {
 					target := &Expr{Kind: ExprLoadLocal, Type: fl.fn.Locals[local].Type, Local: local}
-					args, err := fl.lowerArgsForFunctionType(e.Args, target.Type)
+					args, err := fl.lowerArgsForFunctionType(e.Args, target.Type, e.TailSpread)
 					if err != nil {
 						return nil, err
 					}
@@ -4390,7 +4463,15 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 					if typeInfo, ok := fl.l.typeInfo(target.Type); ok && typeInfo.Kind == TypeFunction {
 						returnType = typeInfo.Return
 					}
-					return &Expr{Kind: ExprCallClosure, Type: returnType, Target: target, Args: args}, nil
+					spreadElement := NoType
+					spreadCallable := NoType
+					if e.TailSpread {
+						if typeInfo, ok := fl.l.typeInfo(target.Type); ok && typeInfo.Kind == TypeFunction && typeInfo.Variadic && len(typeInfo.Params) > 0 {
+							spreadElement = typeInfo.Params[len(typeInfo.Params)-1]
+							spreadCallable = target.Type
+						}
+					}
+					return &Expr{Kind: ExprCallClosure, Type: returnType, Target: target, Args: args, TailSpread: e.TailSpread, SpreadElement: spreadElement, SpreadCallable: spreadCallable}, nil
 				}
 				return nil, fmt.Errorf("unknown function call target %s", def.Name)
 			}
@@ -4481,7 +4562,9 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		for i, arg := range e.Call.Args {
 			var lowered *Expr
 			var err error
-			if methodDef != nil && i < len(methodDef.Parameters) && methodDef.Parameters[i].Type != nil {
+			if e.Call.TailSpread && i == len(e.Call.Args)-1 {
+				lowered, err = fl.lowerExpr(arg)
+			} else if methodDef != nil && i < len(methodDef.Parameters) && methodDef.Parameters[i].Type != nil {
 				var paramTypeID TypeID
 				paramTypeID, err = fl.internType(methodDef.Parameters[i].Type)
 				if err == nil {
@@ -4499,7 +4582,15 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		if methodDef != nil {
 			argABI = lowerABIParamModes(methodDef.Parameters, len(args))
 		}
-		return &Expr{Kind: ExprForeignMethodCall, Type: typeID, Target: target, ForeignTarget: e.Target, ForeignNamespace: e.Namespace, ForeignQualifier: e.Qualifier, ForeignReceiver: e.Receiver, ForeignPointer: e.Pointer, ForeignSymbol: e.Symbol, ForeignResultShape: lowerForeignResultShape(e.ForeignResultShape), ForeignArgABI: argABI, Args: args}, nil
+		spreadElement, err := fl.spreadElementTypeForCall(e.Call)
+		if err != nil {
+			return nil, err
+		}
+		spreadCallable, err := fl.spreadCallableTypeForCall(e.Call)
+		if err != nil {
+			return nil, err
+		}
+		return &Expr{Kind: ExprForeignMethodCall, Type: typeID, Target: target, ForeignTarget: e.Target, ForeignNamespace: e.Namespace, ForeignQualifier: e.Qualifier, ForeignReceiver: e.Receiver, ForeignPointer: e.Pointer, ForeignSymbol: e.Symbol, ForeignResultShape: lowerForeignResultShape(e.ForeignResultShape), ForeignArgABI: argABI, Args: args, TailSpread: e.Call.TailSpread, SpreadElement: spreadElement, SpreadCallable: spreadCallable}, nil
 	case *checker.UnsafeCast:
 		value, err := fl.lowerExprWithExpected(e.Value, fl.l.mustIntern(checker.Any))
 		if err != nil {
@@ -4563,11 +4654,16 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		args := make([]Expr, len(e.Call.Args))
 		fnDef := e.Call.Definition()
 		for i, arg := range e.Call.Args {
-			paramType, err := fl.internContextualCheckerType(fnDef.Parameters[i].Type)
-			if err != nil {
-				return nil, err
+			var lowered *Expr
+			if e.Call.TailSpread && i == len(e.Call.Args)-1 {
+				lowered, err = fl.lowerExpr(arg)
+			} else {
+				var paramType TypeID
+				paramType, err = fl.internContextualCheckerType(fnDef.Parameters[i].Type)
+				if err == nil {
+					lowered, err = fl.lowerExprWithExpected(arg, paramType)
+				}
 			}
-			lowered, err := fl.lowerExprWithExpected(arg, paramType)
 			if err != nil {
 				return nil, err
 			}
@@ -4582,7 +4678,15 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 			typeArgs = append(typeArgs, argID)
 		}
 		argABI := lowerABIParamModes(fnDef.Parameters, len(args))
-		return &Expr{Kind: ExprForeignCall, Type: typeID, ForeignTarget: e.Target, ForeignNamespace: e.Namespace, ForeignQualifier: e.Qualifier, ForeignSymbol: e.Symbol, TypeArgs: typeArgs, ForeignPointer: e.PointerResult, ForeignResultShape: lowerForeignResultShape(e.ForeignResultShape), ForeignArgABI: argABI, Args: args}, nil
+		spreadElement, err := fl.spreadElementTypeForCall(e.Call)
+		if err != nil {
+			return nil, err
+		}
+		spreadCallable, err := fl.spreadCallableTypeForCall(e.Call)
+		if err != nil {
+			return nil, err
+		}
+		return &Expr{Kind: ExprForeignCall, Type: typeID, ForeignTarget: e.Target, ForeignNamespace: e.Namespace, ForeignQualifier: e.Qualifier, ForeignSymbol: e.Symbol, TypeArgs: typeArgs, ForeignPointer: e.PointerResult, ForeignResultShape: lowerForeignResultShape(e.ForeignResultShape), ForeignArgABI: argABI, Args: args, TailSpread: e.Call.TailSpread, SpreadElement: spreadElement, SpreadCallable: spreadCallable}, nil
 	case *checker.ModuleFunctionCall:
 		if kind, ok := resultConstructorKind(e); ok {
 			return fl.lowerResultConstructor(kind, typeID, e)
@@ -4623,7 +4727,7 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 			globalType := fl.l.program.Globals[global].Type
 			if _, callable := fl.functionTypeIDForCallable(globalType); callable {
 				target := &Expr{Kind: ExprLoadGlobal, Type: globalType, Global: global}
-				return fl.lowerFunctionTypeCall(e.Call.Name, e.Call.Args, target)
+				return fl.lowerFunctionTypeCall(e.Call.Name, e.Call.Args, target, e.Call.TailSpread)
 			}
 		}
 		if def := fl.l.moduleFunctionDefinitionForCall(e); def != nil && def.Body != nil {
@@ -5753,7 +5857,7 @@ func (fl *functionLowerer) lowerArgsWithSignature(args []checker.Expression, sig
 	return fl.lowerArgsWithTypeIDs(args, expected)
 }
 
-func (fl *functionLowerer) lowerArgsForFunctionType(args []checker.Expression, typeID TypeID) ([]Expr, error) {
+func (fl *functionLowerer) lowerArgsForFunctionType(args []checker.Expression, typeID TypeID, tailSpread bool) ([]Expr, error) {
 	typeInfo, ok := fl.l.typeInfo(typeID)
 	if !ok || typeInfo.Kind != TypeFunction {
 		return fl.lowerArgs(args)
@@ -5765,6 +5869,10 @@ func (fl *functionLowerer) lowerArgsForFunctionType(args []checker.Expression, t
 		for i := len(typeInfo.Params); i < len(expected); i++ {
 			expected[i] = typeInfo.Params[len(typeInfo.Params)-1]
 		}
+	}
+	if tailSpread && len(args) > 0 {
+		expected = append([]TypeID(nil), expected...)
+		expected[len(args)-1] = NoType
 	}
 	return fl.lowerArgsWithTypeIDs(args, expected)
 }
@@ -6812,7 +6920,15 @@ func (fl *functionLowerer) buildResolvedCallExpr(id FunctionID, def *checker.Fun
 	if err != nil {
 		return nil, err
 	}
-	return &Expr{Kind: ExprCall, Type: signature.Return, Function: id, Args: args, TypeArgs: typeArgs}, nil
+	spreadElement, err := fl.spreadElementTypeForCall(call)
+	if err != nil {
+		return nil, err
+	}
+	spreadCallable, err := fl.spreadCallableTypeForCall(call)
+	if err != nil {
+		return nil, err
+	}
+	return &Expr{Kind: ExprCall, Type: signature.Return, Function: id, Args: args, TypeArgs: typeArgs, TailSpread: call.TailSpread, SpreadElement: spreadElement, SpreadCallable: spreadCallable}, nil
 }
 
 func (l *lowerer) genericBindingsKeyWithInterner(def *checker.FunctionDef, intern func(checker.Type) (TypeID, error)) (string, map[string]TypeID, error) {

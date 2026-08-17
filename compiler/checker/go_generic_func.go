@@ -12,6 +12,18 @@ import (
 // types the call instantiates them with.
 type goTypeParamBindings map[*types.TypeParam]Type
 
+func emptySpreadListLiteral(argument parse.Argument) bool {
+	if !argument.Spread {
+		return false
+	}
+	ref, ok := argument.Value.(*parse.MutRef)
+	if !ok {
+		return false
+	}
+	list, ok := ref.Operand.(*parse.ListLiteral)
+	return ok && len(list.Items) == 0
+}
+
 // instantiateGoFunctionCall resolves a call to a generic Go function. Type
 // arguments come from the call site when written explicitly, or are inferred
 // by unifying supplied arguments against the generic parameter types. The
@@ -46,22 +58,32 @@ func (c *Checker) instantiateGoFunctionCall(modName, name string, goFn *types.Fu
 		inferenceSpans = make([]SourceSpan, tparams.Len())
 		for i := 0; i < sig.Params().Len() && i < len(s.Function.Args); i++ {
 			goParam := sig.Params().At(i).Type()
-			if sig.Variadic() && i == sig.Params().Len()-1 {
+			variadic := sig.Variadic() && i == sig.Params().Len()-1
+			if variadic {
 				if slice, ok := goParam.(*types.Slice); ok {
 					goParam = slice.Elem()
 				}
 			}
-			if !goTypeMentionsTypeParam(goParam, tparams) {
+			if !goTypeMentionsTypeParam(goParam, tparams) || (variadic && emptySpreadListLiteral(s.Function.Args[i])) {
 				continue
 			}
 			value := c.checkExprForInference(s.Function.Args[i].Value)
 			if value == nil {
 				continue
 			}
+			valueType := value.Type()
+			if variadic && s.Function.Args[i].Spread {
+				if element, _, ok := variadicSpreadContainerElement(valueType); ok {
+					valueType = element
+				} else {
+					c.addDiagnostic(variadicSpreadDiagnostic{Kind: spreadRequiresReference, Span: c.sourceSpan(s.Function.Args[i].GetLocation()), Actual: valueType}.build())
+					return nil, nil, false
+				}
+			}
 			currentSpan := c.sourceSpan(s.Function.Args[i].GetLocation())
-			ok, conflictParam, previous, current, previousSpan := inferGoFuncTypeArgs(goParam, value.Type(), tparams, inferred, inferenceSpans, currentSpan)
+			ok, conflictParam, previous, current, previousSpan := inferGoFuncTypeArgs(goParam, valueType, tparams, inferred, inferenceSpans, currentSpan)
 			if !ok {
-				legacy := fmt.Sprintf("Conflicting inferred type arguments for %s: %s and %s", conflictParam.Obj().Name(), previous, value.Type())
+				legacy := fmt.Sprintf("Conflicting inferred type arguments for %s: %s and %s", conflictParam.Obj().Name(), previous, valueType)
 				c.addDiagnostic(conflictingGoTypeInferenceDiagnostic{
 					Parameter: conflictParam.Obj().Name(), PreviousType: previous, CurrentType: current, CurrentSpan: currentSpan, PreviousSpan: sourceSpanIfPresent(previousSpan), LegacyMessage: legacy,
 				}.build())

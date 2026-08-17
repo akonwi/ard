@@ -1288,6 +1288,7 @@ type FunctionCall struct {
 	Name       string
 	Args       []Expression
 	TypeArgs   []Type
+	TailSpread bool
 	fn         *FunctionDef
 	ReturnType Type // Pre-computed by checker
 }
@@ -1312,6 +1313,7 @@ func (f *FunctionCall) Definition() *FunctionDef {
 type FunctionValueCall struct {
 	Callee       Expression
 	Args         []Expression
+	TailSpread   bool
 	FunctionType *FunctionDef
 	ReturnType   Type
 }

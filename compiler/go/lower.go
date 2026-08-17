@@ -3599,6 +3599,25 @@ func (l *lowerer) foreignABIValueArg(arg air.Expr, value ast.Expr, mode air.ABIP
 	return value
 }
 
+func (l *lowerer) lowerSpreadArgument(fn air.Function, arg air.Expr) (loweredExpr, error) {
+	lowered, err := l.lowerExpr(fn, arg)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	if info, ok := l.typeInfo(arg.Type); ok && info.Kind == air.TypeForeignType && info.ForeignPointer {
+		lowered.expr = &ast.StarExpr{X: lowered.expr}
+	} else {
+		lowered.expr = l.valueThroughReference(arg.Type, lowered.expr)
+	}
+	return lowered, nil
+}
+
+func (l *lowerer) materializeCallOperand(stmts []ast.Stmt, value ast.Expr) ([]ast.Stmt, ast.Expr) {
+	temp := l.nextTemp()
+	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{l.ident(temp)}, Tok: token.DEFINE, Rhs: []ast.Expr{value}})
+	return stmts, l.ident(temp)
+}
+
 func (l *lowerer) lowerForeignCall(fn air.Function, expr air.Expr) (loweredExpr, error) {
 	if expr.ForeignTarget != "go" {
 		return loweredExpr{}, fmt.Errorf("unsupported foreign call target %q", expr.ForeignTarget)
@@ -3610,13 +3629,26 @@ func (l *lowerer) lowerForeignCall(fn air.Function, expr air.Expr) (loweredExpr,
 	args := make([]ast.Expr, 0, len(expr.Args))
 	var stmts []ast.Stmt
 	for i := range expr.Args {
-		arg, err := l.lowerExpr(fn, expr.Args[i])
+		var arg loweredExpr
+		var err error
+		if expr.TailSpread && i == len(expr.Args)-1 {
+			arg, err = l.lowerSpreadArgument(fn, expr.Args[i])
+		} else {
+			arg, err = l.lowerExpr(fn, expr.Args[i])
+		}
 		if err != nil {
 			return loweredExpr{}, err
 		}
 		stmts = append(stmts, arg.stmts...)
-		mode := expr.ForeignArgABI[i]
-		args = append(args, l.foreignABIValueArg(expr.Args[i], arg.expr, mode))
+		argExpr := arg.expr
+		if !expr.TailSpread || i != len(expr.Args)-1 {
+			mode := expr.ForeignArgABI[i]
+			argExpr = l.foreignABIValueArg(expr.Args[i], argExpr, mode)
+		}
+		if expr.TailSpread {
+			stmts, argExpr = l.materializeCallOperand(stmts, argExpr)
+		}
+		args = append(args, argExpr)
 	}
 	importPath := expr.ForeignNamespace
 	functionName := expr.ForeignSymbol
@@ -3632,6 +3664,9 @@ func (l *lowerer) lowerForeignCall(fn air.Function, expr air.Expr) (loweredExpr,
 		fun = l.indexWithTypeArgs(fun, expr.TypeArgs)
 	}
 	call := &ast.CallExpr{Fun: fun, Args: args}
+	if expr.TailSpread {
+		call.Ellipsis = token.Pos(1)
+	}
 	if validTypeID(l.program, expr.Type) {
 		info := l.program.Types[expr.Type-1]
 		switch info.Kind {
@@ -3868,16 +3903,36 @@ func (l *lowerer) lowerForeignMethodCall(fn air.Function, expr air.Expr) (lowere
 	}
 	args := make([]ast.Expr, 0, len(expr.Args))
 	stmts := append([]ast.Stmt{}, target.stmts...)
+	receiverExpr := target.expr
+	if expr.TailSpread {
+		stmts, receiverExpr = l.materializeCallOperand(stmts, receiverExpr)
+	}
 	for i := range expr.Args {
-		arg, err := l.lowerExpr(fn, expr.Args[i])
+		var arg loweredExpr
+		var err error
+		if expr.TailSpread && i == len(expr.Args)-1 {
+			arg, err = l.lowerSpreadArgument(fn, expr.Args[i])
+		} else {
+			arg, err = l.lowerExpr(fn, expr.Args[i])
+		}
 		if err != nil {
 			return loweredExpr{}, err
 		}
 		stmts = append(stmts, arg.stmts...)
-		mode := expr.ForeignArgABI[i]
-		args = append(args, l.foreignABIValueArg(expr.Args[i], arg.expr, mode))
+		argExpr := arg.expr
+		if !expr.TailSpread || i != len(expr.Args)-1 {
+			mode := expr.ForeignArgABI[i]
+			argExpr = l.foreignABIValueArg(expr.Args[i], argExpr, mode)
+		}
+		if expr.TailSpread {
+			stmts, argExpr = l.materializeCallOperand(stmts, argExpr)
+		}
+		args = append(args, argExpr)
 	}
-	call := &ast.CallExpr{Fun: &ast.SelectorExpr{X: target.expr, Sel: l.ident(expr.ForeignSymbol)}, Args: args}
+	call := &ast.CallExpr{Fun: &ast.SelectorExpr{X: receiverExpr, Sel: l.ident(expr.ForeignSymbol)}, Args: args}
+	if expr.TailSpread {
+		call.Ellipsis = token.Pos(1)
+	}
 	if validTypeID(l.program, expr.Type) {
 		if info := l.program.Types[expr.Type-1]; info.Kind == air.TypeResult {
 			if expr.ForeignResultShape == air.ForeignResultUnknown {
@@ -4588,6 +4643,28 @@ func (l *lowerer) lowerCallArgs(fn air.Function, rawArgs []air.Expr, params []ai
 			writeback = append(writeback, post...)
 		}
 		args = append(args, argExpr)
+	}
+	return args, stmts, writeback, nil
+}
+
+func (l *lowerer) lowerCallArgsMaterialized(fn air.Function, rawArgs []air.Expr, params []air.Param) ([]ast.Expr, []ast.Stmt, []ast.Stmt, error) {
+	args := make([]ast.Expr, 0, len(rawArgs))
+	var stmts []ast.Stmt
+	var writeback []ast.Stmt
+	for i, arg := range rawArgs {
+		var param []air.Param
+		if i < len(params) {
+			param = params[i : i+1]
+		}
+		loweredArgs, setup, post, err := l.lowerCallArgs(fn, []air.Expr{arg}, param)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		stmts = append(stmts, setup...)
+		var materialized ast.Expr
+		stmts, materialized = l.materializeCallOperand(stmts, loweredArgs[0])
+		args = append(args, materialized)
+		writeback = append(writeback, post...)
 	}
 	return args, stmts, writeback, nil
 }
@@ -6446,12 +6523,41 @@ func (l *lowerer) lowerCallClosure(fn air.Function, expr air.Expr) (loweredExpr,
 			params[i] = air.Param{Type: targetInfo.Params[paramIndex]}
 		}
 	}
-	args, stmts, writeback, err := l.lowerCallArgs(fn, expr.Args, params)
+	callArgs := expr.Args
+	callParams := params
+	calleeStmts := append([]ast.Stmt{}, target.stmts...)
+	calleeExpr := target.expr
+	if expr.TailSpread {
+		callArgs = expr.Args[:len(expr.Args)-1]
+		callParams = params[:len(params)-1]
+		calleeStmts, calleeExpr = l.materializeCallOperand(calleeStmts, calleeExpr)
+	}
+	var args []ast.Expr
+	var stmts []ast.Stmt
+	var writeback []ast.Stmt
+	if expr.TailSpread {
+		args, stmts, writeback, err = l.lowerCallArgsMaterialized(fn, callArgs, callParams)
+	} else {
+		args, stmts, writeback, err = l.lowerCallArgs(fn, callArgs, callParams)
+	}
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	stmts = append(append([]ast.Stmt{}, target.stmts...), stmts...)
-	call := &ast.CallExpr{Fun: target.expr, Args: args}
+	if expr.TailSpread {
+		spread, err := l.lowerSpreadArgument(fn, expr.Args[len(expr.Args)-1])
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		stmts = append(stmts, spread.stmts...)
+		var spreadExpr ast.Expr
+		stmts, spreadExpr = l.materializeCallOperand(stmts, spread.expr)
+		args = append(args, spreadExpr)
+	}
+	stmts = append(calleeStmts, stmts...)
+	call := &ast.CallExpr{Fun: calleeExpr, Args: args}
+	if expr.TailSpread {
+		call.Ellipsis = token.Pos(1)
+	}
 	if hasFunctionType && l.abiReturnShapeAvailable(targetInfo.Return) && len(writeback) == 0 {
 		return l.packABICallResult(expr.Type, targetInfo.Return, stmts, call)
 	}
