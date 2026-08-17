@@ -56,8 +56,6 @@ type lowerer struct {
 	declaredTypeCounts      map[air.ModuleID]int
 	emitTypeOwnerModules    []air.ModuleID
 	emitTypeHasOwner        []bool
-	mutableTraitRefs        map[air.TraitID]bool
-	emittedMutableTraitRefs map[air.TraitID]bool
 	suppressMain            bool
 	includeTests            bool
 	useModulePackages       bool
@@ -193,8 +191,6 @@ func (l *lowerer) lowerModule(module air.Module) (*ast.File, error) {
 	l.goTypeCache = map[air.TypeID]ast.Expr{}
 	l.importErr = nil
 	l.runtimeHelpers = map[string]bool{}
-	l.mutableTraitRefs = map[air.TraitID]bool{}
-	l.emittedMutableTraitRefs = map[air.TraitID]bool{}
 	decls := []ast.Decl{}
 	rootID, hasRoot := findRootFunction(l.program)
 	mainModuleID := l.mainModuleID(rootID, hasRoot)
@@ -604,6 +600,18 @@ func (l *lowerer) ownerModuleForType(typeID air.TypeID) (air.ModuleID, bool) {
 	return l.typeOwnerModules[typeID], l.typeHasOwner[typeID]
 }
 
+func (l *lowerer) ownerModuleForImpl(impl air.Impl) (air.ModuleID, bool) {
+	if owner, ok := l.ownerModuleForType(impl.ForType); ok {
+		return owner, true
+	}
+	for _, methodID := range impl.Methods {
+		if validFunctionID(l.program, methodID) {
+			return l.functionModule(l.program.Functions[methodID]), true
+		}
+	}
+	return 0, false
+}
+
 func (l *lowerer) moduleForPath(modulePath string) (air.ModuleID, bool) {
 	if modulePath == "" {
 		return 0, false
@@ -750,26 +758,31 @@ func (l *lowerer) lowerTypeDecls(typ air.TypeInfo) ([]ast.Decl, error) {
 }
 
 func (l *lowerer) markedMutableTraitRefDecls() ([]ast.Decl, error) {
-	traitIDs := make([]int, 0, len(l.mutableTraitRefs))
-	for traitID := range l.mutableTraitRefs {
-		if l.emittedMutableTraitRefs[traitID] {
-			continue
+	implIDs := []int{}
+	for _, impl := range l.program.Impls {
+		owner, ok := l.ownerModuleForImpl(impl)
+		if ok && owner == l.currentModule && l.traitHasReferenceTypeUse(impl.Trait) {
+			implIDs = append(implIDs, int(impl.ID))
 		}
-		traitIDs = append(traitIDs, int(traitID))
 	}
-	sort.Ints(traitIDs)
-	decls := make([]ast.Decl, 0, len(traitIDs))
-	for _, raw := range traitIDs {
-		traitID := air.TraitID(raw)
-		if !validTraitID(l.program, traitID) {
+	sort.Ints(implIDs)
+	decls := make([]ast.Decl, 0, len(implIDs)*2)
+	for _, raw := range implIDs {
+		implID := air.ImplID(raw)
+		if !validImplID(l.program, implID) {
 			continue
 		}
-		traitDecls, err := l.lowerMutableTraitRefDecl(l.program.Traits[traitID])
+		impl := l.program.Impls[implID]
+		if !validTraitID(l.program, impl.Trait) {
+			continue
+		}
+		trait := l.program.Traits[impl.Trait]
+		traitTypeID := l.traitObjectTypeID(trait.ID)
+		decl, err := l.mutableTraitImplVTableDecl(trait, impl, traitTypeID)
 		if err != nil {
 			return nil, err
 		}
-		decls = append(decls, traitDecls...)
-		l.emittedMutableTraitRefs[traitID] = true
+		decls = append(decls, decl, l.mutableTraitImplRegistrationDecl(trait, impl))
 	}
 	return decls, nil
 }
@@ -813,19 +826,15 @@ func (l *lowerer) lowerTraitObjectDecls(typ air.TypeInfo) ([]ast.Decl, error) {
 	if ok {
 		decls = append(decls, interfaceDecl)
 	}
-	// The mutable-handle machinery (handle struct, vtables, storage vtable)
-	// is only meaningful when the program actually references the trait
-	// mutably. Skipping it otherwise keeps ordinary trait dispatch on the
-	// native Go interface without dead type-switch scaffolding (ADR 0057).
+	// The trait-owning package declares the canonical mutable handle and vtable
+	// types only when the program references the trait mutably. Implementation
+	// and storage vtable values are emitted later in their owning modules.
 	if l.traitHasMutableTraitUse(trait.ID) || l.traitHasReferenceTypeUse(trait.ID) {
-		mutableDecls, err := l.lowerMutableTraitRefDecl(trait)
+		mutableDecls, err := l.lowerMutableTraitRefTypeDecls(trait)
 		if err != nil {
 			return nil, err
 		}
 		decls = append(decls, mutableDecls...)
-		if l.emittedMutableTraitRefs != nil {
-			l.emittedMutableTraitRefs[trait.ID] = true
-		}
 	}
 	return decls, nil
 }
@@ -874,11 +883,14 @@ func (l *lowerer) traitInterfaceAvailable(traitID air.TraitID) bool {
 }
 
 func (l *lowerer) usesNativeTraitInterface(typeID air.TypeID) bool {
+	// Ordinary Trait values and mut Trait references have distinct AIR types and
+	// Go representations. Mutable use requires a forwarding handle, but must not
+	// force otherwise representable ordinary values back to any/type switches.
 	if !l.isTraitObjectType(typeID) {
 		return false
 	}
 	traitID := l.program.Types[typeID-1].Trait
-	if !l.traitInterfaceAvailable(traitID) || l.traitHasMutableTraitUse(traitID) {
+	if !l.traitInterfaceAvailable(traitID) {
 		return false
 	}
 	for _, impl := range l.program.Impls {
@@ -955,7 +967,7 @@ func (l *lowerer) traitInterfaceMethodType(method air.TraitMethod) (*ast.FuncTyp
 	return fnType, nil
 }
 
-func (l *lowerer) lowerMutableTraitRefDecl(trait air.Trait) ([]ast.Decl, error) {
+func (l *lowerer) lowerMutableTraitRefTypeDecls(trait air.Trait) ([]ast.Decl, error) {
 	traitTypeID := l.traitObjectTypeID(trait.ID)
 	if traitTypeID == air.NoType {
 		return nil, fmt.Errorf("missing trait object type for %s", trait.Name)
@@ -966,7 +978,7 @@ func (l *lowerer) lowerMutableTraitRefDecl(trait air.Trait) ([]ast.Decl, error) 
 	}
 	handleFields := []*ast.Field{
 		{Names: []*ast.Ident{l.ident(mutableTraitTargetFieldName(trait))}, Type: l.ident("any")},
-		{Names: []*ast.Ident{l.ident(mutableTraitVTableFieldName(trait))}, Type: &ast.StarExpr{X: l.ident(mutableTraitVTableTypeName(trait))}},
+		{Names: []*ast.Ident{l.ident(mutableTraitVTableFieldName(trait))}, Type: &ast.StarExpr{X: l.mutableTraitVTableTypeExpr(trait)}},
 	}
 	vtableFields := []*ast.Field{
 		{
@@ -995,23 +1007,53 @@ func (l *lowerer) lowerMutableTraitRefDecl(trait air.Trait) ([]ast.Decl, error) 
 		&ast.TypeSpec{Name: l.ident(mutableTraitRefTypeName(trait)), Type: &ast.StructType{Fields: &ast.FieldList{List: handleFields}}},
 		&ast.TypeSpec{Name: l.ident(mutableTraitVTableTypeName(trait)), Type: &ast.StructType{Fields: &ast.FieldList{List: vtableFields}}},
 	}}
-	decls := []ast.Decl{typesDecl}
-	for _, impl := range l.program.Impls {
-		if impl.Trait != trait.ID {
-			continue
-		}
-		decl, err := l.mutableTraitImplVTableDecl(trait, impl, traitTypeID)
-		if err != nil {
-			return nil, err
-		}
-		decls = append(decls, decl)
-	}
 	storageDecl, err := l.mutableTraitStorageVTableDecl(trait, traitTypeID)
 	if err != nil {
 		return nil, err
 	}
+	decls := []ast.Decl{typesDecl}
+	decls = append(decls, l.mutableTraitRegistryDecls(trait)...)
 	decls = append(decls, storageDecl)
 	return decls, nil
+}
+
+func (l *lowerer) mutableTraitRegistryDecls(trait air.Trait) []ast.Decl {
+	vtableType := &ast.StarExpr{X: l.mutableTraitVTableTypeExpr(trait)}
+	registry := &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{
+		Names: []*ast.Ident{l.ident(mutableTraitRegistryName(trait))},
+		Values: []ast.Expr{&ast.CompositeLit{Type: &ast.MapType{
+			Key:   l.qualified("reflect", "reflect", "Type"),
+			Value: vtableType,
+		}}},
+	}}}
+	vtable := l.ident("vtable")
+	samples := l.ident("samples")
+	sample := l.ident("sample")
+	register := &ast.FuncDecl{
+		Name: l.ident(mutableTraitRegisterName(trait)),
+		Type: &ast.FuncType{
+			Params: &ast.FieldList{List: []*ast.Field{
+				{Names: []*ast.Ident{vtable}, Type: vtableType},
+				{Names: []*ast.Ident{samples}, Type: &ast.Ellipsis{Elt: l.ident("any")}},
+			}},
+			Results: &ast.FieldList{List: []*ast.Field{{Type: l.ident("bool")}}},
+		},
+		Body: &ast.BlockStmt{List: []ast.Stmt{
+			&ast.RangeStmt{
+				Key:   l.ident("_"),
+				Value: sample,
+				Tok:   token.DEFINE,
+				X:     samples,
+				Body: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{
+					Lhs: []ast.Expr{&ast.IndexExpr{X: l.ident(mutableTraitRegistryName(trait)), Index: &ast.CallExpr{Fun: l.qualified("reflect", "reflect", "TypeOf"), Args: []ast.Expr{sample}}}},
+					Tok: token.ASSIGN,
+					Rhs: []ast.Expr{vtable},
+				}}},
+			},
+			&ast.ReturnStmt{Results: []ast.Expr{l.ident("true")}},
+		}},
+	}
+	return []ast.Decl{registry, register}
 }
 
 func (l *lowerer) mutableTraitMethodFuncType(method air.TraitMethod) (ast.Expr, error) {
@@ -1068,29 +1110,63 @@ func (l *lowerer) mutableTraitImplVTableDecl(trait air.Trait, impl air.Impl, tra
 		return nil, err
 	}
 	target := l.ident("target")
+	current := l.ident("current")
 	pointerType := &ast.StarExpr{X: concreteType}
-	pointerValue := &ast.TypeAssertExpr{X: target, Type: pointerType}
-	loadBody := []ast.Stmt{}
-	loadValue := ast.Expr(&ast.StarExpr{X: pointerValue})
-	if l.implRequiresPointerReceiver(impl.ID) {
-		copyName := l.ident("copy")
-		loadBody = append(loadBody, &ast.AssignStmt{Lhs: []ast.Expr{copyName}, Tok: token.DEFINE, Rhs: []ast.Expr{loadValue}})
-		loadValue = &ast.UnaryExpr{Op: token.AND, X: copyName}
+	panicCase := func() *ast.CaseClause {
+		return &ast.CaseClause{Body: []ast.Stmt{&ast.ExprStmt{X: &ast.CallExpr{
+			Fun:  l.ident("panic"),
+			Args: []ast.Expr{&ast.BasicLit{Kind: token.STRING, Value: `"unsupported mutable trait target"`}},
+		}}}}
 	}
-	loadBody = append(loadBody, &ast.ReturnStmt{Results: []ast.Expr{&ast.CallExpr{Fun: ordinaryTraitType, Args: []ast.Expr{loadValue}}}})
+	returnLoaded := func(fromPointer bool) []ast.Stmt {
+		value := ast.Expr(current)
+		body := []ast.Stmt{}
+		if fromPointer || l.implRequiresPointerReceiver(impl.ID) {
+			copyName := l.ident("copy")
+			copyValue := value
+			if fromPointer {
+				copyValue = &ast.StarExpr{X: current}
+			}
+			body = append(body, &ast.AssignStmt{Lhs: []ast.Expr{copyName}, Tok: token.DEFINE, Rhs: []ast.Expr{copyValue}})
+			value = copyName
+			if l.implRequiresPointerReceiver(impl.ID) {
+				value = &ast.UnaryExpr{Op: token.AND, X: copyName}
+			}
+		}
+		body = append(body, &ast.ReturnStmt{Results: []ast.Expr{&ast.CallExpr{Fun: ordinaryTraitType, Args: []ast.Expr{value}}}})
+		return body
+	}
 	load := &ast.FuncLit{
 		Type: &ast.FuncType{
 			Params:  &ast.FieldList{List: []*ast.Field{{Names: []*ast.Ident{target}, Type: l.ident("any")}}},
 			Results: &ast.FieldList{List: []*ast.Field{{Type: ordinaryTraitType}}},
 		},
-		Body: &ast.BlockStmt{List: loadBody},
+		Body: &ast.BlockStmt{List: []ast.Stmt{&ast.TypeSwitchStmt{
+			Assign: &ast.AssignStmt{Lhs: []ast.Expr{current}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.TypeAssertExpr{X: target}}},
+			Body: &ast.BlockStmt{List: []ast.Stmt{
+				&ast.CaseClause{List: []ast.Expr{concreteType}, Body: returnLoaded(false)},
+				&ast.CaseClause{List: []ast.Expr{pointerType}, Body: returnLoaded(true)},
+				panicCase(),
+			}},
+		}}},
 	}
+	copyName := l.ident("copy")
 	project := &ast.FuncLit{
 		Type: &ast.FuncType{
-			Params:  &ast.FieldList{List: []*ast.Field{{Names: []*ast.Ident{l.ident("target")}, Type: l.ident("any")}}},
+			Params:  &ast.FieldList{List: []*ast.Field{{Names: []*ast.Ident{target}, Type: l.ident("any")}}},
 			Results: &ast.FieldList{List: []*ast.Field{{Type: l.ident("any")}}},
 		},
-		Body: &ast.BlockStmt{List: []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{l.ident("target")}}}},
+		Body: &ast.BlockStmt{List: []ast.Stmt{&ast.TypeSwitchStmt{
+			Assign: &ast.AssignStmt{Lhs: []ast.Expr{current}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.TypeAssertExpr{X: target}}},
+			Body: &ast.BlockStmt{List: []ast.Stmt{
+				&ast.CaseClause{List: []ast.Expr{concreteType}, Body: []ast.Stmt{
+					&ast.AssignStmt{Lhs: []ast.Expr{copyName}, Tok: token.DEFINE, Rhs: []ast.Expr{current}},
+					&ast.ReturnStmt{Results: []ast.Expr{&ast.UnaryExpr{Op: token.AND, X: copyName}}},
+				}},
+				&ast.CaseClause{List: []ast.Expr{pointerType}, Body: []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{current}}}},
+				panicCase(),
+			}},
+		}}},
 	}
 	elts := []ast.Expr{
 		&ast.KeyValueExpr{Key: l.ident(mutableTraitLoadFieldName(trait)), Value: load},
@@ -1105,29 +1181,63 @@ func (l *lowerer) mutableTraitImplVTableDecl(trait air.Trait, impl air.Impl, tra
 		if err != nil {
 			return nil, err
 		}
-		fnType := fnTypeExpr.(*ast.FuncType)
-		callArgs := []ast.Expr{}
-		if len(methodFn.Signature.Params) > 0 {
-			receiver := ast.Expr(&ast.StarExpr{X: &ast.TypeAssertExpr{X: l.ident("target"), Type: pointerType}})
-			if l.isReferenceType(methodFn.Signature.Params[0].Type) {
-				receiver = &ast.TypeAssertExpr{X: l.ident("target"), Type: pointerType}
+		callBody := func(receiver ast.Expr) []ast.Stmt {
+			callArgs := []ast.Expr{}
+			if len(methodFn.Signature.Params) > 0 {
+				callArgs = append(callArgs, receiver)
 			}
-			callArgs = append(callArgs, receiver)
+			for index := range traitMethod.Signature.Params {
+				callArgs = append(callArgs, l.ident(fmt.Sprintf("arg%d", index)))
+			}
+			call := l.functionCallExpr(methodFn, callArgs, nil)
+			if l.isVoidType(traitMethod.Signature.Return) {
+				return []ast.Stmt{&ast.ExprStmt{X: call}}
+			}
+			return []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{call}}}
 		}
-		for index := range traitMethod.Signature.Params {
-			callArgs = append(callArgs, l.ident(fmt.Sprintf("arg%d", index)))
+		methodCases := []ast.Stmt{}
+		if !l.implRequiresPointerReceiver(impl.ID) {
+			methodCases = append(methodCases, &ast.CaseClause{List: []ast.Expr{concreteType}, Body: callBody(current)})
 		}
-		call := l.functionCallExpr(methodFn, callArgs, nil)
-		body := []ast.Stmt{}
-		if l.isVoidType(traitMethod.Signature.Return) {
-			body = append(body, &ast.ExprStmt{X: call})
-		} else {
-			body = append(body, &ast.ReturnStmt{Results: []ast.Expr{call}})
+		pointerReceiver := ast.Expr(&ast.StarExpr{X: current})
+		if len(methodFn.Signature.Params) > 0 && l.isReferenceType(methodFn.Signature.Params[0].Type) {
+			pointerReceiver = current
 		}
-		elts = append(elts, &ast.KeyValueExpr{Key: l.ident(mutableTraitMethodFieldName(trait.ID, methodIndex)), Value: &ast.FuncLit{Type: fnType, Body: &ast.BlockStmt{List: body}}})
+		methodCases = append(methodCases,
+			&ast.CaseClause{List: []ast.Expr{pointerType}, Body: callBody(pointerReceiver)},
+			panicCase(),
+		)
+		elts = append(elts, &ast.KeyValueExpr{
+			Key: l.ident(mutableTraitMethodFieldName(trait.ID, methodIndex)),
+			Value: &ast.FuncLit{
+				Type: fnTypeExpr.(*ast.FuncType),
+				Body: &ast.BlockStmt{List: []ast.Stmt{&ast.TypeSwitchStmt{
+					Assign: &ast.AssignStmt{Lhs: []ast.Expr{current}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.TypeAssertExpr{X: target}}},
+					Body:   &ast.BlockStmt{List: methodCases},
+				}}},
+			},
+		})
 	}
-	value := &ast.CompositeLit{Type: l.ident(mutableTraitVTableTypeName(trait)), Elts: elts}
-	return &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{l.ident(mutableTraitImplVTableName(trait, impl.ID))}, Values: []ast.Expr{value}}}}, nil
+	value := &ast.CompositeLit{Type: l.mutableTraitVTableTypeExpr(trait), Elts: elts}
+	return &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{
+		Names:  []*ast.Ident{l.ident(mutableTraitImplVTableName(trait, impl.ID))},
+		Values: []ast.Expr{value},
+	}}}, nil
+}
+
+func (l *lowerer) mutableTraitImplRegistrationDecl(trait air.Trait, impl air.Impl) ast.Decl {
+	concreteType := mustTypeExpr(l, impl.ForType)
+	register := l.traitOwnedTypeExpr(trait, mutableTraitRegisterName(trait))
+	vtable := &ast.UnaryExpr{Op: token.AND, X: l.ident(mutableTraitImplVTableName(trait, impl.ID))}
+	valueSample := &ast.StarExpr{X: &ast.CallExpr{Fun: l.ident("new"), Args: []ast.Expr{concreteType}}}
+	pointerSample := &ast.CallExpr{
+		Fun:  &ast.ParenExpr{X: &ast.StarExpr{X: concreteType}},
+		Args: []ast.Expr{l.ident("nil")},
+	}
+	return &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{
+		Names:  []*ast.Ident{l.ident("_")},
+		Values: []ast.Expr{&ast.CallExpr{Fun: register, Args: []ast.Expr{vtable, valueSample, pointerSample}}},
+	}}}
 }
 
 func (l *lowerer) mutableTraitStorageVTableDecl(trait air.Trait, traitTypeID air.TypeID) (ast.Decl, error) {
@@ -1135,144 +1245,105 @@ func (l *lowerer) mutableTraitStorageVTableDecl(trait air.Trait, traitTypeID air
 	if err != nil {
 		return nil, err
 	}
-	currentName := l.ident("current")
-	loadCases := []ast.Stmt{}
-	for _, impl := range l.program.Impls {
-		if impl.Trait != trait.ID || !validTypeID(l.program, impl.ForType) {
-			continue
-		}
-		concreteType, err := l.goType(impl.ForType)
-		if err != nil {
-			return nil, err
-		}
-		if !l.implRequiresPointerReceiver(impl.ID) {
-			loadCases = append(loadCases, &ast.CaseClause{List: []ast.Expr{concreteType}, Body: []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{currentName}}}})
-		}
-		copyName := l.ident("copy")
-		returnCopy := ast.Expr(copyName)
-		if l.implRequiresPointerReceiver(impl.ID) {
-			returnCopy = &ast.UnaryExpr{Op: token.AND, X: copyName}
-		}
-		loadCases = append(loadCases, &ast.CaseClause{
-			List: []ast.Expr{&ast.StarExpr{X: concreteType}},
-			Body: []ast.Stmt{
-				&ast.AssignStmt{Lhs: []ast.Expr{copyName}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.StarExpr{X: currentName}}},
-				&ast.ReturnStmt{Results: []ast.Expr{returnCopy}},
+	target := l.ident("target")
+	storage := l.ident("storage")
+	current := l.ident("current")
+	vtable := l.ident("vtable")
+	lookup := func() []ast.Stmt {
+		return []ast.Stmt{
+			&ast.AssignStmt{
+				Lhs: []ast.Expr{storage},
+				Tok: token.DEFINE,
+				Rhs: []ast.Expr{&ast.TypeAssertExpr{X: target, Type: &ast.StarExpr{X: ordinaryTraitType}}},
 			},
-		})
+			&ast.AssignStmt{Lhs: []ast.Expr{current}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.StarExpr{X: storage}}},
+			&ast.AssignStmt{
+				Lhs: []ast.Expr{vtable},
+				Tok: token.DEFINE,
+				Rhs: []ast.Expr{&ast.IndexExpr{
+					X:     l.ident(mutableTraitRegistryName(trait)),
+					Index: &ast.CallExpr{Fun: l.qualified("reflect", "reflect", "TypeOf"), Args: []ast.Expr{current}},
+				}},
+			},
+			&ast.IfStmt{
+				Cond: &ast.BinaryExpr{X: vtable, Op: token.EQL, Y: l.ident("nil")},
+				Body: &ast.BlockStmt{List: []ast.Stmt{&ast.ExprStmt{X: &ast.CallExpr{
+					Fun:  l.ident("panic"),
+					Args: []ast.Expr{&ast.BasicLit{Kind: token.STRING, Value: `"unsupported trait storage value"`}},
+				}}}},
+			},
+		}
 	}
-	loadCases = append(loadCases, &ast.CaseClause{Body: []ast.Stmt{&ast.ExprStmt{X: &ast.CallExpr{Fun: l.ident("panic"), Args: []ast.Expr{&ast.BasicLit{Kind: token.STRING, Value: `"unsupported trait storage value"`}}}}}})
-	targetAsStorage := &ast.TypeAssertExpr{X: l.ident("target"), Type: &ast.StarExpr{X: ordinaryTraitType}}
+	loadBody := lookup()
+	loadBody = append(loadBody, &ast.ReturnStmt{Results: []ast.Expr{&ast.CallExpr{
+		Fun:  &ast.SelectorExpr{X: vtable, Sel: l.ident(mutableTraitLoadFieldName(trait))},
+		Args: []ast.Expr{current},
+	}}})
 	load := &ast.FuncLit{
 		Type: &ast.FuncType{
-			Params:  &ast.FieldList{List: []*ast.Field{{Names: []*ast.Ident{l.ident("target")}, Type: l.ident("any")}}},
+			Params:  &ast.FieldList{List: []*ast.Field{{Names: []*ast.Ident{target}, Type: l.ident("any")}}},
 			Results: &ast.FieldList{List: []*ast.Field{{Type: ordinaryTraitType}}},
 		},
-		Body: &ast.BlockStmt{List: []ast.Stmt{
-			&ast.AssignStmt{Lhs: []ast.Expr{currentName}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.StarExpr{X: targetAsStorage}}},
-			&ast.TypeSwitchStmt{Assign: &ast.AssignStmt{Lhs: []ast.Expr{currentName}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.TypeAssertExpr{X: currentName}}}, Body: &ast.BlockStmt{List: loadCases}},
-		}},
+		Body: &ast.BlockStmt{List: loadBody},
 	}
-	projectCases := []ast.Stmt{}
-	for _, impl := range l.program.Impls {
-		if impl.Trait != trait.ID || !validTypeID(l.program, impl.ForType) {
-			continue
-		}
-		concreteType, err := l.goType(impl.ForType)
-		if err != nil {
-			return nil, err
-		}
-		if !l.implRequiresPointerReceiver(impl.ID) {
-			copyName := l.ident("copy")
-			pointerName := l.ident("pointer")
-			projectCases = append(projectCases, &ast.CaseClause{
-				List: []ast.Expr{concreteType},
-				Body: []ast.Stmt{
-					&ast.AssignStmt{Lhs: []ast.Expr{copyName}, Tok: token.DEFINE, Rhs: []ast.Expr{currentName}},
-					&ast.AssignStmt{Lhs: []ast.Expr{pointerName}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.UnaryExpr{Op: token.AND, X: copyName}}},
-					&ast.AssignStmt{Lhs: []ast.Expr{&ast.StarExpr{X: l.ident("storage")}}, Tok: token.ASSIGN, Rhs: []ast.Expr{pointerName}},
-					&ast.ReturnStmt{Results: []ast.Expr{pointerName}},
-				},
-			})
-		}
-		projectCases = append(projectCases, &ast.CaseClause{List: []ast.Expr{&ast.StarExpr{X: concreteType}}, Body: []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{currentName}}}})
-	}
-	projectCases = append(projectCases, &ast.CaseClause{Body: []ast.Stmt{&ast.ExprStmt{X: &ast.CallExpr{Fun: l.ident("panic"), Args: []ast.Expr{&ast.BasicLit{Kind: token.STRING, Value: `"unsupported trait storage value"`}}}}}})
+	projected := l.ident("projected")
+	projectBody := lookup()
+	projectBody = append(projectBody,
+		&ast.AssignStmt{
+			Lhs: []ast.Expr{projected},
+			Tok: token.DEFINE,
+			Rhs: []ast.Expr{&ast.CallExpr{
+				Fun:  &ast.SelectorExpr{X: vtable, Sel: l.ident(mutableTraitProjectFieldName(trait))},
+				Args: []ast.Expr{current},
+			}},
+		},
+		&ast.AssignStmt{
+			Lhs: []ast.Expr{&ast.StarExpr{X: storage}},
+			Tok: token.ASSIGN,
+			Rhs: []ast.Expr{&ast.TypeAssertExpr{X: projected, Type: ordinaryTraitType}},
+		},
+		&ast.ReturnStmt{Results: []ast.Expr{projected}},
+	)
 	project := &ast.FuncLit{
 		Type: &ast.FuncType{
-			Params:  &ast.FieldList{List: []*ast.Field{{Names: []*ast.Ident{l.ident("target")}, Type: l.ident("any")}}},
+			Params:  &ast.FieldList{List: []*ast.Field{{Names: []*ast.Ident{target}, Type: l.ident("any")}}},
 			Results: &ast.FieldList{List: []*ast.Field{{Type: l.ident("any")}}},
 		},
-		Body: &ast.BlockStmt{List: []ast.Stmt{
-			&ast.AssignStmt{Lhs: []ast.Expr{l.ident("storage")}, Tok: token.DEFINE, Rhs: []ast.Expr{targetAsStorage}},
-			&ast.AssignStmt{Lhs: []ast.Expr{currentName}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.StarExpr{X: l.ident("storage")}}},
-			&ast.TypeSwitchStmt{Assign: &ast.AssignStmt{Lhs: []ast.Expr{currentName}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.TypeAssertExpr{X: currentName}}}, Body: &ast.BlockStmt{List: projectCases}},
-		}},
+		Body: &ast.BlockStmt{List: projectBody},
 	}
 	elts := []ast.Expr{
 		&ast.KeyValueExpr{Key: l.ident(mutableTraitLoadFieldName(trait)), Value: load},
 		&ast.KeyValueExpr{Key: l.ident(mutableTraitProjectFieldName(trait)), Value: project},
 	}
-	// Dispatch through the impl functions directly (like the load/project
-	// cases) rather than through generated Go interface methods: the trait's
-	// ordinary representation may be `any` when no native interface is
-	// available. Mutating impls always reach storage as pointers (upcast
-	// boxing and Project's promotion maintain that invariant), so the value
-	// case only exists for value-receiver impls (ADR 0057).
 	for methodIndex, method := range trait.Methods {
 		fnTypeExpr, err := l.mutableTraitVTableMethodFuncType(method)
 		if err != nil {
 			return nil, err
 		}
-		args := make([]ast.Expr, len(method.Signature.Params))
-		for index := range args {
-			args[index] = l.ident(fmt.Sprintf("arg%d", index))
+		args := []ast.Expr{current}
+		for index := range method.Signature.Params {
+			args = append(args, l.ident(fmt.Sprintf("arg%d", index)))
 		}
-		methodCases := []ast.Stmt{}
-		for _, impl := range l.program.Impls {
-			if impl.Trait != trait.ID || !validTypeID(l.program, impl.ForType) {
-				continue
-			}
-			if methodIndex >= len(impl.Methods) || !validFunctionID(l.program, impl.Methods[methodIndex]) {
-				return nil, fmt.Errorf("impl %d missing method %d for trait %s", impl.ID, methodIndex, trait.Name)
-			}
-			methodFn := l.program.Functions[impl.Methods[methodIndex]]
-			concreteType, err := l.goType(impl.ForType)
-			if err != nil {
-				return nil, err
-			}
-			pointerReceiver := len(methodFn.Signature.Params) > 0 && l.isReferenceType(methodFn.Signature.Params[0].Type)
-			buildCall := func(receiver ast.Expr) ast.Stmt {
-				callArgs := []ast.Expr{}
-				if len(methodFn.Signature.Params) > 0 {
-					callArgs = append(callArgs, receiver)
-				}
-				callArgs = append(callArgs, args...)
-				call := l.functionCallExpr(methodFn, callArgs, nil)
-				if l.isVoidType(method.Signature.Return) {
-					return &ast.ExprStmt{X: call}
-				}
-				return &ast.ReturnStmt{Results: []ast.Expr{call}}
-			}
-			if !l.implRequiresPointerReceiver(impl.ID) {
-				methodCases = append(methodCases, &ast.CaseClause{List: []ast.Expr{concreteType}, Body: []ast.Stmt{buildCall(currentName)}})
-			}
-			pointerBody := buildCall(&ast.StarExpr{X: currentName})
-			if pointerReceiver {
-				pointerBody = buildCall(currentName)
-			}
-			methodCases = append(methodCases, &ast.CaseClause{List: []ast.Expr{&ast.StarExpr{X: concreteType}}, Body: []ast.Stmt{pointerBody}})
+		call := &ast.CallExpr{
+			Fun:  &ast.SelectorExpr{X: vtable, Sel: l.ident(mutableTraitMethodFieldName(trait.ID, methodIndex))},
+			Args: args,
 		}
-		methodCases = append(methodCases, &ast.CaseClause{Body: []ast.Stmt{&ast.ExprStmt{X: &ast.CallExpr{Fun: l.ident("panic"), Args: []ast.Expr{&ast.BasicLit{Kind: token.STRING, Value: `"unsupported trait storage value"`}}}}}})
-		methodBody := []ast.Stmt{
-			&ast.AssignStmt{Lhs: []ast.Expr{currentName}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.StarExpr{X: targetAsStorage}}},
-			&ast.TypeSwitchStmt{Assign: &ast.AssignStmt{Lhs: []ast.Expr{currentName}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.TypeAssertExpr{X: currentName}}}, Body: &ast.BlockStmt{List: methodCases}},
+		methodBody := lookup()
+		if l.isVoidType(method.Signature.Return) {
+			methodBody = append(methodBody, &ast.ExprStmt{X: call})
+		} else {
+			methodBody = append(methodBody, &ast.ReturnStmt{Results: []ast.Expr{call}})
 		}
-		elts = append(elts, &ast.KeyValueExpr{Key: l.ident(mutableTraitMethodFieldName(trait.ID, methodIndex)), Value: &ast.FuncLit{Type: fnTypeExpr.(*ast.FuncType), Body: &ast.BlockStmt{List: methodBody}}})
+		elts = append(elts, &ast.KeyValueExpr{
+			Key:   l.ident(mutableTraitMethodFieldName(trait.ID, methodIndex)),
+			Value: &ast.FuncLit{Type: fnTypeExpr.(*ast.FuncType), Body: &ast.BlockStmt{List: methodBody}},
+		})
 	}
-
-	value := &ast.CompositeLit{Type: l.ident(mutableTraitVTableTypeName(trait)), Elts: elts}
-	return &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{l.ident(mutableTraitStorageVTableName(trait))}, Values: []ast.Expr{value}}}}, nil
+	value := &ast.CompositeLit{Type: l.mutableTraitVTableTypeExpr(trait), Elts: elts}
+	return &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{
+		Names:  []*ast.Ident{l.ident(mutableTraitStorageVTableName(trait))},
+		Values: []ast.Expr{value},
+	}}}, nil
 }
 
 func (l *lowerer) traitInterfaceTypeName(trait air.Trait) string {
@@ -1299,7 +1370,34 @@ func (l *lowerer) naturalTraitInterfaceTypeName(trait air.Trait) (string, bool) 
 }
 
 func (l *lowerer) traitInterfaceTypeExpr(trait air.Trait) ast.Expr {
-	name := l.traitInterfaceTypeName(trait)
+	return l.traitOwnedTypeExpr(trait, l.traitInterfaceTypeName(trait))
+}
+
+func (l *lowerer) mutableTraitRefTypeExpr(trait air.Trait) ast.Expr {
+	return l.traitOwnedTypeExpr(trait, mutableTraitRefTypeName(trait))
+}
+
+func (l *lowerer) mutableTraitVTableTypeExpr(trait air.Trait) ast.Expr {
+	return l.traitOwnedTypeExpr(trait, mutableTraitVTableTypeName(trait))
+}
+
+func (l *lowerer) mutableTraitImplVTableExpr(trait air.Trait, impl air.Impl) ast.Expr {
+	owner, ok := l.ownerModuleForImpl(impl)
+	return l.moduleOwnedExpr(owner, ok, mutableTraitImplVTableName(trait, impl.ID))
+}
+
+func (l *lowerer) mutableTraitStorageVTableExpr(trait air.Trait) ast.Expr {
+	return l.traitOwnedTypeExpr(trait, mutableTraitStorageVTableName(trait))
+}
+
+func (l *lowerer) moduleOwnedExpr(owner air.ModuleID, ok bool, name string) ast.Expr {
+	if !l.useModulePackages || !ok || owner == l.currentModule {
+		return l.ident(name)
+	}
+	return l.moduleQualified(owner, name)
+}
+
+func (l *lowerer) traitOwnedTypeExpr(trait air.Trait, name string) ast.Expr {
 	if !l.useModulePackages {
 		return l.ident(name)
 	}
@@ -1429,43 +1527,58 @@ func legacyTraitInterfaceTypeName(trait air.Trait) string {
 }
 
 func mutableTraitRefTypeName(trait air.Trait) string {
-	return fmt.Sprintf("ardMutTrait_%s_%d", sanitizeName(trait.Name), trait.ID)
+	return fmt.Sprintf("%sMutTrait_%s_%d", mutableTraitNamePrefix(trait), sanitizeName(trait.Name), trait.ID)
 }
 
 func mutableTraitVTableTypeName(trait air.Trait) string {
-	return fmt.Sprintf("ardMutTraitVTable_%s_%d", sanitizeName(trait.Name), trait.ID)
+	return fmt.Sprintf("%sMutTraitVTable_%s_%d", mutableTraitNamePrefix(trait), sanitizeName(trait.Name), trait.ID)
 }
 
 func mutableTraitImplVTableName(trait air.Trait, impl air.ImplID) string {
-	return fmt.Sprintf("ardMutTraitVTable_%s_%d_impl_%d", sanitizeName(trait.Name), trait.ID, impl)
+	return fmt.Sprintf("%sMutTraitVTable_%s_%d_impl_%d", mutableTraitNamePrefix(trait), sanitizeName(trait.Name), trait.ID, impl)
 }
 
 func mutableTraitStorageVTableName(trait air.Trait) string {
-	return fmt.Sprintf("ardMutTraitVTable_%s_%d_storage", sanitizeName(trait.Name), trait.ID)
+	return fmt.Sprintf("%sMutTraitVTable_%s_%d_storage", mutableTraitNamePrefix(trait), sanitizeName(trait.Name), trait.ID)
+}
+
+func mutableTraitRegistryName(trait air.Trait) string {
+	return fmt.Sprintf("ardMutTraitRegistry_%s_%d", sanitizeName(trait.Name), trait.ID)
+}
+
+func mutableTraitRegisterName(trait air.Trait) string {
+	return fmt.Sprintf("%sRegisterMutTrait_%s_%d", mutableTraitNamePrefix(trait), sanitizeName(trait.Name), trait.ID)
+}
+
+func mutableTraitNamePrefix(trait air.Trait) string {
+	if trait.Private {
+		return "ard"
+	}
+	return "Ard"
 }
 
 func mutableTraitTargetFieldName(trait air.Trait) string {
-	return fmt.Sprintf("ardMutTraitTarget_%d", trait.ID)
+	return fmt.Sprintf("ArdMutTraitTarget_%d", trait.ID)
 }
 
 func mutableTraitVTableFieldName(trait air.Trait) string {
-	return fmt.Sprintf("ardMutTraitVTable_%d", trait.ID)
+	return fmt.Sprintf("ArdMutTraitVTable_%d", trait.ID)
 }
 
 func mutableTraitLoadFieldName(trait air.Trait) string {
-	return fmt.Sprintf("ardMutTraitLoad_%d", trait.ID)
+	return fmt.Sprintf("ArdMutTraitLoad_%d", trait.ID)
 }
 
 func mutableTraitProjectFieldName(trait air.Trait) string {
-	return fmt.Sprintf("ardMutTraitProject_%d", trait.ID)
+	return fmt.Sprintf("ArdMutTraitProject_%d", trait.ID)
 }
 
 func mutableTraitAssignFieldName(trait air.Trait) string {
-	return fmt.Sprintf("ardMutTraitAssign_%d", trait.ID)
+	return fmt.Sprintf("ArdMutTraitAssign_%d", trait.ID)
 }
 
 func mutableTraitMethodFieldName(trait air.TraitID, methodIndex int) string {
-	return fmt.Sprintf("ardMutTraitMethod_%d_%d", trait, methodIndex)
+	return fmt.Sprintf("ArdMutTraitMethod_%d_%d", trait, methodIndex)
 }
 
 func (l *lowerer) lowerGlobal(global air.Global) (ast.Decl, error) {
@@ -2718,6 +2831,23 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 				return loweredExpr{}, err
 			}
 			return loweredExpr{stmts: target.stmts, expr: &ast.CallExpr{Fun: traitType, Args: []ast.Expr{target.expr}}}, nil
+		}
+		if l.implRequiresPointerReceiver(expr.Impl) {
+			place, setup, ok, err := l.mutableTraitUpcastPlace(fn, *expr.Target)
+			if err != nil {
+				return loweredExpr{}, err
+			}
+			if ok {
+				return loweredExpr{stmts: setup, expr: &ast.CallExpr{Fun: l.ident("any"), Args: []ast.Expr{addressOfPlace(place)}}}, nil
+			}
+			target, err := l.lowerExpr(fn, *expr.Target)
+			if err != nil {
+				return loweredExpr{}, err
+			}
+			temp := l.nextTemp()
+			stmts := append([]ast.Stmt{}, target.stmts...)
+			stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{l.ident(temp)}, Tok: token.DEFINE, Rhs: []ast.Expr{target.expr}})
+			return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.ident("any"), Args: []ast.Expr{&ast.UnaryExpr{Op: token.AND, X: l.ident(temp)}}}}, nil
 		}
 		target, err := l.lowerExpr(fn, *expr.Target)
 		if err != nil {
@@ -4513,10 +4643,7 @@ func (l *lowerer) mutableTraitRefType(typeID air.TypeID) (ast.Expr, error) {
 	if !validTraitID(l.program, traitID) {
 		return nil, fmt.Errorf("invalid trait id %d", traitID)
 	}
-	if l.mutableTraitRefs != nil {
-		l.mutableTraitRefs[traitID] = true
-	}
-	return l.ident(mutableTraitRefTypeName(l.program.Traits[traitID])), nil
+	return l.mutableTraitRefTypeExpr(l.program.Traits[traitID]), nil
 }
 
 func (l *lowerer) goTypeInfoReturnFields(info air.TypeInfo) ([]*ast.Field, error) {
@@ -5152,8 +5279,8 @@ func (l *lowerer) mutableTraitAnyForwarderMethodExpr(trait air.Trait, methodInde
 	switchVar := l.nextTemp()
 	switchVarExpr := l.ident(switchVar)
 	cases := []ast.Stmt{
-		l.mutableTraitForwardingCase(traitMethod, mutableTraitMethodFieldName(trait.ID, methodIndex), switchVarExpr, l.ident(mutableTraitRefTypeName(trait))),
-		l.mutableTraitForwardingCase(traitMethod, mutableTraitMethodFieldName(trait.ID, methodIndex), switchVarExpr, &ast.StarExpr{X: l.ident(mutableTraitRefTypeName(trait))}),
+		l.mutableTraitForwardingCase(traitMethod, mutableTraitMethodFieldName(trait.ID, methodIndex), switchVarExpr, l.mutableTraitRefTypeExpr(trait)),
+		l.mutableTraitForwardingCase(traitMethod, mutableTraitMethodFieldName(trait.ID, methodIndex), switchVarExpr, &ast.StarExpr{X: l.mutableTraitRefTypeExpr(trait)}),
 	}
 	for _, impl := range l.program.Impls {
 		if impl.Trait != trait.ID || methodIndex >= len(impl.Methods) || !validTypeID(l.program, impl.ForType) || !validFunctionID(l.program, impl.Methods[methodIndex]) {
@@ -5362,7 +5489,7 @@ func (l *lowerer) lowerMutRef(fn air.Function, expr air.Expr) (loweredExpr, erro
 			}
 			handle := &ast.CompositeLit{Type: refType, Elts: []ast.Expr{
 				&ast.KeyValueExpr{Key: l.ident(mutableTraitTargetFieldName(trait)), Value: place},
-				&ast.KeyValueExpr{Key: l.ident(mutableTraitVTableFieldName(trait)), Value: &ast.UnaryExpr{Op: token.AND, X: l.ident(mutableTraitStorageVTableName(trait))}},
+				&ast.KeyValueExpr{Key: l.ident(mutableTraitVTableFieldName(trait)), Value: &ast.UnaryExpr{Op: token.AND, X: l.mutableTraitStorageVTableExpr(trait)}},
 			}}
 			return loweredExpr{stmts: stmts, expr: handle}, nil
 		}
@@ -7985,7 +8112,7 @@ func (l *lowerer) lowerTraitReferenceProjection(fn air.Function, expr air.Expr) 
 	impl := l.program.Impls[expr.Impl]
 	value := &ast.CompositeLit{Type: refType, Elts: []ast.Expr{
 		&ast.KeyValueExpr{Key: l.ident(mutableTraitTargetFieldName(trait)), Value: target.expr},
-		&ast.KeyValueExpr{Key: l.ident(mutableTraitVTableFieldName(trait)), Value: &ast.UnaryExpr{Op: token.AND, X: l.ident(mutableTraitImplVTableName(trait, impl.ID))}},
+		&ast.KeyValueExpr{Key: l.ident(mutableTraitVTableFieldName(trait)), Value: &ast.UnaryExpr{Op: token.AND, X: l.mutableTraitImplVTableExpr(trait, impl)}},
 	}}
 	return loweredExpr{stmts: target.stmts, expr: value}, nil
 }
@@ -8126,13 +8253,10 @@ func (l *lowerer) lowerTraitObjectCall(fn air.Function, target loweredExpr, expr
 	switchVar := l.nextTemp()
 	switchVarExpr := l.ident(switchVar)
 	cases := []ast.Stmt{}
-	if validTraitID(l.program, expr.Trait) && expr.Method >= 0 && expr.Method < len(l.program.Traits[expr.Trait].Methods) {
-		if l.mutableTraitRefs != nil {
-			l.mutableTraitRefs[expr.Trait] = true
-		}
+	if validTraitID(l.program, expr.Trait) && expr.Method >= 0 && expr.Method < len(l.program.Traits[expr.Trait].Methods) && l.traitHasReferenceTypeUse(expr.Trait) {
 		trait := l.program.Traits[expr.Trait]
 		method := trait.Methods[expr.Method]
-		for _, caseType := range []ast.Expr{l.ident(mutableTraitRefTypeName(trait)), &ast.StarExpr{X: l.ident(mutableTraitRefTypeName(trait))}} {
+		for _, caseType := range []ast.Expr{l.mutableTraitRefTypeExpr(trait), &ast.StarExpr{X: l.mutableTraitRefTypeExpr(trait)}} {
 			args := make([]ast.Expr, 0, len(loweredArgs))
 			body := []ast.Stmt{}
 			writeback := []ast.Stmt{}
@@ -8169,55 +8293,57 @@ func (l *lowerer) lowerTraitObjectCall(fn air.Function, target loweredExpr, expr
 			continue
 		}
 		methodFn := l.program.Functions[impl.Methods[expr.Method]]
-		receiver := ast.Expr(switchVarExpr)
-		if len(methodFn.Signature.Params) > 0 {
-			receiverParam := methodFn.Signature.Params[0]
-			if l.isReferenceType(receiverParam.Type) && l.program.Types[l.program.Types[receiverParam.Type-1].Elem-1].Kind == air.TypeStruct {
-				receiver = &ast.UnaryExpr{Op: token.AND, X: receiver}
-			}
-		}
-		args := []ast.Expr{receiver}
-		body := []ast.Stmt{}
-		writeback := []ast.Stmt{}
-		for i, loweredArg := range loweredArgs {
-			argExpr := loweredArg.expr
-			paramIndex := i + 1 // skip receiver
-			if paramIndex < len(methodFn.Signature.Params) {
-				var setup []ast.Stmt
-				var post []ast.Stmt
-				var adaptErr error
-				argExpr, setup, post, adaptErr = l.adaptCallArgWithStmts(fn, expr.Args[i], argExpr, methodFn.Signature.Params[paramIndex])
-				if adaptErr != nil {
-					return loweredExpr{}, adaptErr
+		buildBody := func(receiver ast.Expr) ([]ast.Stmt, error) {
+			args := []ast.Expr{receiver}
+			body := []ast.Stmt{}
+			writeback := []ast.Stmt{}
+			for i, loweredArg := range loweredArgs {
+				argExpr := loweredArg.expr
+				paramIndex := i + 1 // skip receiver
+				if paramIndex < len(methodFn.Signature.Params) {
+					var setup []ast.Stmt
+					var post []ast.Stmt
+					var adaptErr error
+					argExpr, setup, post, adaptErr = l.adaptCallArgWithStmts(fn, expr.Args[i], argExpr, methodFn.Signature.Params[paramIndex])
+					if adaptErr != nil {
+						return nil, adaptErr
+					}
+					body = append(body, setup...)
+					writeback = append(writeback, post...)
 				}
-				body = append(body, setup...)
-				writeback = append(writeback, post...)
+				args = append(args, argExpr)
 			}
-			args = append(args, argExpr)
-		}
-		callResult := ast.Expr(l.functionCallExpr(methodFn, args, nil))
-		if l.isBuiltinToStringTraitCall(expr, impl.ForType) && len(args) == 1 {
-			callResult = l.toStringExpr(impl.ForType, args[0])
-		}
-		if isVoid {
-			body = append(body, &ast.ExprStmt{X: callResult})
-		} else {
-			body = append(body, &ast.AssignStmt{Lhs: []ast.Expr{l.ident(resultTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{callResult}})
-		}
-		body = append(body, writeback...)
-		if traitObjectWritebackAllowed(fn, *expr.Target) && len(methodFn.Signature.Params) > 0 {
-			receiverParam := methodFn.Signature.Params[0]
-			if l.isReferenceType(receiverParam.Type) && l.program.Types[l.program.Types[receiverParam.Type-1].Elem-1].Kind == air.TypeStruct {
-				body = append(body, &ast.AssignStmt{
-					Lhs: []ast.Expr{target.expr},
-					Tok: token.ASSIGN,
-					Rhs: []ast.Expr{switchVarExpr},
-				})
+			callResult := ast.Expr(l.functionCallExpr(methodFn, args, nil))
+			if l.isBuiltinToStringTraitCall(expr, impl.ForType) && len(args) == 1 {
+				callResult = l.toStringExpr(impl.ForType, args[0])
 			}
+			if isVoid {
+				body = append(body, &ast.ExprStmt{X: callResult})
+			} else {
+				body = append(body, &ast.AssignStmt{Lhs: []ast.Expr{l.ident(resultTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{callResult}})
+			}
+			body = append(body, writeback...)
+			return body, nil
+		}
+		concreteType := mustTypeExpr(l, impl.ForType)
+		if !l.implRequiresPointerReceiver(impl.ID) {
+			body, err := buildBody(switchVarExpr)
+			if err != nil {
+				return loweredExpr{}, err
+			}
+			cases = append(cases, &ast.CaseClause{List: []ast.Expr{concreteType}, Body: body})
+		}
+		pointerReceiver := ast.Expr(&ast.StarExpr{X: switchVarExpr})
+		if len(methodFn.Signature.Params) > 0 && l.isReferenceType(methodFn.Signature.Params[0].Type) {
+			pointerReceiver = switchVarExpr
+		}
+		pointerBody, err := buildBody(pointerReceiver)
+		if err != nil {
+			return loweredExpr{}, err
 		}
 		cases = append(cases, &ast.CaseClause{
-			List: []ast.Expr{mustTypeExpr(l, impl.ForType)},
-			Body: body,
+			List: []ast.Expr{&ast.StarExpr{X: concreteType}},
+			Body: pointerBody,
 		})
 	}
 	cases = append(cases, &ast.CaseClause{Body: []ast.Stmt{&ast.ExprStmt{X: &ast.CallExpr{Fun: l.ident("panic"), Args: []ast.Expr{&ast.BasicLit{Kind: token.STRING, Value: "\"unsupported trait object dispatch\""}}}}}})
@@ -8242,23 +8368,6 @@ func (l *lowerer) isBuiltinToStringTraitCall(expr air.Expr, typeID air.TypeID) b
 	switch l.program.Types[typeID-1].Kind {
 	case air.TypeInt, air.TypeScalar, air.TypeFloat64, air.TypeBool, air.TypeByte, air.TypeRune, air.TypeStr:
 		return true
-	default:
-		return false
-	}
-}
-
-func traitObjectWritebackAllowed(fn air.Function, expr air.Expr) bool {
-	switch expr.Kind {
-	case air.ExprLoadLocal:
-		if int(expr.Local) < 0 || int(expr.Local) >= len(fn.Locals) {
-			return false
-		}
-		return fn.Locals[expr.Local].Mutable
-	case air.ExprGetField:
-		if expr.Target == nil {
-			return false
-		}
-		return traitObjectWritebackAllowed(fn, *expr.Target)
 	default:
 		return false
 	}

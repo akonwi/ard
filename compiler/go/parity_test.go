@@ -1933,6 +1933,68 @@ func TestGoTargetParityEscapedMutableTraitObjectUpcastAliasesConcrete(t *testing
 		t.Fatalf("got %s, want 20", got)
 	}
 }
+func TestGoTargetParityFallbackTraitMutableStorage(t *testing.T) {
+	t.Run("mutating implementation", func(t *testing.T) {
+		program := lowerParitySource(t, `
+			use ard/unsafe
+
+			trait Counter {
+				fn value() Int
+				fn set(value: Int)
+			}
+
+			struct Box { value: Int }
+
+			impl Counter for Box {
+				fn value() Int { self.value }
+				fn mut set(value: Int) { self.value = value }
+			}
+
+			fn main() Str {
+				mut current: Counter = Box{value: 1}
+				let reference = mut current
+				reference.set(2)
+				let snapshot = reference.@
+				let boxed: Any = reference
+				let recovered = unsafe::cast<mut Box>(boxed).expect("box pointer")
+				recovered.value = 3
+				"{snapshot.value()}:{current.value()}:{reference.value()}"
+			}
+		`)
+		if got := runGoTargetParityJSON(t, program); got != `"2:3:3"` {
+			t.Fatalf("got %s, want fallback mutation, snapshot, and projection behavior", got)
+		}
+	})
+
+	t.Run("value implementation promoted by Any projection", func(t *testing.T) {
+		program := lowerParitySource(t, `
+			use ard/unsafe
+
+			trait View {
+				fn value() Int
+			}
+
+			struct Box { value: Int }
+
+			impl View for Box {
+				fn value() Int { self.value }
+			}
+
+			fn main() Int {
+				mut current: View = Box{value: 1}
+				let reference = mut current
+				let boxed: Any = reference
+				let recovered = unsafe::cast<mut Box>(boxed).expect("box pointer")
+				recovered.value = 2
+				current.value() + reference.value()
+			}
+		`)
+		if got := runGoTargetParityJSON(t, program); got != `4` {
+			t.Fatalf("got %s, want promoted fallback trait storage to remain dispatchable", got)
+		}
+	})
+}
+
 func TestGoTargetParityMutableTraitMethodNamesDoNotCollideWithForwarderHooks(t *testing.T) {
 	program := lowerParitySource(t, `
 		trait Weird {
