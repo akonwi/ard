@@ -48,7 +48,7 @@ fn main() {
   if not join::join("a") == "a" { panic("zero tail failed") }
   if not join::join("a", "b", "c") == "a:b:c" { panic("repeated tail failed") }
   let values = ["b", "c"]
-  if not join::join("a", (mut values)...) == "a:b:c" { panic("spread tail failed") }
+  if not join::join("a", values...) == "a:b:c" { panic("spread tail failed") }
 }
 `), 0o644); err != nil {
 		t.Fatal(err)

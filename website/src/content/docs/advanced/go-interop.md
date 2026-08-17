@@ -167,19 +167,21 @@ fmt::Println("hello")
 fmt::Println("hello", 42, true)
 ```
 
-Forward an existing list by spreading an explicit reference as the final argument:
+Forward an existing list by spreading it as the final argument:
 
 ```ard
 use go:os/exec as exec
 
 let args = ["-l", "/tmp"]
-exec::Command("ls", (mut args)...)
+exec::Command("ls", args...)
 
 let args_reference = mut args
 exec::Command("ls", args_reference...)
 ```
 
-Spread forwards the current Go slice descriptor without copying. The Go function may retain the slice or mutate its elements, so an ordinary `args...` is rejected: use `(mut args)...` or an existing reference. `List<T>`, `Slice<T>`, and compatible named Go slices are supported when the complete slice is assignable to the variadic tail without element conversion. For example, `[Any]` can spread into `...Any`, but `[Str]` cannot.
+Spread forwards the current Go slice descriptor without copying. `List<T>`, `Slice<T>`, compatible named Go slices, and references to those values are supported when the complete slice is assignable to the variadic tail without element conversion. For example, `[Any]` can spread into `...Any`, but `[Str]` cannot.
+
+The Go function may retain the slice or mutate its elements; those element writes remain visible through the Ard list even when the list itself was passed without `mut`. Spread does not grant access to rebind the Ard variable or replace its descriptor.
 
 A spread call supplies every fixed parameter positionally, followed by one final spread. It cannot use named arguments or mix individual variadic values with a spread.
 

@@ -79,7 +79,7 @@ fn first_present() Int {
 			input: `use go:example.com/app/ffi
 
 fn empty() Int {
-  ffi::Or<Int>((mut [])...)
+  ffi::Or<Int>([]...)
 }`,
 		},
 		{
@@ -87,25 +87,24 @@ fn empty() Int {
 			input: `use go:example.com/app/ffi
 
 fn prefixed() Int {
-  ffi::WithPrefix(4, (mut [])...)
+  ffi::WithPrefix(4, []...)
 }`,
 		},
 		{
-			name: "generic spread reports missing reference before inference failure",
+			name: "generic spread infers from ordinary list",
 			input: `use go:example.com/app/ffi
 
-fn invalid() {
+fn inferred() Int {
   let values = [1, 2]
-  let value = ffi::Or(values...)
+  ffi::Or(values...)
 }`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Variadic spread requires a reference to a list, Slice, or named Go slice"}},
 		},
 		{
 			name: "context-free empty spread cannot infer generic element",
 			input: `use go:example.com/app/ffi
 
 fn empty() {
-  let value = ffi::Or((mut [])...)
+  let value = ffi::Or([]...)
 }`,
 			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Could not infer type argument T for Go function ffi::Or"}},
 		},

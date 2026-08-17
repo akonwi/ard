@@ -16,12 +16,15 @@ func emptySpreadListLiteral(argument parse.Argument) bool {
 	if !argument.Spread {
 		return false
 	}
-	ref, ok := argument.Value.(*parse.MutRef)
-	if !ok {
+	switch value := argument.Value.(type) {
+	case *parse.ListLiteral:
+		return len(value.Items) == 0
+	case *parse.MutRef:
+		list, ok := value.Operand.(*parse.ListLiteral)
+		return ok && len(list.Items) == 0
+	default:
 		return false
 	}
-	list, ok := ref.Operand.(*parse.ListLiteral)
-	return ok && len(list.Items) == 0
 }
 
 // instantiateGoFunctionCall resolves a call to a generic Go function. Type
@@ -76,7 +79,7 @@ func (c *Checker) instantiateGoFunctionCall(modName, name string, goFn *types.Fu
 				if element, _, ok := variadicSpreadContainerElement(valueType); ok {
 					valueType = element
 				} else {
-					c.addDiagnostic(variadicSpreadDiagnostic{Kind: spreadRequiresReference, Span: c.sourceSpan(s.Function.Args[i].GetLocation()), Actual: valueType}.build())
+					c.addDiagnostic(variadicSpreadDiagnostic{Kind: spreadRequiresSlice, Span: c.sourceSpan(s.Function.Args[i].GetLocation()), Actual: valueType}.build())
 					return nil, nil, false
 				}
 			}

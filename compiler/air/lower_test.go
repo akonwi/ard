@@ -48,7 +48,7 @@ func TestVariadicSpreadSurvivesAIRLowering(t *testing.T) {
 	program := lowerProjectSource(t, root, `use go:os/exec
 fn main() {
   let args = ["a", "b"]
-  let command = exec::Command("echo", (mut args)...)
+  let command = exec::Command("echo", args...)
 }`)
 	mainFn := findFunction(t, program, "main")
 	for _, stmt := range mainFn.Body.Stmts {
@@ -66,8 +66,8 @@ fn main() {
 		if callable.Kind != TypeFunction || !callable.Variadic || len(callable.Params) != 2 {
 			t.Fatalf("spread callable = %#v, want two-parameter variadic function", callable)
 		}
-		if len(call.Args) != 2 || typeKind(t, program, call.Args[1].Type) != TypeReference {
-			t.Fatalf("spread args = %#v, want fixed arg and reference", call.Args)
+		if len(call.Args) != 2 || typeKind(t, program, call.Args[1].Type) != TypeList {
+			t.Fatalf("spread args = %#v, want fixed arg and list", call.Args)
 		}
 		return
 	}

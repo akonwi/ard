@@ -4,7 +4,7 @@
 
 Accepted
 
-Amended by ADR 0062, which adds final call-argument spread for referenced lists and slices while leaving Ard-native variadic declarations out of scope.
+Amended by ADR 0062, which adds final call-argument spread for lists, slices, and their references while leaving Ard-native variadic declarations out of scope.
 
 ## Context
 

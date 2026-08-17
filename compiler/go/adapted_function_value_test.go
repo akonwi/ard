@@ -222,28 +222,28 @@ fn main() {
   if not rebound("a", spread_reference...) == "a:b:c" { panic("rebound spread failed") }
   if not callables.join("a", spread_reference...) == "a:b:c" { panic("field spread failed") }
   if not join_result("a", spread_reference...).or("") == "a:b:c" { panic("result spread failed") }
-  if not ffi::Invoke<Str>(ffi::CountStrings, spread_reference...) == ":b:c" { panic("generic spread failed") }
+  if not ffi::Invoke<Str>(ffi::CountStrings, spread_values...) == ":b:c" { panic("generic spread failed") }
   if not named_join("a", spread_reference...) == "a:b:c" { panic("named function spread failed") }
   let named_values = ffi::NamedStrings()
-  if not ffi::Join("a", (mut named_values)...) == "a:named:slice" { panic("named slice spread failed") }
+  if not ffi::Join("a", named_values...) == "a:named:slice" { panic("named slice spread failed") }
   let named_reference = ffi::StringsRef()
   if not ffi::Join("a", named_reference...) == "a:pointer:slice" { panic("named slice pointer spread failed") }
   let items = [ffi::NewItem("pointer"), ffi::NewItem("s")]
-  if not ffi::JoinItems((mut items)...) == "pointers" { panic("pointer element spread failed") }
+  if not ffi::JoinItems(items...) == "pointers" { panic("pointer element spread failed") }
 
   // Spread preserves backing storage and nil versus nonnil-empty descriptors.
   let mutable_values = ["before"]
-  ffi::Mutate((mut mutable_values)...)
+  ffi::Mutate(mutable_values...)
   if not mutable_values.at(0).or("") == "changed" { panic("spread mutation was copied") }
   let nil_values = ffi::NilStrings()
-  if not ffi::VariadicNil((mut nil_values)...) { panic("nil spread lost nil descriptor") }
+  if not ffi::VariadicNil(nil_values...) { panic("nil spread lost nil descriptor") }
   let empty_values = ffi::EmptyStrings()
-  if ffi::VariadicNil((mut empty_values)...) { panic("empty spread became nil") }
+  if ffi::VariadicNil(empty_values...) { panic("empty spread became nil") }
   let view_source = ["visible", "hidden"]
   let view = view_source.slice(0, 1).expect("view")
-  ffi::Mutate((mut view)...)
+  ffi::Mutate(view...)
   if not view_source.at(0).or("") == "changed" { panic("Slice spread lost shared storage") }
-  if ffi::VariadicAppendReuses((mut view)...) { panic("Slice spread exposed hidden capacity") }
+  if ffi::VariadicAppendReuses(view...) { panic("Slice spread exposed hidden capacity") }
 
   // Fixed arguments and the spread operand retain source evaluation order.
   ffi::ResetSpreadOrder()

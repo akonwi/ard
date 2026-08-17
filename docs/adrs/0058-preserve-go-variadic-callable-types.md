@@ -4,7 +4,7 @@
 
 Accepted
 
-Amended by ADR 0062, which permits final referenced-list spread when calling the variadic callable type preserved by this decision.
+Amended by ADR 0062, which permits final list or list-reference spread when calling the variadic callable type preserved by this decision.
 
 ## Context
 

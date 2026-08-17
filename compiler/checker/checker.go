@@ -11708,32 +11708,35 @@ func (c *Checker) inferBindingsFromExpectedReturn(pattern Type, expected Type, g
 }
 
 func variadicSpreadContainerElement(typ Type) (Type, Type, bool) {
-	var referent Type
-	switch reference := typ.(type) {
+	var containerType Type
+	switch value := derefType(typ).(type) {
 	case *MutableRef:
-		referent = derefType(reference.Of())
+		containerType = derefType(value.Of())
 	case *ForeignType:
-		if !reference.Pointer {
-			return nil, nil, false
+		if value.Pointer {
+			containerType = value.ValueForm()
+		} else {
+			containerType = value
 		}
-		referent = reference.ValueForm()
+	case *List, *Slice:
+		containerType = value
 	default:
 		return nil, nil, false
 	}
-	if referent == nil {
+	if containerType == nil {
 		return nil, nil, false
 	}
-	switch container := referent.(type) {
+	switch container := containerType.(type) {
 	case *List:
-		return container.Of(), referent, true
+		return container.Of(), containerType, true
 	case *Slice:
-		return container.Of(), referent, true
+		return container.Of(), containerType, true
 	case *ForeignType:
 		if !container.Pointer && container.Elem != nil {
-			return container.Elem, referent, true
+			return container.Elem, containerType, true
 		}
 	}
-	return nil, referent, false
+	return nil, containerType, false
 }
 
 func descriptorReferenceVariadicElement(typ Type) bool {
@@ -11782,22 +11785,26 @@ func variadicSpreadWholeSliceAssignable(container Type, actualElement Type, expe
 func (c *Checker) checkVariadicSpreadArgument(expr parse.Expression, expectedElement Type, genericScope *SymbolTable) Expression {
 	var checked Expression
 	c.withValueExprContext(func() {
-		contextualLiteral := false
-		if mutRef, ok := expr.(*parse.MutRef); ok && firstUnresolvedCallTypeVar(expectedElement) == nil {
-			_, contextualLiteral = mutRef.Operand.(*parse.ListLiteral)
+		if firstUnresolvedCallTypeVar(expectedElement) == nil {
+			switch value := expr.(type) {
+			case *parse.ListLiteral:
+				checked = c.checkExprAs(expr, MakeList(expectedElement))
+				return
+			case *parse.MutRef:
+				if _, ok := value.Operand.(*parse.ListLiteral); ok {
+					checked = c.checkExprAs(expr, MakeMutableRef(MakeList(expectedElement)))
+					return
+				}
+			}
 		}
-		if contextualLiteral {
-			checked = c.checkExprAs(expr, MakeMutableRef(MakeList(expectedElement)))
-		} else {
-			checked = c.checkExpr(expr)
-		}
+		checked = c.checkExpr(expr)
 	})
 	if checked == nil {
 		return nil
 	}
 	actualElement, container, ok := variadicSpreadContainerElement(checked.Type())
 	if !ok {
-		c.addDiagnostic(variadicSpreadDiagnostic{Kind: spreadRequiresReference, Span: c.sourceSpan(expr.GetLocation()), Actual: checked.Type()}.build())
+		c.addDiagnostic(variadicSpreadDiagnostic{Kind: spreadRequiresSlice, Span: c.sourceSpan(expr.GetLocation()), Actual: checked.Type()}.build())
 		return nil
 	}
 

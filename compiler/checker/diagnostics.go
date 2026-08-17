@@ -855,7 +855,7 @@ type variadicSpreadDiagnosticKind uint8
 
 const (
 	spreadRequiresVariadic variadicSpreadDiagnosticKind = iota
-	spreadRequiresReference
+	spreadRequiresSlice
 	spreadMustBeFinal
 	spreadTypeMismatch
 	spreadMixedTail
@@ -879,9 +879,9 @@ func (d variadicSpreadDiagnostic) build() Diagnostic {
 	case spreadRequiresVariadic:
 		legacy = "Spread arguments require a variadic callable"
 		label = "this callable is fixed-arity"
-	case spreadRequiresReference:
-		legacy = "Variadic spread requires a reference to a list, Slice, or named Go slice"
-		label = "pass an existing reference or use `(mut values)...`"
+	case spreadRequiresSlice:
+		legacy = "Variadic spread requires a list, Slice, or named Go slice"
+		label = "spread a slice-shaped value"
 	case spreadMustBeFinal:
 		legacy = "Spread argument must be final"
 		label = "move this spread to the final argument position"

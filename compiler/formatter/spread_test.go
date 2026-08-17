@@ -9,6 +9,7 @@ import (
 func TestFormatVariadicSpreadArguments(t *testing.T) {
 	input := `fn main() {
 call(reference...)
+call([1,2]...)
 call((mut values)...)
 call(
 fixed,
@@ -18,6 +19,7 @@ reference...
 `
 	want := `fn main() {
   call(reference...)
+  call([1, 2]...)
   call((mut values)...)
   call(fixed, reference...)
 }

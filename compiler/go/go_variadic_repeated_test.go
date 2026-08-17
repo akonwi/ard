@@ -14,10 +14,10 @@ fn main() Bool {
 	}
 }
 
-func TestGoTargetSpreadsReferencedListsIntoGoVariadics(t *testing.T) {
+func TestGoTargetSpreadsListsIntoGoVariadics(t *testing.T) {
 	program := lowerParitySource(t, `use go:fmt
 
-fn call_sprint(sprint: fn(...Any) Str, values: mut [Any]) Str {
+fn call_sprint(sprint: fn(...Any) Str, values: [Any]) Str {
   sprint(values...)
 }
 
@@ -26,7 +26,7 @@ fn main() Bool {
   let captured_values: [Any] = ["c", "d", 4]
   let captured_reference = mut captured_values
   let sprint = fmt::Sprint
-  fmt::Sprint((mut direct_values)...) == "ab3" and sprint(captured_reference...) == "cd4" and call_sprint(sprint, captured_reference) == "cd4"
+  fmt::Sprint(direct_values...) == "ab3" and sprint(captured_reference...) == "cd4" and call_sprint(sprint, captured_values) == "cd4"
 }`)
 	if got := runGoTargetParityJSON(t, program); got != "true" {
 		t.Fatalf("got %s, want true", got)

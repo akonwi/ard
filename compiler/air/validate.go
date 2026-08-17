@@ -499,10 +499,12 @@ func validateTailSpread(program *Program, expr Expr) error {
 	switch {
 	case lastType.Kind == TypeReference && validTypeID(program, lastType.Elem):
 		container = program.Types[lastType.Elem-1]
-	case lastType.Kind == TypeForeignType && lastType.ForeignPointer && lastType.Elem != NoType:
+	case lastType.Kind == TypeList || lastType.Kind == TypeSlice:
+		container = lastType
+	case lastType.Kind == TypeForeignType && lastType.Elem != NoType:
 		container = lastType
 	default:
-		return fmt.Errorf("variadic spread argument type %d is not a reference (kind=%d pointer=%t elem=%d)", last.Type, lastType.Kind, lastType.ForeignPointer, lastType.Elem)
+		return fmt.Errorf("variadic spread argument type %d is not slice-shaped (kind=%d pointer=%t elem=%d)", last.Type, lastType.Kind, lastType.ForeignPointer, lastType.Elem)
 	}
 	if container.Kind != TypeList && container.Kind != TypeSlice && !(container.Kind == TypeForeignType && container.Elem != NoType) {
 		return fmt.Errorf("variadic spread referent has non-slice type kind %d", container.Kind)

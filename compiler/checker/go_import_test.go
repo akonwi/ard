@@ -1405,22 +1405,28 @@ fn main() {
 }`,
 		},
 		{
-			name: "ordinary list spread is rejected",
+			name: "ordinary list spread",
 			input: `use go:os/exec
 fn main() {
   let args = ["a"]
   let _ = exec::Command("echo", args...)
 }`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Variadic spread requires a reference to a list, Slice, or named Go slice"}},
+		},
+		{
+			name: "list literal spread",
+			input: `use go:os/exec
+fn main() {
+  let _ = exec::Command("echo", ["a", "b"]...)
+}`,
 		},
 		{
 			name: "fixed array spread is rejected",
 			input: `use go:os/exec
 fn main() {
   let values: [Str; 1] = ["a"]
-  let _ = exec::Command("echo", (mut values)...)
+  let _ = exec::Command("echo", values...)
 }`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Variadic spread requires a reference to a list, Slice, or named Go slice"}},
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Variadic spread requires a list, Slice, or named Go slice"}},
 		},
 		{
 			name: "element conversion is rejected",
