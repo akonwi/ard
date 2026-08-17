@@ -13,6 +13,7 @@ var compareOptions = cmp.Options{
 	cmpopts.IgnoreFields(EnumDefinition{}, "NameLocation"),
 	cmpopts.IgnoreFields(VariableDeclaration{}, "NameLocation"),
 	cmpopts.IgnoreFields(Import{}, "PathLocation"),
+	cmpopts.IgnoreFields(Argument{}, "EllipsisLocation"),
 	cmp.AllowUnexported(MutableType{}),
 	cmpopts.IgnoreUnexported(
 		Identifier{},

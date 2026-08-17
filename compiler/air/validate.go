@@ -377,9 +377,153 @@ func validateBlock(program *Program, fn Function, block Block) error {
 	return nil
 }
 
+func spreadTypeContainsParam(program *Program, typeID TypeID, seen map[TypeID]bool) bool {
+	if !validTypeID(program, typeID) || seen[typeID] {
+		return false
+	}
+	seen[typeID] = true
+	typ := program.Types[typeID-1]
+	if typ.Kind == TypeParam {
+		return true
+	}
+	for _, nested := range []TypeID{typ.Elem, typ.Key, typ.Value, typ.Error, typ.Return} {
+		if spreadTypeContainsParam(program, nested, seen) {
+			return true
+		}
+	}
+	for _, nested := range typ.Params {
+		if spreadTypeContainsParam(program, nested, seen) {
+			return true
+		}
+	}
+	for _, nested := range typ.GenericArgs {
+		if spreadTypeContainsParam(program, nested, seen) {
+			return true
+		}
+	}
+	for _, field := range typ.Fields {
+		if spreadTypeContainsParam(program, field.Type, seen) {
+			return true
+		}
+	}
+	for _, member := range typ.Members {
+		if spreadTypeContainsParam(program, member.Type, seen) {
+			return true
+		}
+	}
+	return false
+}
+
+func descriptorReferenceSpreadElement(program *Program, typeID TypeID) bool {
+	if !validTypeID(program, typeID) {
+		return false
+	}
+	typ := program.Types[typeID-1]
+	var referent TypeInfo
+	switch {
+	case typ.Kind == TypeReference && validTypeID(program, typ.Elem):
+		referent = program.Types[typ.Elem-1]
+	case typ.Kind == TypeForeignType && typ.ForeignPointer:
+		referent = typ
+	default:
+		return false
+	}
+	return referent.Kind == TypeList || referent.Kind == TypeSlice || referent.Kind == TypeMap ||
+		(referent.Kind == TypeForeignType && (referent.Elem != NoType || referent.Key != NoType))
+}
+
+func spreadCallableType(program *Program, typeID TypeID) (TypeInfo, error) {
+	if !validTypeID(program, typeID) {
+		return TypeInfo{}, fmt.Errorf("variadic spread has invalid callable type %d", typeID)
+	}
+	callable := program.Types[typeID-1]
+	if callable.Kind == TypeForeignType && validTypeID(program, callable.Value) && callable.Key == NoType {
+		callable = program.Types[callable.Value-1]
+	}
+	if callable.Kind != TypeFunction {
+		return TypeInfo{}, fmt.Errorf("variadic spread callable has non-function type %d", typeID)
+	}
+	return callable, nil
+}
+
+func validateTailSpread(program *Program, expr Expr) error {
+	if !expr.TailSpread {
+		if expr.SpreadElement != NoType || expr.SpreadCallable != NoType {
+			return fmt.Errorf("non-spread expression has spread type metadata")
+		}
+		return nil
+	}
+	switch expr.Kind {
+	case ExprCallClosure, ExprForeignCall, ExprForeignMethodCall:
+	default:
+		return fmt.Errorf("expression kind %d cannot carry variadic spread", expr.Kind)
+	}
+	if len(expr.Args) == 0 {
+		return fmt.Errorf("variadic spread call has no arguments")
+	}
+	if !validTypeID(program, expr.SpreadElement) {
+		return fmt.Errorf("variadic spread has invalid element type %d", expr.SpreadElement)
+	}
+	if spreadTypeContainsParam(program, expr.SpreadElement, map[TypeID]bool{}) {
+		return fmt.Errorf("variadic spread element type %d is not concrete", expr.SpreadElement)
+	}
+	if descriptorReferenceSpreadElement(program, expr.SpreadElement) {
+		return fmt.Errorf("variadic spread element type %d has ambiguous descriptor ABI", expr.SpreadElement)
+	}
+	callable, err := spreadCallableType(program, expr.SpreadCallable)
+	if err != nil {
+		return err
+	}
+	if !callable.Variadic || len(callable.Params) == 0 || len(expr.Args) != len(callable.Params) || callable.Params[len(callable.Params)-1] != expr.SpreadElement {
+		return fmt.Errorf("variadic spread call does not match its callable type")
+	}
+	if expr.Kind == ExprCallClosure {
+		if expr.Target == nil {
+			return fmt.Errorf("closure spread call is missing its target")
+		}
+		targetCallable, err := spreadCallableType(program, expr.Target.Type)
+		if err != nil {
+			return err
+		}
+		if targetCallable.ID != callable.ID {
+			return fmt.Errorf("closure spread callable type %d does not match target type %d", callable.ID, targetCallable.ID)
+		}
+	}
+
+	last := expr.Args[len(expr.Args)-1]
+	if !validTypeID(program, last.Type) {
+		return fmt.Errorf("variadic spread argument has invalid type %d", last.Type)
+	}
+	lastType := program.Types[last.Type-1]
+	var container TypeInfo
+	switch {
+	case lastType.Kind == TypeReference && validTypeID(program, lastType.Elem):
+		container = program.Types[lastType.Elem-1]
+	case lastType.Kind == TypeList || lastType.Kind == TypeSlice:
+		container = lastType
+	case lastType.Kind == TypeForeignType && lastType.Elem != NoType:
+		container = lastType
+	default:
+		return fmt.Errorf("variadic spread argument type %d is not slice-shaped (kind=%d pointer=%t elem=%d)", last.Type, lastType.Kind, lastType.ForeignPointer, lastType.Elem)
+	}
+	if container.Kind != TypeList && container.Kind != TypeSlice && !(container.Kind == TypeForeignType && container.Elem != NoType) {
+		return fmt.Errorf("variadic spread referent has non-slice type kind %d", container.Kind)
+	}
+	if container.Elem != expr.SpreadElement {
+		return fmt.Errorf("variadic spread container element type %d does not match %d", container.Elem, expr.SpreadElement)
+	}
+	if len(expr.ForeignArgABI) > 0 && expr.ForeignArgABI[len(expr.ForeignArgABI)-1] != ABIParamExact {
+		return fmt.Errorf("variadic spread requires exact foreign element ABI")
+	}
+	return nil
+}
+
 func validateExpr(program *Program, fn Function, expr Expr) error {
 	if !validTypeID(program, expr.Type) {
 		return fmt.Errorf("expression has invalid type %d", expr.Type)
+	}
+	if err := validateTailSpread(program, expr); err != nil {
+		return err
 	}
 	if expr.Kind == ExprLoadLocal {
 		if expr.Local < 0 || int(expr.Local) >= len(fn.Locals) {

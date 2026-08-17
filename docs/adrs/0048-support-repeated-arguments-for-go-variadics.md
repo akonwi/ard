@@ -4,6 +4,8 @@
 
 Accepted
 
+Amended by ADR 0062, which adds final call-argument spread for lists, slices, and their references while leaving Ard-native variadic declarations out of scope.
+
 ## Context
 
 Direct Go FFI already recognizes Go variadic parameters. A trailing Go variadic parameter is currently exposed as one optional Ard argument, which makes zero-argument and one-argument calls possible:

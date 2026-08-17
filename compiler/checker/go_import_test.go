@@ -719,6 +719,16 @@ fn main() {
 }`,
 		},
 		{
+			name: "variadic foreign method accepts referenced list spread",
+			input: `use go:log
+
+fn main() {
+  let logger = log::Default()
+  let values: [Any] = ["hello", "world"]
+  logger.Println((mut values)...)
+}`,
+		},
+		{
 			name: "foreign interface method argument type mismatch is reported",
 			input: `use go:regexp
 
@@ -1345,6 +1355,179 @@ exec::Command("echo", "a", "b")`,
 			input: `use go:os/exec
 exec::Command("echo", "a", 1)`,
 			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected Str, got Int"}},
+		},
+	})
+}
+
+func TestGoVariadicSpreadArguments(t *testing.T) {
+	run(t, []test{
+		{
+			name: "explicit list reference spread",
+			input: `use go:os/exec
+fn main() {
+  let args = ["a", "b"]
+  let _ = exec::Command("echo", (mut args)...)
+}`,
+		},
+		{
+			name: "existing list reference spread",
+			input: `use go:os/exec
+fn main() {
+  let args = ["a", "b"]
+  let reference = mut args
+  let _ = exec::Command("echo", reference...)
+}`,
+		},
+		{
+			name: "any list spreads to any variadic",
+			input: `use go:fmt
+fn main() {
+  let values: [Any] = ["a", 1]
+  let _ = fmt::Println((mut values)...)
+}`,
+		},
+		{
+			name: "Slice reference spread",
+			input: `use go:os/exec
+fn main() {
+  let values = ["a", "b"]
+  let view = values.slice(0, 1).expect("view")
+  let _ = exec::Command("echo", (mut view)...)
+}`,
+		},
+		{
+			name: "named Go slice reference spread",
+			input: `use go:os/exec
+use go:sort
+fn main() {
+  let values: sort::StringSlice = ["a", "b"]
+  let _ = exec::Command("echo", (mut values)...)
+}`,
+		},
+		{
+			name: "ordinary list spread",
+			input: `use go:os/exec
+fn main() {
+  let args = ["a"]
+  let _ = exec::Command("echo", args...)
+}`,
+		},
+		{
+			name: "list literal spread",
+			input: `use go:os/exec
+fn main() {
+  let _ = exec::Command("echo", ["a", "b"]...)
+}`,
+		},
+		{
+			name: "fixed array spread is rejected",
+			input: `use go:os/exec
+fn main() {
+  let values: [Str; 1] = ["a"]
+  let _ = exec::Command("echo", values...)
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Variadic spread requires a list, Slice, or named Go slice"}},
+		},
+		{
+			name: "element conversion is rejected",
+			input: `use go:fmt
+fn main() {
+  let values = ["a", "b"]
+  let _ = fmt::Println((mut values)...)
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Variadic spread type mismatch: expected [Any], got [Str]"}},
+		},
+		{
+			name: "fixed callable spread is rejected",
+			input: `use go:strings
+fn main() {
+  let values = ["a"]
+  let _ = strings::Join((mut values)...)
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Spread arguments require a variadic callable"}},
+		},
+		{
+			name: "individual variadic arguments cannot precede spread",
+			input: `use go:os/exec
+fn main() {
+  let args = ["a"]
+  let _ = exec::Command("echo", "prefix", (mut args)...)
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Variadic spread cannot be mixed with individual variadic arguments"}},
+		},
+		{
+			name: "fixed arguments cannot be omitted before spread",
+			input: `use go:os/exec
+fn main() {
+  let args = ["a"]
+  let _ = exec::Command((mut args)...)
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Variadic spread requires every fixed argument before it"}},
+		},
+	})
+}
+
+func TestVariadicSpreadRejectsFixedSpecialCalls(t *testing.T) {
+	run(t, []test{
+		{
+			name: "panic",
+			input: `fn main() {
+  let values = ["message"]
+  panic((mut values)...)
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Spread arguments require a variadic callable"}},
+		},
+		{
+			name: "Maybe new",
+			input: `fn main() {
+  let values = [1]
+  let value = Maybe::new((mut values)...)
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Spread arguments require a variadic callable"}},
+		},
+		{
+			name: "contextual Result constructor",
+			input: `fn result() (mut [Int])!Str {
+  let values = [1]
+  Result::ok((mut values)...)
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Spread arguments require a variadic callable"}},
+		},
+		{
+			name: "foreign scalar from conversion",
+			input: `use go:time
+fn main() {
+  let values = [1]
+  let value = time::Duration::from((mut values)...)
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Spread arguments require a variadic callable"}},
+		},
+		{
+			name: "foreign scalar conversion",
+			input: `use go:time
+fn main() {
+  let values = [1]
+  let value = time::Duration((mut values)...)
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Spread arguments require a variadic callable"}},
+		},
+		{
+			name: "unsafe cast",
+			input: `use ard/unsafe
+fn main() {
+  let values: [Any] = [1]
+  let value = unsafe::cast<Int>((mut values)...)
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Spread arguments require a variadic callable"}},
+		},
+		{
+			name: "unsafe nil check",
+			input: `use ard/unsafe
+fn main() {
+  let values: [Any] = [1]
+  let value = unsafe::is_nil((mut values)...)
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Spread arguments require a variadic callable"}},
 		},
 	})
 }

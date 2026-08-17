@@ -4,6 +4,8 @@
 
 Accepted
 
+Amended by ADR 0062, which permits final list or list-reference spread when calling the variadic callable type preserved by this decision.
+
 ## Context
 
 ADR 0048 made direct Go variadic function and method calls accept zero or repeated trailing arguments:

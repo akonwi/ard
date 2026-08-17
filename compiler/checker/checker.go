@@ -7078,14 +7078,13 @@ func (c *Checker) checkFunctionValueCall(callee Expression, callArgs []parse.Arg
 	}
 
 	callTypeArgs := c.resolveCallTypeArgs(typeArgs)
-	resolvedExprs, err := c.resolveArguments(callArgs, fnDef.Parameters)
-	if err != nil {
-		c.addArgumentBindingError(err, location)
+	resolvedExprs, tailSpread, ok := c.resolveCallArguments(callArgs, fnDef, location)
+	if !ok {
 		return nil
 	}
 
 	numOmittedArgs := 0
-	if len(resolvedExprs) < len(fnDef.Parameters) {
+	if !tailSpread && len(resolvedExprs) < len(fnDef.Parameters) {
 		for i := len(resolvedExprs); i < len(fnDef.Parameters); i++ {
 			if !callableParameterOmittable(fnDef.Parameters, i) {
 				c.addMissingArgument(fnDef.Parameters[i], location)
@@ -7093,7 +7092,7 @@ func (c *Checker) checkFunctionValueCall(callee Expression, callArgs []parse.Arg
 			}
 		}
 		numOmittedArgs = len(fnDef.Parameters) - len(resolvedExprs)
-	} else if len(resolvedExprs) > len(fnDef.Parameters) && !(len(fnDef.Parameters) > 0 && fnDef.Parameters[len(fnDef.Parameters)-1].Variadic) {
+	} else if !tailSpread && len(resolvedExprs) > len(fnDef.Parameters) && !(len(fnDef.Parameters) > 0 && fnDef.Parameters[len(fnDef.Parameters)-1].Variadic) {
 		c.addArgumentCount(fmt.Sprint(len(fnDef.Parameters)), len(resolvedExprs), location, "")
 		resolvedExprs = resolvedExprs[:len(fnDef.Parameters)]
 	}
@@ -7103,9 +7102,11 @@ func (c *Checker) checkFunctionValueCall(callee Expression, callArgs []parse.Arg
 		c.addGenericFunctionResolutionError(setupErr, location)
 		return nil
 	}
-	fnDef = expandFunctionDefForRepeatedVariadic(fnDef, len(resolvedExprs))
-	fnDefCopy = expandFunctionDefForRepeatedVariadic(fnDefCopy, len(resolvedExprs))
-	args, fnToUse := c.checkAndProcessArguments(fnDef, resolvedExprs, fnDefCopy, genericScope, numOmittedArgs, contextualGenericReturn(expectedReturn, callTypeArgs), location)
+	if !tailSpread {
+		fnDef = expandFunctionDefForRepeatedVariadic(fnDef, len(resolvedExprs))
+		fnDefCopy = expandFunctionDefForRepeatedVariadic(fnDefCopy, len(resolvedExprs))
+	}
+	args, fnToUse := c.checkAndProcessArguments(fnDef, resolvedExprs, fnDefCopy, genericScope, numOmittedArgs, contextualGenericReturn(expectedReturn, callTypeArgs), location, tailSpread)
 	if args == nil {
 		return nil
 	}
@@ -7113,6 +7114,7 @@ func (c *Checker) checkFunctionValueCall(callee Expression, callArgs []parse.Arg
 	return &FunctionValueCall{
 		Callee:       callee,
 		Args:         args,
+		TailSpread:   tailSpread,
 		FunctionType: fnToUse,
 		ReturnType:   fnToUse.ReturnType,
 	}
@@ -7331,6 +7333,9 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 	case *parse.FunctionCall:
 		{
 			if s.Name == "panic" {
+				if c.rejectSpreadForFixedCall(s.Args) {
+					return nil
+				}
 				if len(s.TypeArgs) > 0 {
 					c.addInvalidFunctionTypeArguments("panic", 0, len(s.TypeArgs), false, s.GetLocation(), "")
 					return nil
@@ -7376,16 +7381,15 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 
 			callTypeArgs := c.resolveCallTypeArgs(s.TypeArgs)
 
-			// Resolve named arguments to positional arguments (for expressions only)
-			resolvedExprs, err := c.resolveArguments(s.Args, fnDef.Parameters)
-			if err != nil {
-				c.addArgumentBindingError(err, s.GetLocation())
+			// Resolve named arguments to positional arguments (for expressions only).
+			resolvedExprs, tailSpread, ok := c.resolveCallArguments(s.Args, fnDef, s.GetLocation())
+			if !ok {
 				return nil
 			}
 
 			// Check argument count after resolving.
 			numOmittedArgs := 0
-			if len(resolvedExprs) < len(fnDef.Parameters) {
+			if !tailSpread && len(resolvedExprs) < len(fnDef.Parameters) {
 				for i := len(resolvedExprs); i < len(fnDef.Parameters); i++ {
 					if !callableParameterOmittable(fnDef.Parameters, i) {
 						c.addMissingArgument(fnDef.Parameters[i], s.GetLocation())
@@ -7393,7 +7397,7 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 					}
 				}
 				numOmittedArgs = len(fnDef.Parameters) - len(resolvedExprs)
-			} else if len(resolvedExprs) > len(fnDef.Parameters) && !(len(fnDef.Parameters) > 0 && fnDef.Parameters[len(fnDef.Parameters)-1].Variadic) {
+			} else if !tailSpread && len(resolvedExprs) > len(fnDef.Parameters) && !(len(fnDef.Parameters) > 0 && fnDef.Parameters[len(fnDef.Parameters)-1].Variadic) {
 				c.addArgumentCount(fmt.Sprint(len(fnDef.Parameters)), len(resolvedExprs), s.GetLocation(), "")
 				resolvedExprs = resolvedExprs[:len(fnDef.Parameters)]
 			}
@@ -7405,9 +7409,11 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 			}
 
 			// Check and process arguments (handles both generics and mutability).
-			fnDef = expandFunctionDefForRepeatedVariadic(fnDef, len(resolvedExprs))
-			fnDefCopy = expandFunctionDefForRepeatedVariadic(fnDefCopy, len(resolvedExprs))
-			args, fnToUse := c.checkAndProcessArguments(fnDef, resolvedExprs, fnDefCopy, genericScope, numOmittedArgs, contextualGenericReturn(expectedReturn, callTypeArgs), s.GetLocation())
+			if !tailSpread {
+				fnDef = expandFunctionDefForRepeatedVariadic(fnDef, len(resolvedExprs))
+				fnDefCopy = expandFunctionDefForRepeatedVariadic(fnDefCopy, len(resolvedExprs))
+			}
+			args, fnToUse := c.checkAndProcessArguments(fnDef, resolvedExprs, fnDefCopy, genericScope, numOmittedArgs, contextualGenericReturn(expectedReturn, callTypeArgs), s.GetLocation(), tailSpread)
 			if args == nil {
 				return nil
 			}
@@ -7416,6 +7422,7 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 				Name:       s.Name,
 				Args:       args,
 				TypeArgs:   callTypeArgs,
+				TailSpread: tailSpread,
 				fn:         fnToUse,
 				ReturnType: fnToUse.ReturnType,
 			}
@@ -7615,16 +7622,15 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 				return nil
 			}
 
-			// Resolve named and positional arguments to match parameters
-			resolvedExprs, err := c.resolveArguments(s.Method.Args, fnDef.Parameters)
-			if err != nil {
-				c.addArgumentBindingError(err, s.GetLocation())
+			// Resolve named and positional arguments to match parameters.
+			resolvedExprs, tailSpread, ok := c.resolveCallArguments(s.Method.Args, fnDef, s.GetLocation())
+			if !ok {
 				return nil
 			}
 
-			// Check argument count and validate omitted arguments
+			// Check argument count and validate omitted arguments.
 			numOmittedArgs := 0
-			if len(resolvedExprs) < len(fnDef.Parameters) {
+			if !tailSpread && len(resolvedExprs) < len(fnDef.Parameters) {
 				// Find first non-nullable parameter that's missing
 				for i := len(resolvedExprs); i < len(fnDef.Parameters); i++ {
 					if !callableParameterOmittable(fnDef.Parameters, i) {
@@ -7633,7 +7639,7 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 					}
 				}
 				numOmittedArgs = len(fnDef.Parameters) - len(resolvedExprs)
-			} else if len(resolvedExprs) > len(fnDef.Parameters) && !(len(fnDef.Parameters) > 0 && fnDef.Parameters[len(fnDef.Parameters)-1].Variadic) {
+			} else if !tailSpread && len(resolvedExprs) > len(fnDef.Parameters) && !(len(fnDef.Parameters) > 0 && fnDef.Parameters[len(fnDef.Parameters)-1].Variadic) {
 				c.addArgumentCount(fmt.Sprint(len(fnDef.Parameters)), len(resolvedExprs), s.GetLocation(), "")
 				resolvedExprs = resolvedExprs[:len(fnDef.Parameters)]
 			}
@@ -7673,11 +7679,13 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 				}
 			}
 
-			fnDef = expandFunctionDefForRepeatedVariadic(fnDef, len(resolvedExprs))
-			fnDefCopy = expandFunctionDefForRepeatedVariadic(fnDefCopy, len(resolvedExprs))
+			if !tailSpread {
+				fnDef = expandFunctionDefForRepeatedVariadic(fnDef, len(resolvedExprs))
+				fnDefCopy = expandFunctionDefForRepeatedVariadic(fnDefCopy, len(resolvedExprs))
+			}
 
 			// Check and process arguments (handles both generics and mutability)
-			args, fnToUse := c.checkAndProcessArguments(fnDef, resolvedExprs, fnDefCopy, genericScope, numOmittedArgs, contextualGenericReturn(expectedReturn, callTypeArgs), s.GetLocation())
+			args, fnToUse := c.checkAndProcessArguments(fnDef, resolvedExprs, fnDefCopy, genericScope, numOmittedArgs, contextualGenericReturn(expectedReturn, callTypeArgs), s.GetLocation(), tailSpread)
 			if args == nil {
 				return nil
 			}
@@ -7702,7 +7710,7 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 					}
 				}
 				pointer := foreign.Pointer || foreignPointerReceiver
-				return &ForeignMethodCall{Subject: subj, Target: foreign.Target, Namespace: foreign.Namespace, Qualifier: foreign.Qualifier, Receiver: foreign.Name, Pointer: pointer, Symbol: s.Method.Name, ForeignResultShape: fnToUse.ForeignResultShape, Call: &FunctionCall{Name: s.Method.Name, Args: args, fn: fnToUse, ReturnType: fnToUse.ReturnType}}
+				return &ForeignMethodCall{Subject: subj, Target: foreign.Target, Namespace: foreign.Namespace, Qualifier: foreign.Qualifier, Receiver: foreign.Name, Pointer: pointer, Symbol: s.Method.Name, ForeignResultShape: fnToUse.ForeignResultShape, Call: &FunctionCall{Name: s.Method.Name, Args: args, TailSpread: tailSpread, fn: fnToUse, ReturnType: fnToUse.ReturnType}}
 			}
 			// Create function call. Slice bounds retain source evaluation order even
 			// though named arguments are stored by destination parameter index.
@@ -8076,6 +8084,9 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 			// take precedence over module/Go-package lookup since `Str` is not a
 			// user-defined symbol. (#283)
 			if targetIdent, ok := s.Target.(*parse.Identifier); ok && targetIdent.Name == "Str" {
+				if c.rejectSpreadForFixedCall(s.Function.Args) {
+					return nil
+				}
 				if expr, handled := c.checkStrStatic(s); handled {
 					return expr
 				}
@@ -8085,6 +8096,9 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 			// bare sized scalar. (#284)
 			if targetIdent, ok := s.Target.(*parse.Identifier); ok && s.Function.Name == "from" {
 				if scalar := scalarTypeByName(targetIdent.Name); scalar != nil {
+					if c.rejectSpreadForFixedCall(s.Function.Args) {
+						return nil
+					}
 					return c.checkScalarFrom(s, scalar)
 				}
 			}
@@ -8102,15 +8116,14 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 				fnDef := sym.Type.(*FunctionDef)
 				callTypeArgs := c.resolveCallTypeArgs(s.Function.TypeArgs)
 
-				// Resolve named and positional arguments to match parameters
-				resolvedExprs, err := c.resolveArguments(s.Function.Args, fnDef.Parameters)
-				if err != nil {
-					c.addArgumentBindingError(err, s.GetLocation())
+				// Resolve named and positional arguments to match parameters.
+				resolvedExprs, tailSpread, ok := c.resolveCallArguments(s.Function.Args, fnDef, s.GetLocation())
+				if !ok {
 					return nil
 				}
 
 				numOmittedArgs := 0
-				if len(resolvedExprs) < len(fnDef.Parameters) {
+				if !tailSpread && len(resolvedExprs) < len(fnDef.Parameters) {
 					for i := len(resolvedExprs); i < len(fnDef.Parameters); i++ {
 						if !callableParameterOmittable(fnDef.Parameters, i) {
 							c.addMissingArgument(fnDef.Parameters[i], s.GetLocation())
@@ -8118,7 +8131,7 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 						}
 					}
 					numOmittedArgs = len(fnDef.Parameters) - len(resolvedExprs)
-				} else if len(resolvedExprs) > len(fnDef.Parameters) {
+				} else if !tailSpread && len(resolvedExprs) > len(fnDef.Parameters) {
 					c.addArgumentCount(fmt.Sprint(len(fnDef.Parameters)), len(resolvedExprs), s.GetLocation(), "")
 					resolvedExprs = resolvedExprs[:len(fnDef.Parameters)]
 				}
@@ -8128,7 +8141,7 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 					c.addGenericFunctionResolutionError(setupErr, s.GetLocation())
 					return nil
 				}
-				args, fnToUse := c.checkAndProcessArguments(fnDef, resolvedExprs, fnDefCopy, genericScope, numOmittedArgs, contextualGenericReturn(expectedReturn, callTypeArgs), s.GetLocation())
+				args, fnToUse := c.checkAndProcessArguments(fnDef, resolvedExprs, fnDefCopy, genericScope, numOmittedArgs, contextualGenericReturn(expectedReturn, callTypeArgs), s.GetLocation(), tailSpread)
 				if args == nil {
 					return nil
 				}
@@ -8137,6 +8150,7 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 					Name:       absolutePath,
 					Args:       args,
 					TypeArgs:   callTypeArgs,
+					TailSpread: tailSpread,
 					fn:         fnToUse,
 					ReturnType: fnToUse.ReturnType,
 				}
@@ -8145,6 +8159,9 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 			// find the function in a module or Go package namespace
 			modName, name := c.destructurePath(s)
 			if mod := c.resolveModule(modName); mod != nil && mod.Path() == "ard/unsafe" {
+				if c.rejectSpreadForFixedCall(s.Function.Args) {
+					return nil
+				}
 				switch name {
 				case "cast":
 					return c.checkUnsafeCast(s)
@@ -8157,6 +8174,9 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 				// scalar type, e.g. time::Duration::from(ms). (#284)
 				if typeName, isFrom := strings.CutSuffix(name, "::from"); isFrom {
 					if named, ok := goPkg.Types[typeName]; ok && isNumericScalar(foreignScalarPrimitive(named)) {
+						if c.rejectSpreadForFixedCall(s.Function.Args) {
+							return nil
+						}
 						return c.checkScalarFrom(s, named)
 					}
 				}
@@ -8183,6 +8203,9 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 					// a mismatched argument reports a clear error.
 					if named, ok := goPkg.Types[name]; ok && len(s.Function.TypeArgs) == 0 {
 						if prim := foreignScalarPrimitive(named); prim != nil {
+							if c.rejectSpreadForFixedCall(s.Function.Args) {
+								return nil
+							}
 							if len(s.Function.Args) != 1 {
 								c.addArgumentCount("1", len(s.Function.Args), s.GetLocation(), "")
 								return nil
@@ -8222,43 +8245,53 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 						return nil
 					}
 				}
-				resolvedExprs, err := c.resolveArguments(s.Function.Args, fnDef.Parameters)
-				if err != nil {
-					c.addArgumentBindingError(err, s.GetLocation())
+				resolvedExprs, tailSpread, ok := c.resolveCallArguments(s.Function.Args, fnDef, s.GetLocation())
+				if !ok {
 					return nil
 				}
-				effectiveFnDef := expandFunctionDefForRepeatedVariadic(fnDef, len(resolvedExprs))
-				if len(resolvedExprs) != len(effectiveFnDef.Parameters) {
-					// A trailing Go variadic argument may be omitted.
-					omittedVariadic := len(resolvedExprs) == len(fnDef.Parameters)-1 && fnDef.Parameters[len(fnDef.Parameters)-1].Variadic
-					if !omittedVariadic {
-						c.addArgumentCount(fmt.Sprint(variadicExpectedArgumentCount(fnDef)), len(resolvedExprs), s.GetLocation(), "")
-						return nil
+				effectiveFnDef := fnDef
+				if !tailSpread {
+					effectiveFnDef = expandFunctionDefForRepeatedVariadic(fnDef, len(resolvedExprs))
+					if len(resolvedExprs) != len(effectiveFnDef.Parameters) {
+						// A trailing Go variadic argument may be omitted.
+						omittedVariadic := len(resolvedExprs) == len(fnDef.Parameters)-1 && fnDef.Parameters[len(fnDef.Parameters)-1].Variadic
+						if !omittedVariadic {
+							c.addArgumentCount(fmt.Sprint(variadicExpectedArgumentCount(fnDef)), len(resolvedExprs), s.GetLocation(), "")
+							return nil
+						}
 					}
 				}
-				args := make([]Expression, len(resolvedExprs))
-				for i, expr := range resolvedExprs {
-					checkedArg := c.checkExprAsArgument(expr, effectiveFnDef.Parameters[i].Type, effectiveFnDef.Parameters[i])
-					if checkedArg == nil {
+				var args []Expression
+				if tailSpread {
+					args, effectiveFnDef = c.checkAndProcessArguments(fnDef, resolvedExprs, fnDef, nil, 0, nil, s.GetLocation(), true)
+					if args == nil {
 						return nil
 					}
-					if effectiveFnDef.Parameters[i].Mutable && !isReferenceValued(checkedArg) {
-						// A Go descriptor or pointer boundary accepts only an
-						// actual reference (ADR 0057).
-						legacyMessage := fmt.Sprintf("Type mismatch: Expected %s, got %s", formatTypeForDisplay(effectiveFnDef.Parameters[i].Type), formatTypeForDisplay(checkedArg.Type()))
-						c.addIncorrectArgumentType(legacyMessage, effectiveFnDef.Parameters[i].Type, checkedArg.Type(), expr.GetLocation(), effectiveFnDef.Parameters[i], true)
-						return nil
+				} else {
+					args = make([]Expression, len(resolvedExprs))
+					for i, expr := range resolvedExprs {
+						checkedArg := c.checkExprAsArgument(expr, effectiveFnDef.Parameters[i].Type, effectiveFnDef.Parameters[i])
+						if checkedArg == nil {
+							return nil
+						}
+						if effectiveFnDef.Parameters[i].Mutable && !isReferenceValued(checkedArg) {
+							// A Go descriptor or pointer boundary accepts only an
+							// actual reference (ADR 0057).
+							legacyMessage := fmt.Sprintf("Type mismatch: Expected %s, got %s", formatTypeForDisplay(effectiveFnDef.Parameters[i].Type), formatTypeForDisplay(checkedArg.Type()))
+							c.addIncorrectArgumentType(legacyMessage, effectiveFnDef.Parameters[i].Type, checkedArg.Type(), expr.GetLocation(), effectiveFnDef.Parameters[i], true)
+							return nil
+						}
+						if converted, ok := c.destinationConversion(effectiveFnDef.Parameters[i].Type, checkedArg); ok {
+							checkedArg = converted
+						} else if !c.areCompatible(effectiveFnDef.Parameters[i].Type, checkedArg.Type()) && !sliceDescriptorProjectionCompatible(effectiveFnDef.Parameters[i].Type, checkedArg.Type()) {
+							legacyMessage := typeMismatch(effectiveFnDef.Parameters[i].Type, checkedArg.Type())
+							c.addIncorrectArgumentType(legacyMessage, effectiveFnDef.Parameters[i].Type, checkedArg.Type(), expr.GetLocation(), effectiveFnDef.Parameters[i], false)
+							return nil
+						}
+						args[i] = checkedArg
 					}
-					if converted, ok := c.destinationConversion(effectiveFnDef.Parameters[i].Type, checkedArg); ok {
-						checkedArg = converted
-					} else if !c.areCompatible(effectiveFnDef.Parameters[i].Type, checkedArg.Type()) && !sliceDescriptorProjectionCompatible(effectiveFnDef.Parameters[i].Type, checkedArg.Type()) {
-						legacyMessage := typeMismatch(effectiveFnDef.Parameters[i].Type, checkedArg.Type())
-						c.addIncorrectArgumentType(legacyMessage, effectiveFnDef.Parameters[i].Type, checkedArg.Type(), expr.GetLocation(), effectiveFnDef.Parameters[i], false)
-						return nil
-					}
-					args[i] = checkedArg
 				}
-				return &ForeignFunctionCall{Target: "go", Namespace: goPkg.Path, Qualifier: goPkg.TypesName, Symbol: name, TypeArgs: callTypeArgs, PointerResult: pointerResult, ForeignResultShape: effectiveFnDef.ForeignResultShape, Call: &FunctionCall{Name: name, Args: args, fn: effectiveFnDef, ReturnType: effectiveFnDef.ReturnType}}
+				return &ForeignFunctionCall{Target: "go", Namespace: goPkg.Path, Qualifier: goPkg.TypesName, Symbol: name, TypeArgs: callTypeArgs, PointerResult: pointerResult, ForeignResultShape: effectiveFnDef.ForeignResultShape, Call: &FunctionCall{Name: name, Args: args, TailSpread: tailSpread, fn: effectiveFnDef, ReturnType: effectiveFnDef.ReturnType}}
 			}
 
 			var fnDef *FunctionDef
@@ -8268,6 +8301,9 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 				return nil
 			}
 			if mod.Path() == "builtin/Maybe" && name == "new" {
+				if c.rejectSpreadForFixedCall(s.Function.Args) {
+					return nil
+				}
 				return c.checkMaybeNewStatic(s, mod, expectedReturn)
 			}
 
@@ -8289,16 +8325,15 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 			}
 			callTypeArgs := c.resolveCallTypeArgs(s.Function.TypeArgs)
 
-			// Resolve named and positional arguments to match parameters
-			resolvedExprs, err := c.resolveArguments(s.Function.Args, fnDef.Parameters)
-			if err != nil {
-				c.addArgumentBindingError(err, s.GetLocation())
+			// Resolve named and positional arguments to match parameters.
+			resolvedExprs, tailSpread, ok := c.resolveCallArguments(s.Function.Args, fnDef, s.GetLocation())
+			if !ok {
 				return nil
 			}
 
 			// Check argument count and validate omitted arguments.
 			numOmittedArgs := 0
-			if len(resolvedExprs) < len(fnDef.Parameters) {
+			if !tailSpread && len(resolvedExprs) < len(fnDef.Parameters) {
 				for i := len(resolvedExprs); i < len(fnDef.Parameters); i++ {
 					if !callableParameterOmittable(fnDef.Parameters, i) {
 						c.addMissingArgument(fnDef.Parameters[i], s.GetLocation())
@@ -8306,7 +8341,7 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 					}
 				}
 				numOmittedArgs = len(fnDef.Parameters) - len(resolvedExprs)
-			} else if len(resolvedExprs) > len(fnDef.Parameters) && !(len(fnDef.Parameters) > 0 && fnDef.Parameters[len(fnDef.Parameters)-1].Variadic) {
+			} else if !tailSpread && len(resolvedExprs) > len(fnDef.Parameters) && !(len(fnDef.Parameters) > 0 && fnDef.Parameters[len(fnDef.Parameters)-1].Variadic) {
 				c.addArgumentCount(fmt.Sprint(len(fnDef.Parameters)), len(resolvedExprs), s.GetLocation(), "")
 				resolvedExprs = resolvedExprs[:len(fnDef.Parameters)]
 			}
@@ -8317,9 +8352,11 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 				return nil
 			}
 
-			fnDef = expandFunctionDefForRepeatedVariadic(fnDef, len(resolvedExprs))
-			fnDefCopy = expandFunctionDefForRepeatedVariadic(fnDefCopy, len(resolvedExprs))
-			args, fnToUse := c.checkAndProcessArguments(fnDef, resolvedExprs, fnDefCopy, genericScope, numOmittedArgs, contextualGenericReturn(expectedReturn, callTypeArgs), s.GetLocation())
+			if !tailSpread {
+				fnDef = expandFunctionDefForRepeatedVariadic(fnDef, len(resolvedExprs))
+				fnDefCopy = expandFunctionDefForRepeatedVariadic(fnDefCopy, len(resolvedExprs))
+			}
+			args, fnToUse := c.checkAndProcessArguments(fnDef, resolvedExprs, fnDefCopy, genericScope, numOmittedArgs, contextualGenericReturn(expectedReturn, callTypeArgs), s.GetLocation(), tailSpread)
 			if args == nil {
 				return nil
 			}
@@ -8331,6 +8368,7 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 				Name:       callName,
 				Args:       args,
 				TypeArgs:   callTypeArgs,
+				TailSpread: tailSpread,
 				fn:         fnToUse,
 				ReturnType: fnToUse.ReturnType,
 			}
@@ -10667,6 +10705,14 @@ func (c *Checker) checkExprAsInner(expr parse.Expression, expectedType Type, exp
 			if len(s.Function.TypeArgs) > 0 {
 				break
 			}
+			if c.rejectSpreadForFixedCall(s.Function.Args) {
+				callDef := *fnDef
+				callDef.ReturnType = derefType(resultType)
+				return &ModuleFunctionCall{
+					Module: mod.Path(),
+					Call:   &FunctionCall{Name: callDef.name(), fn: &callDef, ReturnType: callDef.ReturnType},
+				}
+			}
 
 			if len(s.Function.Args) != len(fnDef.Parameters) {
 				c.addArgumentCount(fmt.Sprint(len(fnDef.Parameters)), len(s.Function.Args), s.GetLocation(), "")
@@ -11661,7 +11707,134 @@ func (c *Checker) inferBindingsFromExpectedReturn(pattern Type, expected Type, g
 	}
 }
 
-func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []parse.Expression, fnDefCopy *FunctionDef, genericScope *SymbolTable, numOmittedArgs int, expectedReturn Type, callLocation parse.Location) ([]Expression, *FunctionDef) {
+func variadicSpreadContainerElement(typ Type) (Type, Type, bool) {
+	var containerType Type
+	switch value := derefType(typ).(type) {
+	case *MutableRef:
+		containerType = derefType(value.Of())
+	case *ForeignType:
+		if value.Pointer {
+			containerType = value.ValueForm()
+		} else {
+			containerType = value
+		}
+	case *List, *Slice:
+		containerType = value
+	default:
+		return nil, nil, false
+	}
+	if containerType == nil {
+		return nil, nil, false
+	}
+	switch container := containerType.(type) {
+	case *List:
+		return container.Of(), containerType, true
+	case *Slice:
+		return container.Of(), containerType, true
+	case *ForeignType:
+		if !container.Pointer && container.Elem != nil {
+			return container.Elem, containerType, true
+		}
+	}
+	return nil, containerType, false
+}
+
+func descriptorReferenceVariadicElement(typ Type) bool {
+	typ = derefType(typ)
+	var referent Type
+	switch reference := typ.(type) {
+	case *MutableRef:
+		referent = derefType(reference.Of())
+	case *ForeignType:
+		if reference.Pointer {
+			referent = reference.ValueForm()
+		}
+	}
+	switch value := referent.(type) {
+	case *List, *Slice, *Map:
+		return true
+	case *ForeignType:
+		return value.Elem != nil || value.MapKey != nil || value.MapValue != nil
+	default:
+		return false
+	}
+}
+
+func variadicSpreadWholeSliceAssignable(container Type, actualElement Type, expectedElement Type) bool {
+	switch source := container.(type) {
+	case *List, *Slice:
+		return equalTypes(actualElement, expectedElement)
+	case *ForeignType:
+		if !equalTypes(actualElement, expectedElement) {
+			return false
+		}
+		if source.GoType == nil {
+			return true
+		}
+		sourceGoType := source.GoType
+		if pointer, ok := sourceGoType.(*gotypes.Pointer); ok {
+			sourceGoType = pointer.Elem()
+		}
+		underlying, ok := sourceGoType.Underlying().(*gotypes.Slice)
+		return ok && gotypes.AssignableTo(sourceGoType, gotypes.NewSlice(underlying.Elem()))
+	default:
+		return false
+	}
+}
+
+func (c *Checker) checkVariadicSpreadArgument(expr parse.Expression, expectedElement Type, genericScope *SymbolTable) Expression {
+	var checked Expression
+	c.withValueExprContext(func() {
+		if firstUnresolvedCallTypeVar(expectedElement) == nil {
+			switch value := expr.(type) {
+			case *parse.ListLiteral:
+				checked = c.checkExprAs(expr, MakeList(expectedElement))
+				return
+			case *parse.MutRef:
+				if _, ok := value.Operand.(*parse.ListLiteral); ok {
+					checked = c.checkExprAs(expr, MakeMutableRef(MakeList(expectedElement)))
+					return
+				}
+			}
+		}
+		checked = c.checkExpr(expr)
+	})
+	if checked == nil {
+		return nil
+	}
+	actualElement, container, ok := variadicSpreadContainerElement(checked.Type())
+	if !ok {
+		c.addDiagnostic(variadicSpreadDiagnostic{Kind: spreadRequiresSlice, Span: c.sourceSpan(expr.GetLocation()), Actual: checked.Type()}.build())
+		return nil
+	}
+
+	if hasGenericsInType(actualElement) {
+		c.addDiagnostic(variadicSpreadDiagnostic{Kind: spreadGenericElement, Span: c.sourceSpan(expr.GetLocation()), Expected: actualElement}.build())
+		return nil
+	}
+	if genericScope != nil && hasGenericsInType(expectedElement) {
+		if err := c.unifyTypes(expectedElement, actualElement, genericScope); err != nil {
+			c.addDiagnostic(variadicSpreadDiagnostic{Kind: spreadTypeMismatch, Span: c.sourceSpan(expr.GetLocation()), Expected: derefType(expectedElement), Actual: actualElement}.build())
+			return nil
+		}
+	}
+	expectedElement = derefType(expectedElement)
+	if hasGenericsInType(expectedElement) {
+		c.addDiagnostic(variadicSpreadDiagnostic{Kind: spreadGenericElement, Span: c.sourceSpan(expr.GetLocation()), Expected: expectedElement}.build())
+		return nil
+	}
+	if descriptorReferenceVariadicElement(expectedElement) {
+		c.addDiagnostic(variadicSpreadDiagnostic{Kind: spreadUnsafeElementABI, Span: c.sourceSpan(expr.GetLocation()), Expected: expectedElement}.build())
+		return nil
+	}
+	if !variadicSpreadWholeSliceAssignable(container, actualElement, expectedElement) {
+		c.addDiagnostic(variadicSpreadDiagnostic{Kind: spreadTypeMismatch, Span: c.sourceSpan(expr.GetLocation()), Expected: expectedElement, Actual: actualElement}.build())
+		return nil
+	}
+	return checked
+}
+
+func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []parse.Expression, fnDefCopy *FunctionDef, genericScope *SymbolTable, numOmittedArgs int, expectedReturn Type, callLocation parse.Location, tailSpread bool) ([]Expression, *FunctionDef) {
 	// Create the full argument list including synthesized Maybe::new() calls for omitted arguments
 	// Need to maintain parameter order, so use indexed assignment instead of appending
 	totalArgs := len(fnDefCopy.Parameters)
@@ -11719,6 +11892,18 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 					contextualParamType = candidate
 				}
 			}
+		}
+
+		if tailSpread && i == len(fnDefCopy.Parameters)-1 {
+			checkedArg := c.checkVariadicSpreadArgument(resolvedExprs[i], paramType, genericScope)
+			if checkedArg == nil {
+				return nil, nil
+			}
+			allExprs[i] = checkedArg
+			if genericScope != nil {
+				genericScope.genericPendingOrigin = nil
+			}
+			continue
 		}
 
 		// For list and map literals, use checkExprAs to infer type from context.
@@ -12339,6 +12524,69 @@ func (c *Checker) addArgumentBindingError(err *argumentBindingError, fallback pa
 		Span:         c.sourceSpan(location),
 		PreviousSpan: previous,
 	}.build())
+}
+
+func (c *Checker) rejectSpreadForFixedCall(args []parse.Argument) bool {
+	for _, arg := range args {
+		if arg.Spread {
+			c.addDiagnostic(variadicSpreadDiagnostic{Kind: spreadRequiresVariadic, Span: c.sourceSpan(arg.EllipsisLocation)}.build())
+			return true
+		}
+	}
+	return false
+}
+
+// resolveCallArguments preserves a final spread argument until call checking has
+// validated its referenced outer slice. Ordinary calls retain named-argument
+// binding through resolveArguments.
+func (c *Checker) resolveCallArguments(args []parse.Argument, fnDef *FunctionDef, location parse.Location) ([]parse.Expression, bool, bool) {
+	spreadIndex := -1
+	for i, arg := range args {
+		if arg.Spread {
+			if spreadIndex >= 0 {
+				c.addDiagnostic(variadicSpreadDiagnostic{Kind: spreadMixedTail, Span: c.sourceSpan(arg.EllipsisLocation)}.build())
+				return nil, false, false
+			}
+			spreadIndex = i
+		}
+	}
+	if spreadIndex < 0 {
+		resolved, err := c.resolveArguments(args, fnDef.Parameters)
+		if err != nil {
+			c.addArgumentBindingError(err, location)
+			return nil, false, false
+		}
+		return resolved, false, true
+	}
+	if spreadIndex != len(args)-1 {
+		c.addDiagnostic(variadicSpreadDiagnostic{Kind: spreadMustBeFinal, Span: c.sourceSpan(args[spreadIndex].EllipsisLocation)}.build())
+		return nil, false, false
+	}
+	for _, arg := range args {
+		if arg.Name != "" {
+			c.addDiagnostic(variadicSpreadDiagnostic{Kind: spreadNamedArgument, Span: c.sourceSpan(arg.GetLocation())}.build())
+			return nil, false, false
+		}
+	}
+	if fnDef == nil || len(fnDef.Parameters) == 0 || !fnDef.Parameters[len(fnDef.Parameters)-1].Variadic {
+		c.addDiagnostic(variadicSpreadDiagnostic{Kind: spreadRequiresVariadic, Span: c.sourceSpan(args[spreadIndex].EllipsisLocation)}.build())
+		return nil, false, false
+	}
+	fixedCount := len(fnDef.Parameters) - 1
+	providedFixed := len(args) - 1
+	if providedFixed < fixedCount {
+		c.addDiagnostic(variadicSpreadDiagnostic{Kind: spreadMissingFixed, Span: c.sourceSpan(args[spreadIndex].GetLocation())}.build())
+		return nil, false, false
+	}
+	if providedFixed > fixedCount {
+		c.addDiagnostic(variadicSpreadDiagnostic{Kind: spreadMixedTail, Span: c.sourceSpan(args[spreadIndex].GetLocation())}.build())
+		return nil, false, false
+	}
+	resolved := make([]parse.Expression, len(args))
+	for i := range args {
+		resolved[i] = args[i].Value
+	}
+	return resolved, true, true
 }
 
 // resolveArguments converts unified argument list to positional arguments.

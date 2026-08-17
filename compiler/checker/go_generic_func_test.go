@@ -66,6 +66,140 @@ fn set(c: mut ffi::StateCtx) {
 }`,
 		},
 		{
+			name: "infer variadic type arg from spread element",
+			input: `use go:example.com/app/ffi
+
+fn first_present() Int {
+  let values = [0, 4, 0]
+  ffi::Or((mut values)...)
+}`,
+		},
+		{
+			name: "explicit variadic type arg contexts empty spread",
+			input: `use go:example.com/app/ffi
+
+fn empty() Int {
+  ffi::Or<Int>([]...)
+}`,
+		},
+		{
+			name: "fixed argument contexts empty spread after generic inference",
+			input: `use go:example.com/app/ffi
+
+fn prefixed() Int {
+  ffi::WithPrefix(4, []...)
+}`,
+		},
+		{
+			name: "generic spread infers from ordinary list",
+			input: `use go:example.com/app/ffi
+
+fn inferred() Int {
+  let values = [1, 2]
+  ffi::Or(values...)
+}`,
+		},
+		{
+			name: "context-free empty spread cannot infer generic element",
+			input: `use go:example.com/app/ffi
+
+fn empty() {
+  let value = ffi::Or([]...)
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Could not infer type argument T for Go function ffi::Or"}},
+		},
+		{
+			name: "explicit generic element still requires whole-slice identity",
+			input: `use go:example.com/app/ffi
+
+fn mismatch() {
+  let values = [1, 2]
+  let value: Any = ffi::Or<Any>((mut values)...)
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Variadic spread type mismatch: expected [Any], got [Int]"}},
+		},
+		{
+			name: "foreign pointer to named slice spreads its referenced descriptor",
+			input: `use go:example.com/app/ffi
+
+fn join() Str {
+  let reference = ffi::StringsRef()
+  ffi::JoinStrings(reference...)
+}`,
+		},
+		{
+			name: "named Go slices with channel elements spread exactly",
+			input: `use go:example.com/app/ffi
+
+fn count() Int {
+  let values = ffi::Channels()
+  ffi::CountChannels((mut values)...)
+}`,
+		},
+		{
+			name: "named Go slices with function elements spread exactly",
+			input: `use go:example.com/app/ffi
+
+fn count() Int {
+  let values = ffi::CallbacksValue()
+  ffi::CountCallbacks((mut values)...)
+}`,
+		},
+		{
+			name: "named Go slices with fixed-array elements spread exactly",
+			input: `use go:example.com/app/ffi
+
+fn count() Int {
+  let values = ffi::ArraysValue()
+  ffi::CountArrays((mut values)...)
+}`,
+		},
+		{
+			name: "descriptor-value variadic element spread is rejected",
+			input: `use go:example.com/app/ffi
+
+fn join() {
+  let first = ["a"]
+  let values = [mut first]
+  ffi::JoinSlices((mut values)...)
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Variadic spread does not support descriptor-reference element type mut [Str]"}},
+		},
+		{
+			name: "descriptor-value element remains rejected after callable assignment",
+			input: `use go:example.com/app/ffi
+
+fn join() {
+  let first = ["a"]
+  let values = [mut first]
+  let join: fn(...mut [Str]) = ffi::JoinSlices
+  join((mut values)...)
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Variadic spread does not support descriptor-reference element type mut [Str]"}},
+		},
+		{
+			name: "pointer-to-named-slice variadic element is conservatively rejected",
+			input: `use go:example.com/app/ffi
+
+fn join() {
+  let first = ffi::StringsRef()
+  let values = [first]
+  ffi::NamedSlicePointers((mut values)...)
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Variadic spread does not support descriptor-reference element type mut ffi::Strings"}},
+		},
+		{
+			name: "exact pointer-to-descriptor variadic element spread is conservatively rejected",
+			input: `use go:example.com/app/ffi
+
+fn join() {
+  let first = ["a"]
+  let values = [mut first]
+  ffi::SlicePointers((mut values)...)
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Variadic spread does not support descriptor-reference element type mut [Str]"}},
+		},
+		{
 			name: "reject uninferable call without type args",
 			input: `use go:example.com/app/ffi
 
@@ -202,6 +336,36 @@ func SlicePair[T any](first []T, second []T) T {
 func First[T comparable](values []T) T {
 	return values[0]
 }
+
+func Or[T comparable](values ...T) T {
+	var zero T
+	for _, value := range values {
+		if value != zero {
+			return value
+		}
+	}
+	return zero
+}
+
+func WithPrefix[T comparable](prefix T, values ...T) T { return prefix }
+
+type Strings []string
+func StringsRef() *Strings { values := Strings{"a", "b"}; return &values }
+func JoinStrings(values ...string) string { out := ""; for _, value := range values { out += value }; return out }
+func NamedSlicePointers(values ...*Strings) {}
+
+type Chans []chan int
+func Channels() Chans { return Chans{make(chan int), make(chan int)} }
+func CountChannels(values ...chan int) int { return len(values) }
+type Callbacks []func(int) int
+func CallbacksValue() Callbacks { return Callbacks{func(v int) int { return v }} }
+func CountCallbacks(values ...func(int) int) int { return len(values) }
+type Arrays [][2]int
+func ArraysValue() Arrays { return Arrays{{1, 2}} }
+func CountArrays(values ...[2]int) int { return len(values) }
+
+func JoinSlices(values ...[]string) {}
+func SlicePointers(values ...*[]string) {}
 
 func Touch(c *StateCtx) {}
 `

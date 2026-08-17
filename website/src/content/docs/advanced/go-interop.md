@@ -167,7 +167,25 @@ fmt::Println("hello")
 fmt::Println("hello", 42, true)
 ```
 
-Ard does not currently have spread syntax (`args...`) or Ard-native variadic function declarations. Forwarding an existing list to a Go variadic parameter still needs a Go helper or an explicit wrapper.
+Forward an existing list by spreading it as the final argument:
+
+```ard
+use go:os/exec as exec
+
+let args = ["-l", "/tmp"]
+exec::Command("ls", args...)
+
+let args_reference = mut args
+exec::Command("ls", args_reference...)
+```
+
+Spread forwards the current Go slice descriptor without copying. `List<T>`, `Slice<T>`, compatible named Go slices, and references to those values are supported when the complete slice is assignable to the variadic tail without element conversion. For example, `[Any]` can spread into `...Any`, but `[Str]` cannot.
+
+The Go function may retain the slice or mutate its elements; those element writes remain visible through the Ard list even when the list itself was passed without `mut`. Spread does not grant access to rebind the Ard variable or replace its descriptor.
+
+A spread call supplies every fixed parameter positionally, followed by one final spread. It cannot use named arguments or mix individual variadic values with a spread.
+
+Variadic elements that themselves require slice/map descriptor adaptation, such as Go `...[]T`, cannot be spread yet because that ABI distinction does not survive every first-class callable path. Pass those elements individually. Ard-native variadic function declarations remain unsupported.
 
 ## Go Interfaces
 
@@ -362,6 +380,5 @@ Direct Go interop is intentionally incremental. Current limitations include:
 
 - embedded/promoted Go fields are not resolved through promotion;
 - Ard functions and closures cannot implement Go callback-shaped interfaces directly yet;
-- spread/forwarding for Go variadics still needs companion wrappers;
 - exact Go `*Interface` parameters are unsupported;
 - pure Ard cannot construct multi-level Go pointers—an exact compatible foreign pointer must already exist.

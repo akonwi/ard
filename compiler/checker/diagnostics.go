@@ -57,6 +57,7 @@ const (
 	DiagnosticCodeBranchTypeMismatch            DiagnosticCode = "branch_type_mismatch"
 	DiagnosticCodeNonExhaustiveValueIf          DiagnosticCode = "non_exhaustive_value_if"
 	DiagnosticCodeInvalidDerefOperand           DiagnosticCode = "invalid_deref_operand"
+	DiagnosticCodeInvalidVariadicSpread         DiagnosticCode = "invalid_variadic_spread"
 	DiagnosticCodeDeprecatedDerefSyntax         DiagnosticCode = "deprecated_deref_syntax"
 	DiagnosticCodeNonAddressableBorrow          DiagnosticCode = "non_addressable_borrow"
 	DiagnosticCodeValueInteriorMutation         DiagnosticCode = "value_interior_mutation"
@@ -847,6 +848,64 @@ func (d argumentBindingDiagnostic) build() Diagnostic {
 	}
 	diagnostic := newLabeledDiagnostic(Error, legacy, title, "", DiagnosticLabel{Span: d.Span, Message: primary}, secondary...)
 	diagnostic.Code = code
+	return diagnostic
+}
+
+type variadicSpreadDiagnosticKind uint8
+
+const (
+	spreadRequiresVariadic variadicSpreadDiagnosticKind = iota
+	spreadRequiresSlice
+	spreadMustBeFinal
+	spreadTypeMismatch
+	spreadMixedTail
+	spreadMissingFixed
+	spreadNamedArgument
+	spreadGenericElement
+	spreadUnsafeElementABI
+)
+
+type variadicSpreadDiagnostic struct {
+	Kind     variadicSpreadDiagnosticKind
+	Span     SourceSpan
+	Expected Type
+	Actual   Type
+}
+
+func (d variadicSpreadDiagnostic) build() Diagnostic {
+	legacy := "Invalid variadic spread"
+	label := "this spread is invalid"
+	switch d.Kind {
+	case spreadRequiresVariadic:
+		legacy = "Spread arguments require a variadic callable"
+		label = "this callable is fixed-arity"
+	case spreadRequiresSlice:
+		legacy = "Variadic spread requires a list, Slice, or named Go slice"
+		label = "spread a slice-shaped value"
+	case spreadMustBeFinal:
+		legacy = "Spread argument must be final"
+		label = "move this spread to the final argument position"
+	case spreadTypeMismatch:
+		legacy = fmt.Sprintf("Variadic spread type mismatch: expected [%s], got [%s]", formatTypeForDisplay(d.Expected), formatTypeForDisplay(d.Actual))
+		label = "the complete slice must be assignable without element conversion"
+	case spreadMixedTail:
+		legacy = "Variadic spread cannot be mixed with individual variadic arguments"
+		label = "put every variadic value in the spread list"
+	case spreadMissingFixed:
+		legacy = "Variadic spread requires every fixed argument before it"
+		label = "supply all fixed arguments positionally before the spread"
+	case spreadNamedArgument:
+		legacy = "Variadic spread calls do not support named arguments"
+		label = "use positional fixed arguments before the spread"
+	case spreadGenericElement:
+		legacy = fmt.Sprintf("Variadic spread requires a concrete element type, got %s", formatTypeForDisplay(d.Expected))
+		label = "the element ABI must be known before spread lowering"
+	case spreadUnsafeElementABI:
+		legacy = fmt.Sprintf("Variadic spread does not support descriptor-reference element type %s", formatTypeForDisplay(d.Expected))
+		label = "this callable's exact Go element ABI is not preserved through function values"
+	}
+	diagnostic := newLabeledDiagnostic(Error, legacy, "Invalid variadic spread", "", DiagnosticLabel{Span: d.Span, Message: label})
+	diagnostic.Code = DiagnosticCodeInvalidVariadicSpread
 	return diagnostic
 }
 

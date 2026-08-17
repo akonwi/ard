@@ -391,6 +391,25 @@ func TestFunctionCalls(t *testing.T) {
 				},
 			},
 		},
+		{
+			name:  "Call with an existing reference spread",
+			input: `print(values_reference...)`,
+			output: Program{Imports: []Import{}, Statements: []Statement{
+				&FunctionCall{Name: "print", Args: []Argument{{Value: &Identifier{Name: "values_reference"}, Spread: true}}, Comments: []Comment{}},
+			}},
+		},
+		{
+			name:  "Call with an explicit reference spread",
+			input: `print((mut values)...)`,
+			output: Program{Imports: []Import{}, Statements: []Statement{
+				&FunctionCall{Name: "print", Args: []Argument{{Value: &MutRef{Operand: &Identifier{Name: "values"}}, Spread: true}}, Comments: []Comment{}},
+			}},
+		},
+		{
+			name:     "Spread argument must be final",
+			input:    `print(values_reference..., "later")`,
+			wantErrs: []string{"Spread argument must be final"},
+		},
 	}
 
 	runTests(t, tests)

@@ -4412,6 +4412,15 @@ func (p *parser) parseFunctionArguments() ([]Argument, []Comment, error) {
 			})
 		}
 
+		spread := false
+		if p.match(ellipsis) {
+			spread = true
+			index := len(args) - 1
+			args[index].Spread = true
+			args[index].EllipsisLocation = p.previous().getLocation()
+			args[index].Location.End = args[index].EllipsisLocation.End
+		}
+
 		// Check for inline comment after argument
 		if c := p.parseInlineComment(); c != nil {
 			comments = append(comments, *c)
@@ -4419,6 +4428,9 @@ func (p *parser) parseFunctionArguments() ([]Argument, []Comment, error) {
 
 		p.match(comma)
 		p.match(new_line)
+		if spread && !p.check(right_paren) && !p.isAtEnd() {
+			p.addError(p.previous(), "Spread argument must be final")
+		}
 
 		if p.index == iterationStart {
 			p.addError(p.peek(), "Could not parse function argument")

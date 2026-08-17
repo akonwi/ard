@@ -253,14 +253,19 @@ type Expr struct {
 	Observational      bool
 	ForeignResultShape ForeignResultShape
 	ForeignArgABI      []ABIParamMode
-	TypeArgs           []TypeID
-	Impl               ImplID
-	Trait              TraitID
-	Method             int
-	Args               []Expr
-	ArgOrder           []int
-	Entries            []MapEntry
-	CaptureLocals      []LocalID
+	// TailSpread marks the final call argument as a referenced slice descriptor
+	// forwarded to a variadic callable with Go `...` semantics (ADR 0062).
+	TailSpread     bool
+	SpreadElement  TypeID
+	SpreadCallable TypeID
+	TypeArgs       []TypeID
+	Impl           ImplID
+	Trait          TraitID
+	Method         int
+	Args           []Expr
+	ArgOrder       []int
+	Entries        []MapEntry
+	CaptureLocals  []LocalID
 
 	Fields []StructFieldValue
 	Target *Expr
