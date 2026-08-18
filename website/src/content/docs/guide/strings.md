@@ -39,6 +39,16 @@ let wrapped = `{{{name}}}`
 
 These evaluate to `Hello, Ada!`, `{name}`, and `{Ada}` when `name` is `Ada`.
 
+## Error interpolation
+
+A builtin `Error` value interpolates through its `error() Str` method:
+
+```ard
+let message = "request failed: {error}"
+```
+
+This is an interpolation-only conversion. An `Error` cannot otherwise be assigned or passed as `Str`; call `error.error()` when a message value is required. Existing `to_str` and `ToString` behavior takes precedence for concrete values supporting both contracts.
+
 ## Multiline raw strings
 
 A raw string enters multiline mode when its opening backtick is immediately

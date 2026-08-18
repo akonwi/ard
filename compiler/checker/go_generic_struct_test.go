@@ -30,6 +30,58 @@ let box = ffi::Box<Str>{Value: "hello"}`,
 let box = ffi::Box{Value: "hello"}`,
 		},
 		{
+			name: "generic method keeps substituted Error as an ordinary value",
+			input: `use go:example.com/app/ffi
+
+let box = ffi::Box<Error>{Value: Error::new("boom")}
+let error: Error = box.Get()
+let result: Error!Error = box.Load()`,
+		},
+		{
+			name: "generic result methods preserve Ard type arguments",
+			input: `use go:example.com/app/ffi
+
+struct User { name: Str }
+
+let box = ffi::Make(User{name: "Ada"})
+let user: User = box.Get()
+let nested = box.Nested()
+let nested_user: User = nested.Get()`,
+		},
+		{
+			name: "generic method keeps nested callback Error results as ordinary values",
+			input: `use go:example.com/app/ffi
+
+let holder = ffi::Holder<Error>{}
+let called: Error = holder.Call(fn() Error { Error::new("called") })
+let callback: fn() Error = holder.Callback(Error::new("callback"))
+let named = holder.Named(Error::new("named"))
+let named_value: Error = named()
+let callbacks = [fn() Error { Error::new("list") }]
+let mapped_callbacks: [fn() Error] = holder.Callbacks(mut callbacks)
+let maybe_callback: (fn() Error)? = holder.Lookup(Error::new("maybe"))
+let variadic_value: Error = holder.Variadic(fn() Error { Error::new("variadic") })
+let wrapped = holder.Wrap(Error::new("wrapped"))
+let wrapped_value: Error = wrapped.Produce()
+let producers = holder.Array(Error::new("array"))
+let producer: fn() Error = producers.at(0).expect("producer")`,
+		},
+		{
+			name: "generic interface method keeps substituted Error as an ordinary value",
+			input: `use go:example.com/app/ffi
+
+let getter = ffi::AsGetter(Error::new("boom"))
+let error: Error = getter.Get()`,
+		},
+		{
+			name: "promoted generic method keeps substituted Error as an ordinary value",
+			input: `use go:example.com/app/ffi
+
+let inner = ffi::Inner<Str, Error>{Value: Error::new("boom")}
+let outer = ffi::Outer<Error>{Inner: inner}
+let error: Error = outer.Read()`,
+		},
+		{
 			name: "infer slice element type arg from supplied field",
 			input: `use go:example.com/app/ffi
 
@@ -56,24 +108,30 @@ let radio = ffi::Radio<Str>{
 			input: `use go:example.com/app/ffi
 
 let callbacks = ffi::Callbacks<Str>{
-  Error: fn(value: Str) Void!Str { Result::ok(()) },
-  Result: fn(value: Str) Str!Str { Result::ok(value) },
+  Error: fn(value: Str) Void!Error { Result::ok(()) },
+  Result: fn(value: Str) Str!Error { Result::ok(value) },
   Maybe: fn(value: Str) Str? { Maybe::new(value) },
 }`,
 		},
 		{
-			name: "generic named callback classifies substituted result ABI shapes",
+			name: "generic named callback keeps substituted Error as an ordinary value",
 			input: `use go:example.com/app/ffi
 
 let returned = ffi::ReturnCallbacks<Str, Error>{
-  Return: fn(value: Str) Void!Str { Result::ok(()) },
-}
-let mutable_returned = ffi::ReturnCallbacks<Str, mut Error>{
-  Return: fn(value: Str) Void!Str { Result::ok(()) },
+  Return: fn(value: Str) Error { Error::new(value) },
 }
 let paired = ffi::PairCallbacks<Str, Bool>{
   Pair: fn(value: Str) Str? { Maybe::new(value) },
 }`,
+		},
+		{
+			name: "generic named callback does not reinterpret substituted Error as Result",
+			input: `use go:example.com/app/ffi
+
+let returned = ffi::ReturnCallbacks<Str, Error>{
+  Return: fn(value: Str) Void!Error { Result::ok(()) },
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected ffi::ReturnCallback<Str, Error>, got fn(Str) Void!Error"}},
 		},
 		{
 			name: "generic named callback rejects substituted empty struct result",
@@ -154,6 +212,68 @@ func writeGoGenericStructPackage(t *testing.T, root string) {
 type Box[T any] struct {
 	Value T
 	Label string
+}
+
+func (b Box[T]) Get() T { return b.Value }
+
+func (b Box[T]) Load() (T, error) { return b.Value, nil }
+
+func Make[T any](value T) Box[T] { return Box[T]{Value: value} }
+
+type Container[T any] struct {
+	Value T
+}
+
+func (container Container[T]) Get() T { return container.Value }
+
+func (b Box[T]) Nested() Container[T] { return Container[T]{Value: b.Value} }
+
+type Holder[T any] struct{}
+
+func (Holder[T]) Call(callback func() T) T { return callback() }
+
+func (Holder[T]) Callback(value T) func() T { return func() T { return value } }
+
+type Producer[T any] func() T
+
+func (Holder[T]) Named(value T) Producer[T] { return func() T { return value } }
+
+func (Holder[T]) Callbacks(callbacks []func() T) []func() T { return callbacks }
+
+func (Holder[T]) Lookup(value T) (func() T, bool) {
+	return func() T { return value }, true
+}
+
+func (Holder[T]) Variadic(callbacks ...func() T) T { return callbacks[0]() }
+
+type CallbackBox[T any] struct {
+	Produce func() T
+}
+
+func (Holder[T]) Wrap(value T) CallbackBox[T] {
+	return CallbackBox[T]{Produce: func() T { return value }}
+}
+
+type Producers[T any] [1]func() T
+
+func (Holder[T]) Array(value T) Producers[T] {
+	return Producers[T]{func() T { return value }}
+}
+
+type Getter[T any] interface {
+	Get() T
+}
+
+func AsGetter[T any](value T) Getter[T] { return Box[T]{Value: value} }
+
+type Inner[A, B any] struct {
+	Value B
+}
+
+func (inner Inner[A, B]) Read() B { return inner.Value }
+
+type Outer[T any] struct {
+	Inner[string, T]
 }
 
 type EventContext struct{}

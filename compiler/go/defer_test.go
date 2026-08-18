@@ -40,7 +40,7 @@ func Fail(msg string) error { return errors.New(msg) }
 	mainPath := filepath.Join(projectDir, "main.ard")
 	if err := os.WriteFile(mainPath, []byte(`use go:defercase/ffi
 
-fn exercise() Void!Str {
+fn exercise() Void!Error {
   ffi::Reset()
 
   mut label = "first"

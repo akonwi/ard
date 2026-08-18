@@ -210,7 +210,7 @@ func callbackReturnTypeFromGo(results *types.Tuple) (Type, string) {
 	case 1:
 		resultType := results.At(0).Type()
 		if isGoError(resultType) {
-			return MakeResult(Void, Str), ""
+			return MakeResult(Void, BuiltinError), ""
 		}
 		// Ard Void functions have no Go result. They cannot satisfy a Go
 		// callback that returns a value-position struct{} without an adapter,
@@ -234,7 +234,7 @@ func callbackReturnTypeFromGo(results *types.Tuple) (Type, string) {
 				return nil, fmt.Sprintf("callback result 1 has unsupported type %s: %s", results.At(0).Type().String(), reason)
 			}
 			if isGoError(results.At(1).Type()) {
-				return MakeResult(value, Str), ""
+				return MakeResult(value, BuiltinError), ""
 			}
 			return MakeMaybe(value), ""
 		}
@@ -254,7 +254,7 @@ func returnTypeFromGoWithMethods(results *types.Tuple, includeMethods bool) (Typ
 		return Void, ""
 	case 1:
 		if isGoError(results.At(0).Type()) {
-			return MakeResult(Void, Str), ""
+			return MakeResult(Void, BuiltinError), ""
 		}
 		return typeFromGoWithMethods(results.At(0).Type(), includeMethods)
 	case 2:
@@ -263,7 +263,7 @@ func returnTypeFromGoWithMethods(results *types.Tuple, includeMethods bool) (Typ
 			if reason != "" {
 				return nil, fmt.Sprintf("result 1 has unsupported type %s: %s", results.At(0).Type().String(), reason)
 			}
-			return MakeResult(val, Str), ""
+			return MakeResult(val, BuiltinError), ""
 		}
 		if isGoBool(results.At(1).Type()) {
 			val, reason := typeFromGoWithMethods(results.At(0).Type(), includeMethods)
@@ -663,7 +663,9 @@ func goMethodsForNamedType(named *types.Named, pointer bool) (map[string]*Functi
 		if !ok || !token.IsExported(method.Name()) {
 			continue
 		}
-		def, reason := functionDefFromGoSignatureWithMethods(method.Name(), method.Type().(*types.Signature), false)
+		declared := method.Origin().Type().(*types.Signature)
+		instantiated := method.Type().(*types.Signature)
+		def, reason := functionDefFromGoMethodSignatures(method.Name(), declared, instantiated)
 		if reason == "" {
 			methods[method.Name()] = def
 		} else {
@@ -671,6 +673,325 @@ func goMethodsForNamedType(named *types.Named, pointer bool) (map[string]*Functi
 		}
 	}
 	return methods, unsupported
+}
+
+// functionDefFromGoMethodSignatures maps concrete selected method types while
+// classifying the error convention from the method's declaration. A generic
+// value result instantiated with error therefore remains an ordinary Error.
+func functionDefFromGoMethodSignatures(name string, declared, instantiated *types.Signature) (*FunctionDef, string) {
+	def, reason := functionDefFromGoSignatureWithMethods(name, instantiated, false)
+	if reason != "" {
+		return nil, reason
+	}
+	ret, reason := returnTypeFromGoMethodSignatures(declared.Results(), instantiated.Results())
+	if reason != "" {
+		return nil, reason
+	}
+	def.ReturnType = ret
+	for i := range def.Parameters {
+		if i >= declared.Params().Len() || i >= instantiated.Params().Len() {
+			break
+		}
+		declaredParam := declared.Params().At(i).Type()
+		instantiatedParam := instantiated.Params().At(i).Type()
+		if def.Parameters[i].Variadic {
+			if slice, ok := declaredParam.(*types.Slice); ok {
+				declaredParam = slice.Elem()
+			}
+			if slice, ok := instantiatedParam.(*types.Slice); ok {
+				instantiatedParam = slice.Elem()
+			}
+		}
+		mapped, reason := remapDeclaredGoCallbackType(declaredParam, instantiatedParam, def.Parameters[i].Type)
+		if reason != "" {
+			return nil, fmt.Sprintf("parameter %d has unsupported type %s: %s", i+1, instantiated.Params().At(i).Type(), reason)
+		}
+		def.Parameters[i].Type = mapped
+	}
+	def.ForeignResultShape = foreignResultShapeFromMethodSignatures(declared.Results(), instantiated.Results())
+	return def, ""
+}
+
+func returnTypeFromGoMethodSignatures(declared, instantiated *types.Tuple) (Type, string) {
+	if declared.Len() != instantiated.Len() {
+		return nil, "instantiated method result shape does not match its declaration"
+	}
+	switch declared.Len() {
+	case 0:
+		return Void, ""
+	case 1:
+		if isGoError(declared.At(0).Type()) {
+			return MakeResult(Void, BuiltinError), ""
+		}
+		mapped, reason := typeFromGoWithMethods(instantiated.At(0).Type(), false)
+		if reason != "" {
+			return nil, reason
+		}
+		return remapDeclaredGoCallbackType(declared.At(0).Type(), instantiated.At(0).Type(), mapped)
+	case 2:
+		if isGoError(declared.At(1).Type()) {
+			value, reason := typeFromGoWithMethods(instantiated.At(0).Type(), false)
+			if reason != "" {
+				return nil, fmt.Sprintf("result 1 has unsupported type %s: %s", instantiated.At(0).Type(), reason)
+			}
+			value, reason = remapDeclaredGoCallbackType(declared.At(0).Type(), instantiated.At(0).Type(), value)
+			if reason != "" {
+				return nil, fmt.Sprintf("result 1 has unsupported type %s: %s", instantiated.At(0).Type(), reason)
+			}
+			return MakeResult(value, BuiltinError), ""
+		}
+		if isGoBool(instantiated.At(1).Type()) {
+			value, reason := typeFromGoWithMethods(instantiated.At(0).Type(), false)
+			if reason != "" {
+				return nil, fmt.Sprintf("result 1 has unsupported type %s: %s", instantiated.At(0).Type(), reason)
+			}
+			value, reason = remapDeclaredGoCallbackType(declared.At(0).Type(), instantiated.At(0).Type(), value)
+			if reason != "" {
+				return nil, fmt.Sprintf("result 1 has unsupported type %s: %s", instantiated.At(0).Type(), reason)
+			}
+			return MakeMaybe(value), ""
+		}
+	}
+	return nil, fmt.Sprintf("unsupported result shape %s", instantiated.String())
+}
+
+func remapDeclaredGoCallbackType(declared, instantiated types.Type, mapped Type) (Type, string) {
+	declaredSignature, declaredIsCallback := declared.Underlying().(*types.Signature)
+	instantiatedSignature, instantiatedIsCallback := instantiated.Underlying().(*types.Signature)
+	if !declaredIsCallback || !instantiatedIsCallback {
+		return remapDeclaredGoCallbackContainer(declared, instantiated, mapped)
+	}
+	callback, reason := functionDefFromGoCallbackSignature("<function>", instantiatedSignature)
+	if reason != "" {
+		return nil, reason
+	}
+	ret, reason := returnTypeFromGoMethodSignatures(declaredSignature.Results(), instantiatedSignature.Results())
+	if reason != "" {
+		return nil, reason
+	}
+	callback.ReturnType = ret
+	for i := range callback.Parameters {
+		if i >= declaredSignature.Params().Len() || i >= instantiatedSignature.Params().Len() {
+			break
+		}
+		declaredParam := declaredSignature.Params().At(i).Type()
+		instantiatedParam := instantiatedSignature.Params().At(i).Type()
+		if callback.Parameters[i].Variadic {
+			if slice, ok := declaredParam.(*types.Slice); ok {
+				declaredParam = slice.Elem()
+			}
+			if slice, ok := instantiatedParam.(*types.Slice); ok {
+				instantiatedParam = slice.Elem()
+			}
+		}
+		parameterType, reason := remapDeclaredGoCallbackType(declaredParam, instantiatedParam, callback.Parameters[i].Type)
+		if reason != "" {
+			return nil, reason
+		}
+		callback.Parameters[i].Type = parameterType
+	}
+	if foreign, ok := mapped.(*ForeignType); ok {
+		copy := *foreign
+		copy.Underlying = callback
+		return &copy, ""
+	}
+	return callback, ""
+}
+
+func remapDeclaredGoCallbackContainer(declared, instantiated types.Type, mapped Type) (Type, string) {
+	if declaredPointer, ok := declared.(*types.Pointer); ok {
+		instantiatedPointer, ok := instantiated.(*types.Pointer)
+		mappedReference, mappedOK := mapped.(*MutableRef)
+		if !ok || !mappedOK {
+			return mapped, ""
+		}
+		elem, reason := remapDeclaredGoCallbackType(declaredPointer.Elem(), instantiatedPointer.Elem(), mappedReference.Of())
+		if reason != "" {
+			return nil, reason
+		}
+		return MakeMutableRef(elem), ""
+	}
+
+	// Slice and map parameters carry an Ard reference wrapper for descriptor
+	// mutability. Recurse through that wrapper without confusing it for a Go
+	// pointer declaration.
+	if mappedReference, ok := mapped.(*MutableRef); ok {
+		inner, reason := remapDeclaredGoCallbackContainer(declared, instantiated, mappedReference.Of())
+		if reason != "" {
+			return nil, reason
+		}
+		return MakeMutableRef(inner), ""
+	}
+
+	switch declaredContainer := declared.Underlying().(type) {
+	case *types.Slice:
+		instantiatedContainer, ok := instantiated.Underlying().(*types.Slice)
+		if !ok {
+			return mapped, ""
+		}
+		var mappedElem Type
+		switch container := mapped.(type) {
+		case *List:
+			mappedElem = container.Of()
+		case *ForeignType:
+			mappedElem = container.Elem
+		}
+		if mappedElem == nil {
+			return mapped, ""
+		}
+		elem, reason := remapDeclaredGoCallbackType(declaredContainer.Elem(), instantiatedContainer.Elem(), mappedElem)
+		if reason != "" {
+			return nil, reason
+		}
+		if foreign, ok := mapped.(*ForeignType); ok {
+			copy := *foreign
+			copy.Elem = elem
+			return &copy, ""
+		}
+		return MakeList(elem), ""
+	case *types.Array:
+		instantiatedContainer, ok := instantiated.Underlying().(*types.Array)
+		if !ok {
+			return mapped, ""
+		}
+		var array *FixedArray
+		switch container := mapped.(type) {
+		case *FixedArray:
+			array = container
+		case *ForeignType:
+			array, _ = container.Underlying.(*FixedArray)
+		}
+		if array == nil {
+			return mapped, ""
+		}
+		elem, reason := remapDeclaredGoCallbackType(declaredContainer.Elem(), instantiatedContainer.Elem(), array.Of())
+		if reason != "" {
+			return nil, reason
+		}
+		remappedArray := MakeFixedArray(elem, array.Len())
+		if foreign, ok := mapped.(*ForeignType); ok {
+			copy := *foreign
+			copy.Underlying = remappedArray
+			return &copy, ""
+		}
+		return remappedArray, ""
+	case *types.Map:
+		instantiatedContainer, ok := instantiated.Underlying().(*types.Map)
+		if !ok {
+			return mapped, ""
+		}
+		var mappedKey, mappedValue Type
+		switch container := mapped.(type) {
+		case *Map:
+			mappedKey, mappedValue = container.Key(), container.Value()
+		case *ForeignType:
+			mappedKey, mappedValue = container.MapKey, container.MapValue
+		}
+		if mappedKey == nil || mappedValue == nil {
+			return mapped, ""
+		}
+		key, reason := remapDeclaredGoCallbackType(declaredContainer.Key(), instantiatedContainer.Key(), mappedKey)
+		if reason != "" {
+			return nil, reason
+		}
+		value, reason := remapDeclaredGoCallbackType(declaredContainer.Elem(), instantiatedContainer.Elem(), mappedValue)
+		if reason != "" {
+			return nil, reason
+		}
+		if foreign, ok := mapped.(*ForeignType); ok {
+			copy := *foreign
+			copy.MapKey, copy.MapValue = key, value
+			return &copy, ""
+		}
+		return MakeMap(key, value), ""
+	case *types.Struct:
+		instantiatedContainer, ok := instantiated.Underlying().(*types.Struct)
+		foreign, mappedOK := mapped.(*ForeignType)
+		if !ok || !mappedOK {
+			return mapped, ""
+		}
+		copy := *foreign
+		remapFields := func(fields map[string]Type) (map[string]Type, string) {
+			remapped := make(map[string]Type, len(fields))
+			for name, field := range fields {
+				remapped[name] = field
+			}
+			for i := 0; i < declaredContainer.NumFields() && i < instantiatedContainer.NumFields(); i++ {
+				declaredField := declaredContainer.Field(i)
+				instantiatedField := instantiatedContainer.Field(i)
+				field, exists := fields[instantiatedField.Name()]
+				if !exists {
+					continue
+				}
+				mappedField, reason := remapDeclaredGoCallbackType(declaredField.Type(), instantiatedField.Type(), field)
+				if reason != "" {
+					return nil, reason
+				}
+				remapped[instantiatedField.Name()] = mappedField
+			}
+			return remapped, ""
+		}
+		if foreign.Fields != nil {
+			fields, reason := remapFields(foreign.Fields)
+			if reason != "" {
+				return nil, reason
+			}
+			copy.Fields = fields
+		}
+		if foreign.LoadFields != nil {
+			loadFields := foreign.LoadFields
+			copy.LoadFields = func() (map[string]Type, map[string]string) {
+				fields, unsupported := loadFields()
+				remapped, _ := remapFields(fields)
+				return remapped, unsupported
+			}
+		}
+		return &copy, ""
+	case *types.Chan:
+		instantiatedContainer, ok := instantiated.Underlying().(*types.Chan)
+		if !ok {
+			return mapped, ""
+		}
+		var mappedElem Type
+		switch channel := mapped.(type) {
+		case *Chan:
+			mappedElem = channel.Of()
+		case *Receiver:
+			mappedElem = channel.Of()
+		case *Sender:
+			mappedElem = channel.Of()
+		}
+		if mappedElem == nil {
+			return mapped, ""
+		}
+		elem, reason := remapDeclaredGoCallbackType(declaredContainer.Elem(), instantiatedContainer.Elem(), mappedElem)
+		if reason != "" {
+			return nil, reason
+		}
+		switch instantiatedContainer.Dir() {
+		case types.RecvOnly:
+			return MakeReceiver(elem), ""
+		case types.SendOnly:
+			return MakeSender(elem), ""
+		default:
+			return MakeChan(elem), ""
+		}
+	default:
+		return mapped, ""
+	}
+}
+
+func foreignResultShapeFromMethodSignatures(declared, instantiated *types.Tuple) ForeignResultShape {
+	switch {
+	case declared.Len() == 1 && isGoError(declared.At(0).Type()):
+		return ForeignResultErrorOnly
+	case declared.Len() == 2 && isGoError(declared.At(1).Type()):
+		return ForeignResultValueError
+	case instantiated.Len() == 2 && isGoBool(instantiated.At(1).Type()):
+		return ForeignResultValueBool
+	default:
+		return ForeignResultDirect
+	}
 }
 
 func primitiveTypeFromGo(t types.Type) (Type, string) {

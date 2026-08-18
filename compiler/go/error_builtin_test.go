@@ -22,9 +22,33 @@ func TestRunProgramBuiltinErrorInterop(t *testing.T) {
 	}
 	if err := os.WriteFile(filepath.Join(projectDir, "ffi", "ffi.go"), []byte(`package ffi
 
+import (
+	"errors"
+	"fmt"
+)
+
 func Message(err error) string { return err.Error() }
 
 var remembered error
+var Sentinel error = errors.New("sentinel")
+
+func Fail() error { return Sentinel }
+
+func Load() (int, error) { return 0, fmt.Errorf("load failed: %w", Sentinel) }
+
+func IsSentinel(err error) bool { return errors.Is(err, Sentinel) }
+
+type Worker struct{}
+
+type Failer interface {
+	Fail() error
+}
+
+func (Worker) Fail() error { return Sentinel }
+
+func AsFailer() Failer { return Worker{} }
+
+func GenericFail[T any](value T) (T, error) { return value, Sentinel }
 
 func Remember(err error) { remembered = err }
 
@@ -51,10 +75,44 @@ impl Error for ValidationError {
 
 struct MutableError {
   message: Str,
+  calls: Int,
+}
+
+struct BothStringAndError {
+  label: Str,
+}
+
+struct GenericError<$T> {
+  value: $T,
+}
+
+impl Error for GenericError {
+  fn error() Str { "generic" }
+}
+
+struct GenericMutableError<$T> {
+  value: $T,
+  calls: Int,
+}
+
+impl Error for GenericMutableError {
+  fn mut error() Str {
+    self.calls =+ 1
+    "generic mutable"
+  }
+}
+
+impl BothStringAndError {
+  fn to_str() Str { "string" }
+}
+
+impl Error for BothStringAndError {
+  fn error() Str { "error" }
 }
 
 impl Error for MutableError {
   fn mut error() Str {
+    self.calls =+ 1
     self.message
   }
 }
@@ -89,8 +147,11 @@ fn main() {
   let custom = ValidationError{message: "custom"}
   if not ffi::Message(custom) == "custom" { panic("custom Error implementation failed") }
   if not ffi::Message(Error::new("simple")) == "simple" { panic("Error::new failed") }
-  mut mutable_error = MutableError{message: "mutable"}
+  mut mutable_error = MutableError{message: "mutable", calls: 0}
   if not ffi::Message(mutable_error) == "mutable" { panic("mutable Error implementation failed") }
+  let interpolation_error: mut MutableError = mut MutableError{message: "interpolated", calls: 0}
+  if not "{interpolation_error}" == "interpolated" { panic("mutable Error interpolation failed") }
+  if not interpolation_error.calls == 1 { panic("mutable Error interpolation lost its receiver") }
   let holder = ffi::Holder{Err: custom}
   if not ffi::HolderMessage(holder) == "custom" { panic("Go error field failed") }
   let message = match passthrough(fail()) {
@@ -115,6 +176,79 @@ fn main() {
     err(_) => false,
   }
   if not succeeded { panic("expected void success") }
+
+  let failed = ffi::Fail()
+  match failed {
+    ok(_) => panic("expected imported error-only failure"),
+    err(error) => {
+      if not ffi::IsSentinel(error) { panic("error-only import lost identity") }
+      if not "failure: {error}" == "failure: sentinel" { panic("Error interpolation failed") }
+      if not ffi::IsSentinel(error) { panic("interpolation changed error identity") }
+    },
+  }
+
+  let loaded = ffi::Load()
+  match loaded {
+    ok(_) => panic("expected imported value-error failure"),
+    err(error) => {
+      if not ffi::IsSentinel(error) { panic("wrapped import lost its error chain") }
+      if not "{error}" == "load failed: sentinel" { panic("wrapped Error interpolation failed") }
+    },
+  }
+
+  let fail: fn() Void!Error = ffi::Fail
+  match fail() {
+    ok(_) => panic("expected imported function-value failure"),
+    err(error) => {
+      if not ffi::IsSentinel(error) { panic("function value lost identity") }
+    },
+  }
+
+  let worker = ffi::Worker{}
+  match worker.Fail() {
+    ok(_) => panic("expected imported method failure"),
+    err(error) => {
+      if not ffi::IsSentinel(error) { panic("method call lost identity") }
+    },
+  }
+  let fail_method: fn() Void!Error = worker.Fail
+  match fail_method() {
+    ok(_) => panic("expected imported method-value failure"),
+    err(error) => {
+      if not ffi::IsSentinel(error) { panic("method value lost identity") }
+    },
+  }
+
+  let failer = ffi::AsFailer()
+  match failer.Fail() {
+    ok(_) => panic("expected imported interface failure"),
+    err(error) => {
+      if not ffi::IsSentinel(error) { panic("interface method lost identity") }
+    },
+  }
+
+  match ffi::GenericFail(7) {
+    ok(_) => panic("expected imported generic failure"),
+    err(error) => {
+      if not ffi::IsSentinel(error) { panic("generic call lost identity") }
+    },
+  }
+
+  let concrete_message = "{ValidationError{message: "concrete"}}"
+  if not concrete_message == "concrete" { panic("concrete Error interpolation failed") }
+  if not "{BothStringAndError{label: "both"}}" == "string" { panic("to_str should take interpolation precedence") }
+  let widened_error: Error = BothStringAndError{label: "both"}
+  if not "{widened_error}" == "error" { panic("Error fallback should use static Error contract") }
+  let generic_error = GenericError<Int>{value: 1}
+  if not "{generic_error}" == "generic" { panic("generic Error interpolation failed") }
+  let generic_as_error: Error = generic_error
+  if not "{generic_as_error}" == "generic" { panic("generic Error upcast failed") }
+  let generic_mutable: mut GenericMutableError<Int> = mut GenericMutableError<Int>{value: 1, calls: 0}
+  if not "{generic_mutable}" == "generic mutable" { panic("generic mutable Error interpolation failed") }
+  if not generic_mutable.calls == 1 { panic("generic mutable Error interpolation lost its receiver") }
+  let generic_mutable_as_error: Error = generic_mutable
+  if not "{generic_mutable_as_error}" == "generic mutable" { panic("generic mutable Error upcast failed") }
+  if not generic_mutable.calls == 2 { panic("generic mutable Error upcast lost its receiver") }
 }
 `), 0o644); err != nil {
 		t.Fatal(err)

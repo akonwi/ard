@@ -19,14 +19,15 @@ func TestFunctionDefFromGoSignatureRecordsResultShape(t *testing.T) {
 	boolType := types.Typ[types.Bool]
 
 	tests := []struct {
-		name    string
-		results *types.Tuple
-		want    ForeignResultShape
+		name       string
+		results    *types.Tuple
+		want       ForeignResultShape
+		wantReturn string
 	}{
-		{name: "direct", results: types.NewTuple(types.NewParam(token.NoPos, nil, "value", intType)), want: ForeignResultDirect},
-		{name: "error only", results: types.NewTuple(types.NewParam(token.NoPos, nil, "err", errorType)), want: ForeignResultErrorOnly},
-		{name: "value and error", results: types.NewTuple(types.NewParam(token.NoPos, nil, "value", intType), types.NewParam(token.NoPos, nil, "err", errorType)), want: ForeignResultValueError},
-		{name: "value and bool", results: types.NewTuple(types.NewParam(token.NoPos, nil, "value", intType), types.NewParam(token.NoPos, nil, "ok", boolType)), want: ForeignResultValueBool},
+		{name: "direct", results: types.NewTuple(types.NewParam(token.NoPos, nil, "value", intType)), want: ForeignResultDirect, wantReturn: "Int"},
+		{name: "error only", results: types.NewTuple(types.NewParam(token.NoPos, nil, "err", errorType)), want: ForeignResultErrorOnly, wantReturn: "Void!Error"},
+		{name: "value and error", results: types.NewTuple(types.NewParam(token.NoPos, nil, "value", intType), types.NewParam(token.NoPos, nil, "err", errorType)), want: ForeignResultValueError, wantReturn: "Int!Error"},
+		{name: "value and bool", results: types.NewTuple(types.NewParam(token.NoPos, nil, "value", intType), types.NewParam(token.NoPos, nil, "ok", boolType)), want: ForeignResultValueBool, wantReturn: "Int?"},
 	}
 
 	for _, tt := range tests {
@@ -38,6 +39,9 @@ func TestFunctionDefFromGoSignatureRecordsResultShape(t *testing.T) {
 			}
 			if got := fn.ForeignResultShape; got != tt.want {
 				t.Fatalf("result shape = %v, want %v", got, tt.want)
+			}
+			if got := fn.ReturnType.String(); got != tt.wantReturn {
+				t.Fatalf("return type = %s, want %s", got, tt.wantReturn)
 			}
 		})
 	}

@@ -62,12 +62,12 @@ Method calls on foreign Go interface values use the same surface syntax as other
 ```ard
 use go:io
 
-fn write_one(mut writer: io::Writer) Int!Str {
+fn write_one(mut writer: io::Writer) Int!Error {
   writer.Write([1])
 }
 ```
 
-The method's Ard-facing signature is derived from the Go signature using the same boundary rules as direct Go functions and methods. For example, `Write([]byte) (int, error)` is exposed as returning `Int!Str`.
+The method's Ard-facing signature is derived from the Go signature using the same boundary rules as direct Go functions and methods. Per ADR 0063, `Write([]byte) (int, error)` is exposed as returning `Int!Error`.
 
 If an interface contains unsupported methods, diagnostics should name the unsupported method and the unsupported Go shape. A future implementation may choose whether an interface type is rejected entirely when any method is unsupported, or whether the type is accepted while unsupported methods are unavailable. The preferred user experience is actionable diagnostics at the use site.
 
@@ -91,9 +91,9 @@ struct Sink {
 }
 
 impl io::Writer for Sink {
-  fn mut write(bytes: [Byte]) Int!Str {
+  fn mut write(bytes: [Byte]) Int!Error {
     self.written =+ bytes.size()
-    bytes.size()
+    Result::ok(bytes.size())
   }
 }
 ```
@@ -127,8 +127,8 @@ For an `impl ForeignInterface for ArdType` block, the checker validates against 
 
 Common result/maybe mappings are valid in interface methods:
 
-- Go `(T, error)` ↔ Ard `T!Str`;
-- Go `error` ↔ Ard `Void!Str`;
+- Go `(T, error)` ↔ Ard `T!Error`;
+- Go `error` ↔ Ard `Void!Error`;
 - Go `(T, bool)` ↔ Ard `T?`;
 - Go `bool` for an optional unit result ↔ Ard `Void?`.
 
@@ -140,9 +140,9 @@ For the `io.Writer` example:
 
 ```ard
 impl io::Writer for Sink {
-  fn mut write(bytes: [Byte]) Int!Str {
+  fn mut write(bytes: [Byte]) Int!Error {
     self.written =+ bytes.size()
-    bytes.size()
+    Result::ok(bytes.size())
   }
 }
 ```
@@ -155,7 +155,7 @@ func (s *Sink) Write(bytes []byte) (int, error) {
 }
 ```
 
-Because ADR 0038 makes `Int!Str` lower to `(int, error)` in method return position, no special result wrapper is needed for this common case.
+Because ADRs 0038, 0053, and 0063 make `Int!Error` lower to `(int, error)` in method return position, no special result wrapper is needed for this common case.
 
 If an Ard type has multiple methods that would lower to the same Go receiver method name/signature, the checker or backend must reject the duplicate rather than emitting invalid Go. Inherent method naming and foreign-interface impl method naming share the same generated Go method namespace. The checker also rejects a required Go interface method when an Ard struct field lowers to the same exported Go selector; the implementation is not recorded as interface conformance because a standalone method helper cannot satisfy a Go method set.
 

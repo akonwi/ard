@@ -54,7 +54,7 @@ func RequiredEnv(name string) (string, error) {
 ```ard
 use go:my_app/ffi
 
-fn home_dir() Str!Str {
+fn home_dir() Str!Error {
   ffi::RequiredEnv("HOME")
 }
 ```
@@ -195,7 +195,7 @@ Named Go interfaces can be used as direct Go types. Ard checks assignability wit
 use go:io
 use go:strings
 
-fn read_all(reader: io::Reader) [Byte]!Str {
+fn read_all(reader: io::Reader) [Byte]!Error {
   io::ReadAll(reader)
 }
 
@@ -241,7 +241,24 @@ let error: Error = AppError{message: "request failed"}
 
 `Error::new("message")` creates a simple Go-compatible error. An explicit `impl Error` emits Go's `Error() string` method, so the Ard struct can be passed directly to Go APIs accepting `error`.
 
-For compatibility, conventional Go error returns retain their existing mapping: Go `error` becomes `Void!Str`, and `(T, error)` becomes `T!Str`. Ard functions returning `Void!Error` or `T!Error` also use Go's idiomatic error return ABI, while preserving the underlying error value.
+Conventional Go error returns preserve the original interface value: Go `error` becomes `Void!Error`, and `(T, error)` becomes `T!Error`. Error-returning Go callbacks use the corresponding `!Error` Ard function types. Ard functions returning `Void!Error` or `T!Error` use Go's idiomatic error return ABI and forward the underlying error value directly.
+
+This preservation keeps sentinel identity, concrete error types, and unwrap chains available to APIs such as Go's `errors.Is`:
+
+```ard
+use go:errors
+use go:io/fs
+use go:os
+
+match os::Open("missing") {
+  err(error) => errors::Is(error, fs::ErrNotExist),
+  ok(_) => false,
+}
+```
+
+Go's sole-`error` signature is inherently ambiguous. Ard consistently treats it as `Void!Error`, so an idiosyncratic value-returning function such as `errors.Unwrap(error) error` yields a non-nil returned error through the `err(error)` arm and nil through `ok(())`. A pure Ard wrapper can expose that operation as `Error?` when desired.
+
+Pure Ard functions returning ordinary `Error` still return an ordinary value; only an explicit `T!Error` has Result semantics. Use `error.error()` or `Result.map_err` when a message value is specifically required. String interpolation observes `Error` automatically without making it assignable to `Str`.
 
 ## Struct Field Reads
 

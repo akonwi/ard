@@ -4,6 +4,8 @@
 
 Accepted
 
+Superseded in part by ADR 0063. The builtin `Error` contract and its value/ABI representation remain current, but imported conventional error returns and callbacks now preserve identity through `!Error` instead of reducing errors to `Str`.
+
 ## Context
 
 Ard is Go-native first, but its current treatment of Go's predeclared `error` type is limited to conventional return shapes:
@@ -80,7 +82,9 @@ Named Go interfaces that happen to contain `Error() string` remain ordinary name
 
 ### Preserve existing imported return and callback mappings
 
-This decision is additive. Existing mappings remain unchanged:
+> Superseded by ADR 0063. This section records the original compatibility decision; imported conventional errors now use identity-preserving `!Error` mappings.
+
+This decision was initially additive. Existing mappings remained unchanged:
 
 | Go shape | Ard-facing shape |
 | --- | --- |
@@ -133,10 +137,10 @@ Other Ard traits do not gain special Go error behavior merely by declaring a met
 - Ard structs can intentionally implement Go's `error` interface without a Go shim.
 - Go APIs accepting or storing `error` values become directly representable.
 - Ard APIs can preserve structured error identity by returning `T!Error`.
-- Existing `T!Str` programs and imported Go error-return callbacks remain source-compatible.
-- Error behavior is position-sensitive: imported conventional returns remain strings, while explicit `Error` values preserve the Go interface value.
+- At the time of this decision, existing `T!Str` programs and imported Go error-return callbacks remained source-compatible.
+- ADR 0063 later superseded that compatibility policy: imported conventional returns and callbacks now preserve the Go interface value through `!Error`.
 - The checker, AIR, and Go backend need explicit builtin identity rather than relying on the name `Error` alone.
-- Future work may reconsider imported return mapping, error wrapping, `errors.Is`/`errors.As`, typed extraction, and support for additional implementation targets.
+- ADR 0063 subsequently reconsidered imported return mapping; error wrapping, typed extraction, and support for additional implementation targets remain future work.
 - Non-Go backends must provide a representation for the builtin contract if they support programs using it; this ADR defines the Go-native representation first.
 
 ## Related

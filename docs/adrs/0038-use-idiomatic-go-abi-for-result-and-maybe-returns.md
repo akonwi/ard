@@ -4,6 +4,8 @@
 
 Proposed
 
+Superseded in part by ADRs 0053 and 0063: `T!Error` also uses Go's idiomatic error ABI, and imported conventional Go error results now adapt to `!Error`. The `T!Str` ABI defined here remains supported for pure Ard message errors.
+
 ## Context
 
 Ard has first-class `Result` and `Maybe` semantics:

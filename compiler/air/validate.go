@@ -580,7 +580,7 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 			return fmt.Errorf("trait reference projection has invalid impl id %d", expr.Impl)
 		}
 		impl := program.Impls[expr.Impl]
-		if impl.Trait != expr.Trait || impl.ForType != source.Elem {
+		if impl.Trait != expr.Trait || !implMatchesType(program, impl.ForType, source.Elem) {
 			return fmt.Errorf("trait reference projection impl %d does not match source referent", expr.Impl)
 		}
 	}
@@ -767,7 +767,7 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 			if impl.Trait != expr.Trait {
 				return fmt.Errorf("trait upcast impl %d has trait %d, want %d", expr.Impl, impl.Trait, expr.Trait)
 			}
-			if impl.ForType != targetImplType {
+			if !implMatchesType(program, impl.ForType, targetImplType) {
 				return fmt.Errorf("trait upcast impl %d is for type %d, got target type %d", expr.Impl, impl.ForType, targetImplType)
 			}
 		}
@@ -1188,6 +1188,21 @@ func typesStructurallyEquivalent(program *Program, leftID TypeID, rightID TypeID
 	default:
 		return false
 	}
+}
+
+func implMatchesType(program *Program, implType, actualType TypeID) bool {
+	if implType == actualType {
+		return true
+	}
+	actual, err := typeInfo(program, actualType)
+	if err != nil || actual.Generic == NoType {
+		return false
+	}
+	if implType == actual.Generic {
+		return true
+	}
+	impl, err := typeInfo(program, implType)
+	return err == nil && impl.Generic == actual.Generic
 }
 
 func typeInfo(program *Program, id TypeID) (TypeInfo, error) {

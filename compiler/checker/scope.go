@@ -1020,6 +1020,14 @@ func structField(def *StructDef, name string) (Type, bool) {
 	return substituteTypeBindings(field, structTypeBindings(def)), true
 }
 
+// foreignTypeWithArgs applies Ard type arguments to a foreign generic type and
+// refreshes its Go-derived field and method metadata. Updating TypeArgs alone
+// would leave signatures such as Box<T>.Get() T referring to the unbound Go
+// type parameter. We therefore instantiate the Go named type, using temporary
+// placeholders for Ard-owned arguments that have no go/types representation,
+// and then replace those placeholders throughout the loaded and lazy metadata.
+// The recursive substitution below preserves nested generic types and uses a
+// seen map so self-referential foreign types remain finite.
 func foreignTypeWithArgs(typ *ForeignType, args []Type) *ForeignType {
 	copy := *typ
 	copy.TypeArgs = append([]Type(nil), args...)
@@ -1041,7 +1049,14 @@ func foreignTypeWithArgs(typ *ForeignType, args []Type) *ForeignType {
 	for i, arg := range args {
 		converted, ok := checkerTypeToGoTypeWithContext(arg, goTypeContext)
 		if !ok {
-			return &copy
+			// A local placeholder lets go/types instantiate method selections;
+			// method/field types are mapped back to the original Ard argument
+			// below before the foreign type escapes the checker.
+			converted = gotypes.NewNamed(
+				gotypes.NewTypeName(0, nil, fmt.Sprintf("ArdTypeArgument%d", i), nil),
+				gotypes.NewStruct(nil, nil),
+				nil,
+			)
 		}
 		goArgs[i] = converted
 	}
@@ -1060,7 +1075,125 @@ func foreignTypeWithArgs(typ *ForeignType, args []Type) *ForeignType {
 	refreshed.TypeArgs = append([]Type(nil), args...)
 	refreshed.Fields, refreshed.UnsupportedFields = goFieldsForInstantiatedGenericNamedType(instNamed, named.Origin(), args)
 	refreshed.FieldsLoaded = true
+	refreshed.Methods = substituteInstantiatedGoMethodArgs(refreshed.Methods, goArgs, args)
+	refreshed.PointerMethods = substituteInstantiatedGoMethodArgs(refreshed.PointerMethods, goArgs, args)
 	return refreshed
+}
+
+func substituteInstantiatedGoMethodArgs(methods map[string]*FunctionDef, goArgs []gotypes.Type, ardArgs []Type) map[string]*FunctionDef {
+	return substituteInstantiatedGoMethodArgsSeen(methods, goArgs, ardArgs, map[*ForeignType]*ForeignType{})
+}
+
+func substituteInstantiatedGoMethodArgsSeen(methods map[string]*FunctionDef, goArgs []gotypes.Type, ardArgs []Type, seen map[*ForeignType]*ForeignType) map[string]*FunctionDef {
+	if methods == nil {
+		return nil
+	}
+	mapped := make(map[string]*FunctionDef, len(methods))
+	for name, method := range methods {
+		if method == nil {
+			continue
+		}
+		mapped[name] = substituteInstantiatedGoTypeArgsSeen(method, goArgs, ardArgs, seen).(*FunctionDef)
+	}
+	return mapped
+}
+
+func substituteInstantiatedGoTypeArgs(t Type, goArgs []gotypes.Type, ardArgs []Type) Type {
+	return substituteInstantiatedGoTypeArgsSeen(t, goArgs, ardArgs, map[*ForeignType]*ForeignType{})
+}
+
+func substituteInstantiatedGoTypeArgsSeen(t Type, goArgs []gotypes.Type, ardArgs []Type, seen map[*ForeignType]*ForeignType) Type {
+	if foreign, ok := t.(*ForeignType); ok && foreign.GoType != nil {
+		for i, goArg := range goArgs {
+			if i < len(ardArgs) && gotypes.Identical(foreign.GoType, goArg) {
+				return ardArgs[i]
+			}
+		}
+	}
+	substitute := func(value Type) Type {
+		return substituteInstantiatedGoTypeArgsSeen(value, goArgs, ardArgs, seen)
+	}
+	switch typ := t.(type) {
+	case *MutableRef:
+		return MakeMutableRef(substitute(typ.Of()))
+	case *List:
+		return MakeList(substitute(typ.Of()))
+	case *Slice:
+		return MakeSlice(substitute(typ.Of()))
+	case *FixedArray:
+		return MakeFixedArray(substitute(typ.Of()), typ.Len())
+	case *Map:
+		return MakeMap(substitute(typ.Key()), substitute(typ.Value()))
+	case *Maybe:
+		return MakeMaybe(substitute(typ.Of()))
+	case *Result:
+		return MakeResult(substitute(typ.Val()), substitute(typ.Err()))
+	case *Chan:
+		return MakeChan(substitute(typ.Of()))
+	case *Receiver:
+		return MakeReceiver(substitute(typ.Of()))
+	case *Sender:
+		return MakeSender(substitute(typ.Of()))
+	case *FunctionDef:
+		copy := *typ
+		copy.Parameters = append([]Parameter(nil), typ.Parameters...)
+		for i := range copy.Parameters {
+			copy.Parameters[i].Type = substitute(copy.Parameters[i].Type)
+		}
+		copy.ReturnType = substitute(copy.ReturnType)
+		return &copy
+	case *ForeignType:
+		if existing, ok := seen[typ]; ok {
+			return existing
+		}
+		copy := *typ
+		seen[typ] = &copy
+		copy.TypeArgs = append([]Type(nil), typ.TypeArgs...)
+		for i := range copy.TypeArgs {
+			copy.TypeArgs[i] = substitute(copy.TypeArgs[i])
+		}
+		if copy.Underlying != nil {
+			copy.Underlying = substitute(copy.Underlying)
+		}
+		if copy.Elem != nil {
+			copy.Elem = substitute(copy.Elem)
+		}
+		if copy.MapKey != nil {
+			copy.MapKey = substitute(copy.MapKey)
+		}
+		if copy.MapValue != nil {
+			copy.MapValue = substitute(copy.MapValue)
+		}
+		if typ.Fields != nil {
+			copy.Fields = make(map[string]Type, len(typ.Fields))
+			for name, field := range typ.Fields {
+				copy.Fields[name] = substitute(field)
+			}
+		}
+		copy.Methods = substituteInstantiatedGoMethodArgsSeen(typ.Methods, goArgs, ardArgs, seen)
+		copy.PointerMethods = substituteInstantiatedGoMethodArgsSeen(typ.PointerMethods, goArgs, ardArgs, seen)
+		if typ.LoadFields != nil {
+			loadFields := typ.LoadFields
+			copy.LoadFields = func() (map[string]Type, map[string]string) {
+				fields, unsupported := loadFields()
+				mapped := make(map[string]Type, len(fields))
+				for name, field := range fields {
+					mapped[name] = substituteInstantiatedGoTypeArgs(field, goArgs, ardArgs)
+				}
+				return mapped, unsupported
+			}
+		}
+		if typ.LoadMethods != nil {
+			loadMethods := typ.LoadMethods
+			copy.LoadMethods = func(pointer bool) (map[string]*FunctionDef, map[string]string) {
+				methods, unsupported := loadMethods(pointer)
+				return substituteInstantiatedGoMethodArgs(methods, goArgs, ardArgs), unsupported
+			}
+		}
+		return &copy
+	default:
+		return t
+	}
 }
 
 func substituteTypeBindings(t Type, bindings map[string]Type) Type {

@@ -273,7 +273,7 @@ func boundReturnTypeFromGo(results *types.Tuple, tparams *types.TypeParamList, b
 		return Void, ""
 	case 1:
 		if isGoError(results.At(0).Type()) {
-			return MakeResult(Void, Str), ""
+			return MakeResult(Void, BuiltinError), ""
 		}
 		value, reason := boundTypeFromGo(results.At(0).Type(), tparams, bindings)
 		if reason != "" {
@@ -289,7 +289,7 @@ func boundReturnTypeFromGo(results *types.Tuple, tparams *types.TypeParamList, b
 			if _, ok := val.(*MutableRef); ok {
 				return nil, "mut results inside Result are not supported yet"
 			}
-			return MakeResult(normalizeGoSliceResultType(val), Str), ""
+			return MakeResult(normalizeGoSliceResultType(val), BuiltinError), ""
 		}
 		if isGoBool(results.At(1).Type()) {
 			val, reason := boundTypeFromGo(results.At(0).Type(), tparams, bindings)
@@ -550,8 +550,10 @@ func boundCallbackReturnTypeFromGo(results, instantiated *types.Tuple, tparams *
 	case 1:
 		resultType := results.At(0).Type()
 		instantiatedResult := instantiated.At(0).Type()
-		if isGoError(instantiatedResult) {
-			return MakeResult(Void, Str), ""
+		// Result adaptation follows the declared Go signature. A generic
+		// value result instantiated with error remains an ordinary Error.
+		if isGoError(resultType) {
+			return MakeResult(Void, BuiltinError), ""
 		}
 		if isGoEmptyStruct(types.Unalias(instantiatedResult)) {
 			return nil, "callback result struct{} requires an ABI adapter"
@@ -562,8 +564,11 @@ func boundCallbackReturnTypeFromGo(results, instantiated *types.Tuple, tparams *
 		}
 		return result, ""
 	case 2:
-		second := instantiated.At(1).Type()
-		if !isGoError(second) && !isGoBool(second) {
+		declaredSecond := results.At(1).Type()
+		instantiatedSecond := instantiated.At(1).Type()
+		// Error convention adaptation is declaration-sensitive. Preserve the
+		// existing instantiated-bool comma-ok behavior for generic callbacks.
+		if !isGoError(declaredSecond) && !isGoBool(instantiatedSecond) {
 			return nil, fmt.Sprintf("callback multi-result shape %s is not supported yet", results.String())
 		}
 		first := results.At(0).Type()
@@ -574,8 +579,8 @@ func boundCallbackReturnTypeFromGo(results, instantiated *types.Tuple, tparams *
 		if reason != "" {
 			return nil, fmt.Sprintf("callback result 1 %s", reason)
 		}
-		if isGoError(second) {
-			return MakeResult(value, Str), ""
+		if isGoError(declaredSecond) {
+			return MakeResult(value, BuiltinError), ""
 		}
 		return MakeMaybe(value), ""
 	default:

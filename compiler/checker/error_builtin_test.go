@@ -18,6 +18,18 @@ impl Error for ValidationError {
   }
 }
 
+struct BothStringAndError {
+  label: Str,
+}
+
+impl BothStringAndError {
+  fn to_str() Str { "string" }
+}
+
+impl Error for BothStringAndError {
+  fn error() Str { "error" }
+}
+
 fn report(error: Error) Error {
   error
 }
@@ -31,6 +43,11 @@ fn validate(fail: Bool) Int!Error {
 
 let simple: Error = Error::new("boom")
 let custom: Error = report(ValidationError{message: "bad"})
+let simple_message = "error: {simple}"
+let concrete_message = "error: {ValidationError{message: "bad"}}"
+let preferred_string = "{BothStringAndError{label: "both"}}"
+let widened_error: Error = BothStringAndError{label: "both"}
+let error_fallback = "{widened_error}"
 `
 	result := parse.Parse([]byte(source), "main.ard")
 	if len(result.Errors) > 0 {
@@ -40,6 +57,59 @@ let custom: Error = report(ValidationError{message: "bad"})
 	c.Check()
 	if c.HasErrors() {
 		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
+	}
+}
+
+func TestErrorInterpolationRejectsMutatingImplementationOnValue(t *testing.T) {
+	source := `struct CountingError {
+  calls: Int,
+}
+
+impl Error for CountingError {
+  fn mut error() Str {
+    self.calls =+ 1
+    "called"
+  }
+}
+
+let error = CountingError{calls: 0}
+let message = "{error}"
+`
+	result := parse.Parse([]byte(source), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	c := checker.New("main.ard", result.Program, nil)
+	c.Check()
+	if !c.HasErrors() {
+		t.Fatal("checker succeeded; expected mutating Error interpolation to require a reference")
+	}
+}
+
+func TestErrorInterpolationRejectsUnionOfErrors(t *testing.T) {
+	source := `struct FirstError { message: Str }
+struct SecondError { message: Str }
+
+impl Error for FirstError {
+  fn error() Str { self.message }
+}
+
+impl Error for SecondError {
+  fn error() Str { self.message }
+}
+
+type Failure = FirstError | SecondError
+let failure: Failure = FirstError{message: "failed"}
+let message = "{failure}"
+`
+	result := parse.Parse([]byte(source), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	c := checker.New("main.ard", result.Program, nil)
+	c.Check()
+	if !c.HasErrors() {
+		t.Fatal("checker succeeded; expected union Error interpolation diagnostic")
 	}
 }
 

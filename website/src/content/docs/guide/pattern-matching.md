@@ -181,7 +181,7 @@ use go:database/sql
 
 type QueryTarget = mut sql::DB | mut sql::Tx
 
-fn close(target: QueryTarget) Void!Str {
+fn close(target: QueryTarget) Void!Error {
   match target {
     sql::DB(db) => db.Close(),
     sql::Tx(tx) => tx.Rollback(),

@@ -1,6 +1,7 @@
 use ard/async
 
 use go:context
+use go:errors
 use go:fmt
 use go:github.com/go-chi/chi/v5 as chi
 use go:github.com/go-chi/chi/v5/middleware
@@ -20,8 +21,6 @@ use go:time
 //     channel via `signal.Notify` expresses the same wait.
 //   - `context.WithTimeout` also returns a pair; shutdown uses
 //     `context.Background()` and waits for in-flight requests to drain.
-//   - Go errors arrive stringified (`Void!Str`), so `errors.Is(err,
-//     http.ErrServerClosed)` becomes a message comparison.
 
 fn service() mut chi::Mux {
   let router = chi::NewRouter()
@@ -65,10 +64,10 @@ fn main() {
     fn() {
       match server.ListenAndServe() {
         ok => (),
-        err(message) => {
-          match message == "http: Server closed" {
+        err(error) => {
+          match errors::Is(error, http::ErrServerClosed) {
             true => (),
-            false => panic(message),
+            false => panic(error),
           }
         },
       }
@@ -83,6 +82,6 @@ fn main() {
   fmt::Println("shutting down")
   match server.Shutdown(context::Background()) {
     ok => fmt::Println("goodbye"),
-    err(message) => panic(message),
+    err(error) => panic(error),
   }
 }

@@ -580,7 +580,7 @@ fn main() {
   if not returned.size() == 2 { panic("generic Go Slice result did not normalize to List") }
   let optional_returned: [Int]? = ffi::MaybeRebuffer(mut view)
   if not optional_returned.expect("present").size() == 1 { panic("generic Go Maybe slice result did not normalize to List") }
-  let result_returned: [Int]!Str = ffi::ResultRebuffer(mut view)
+  let result_returned: [Int]!Error = ffi::ResultRebuffer(mut view)
   if not result_returned.expect("ok").size() == 1 { panic("generic Go Result slice result did not normalize to List") }
   let nested_returned: [[Int]] = ffi::WrapRebuffer(mut view)
   let nested_inner = nested_returned.at(0).expect("nested")
