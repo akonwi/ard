@@ -61,7 +61,7 @@ Because Ard compiles to Go, the boundary between the two is intentionally thin:
   }
   ```
 
-- **Boundary adaptation.** Idiomatic Go shapes are adapted at the call boundary: `(T, error)` returns become `T!Str`, comma-ok pairs become `T?`, and Go's `any` becomes Ard's opaque `Any`.
+- **Boundary adaptation.** Idiomatic Go shapes are adapted at the call boundary: `(T, error)` returns become identity-preserving `T!Error`, comma-ok pairs become `T?`, and Go's `any` becomes Ard's opaque `Any`.
 
 - **Concurrency is Go's.** `async::start` runs goroutines, and built-in channels (`Chan<T>`) lower to native Go channels, including `select`.
 

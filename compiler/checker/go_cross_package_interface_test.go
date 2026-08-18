@@ -31,7 +31,7 @@ func TestGoInterfaceSatisfactionAcrossPackageLoads(t *testing.T) {
 use go:net/url
 use go:net/http/httputil
 
-fn main() Void!Str {
+fn main() Void!Error {
   let target = try url::Parse("http://localhost:9")
   let proxy = httputil::NewSingleHostReverseProxy(target)
   http::ListenAndServe(":0", proxy)

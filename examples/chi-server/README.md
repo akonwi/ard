@@ -17,7 +17,7 @@ There is no Go shim — everything is direct `use go:` interop:
 - OS signals through a built-in channel: `Chan::new<os::Signal>()` narrowed
   with `.sender()` for `signal::Notify`
 - `async::start` for the background serve goroutine
-- Go `(T, error)` returns handled as Ard results (`Void!Str`)
+- Go errors handled as identity-preserving Ard results (`Void!Error`)
 
 ## Adaptations from the Go original
 
@@ -25,8 +25,8 @@ There is no Go shim — everything is direct `use go:` interop:
   pairs, which Ard's Go interop does not map; the port registers `SIGINT` and
   `SIGTERM` through `signal.Notify`, waits on a channel, and shuts down with
   `context.Background()`.
-- Go errors are stringified, so `errors.Is(err, http.ErrServerClosed)` becomes
-  a message comparison.
+- Go error identity is preserved, so `errors.Is(error, http.ErrServerClosed)`
+  checks the server sentinel directly.
 
 ## Run
 

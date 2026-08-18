@@ -428,7 +428,7 @@ Builtin operations on primitives and collections lower to Go builtins and the Go
 #### Literals and interpolation
 
 - Byte and rune literals lower to Go `byte` and rune literals, including escapes such as `'\n'`, `'\x00'`, and `'\u0080'`.
-- String interpolation lowers to string concatenation of the literal segments and each interpolated expression's `to_str` lowering. Primitive interpolations use direct conversion (for example `strconv`), and `ToString` values use their `String()` method, so interpolation does not depend on `fmt` reflection.
+- String interpolation lowers to string concatenation of the literal segments and each interpolated expression's string conversion. Primitive interpolations use direct conversion (for example `strconv`), and `ToString` values use their `String()` method. Builtin `Error` values fall back to their `error() Str` contract after existing `to_str`/`ToString` behavior. This observation does not make `Error` assignable to `Str`, and interpolation does not depend on `fmt` reflection.
 
 #### Builtin collection and string operations
 
@@ -539,7 +539,7 @@ Interop with Go is a single mechanism: direct Go interop through `use go:`. Ther
 Go values map to Ard types structurally, and a few idiomatic Go shapes are adapted at the boundary:
 
 - Go `struct{}` is Ard's unit type `Void`, and a no-result Go function is `Void` too.
-- A Go function returning `(T, error)` is adapted to Ard `T!Str`; one returning only `error` is `Void!Str`. The Go `error` is stringified — Ard does not model Go's `error` interface as a value.
+- A Go function returning `(T, error)` is adapted to Ard `T!Error`; one returning only `error` is `Void!Error`. The original Go error interface is stored directly in the Result error arm, preserving sentinel identity, concrete type, and unwrap behavior (ADR 0063).
 - A Go function returning the comma-ok pair `(T, bool)` is adapted to Ard `T?`.
 - Otherwise a single Go result maps to its Ard type by the normal rules: primitives, `[]T` to `[T]`, `map[K]V` to `[K:V]`, `any` to `Any`, `func` to a function type, and Go channel types to `Chan<T>`, `Receiver<T>`, or `Sender<T>` according to direction. Named Go map types remain foreign named types, but expose map-like methods when their key and value types are representable.
 

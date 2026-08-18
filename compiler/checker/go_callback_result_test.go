@@ -46,7 +46,7 @@ func RunNamed(cb WalkFunc) {}
 			input: `use go:cbshapes/ffi
 
 fn main() {
-  ffi::RunErr(fn(n: Int) Void!Str { Result::ok(()) })
+  ffi::RunErr(fn(n: Int) Void!Error { Result::ok(()) })
 }`,
 		},
 		{
@@ -54,7 +54,7 @@ fn main() {
 			input: `use go:cbshapes/ffi
 
 fn main() {
-  ffi::RunPair(fn(n: Int) Str!Str { Result::ok("{n}") })
+  ffi::RunPair(fn(n: Int) Str!Error { Result::ok("{n}") })
 }`,
 		},
 		{
@@ -70,7 +70,7 @@ fn main() {
 			input: `use go:cbshapes/ffi
 
 fn main() {
-  ffi::RunNamed(fn(n: Int) Void!Str { Result::ok(()) })
+  ffi::RunNamed(fn(n: Int) Void!Error { Result::ok(()) })
 }`,
 		},
 		{
@@ -80,7 +80,7 @@ fn main() {
 fn main() {
   ffi::RunErr(fn(n: Int) Int { n })
 }`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected fn(Int) Void!Str, got fn(Int) Int"}},
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected fn(Int) Void!Error, got fn(Int) Int"}},
 		},
 		{
 			name: "non-error non-bool tuple callback stays rejected",

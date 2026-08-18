@@ -71,9 +71,11 @@ impl Error for ValidationError {
 }
 ```
 
-`T!Error` preserves the underlying Go error value when returned through generated Go APIs. `T!Str` remains supported and continues to use a message-only Go error at return boundaries. Result error types are otherwise unconstrained; use any `E` in `T!E` when Go error interoperability is not needed.
+`T!Error` preserves the underlying Go error value through imported calls and generated Go APIs. Go `error` returns become `Void!Error`, and `(T, error)` returns become `T!Error`. Go parameters, fields, and callback arguments typed as `error` also use builtin `Error`.
 
-Imported Go functions returning `error` continue to expose `T!Str` for compatibility. Go parameters and fields typed as `error` use builtin `Error`.
+`T!Str` remains supported for pure Ard message errors and continues to construct a message-only Go error at return boundaries. Result error types are otherwise unconstrained; use any `E` in `T!E` when Go error interoperability is not needed.
+
+Use `error.error()` when an API specifically needs the message as `Str`, or transform a whole Result with `map_err`. String interpolation observes `Error` automatically, so `"request failed: {error}"` remains concise without discarding identity from the value itself.
 
 ## Maybe Types
 

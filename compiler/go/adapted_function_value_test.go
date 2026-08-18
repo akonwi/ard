@@ -158,7 +158,7 @@ func Invoke[T any](call func(...T) string, values ...T) string { return call(val
 	mainPath := filepath.Join(projectDir, "main.ard")
 	if err := os.WriteFile(mainPath, []byte(`use go:fnvalues/ffi
 
-fn apply(f: fn(Str) Int!Str, input: Str) Int {
+fn apply(f: fn(Str) Int!Error, input: Str) Int {
   f(input).or(-1)
 }
 

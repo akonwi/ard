@@ -44,12 +44,12 @@ fn main() {
 			name: "variadic Go function value accepts zero and repeated arguments",
 			input: `use go:fmt
 
-fn invoke(print: fn(...Any) Int!Str) Int!Str {
+fn invoke(print: fn(...Any) Int!Error) Int!Error {
   print("hello", 42, true)
 }
 
 fn main() {
-  let print: fn(...Any) Int!Str = fmt::Println
+  let print: fn(...Any) Int!Error = fmt::Println
   let rebound = print
   print()
   rebound("hello")
@@ -60,12 +60,12 @@ fn main() {
 			name: "variadic Go function value accepts referenced list spread",
 			input: `use go:fmt
 
-fn invoke(print: fn(...Any) Int!Str, values: mut [Any]) Int!Str {
+fn invoke(print: fn(...Any) Int!Error, values: mut [Any]) Int!Error {
   print(values...)
 }
 
 fn main() {
-  let print: fn(...Any) Int!Str = fmt::Println
+  let print: fn(...Any) Int!Error = fmt::Println
   let values: [Any] = ["hello", 42, true]
   let reference = mut values
   print(reference...)
@@ -91,9 +91,9 @@ fn main() {
 			input: `use go:fmt
 
 fn main() {
-  let print: fn(Any) Int!Str = fmt::Println
+  let print: fn(Any) Int!Error = fmt::Println
 }`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected fn(Any) Int!Str, got fn(...Any) Int!Str"}},
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected fn(Any) Int!Error, got fn(...Any) Int!Error"}},
 		},
 		{
 			name: "Ard closure cannot acquire variadicity from context",
@@ -107,7 +107,7 @@ fn main() {
 			input: `use go:os
 
 fn main() {
-  let read: fn(Str) [Byte]!Str = os::ReadFile
+  let read: fn(Str) [Byte]!Error = os::ReadFile
   let failed = read("missing.txt").is_err()
 }`,
 		},
@@ -124,8 +124,8 @@ fn main() {
 			name: "error-only Go function value carries a Void Result signature",
 			input: `use go:os
 
-fn main() Void!Str {
-  let chdir: fn(Str) Void!Str = os::Chdir
+fn main() Void!Error {
+  let chdir: fn(Str) Void!Error = os::Chdir
   try chdir(".")
   Result::ok(())
 }`,

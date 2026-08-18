@@ -1213,7 +1213,7 @@ use go:pkgvars/ffi
 struct Sink {}
 
 impl io::Writer for Sink {
-  fn write(bytes: [Byte]) Int!Str {
+  fn write(bytes: [Byte]) Int!Error {
     Result::ok(bytes.size())
   }
 }
@@ -1300,13 +1300,13 @@ func TestRunProgramExecutesGoForeignMethodValues(t *testing.T) {
 				panic("expected method value match")
 			}
 			let when = time::Now()
-			let marshal: fn() [Byte]!Str = when.MarshalText
+			let marshal: fn() [Byte]!Error = when.MarshalText
 			let bytes = try marshal() -> err { panic(err) }
 			if bytes.size() == 0 {
 				panic("expected marshal bytes")
 			}
 			let mutable_when = mut time::Now()
-			let unmarshal: fn(mut [Byte]) Void!Str = mutable_when.UnmarshalText
+			let unmarshal: fn(mut [Byte]) Void!Error = mutable_when.UnmarshalText
 			let text = mut "2024-01-02T00:00:00Z".bytes()
 			try unmarshal(text) -> err { panic(err) }
 			if not mutable_when.Format(time::RFC3339) == "2024-01-02T00:00:00Z" {
@@ -1537,17 +1537,17 @@ func TestRunProgramPreservesArdOwnershipAcrossGoInterfaceConversion(t *testing.T
 		struct Sink { written: Int }
 
 		impl io::Writer for Sink {
-			fn mut write(bytes: [Byte]) Int!Str {
+			fn mut write(bytes: [Byte]) Int!Error {
 				self.written =+ bytes.size()
 				Result::ok(bytes.size())
 			}
 		}
 
-		fn consume(writer: io::Writer) Int!Str {
+		fn consume(writer: io::Writer) Int!Error {
 			fmt::Fprint(writer, "x")
 		}
 
-		fn forward_reference(writer: mut Sink) Int!Str {
+		fn forward_reference(writer: mut Sink) Int!Error {
 			fmt::Fprint(writer, "x")
 		}
 
@@ -1584,7 +1584,7 @@ func TestRunProgramPreservesDynamicTypeForValueReceiverInterfaces(t *testing.T) 
 		struct Sink {}
 
 		impl io::Writer for Sink {
-			fn write(bytes: [Byte]) Int!Str {
+			fn write(bytes: [Byte]) Int!Error {
 				Result::ok(bytes.size())
 			}
 		}
@@ -1614,13 +1614,13 @@ func TestRunProgramPassesValueFieldToGoInterface(t *testing.T) {
 		struct Box { sink: Sink }
 
 		impl io::Writer for Sink {
-			fn mut write(bytes: [Byte]) Int!Str {
+			fn mut write(bytes: [Byte]) Int!Error {
 				self.written =+ bytes.size()
 				Result::ok(bytes.size())
 			}
 		}
 
-		fn consume(writer: io::Writer) Int!Str {
+		fn consume(writer: io::Writer) Int!Error {
 			let bytes: [Byte] = []
 			writer.Write(mut bytes)
 		}
@@ -3590,7 +3590,7 @@ func TestLowerProgramKeepsForeignMutableListParamsAsDescriptors(t *testing.T) {
 		struct Sink {}
 
 		impl io::Writer for Sink {
-			fn write(bytes: mut [Byte]) Int!Str {
+			fn write(bytes: mut [Byte]) Int!Error {
 				Result::ok(bytes.size())
 			}
 		}

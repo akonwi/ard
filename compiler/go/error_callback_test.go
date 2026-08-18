@@ -12,9 +12,9 @@ import (
 // TestRunProgramErrorReturningGoCallbacks pins that Go callback parameters
 // whose signatures return an error or comma-ok pair adapt to Ard closures,
 // mirroring the call-boundary adaptation in reverse: `func(...) error` takes
-// an Ard `fn(...) Void!Str`, `func(...) (T, error)` takes `fn(...) T!Str`,
+// an Ard `fn(...) Void!Error`, `func(...) (T, error)` takes `fn(...) T!Error`,
 // and `func(...) (T, bool)` takes `fn(...) T?`. The Ard returns already
-// lower to those Go ABI shapes (ADR 0038), so no wrapper is generated.
+// lower to those Go ABI shapes (ADRs 0038 and 0063), so no wrapper is generated.
 func TestRunProgramErrorReturningGoCallbacks(t *testing.T) {
 	projectDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"errcb\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
@@ -27,6 +27,14 @@ func TestRunProgramErrorReturningGoCallbacks(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(projectDir, "ffi", "ffi.go"), []byte(`package ffi
+
+import "errors"
+
+var Sentinel error = errors.New("sentinel")
+
+func CallbackSame(cb func() error) bool { return cb() == Sentinel }
+
+func GenericCallbackSame[T any](value T, cb func(T) error) bool { return cb(value) == Sentinel }
 
 // Walk visits values until the callback fails, mirroring the
 // filepath.WalkDir / errgroup.Go callback convention.
@@ -67,6 +75,8 @@ func Named(cb WalkFunc) string {
 	}
 	return "ok"
 }
+
+func NamedSame(cb WalkFunc) bool { return cb(0) == Sentinel }
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -75,29 +85,29 @@ func Named(cb WalkFunc) string {
 
 fn main() {
   // error-only callback: succeed for every value
-  let all = ffi::Walk(fn(n: Int) Void!Str {
+  let all = ffi::Walk(fn(n: Int) Void!Error {
     Result::ok(())
   })
   if not all == "done" { panic("expected full walk, got {all}") }
 
   // error-only callback: fail midway and surface the message through Go
-  let stopped = ffi::Walk(fn(n: Int) Void!Str {
+  let stopped = ffi::Walk(fn(n: Int) Void!Error {
     match n == 2 {
-      true => Result::err("stop at {n}"),
+      true => Result::err(Error::new("stop at {n}")),
       false => Result::ok(()),
     }
   })
   if not stopped == "stop at 2" { panic("expected early stop, got {stopped}") }
 
   // (T, error) callback: ok case
-  let doubled = ffi::Transform(21, fn(n: Int) Str!Str {
+  let doubled = ffi::Transform(21, fn(n: Int) Str!Error {
     Result::ok("{n * 2}")
   })
   if not doubled == "42" { panic("expected 42, got {doubled}") }
 
   // (T, error) callback: err case
-  let failed = ffi::Transform(1, fn(n: Int) Str!Str {
-    Result::err("bad input")
+  let failed = ffi::Transform(1, fn(n: Int) Str!Error {
+    Result::err(Error::new("bad input"))
   })
   if not failed == "error: bad input" { panic("expected error passthrough, got {failed}") }
 
@@ -111,10 +121,14 @@ fn main() {
   if not looked == "found" { panic("expected comma-ok lookup, got {looked}") }
 
   // named Go func type with an error return
-  let named = ffi::Named(fn(n: Int) Void!Str {
-    Result::err("n was {n}")
+  let named = ffi::Named(fn(n: Int) Void!Error {
+    Result::err(Error::new("n was {n}"))
   })
   if not named == "n was 5" { panic("expected named callback error, got {named}") }
+  let named_same = ffi::NamedSame(fn(n: Int) Void!Error {
+    Result::err(ffi::Sentinel)
+  })
+  if not named_same { panic("named callback lost error identity") }
 
   // a named Ard function (not a literal) as the callback
   let checked = ffi::Walk(check)
@@ -122,18 +136,28 @@ fn main() {
 
   // a capturing closure as the callback
   let limit = 1
-  let captured = ffi::Walk(fn(n: Int) Void!Str {
+  let captured = ffi::Walk(fn(n: Int) Void!Error {
     match n > limit {
-      true => Result::err("over {limit}"),
+      true => Result::err(Error::new("over {limit}")),
       false => Result::ok(()),
     }
   })
   if not captured == "over 1" { panic("expected capturing callback, got {captured}") }
+
+  let same = ffi::CallbackSame(fn() Void!Error {
+    Result::err(ffi::Sentinel)
+  })
+  if not same { panic("callback lost error identity") }
+
+  let generic_same = ffi::GenericCallbackSame(1, fn(n: Int) Void!Error {
+    Result::err(ffi::Sentinel)
+  })
+  if not generic_same { panic("generic callback lost error identity") }
 }
 
-fn check(n: Int) Void!Str {
+fn check(n: Int) Void!Error {
   match n == 3 {
-    true => Result::err("stop at {n}"),
+    true => Result::err(Error::new("stop at {n}")),
     false => Result::ok(()),
   }
 }

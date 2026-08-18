@@ -2,6 +2,7 @@ package air
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -1539,13 +1540,54 @@ func (l *lowerer) declareRequiredGenericGoMethods(module ModuleID, def *checker.
 			names = append(names, name)
 		}
 	}
+	for _, trait := range def.Traits {
+		if !checker.IsBuiltinError(trait) {
+			continue
+		}
+		for _, method := range trait.GetMethods() {
+			if methods[method.Name] != nil {
+				names = append(names, method.Name)
+			}
+		}
+	}
 	sort.Strings(names)
+	names = slices.Compact(names)
 	fl := &functionLowerer{l: l}
+	declaredMethods := map[string]FunctionID{}
 	for _, name := range names {
 		method := methods[name]
-		if _, _, err := fl.declareGenericInstanceMethodFunction(module, selfType, def, method); err != nil {
+		id, _, err := fl.declareGenericInstanceMethodFunction(module, selfType, def, method)
+		if err != nil {
 			return fmt.Errorf("declare required Go method %s.%s: %w", def.Name, method.RequiredGoMethodName, err)
 		}
+		declaredMethods[name] = id
+	}
+
+	// Builtin Error is both a required native Go method and an Ard trait.
+	// Register its generic implementation so static interpolation dispatch can
+	// call the same generic receiver method for concrete instantiations.
+	for _, trait := range def.Traits {
+		if !checker.IsBuiltinError(trait) {
+			continue
+		}
+		traitID, err := l.internTrait(trait)
+		if err != nil {
+			return err
+		}
+		if _, exists := l.lookupImpl(traitID, selfType); exists {
+			continue
+		}
+		traitMethods := trait.GetMethods()
+		methodIDs := make([]FunctionID, len(traitMethods))
+		for i, traitMethod := range traitMethods {
+			id, ok := declaredMethods[traitMethod.Name]
+			if !ok {
+				return fmt.Errorf("generic Error implementation %s is missing method %s", def.Name, traitMethod.Name)
+			}
+			methodIDs[i] = id
+		}
+		id := ImplID(len(l.program.Impls))
+		l.program.Impls = append(l.program.Impls, Impl{ID: id, Trait: traitID, ForType: selfType, Methods: methodIDs})
 	}
 	return nil
 }
@@ -6219,8 +6261,15 @@ func (fl *functionLowerer) lowerStaticTraitMethod(typeID TypeID, target *Expr, m
 		}
 	}
 
+	implTargetType := target.Type
+	if reference, ok := fl.l.typeInfo(target.Type); ok && reference.Kind == TypeReference {
+		implTargetType = reference.Elem
+	}
+	implTargetInfo, _ := fl.l.typeInfo(implTargetType)
 	for _, impl := range fl.l.program.Impls {
-		if impl.ForType != target.Type {
+		implInfo, _ := fl.l.typeInfo(impl.ForType)
+		genericMatch := implTargetInfo.Generic != NoType && (impl.ForType == implTargetInfo.Generic || implInfo.Generic == implTargetInfo.Generic)
+		if impl.ForType != implTargetType && !genericMatch {
 			continue
 		}
 		if !validTraitID(&fl.l.program, impl.Trait) {
@@ -6246,7 +6295,11 @@ func (fl *functionLowerer) lowerStaticTraitMethod(typeID TypeID, target *Expr, m
 				return nil, false, err
 			}
 			args = append(args, loweredArgs...)
-			return &Expr{Kind: ExprCall, Type: typeID, Function: id, Args: args}, true, nil
+			var typeArgs []TypeID
+			if genericMatch {
+				typeArgs = append([]TypeID(nil), implTargetInfo.GenericArgs...)
+			}
+			return &Expr{Kind: ExprCall, Type: typeID, Function: id, Args: args, TypeArgs: typeArgs}, true, nil
 		}
 	}
 	return nil, false, nil
@@ -6757,8 +6810,16 @@ func (l *lowerer) referentTypeInfo(id TypeID) (TypeInfo, bool) {
 }
 
 func (l *lowerer) lookupImpl(trait TraitID, forType TypeID) (ImplID, bool) {
+	forTypeInfo, _ := l.typeInfo(forType)
 	for _, impl := range l.program.Impls {
-		if impl.Trait == trait && impl.ForType == forType {
+		if impl.Trait != trait {
+			continue
+		}
+		if impl.ForType == forType {
+			return impl.ID, true
+		}
+		implInfo, _ := l.typeInfo(impl.ForType)
+		if forTypeInfo.Generic != NoType && (impl.ForType == forTypeInfo.Generic || implInfo.Generic == forTypeInfo.Generic) {
 			return impl.ID, true
 		}
 	}

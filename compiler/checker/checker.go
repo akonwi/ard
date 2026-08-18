@@ -6322,6 +6322,24 @@ func applySliceArgumentOrder(node Expression, sourceArgs []parse.Argument, param
 	return node
 }
 
+func (c *Checker) createInterpolationMethodNode(original, observed Expression, fnDef *FunctionDef, loc parse.Location) Expression {
+	subject := observed
+	if fnDef.Mutates {
+		if !c.permitsInteriorMutation(original) {
+			c.addDiagnostic(referenceReceiverDiagnostic{
+				Kind:            referenceArdReceiver,
+				Receiver:        fmt.Sprint(original),
+				Method:          fnDef.Name,
+				Span:            c.sourceSpan(loc),
+				DeclarationSpan: expressionBindingSpan(original),
+			}.build())
+			return nil
+		}
+		subject = original
+	}
+	return c.createPrimitiveMethodNode(subject, fnDef.Name, []Expression{}, fnDef, nil, parse.Location{})
+}
+
 func (c *Checker) createPrimitiveMethodNode(subject Expression, methodName string, args []Expression, fnDef *FunctionDef, typeArgs []Type, loc parse.Location) Expression {
 	// Determine subject type - emit specialized nodes for all built-in types.
 	// A reference-valued subject dispatches through its referent: method
@@ -7257,9 +7275,11 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 		{
 			chunks := make([]Expression, len(s.Chunks))
 			for i := range s.Chunks {
-				// Interpolation is an observational read: a reference chunk
-				// stringifies its current referent (ADR 0057).
-				cx := observeReference(c.checkExpr(s.Chunks[i]))
+				// Interpolation normally observes a reference's current referent.
+				// Keep the original expression so a mutating explicit conversion
+				// implementation still goes through normal receiver checks.
+				original := c.checkExpr(s.Chunks[i])
+				cx := observeReference(original)
 				if cx == nil {
 					// skip bad expressions
 					chunks[i] = &StrLiteral{}
@@ -7278,6 +7298,21 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 					continue
 				}
 
+				// Struct methods live in the checker's side table rather than on
+				// the shape type. Resolve an existing to_str before Error so the
+				// established interpolation behavior keeps precedence.
+				if structDef, ok := cx.Type().(*StructDef); ok {
+					if toStr, ok := c.structMethod(structDef, "to_str"); ok && toStr.ReturnType == Str && len(toStr.Parameters) == 0 {
+						methodNode := c.createInterpolationMethodNode(original, cx, toStr, s.Chunks[i].GetLocation())
+						if methodNode == nil {
+							chunks[i] = &StrLiteral{}
+						} else {
+							chunks[i] = methodNode
+						}
+						continue
+					}
+				}
+
 				if toStr, ok := cx.Type().get("to_str").(*FunctionDef); ok && toStr.ReturnType == Str && len(toStr.Parameters) == 0 {
 					chunks[i] = c.createPrimitiveMethodNode(cx, toStr.Name, []Expression{}, toStr, nil, parse.Location{})
 					continue
@@ -7285,17 +7320,36 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 
 				if strMod := c.findModuleByPath("ard/string"); strMod != nil {
 					toStringTrait := strMod.Get("ToString").Type.(*Trait)
-					if !cx.Type().hasTrait(toStringTrait) {
-						c.addTypeMismatch(toStringTrait, cx.Type(), s.Chunks[i].GetLocation())
-						// a non-stringable chunk stays empty
-						chunks[i] = &StrLiteral{}
+					if cx.Type().hasTrait(toStringTrait) {
+						// For non-string types that satisfy ToString trait, wrap with to_str() call.
+						toStrMethod := toStringTrait.methods[0]
+						methodNode := c.createPrimitiveMethodNode(cx, toStrMethod.Name, []Expression{}, &toStrMethod, nil, parse.Location{})
+						chunks[i] = methodNode
 						continue
 					}
+				}
 
-					// For non-string types that satisfy ToString trait, wrap with to_str() call
-					toStrMethod := toStringTrait.methods[0]
-					methodNode := c.createPrimitiveMethodNode(cx, toStrMethod.Name, []Expression{}, &toStrMethod, nil, parse.Location{})
-					chunks[i] = methodNode
+				// Error is stringifiable in interpolation without becoming
+				// implicitly assignable to Str. Existing to_str/ToString behavior
+				// takes precedence when a concrete type supports both contracts.
+				_, concreteError := cx.Type().(*StructDef)
+				_, errorObject := cx.Type().(*Trait)
+				if (concreteError || errorObject) && cx.Type().hasTrait(BuiltinError) {
+					errorMethod := BuiltinError.methods[0]
+					if structDef, ok := cx.Type().(*StructDef); ok {
+						if implementation, ok := c.structMethod(structDef, errorMethod.Name); ok {
+							// Keep builtin trait dispatch (and its native Go Error
+							// method metadata), but carry the concrete receiver's
+							// mutability through normal reference checks.
+							errorMethod.Mutates = implementation.Mutates
+						}
+					}
+					methodNode := c.createInterpolationMethodNode(original, cx, &errorMethod, s.Chunks[i].GetLocation())
+					if methodNode == nil {
+						chunks[i] = &StrLiteral{}
+					} else {
+						chunks[i] = methodNode
+					}
 					continue
 				}
 

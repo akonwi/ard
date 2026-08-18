@@ -121,7 +121,7 @@ resource = next_resource
 
 ### Results are discarded
 
-Any value produced by deferred work is discarded. This is consistent with ordinary Ard statement position, where a call's value can already be ignored. It also includes Go cleanup methods that return `error`, which Ard adapts as `Void!Str`:
+Any value produced by deferred work is discarded. This is consistent with ordinary Ard statement position, where a call's value can already be ignored. It also includes Go cleanup methods that return `error`, which Ard adapts as `Void!Error`:
 
 ```ard
 defer file.Close() // cleanup result is ignored

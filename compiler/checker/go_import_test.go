@@ -45,7 +45,7 @@ fn consume(writer: io::Writer) {}`,
 			input: `use go:bytes
 use go:fmt
 
-fn main() Int!Str {
+fn main() Int!Error {
   fmt::Fprint(bytes::NewBufferString("hello"), "!")
 }`,
 		},
@@ -58,7 +58,7 @@ struct Sink {
 }
 
 impl io::Writer for Sink {
-  fn mut write(bytes: [Byte]) Int!Str {
+  fn mut write(bytes: [Byte]) Int!Error {
     self.written =+ bytes.size()
     Result::ok(bytes.size())
   }
@@ -78,7 +78,7 @@ fn main() {
 struct Sink {}
 
 impl io::Writer for Sink {
-  fn write(bytes: mut [Byte]) Int!Str {
+  fn write(bytes: mut [Byte]) Int!Error {
     Result::ok(bytes.size())
   }
 }`,
@@ -90,7 +90,7 @@ impl io::Writer for Sink {
 struct Sink {}
 
 impl io::Writer for Sink {
-  fn write(bytes: mut [Byte]) Int!Str {
+  fn write(bytes: mut [Byte]) Int!Error {
     bytes.push(bytes.at(0).expect("byte"))
     Result::ok(bytes.size())
   }
@@ -104,7 +104,7 @@ impl io::Writer for Sink {
 struct Sink {}
 
 impl io::Writer for Sink {
-  fn write(bytes: mut [Byte]) Int!Str {
+  fn write(bytes: mut [Byte]) Int!Error {
     bytes = []
     Result::ok(bytes.size())
   }
@@ -118,7 +118,7 @@ impl io::Writer for Sink {
 struct Sink {}
 
 impl io::Writer for Sink {
-  fn write(bytes: mut [Byte]) Int!Str {
+  fn write(bytes: mut [Byte]) Int!Error {
     let alias = mut bytes
     alias.prepend(bytes.at(0).expect("byte"))
     Result::ok(bytes.size())
@@ -133,7 +133,7 @@ impl io::Writer for Sink {
 struct Sink {}
 
 impl io::Writer for Sink {
-  fn write(bytes: mut [Byte]) Int!Str {
+  fn write(bytes: mut [Byte]) Int!Error {
     let grow = fn() {
       bytes.push(bytes.at(0).expect("byte"))
       ()
@@ -151,7 +151,7 @@ impl io::Writer for Sink {
 struct Sink {}
 
 impl io::Writer for Sink {
-  fn write(bytes: mut [Byte]) Int!Str {
+  fn write(bytes: mut [Byte]) Int!Error {
     let copy = mut bytes.@
     copy.push(bytes.at(0).expect("byte"))
     Result::ok(copy.size())
@@ -171,7 +171,7 @@ struct Box {
 }
 
 impl io::Writer for Sink {
-  fn mut write(bytes: [Byte]) Int!Str {
+  fn mut write(bytes: [Byte]) Int!Error {
     self.written =+ bytes.size()
     Result::ok(bytes.size())
   }
@@ -193,7 +193,7 @@ struct Sink {
 }
 
 impl io::Writer for Sink {
-  fn mut write(bytes: [Byte]) Int!Str {
+  fn mut write(bytes: [Byte]) Int!Error {
     self.written =+ bytes.size()
     Result::ok(bytes.size())
   }
@@ -214,7 +214,7 @@ use go:io
 struct Sink { written: Int }
 
 impl io::Writer for Sink {
-  fn mut write(bytes: [Byte]) Int!Str {
+  fn mut write(bytes: [Byte]) Int!Error {
     self.written =+ bytes.size()
     Result::ok(bytes.size())
   }
@@ -233,7 +233,7 @@ use go:io
 struct Sink { written: Int }
 
 impl io::Writer for Sink {
-  fn mut write(bytes: [Byte]) Int!Str {
+  fn mut write(bytes: [Byte]) Int!Error {
     self.written =+ bytes.size()
     Result::ok(bytes.size())
   }
@@ -251,7 +251,7 @@ fn main() {
 struct Sink { written: Int }
 
 impl io::Writer for Sink {
-  fn mut write(bytes: [Byte]) Int!Str {
+  fn mut write(bytes: [Byte]) Int!Error {
     self.written =+ bytes.size()
     Result::ok(bytes.size())
   }
@@ -274,7 +274,7 @@ struct Sink { written: Int }
 struct Box { writer: io::Writer }
 
 impl io::Writer for Sink {
-  fn mut write(bytes: [Byte]) Int!Str {
+  fn mut write(bytes: [Byte]) Int!Error {
     self.written =+ bytes.size()
     Result::ok(bytes.size())
   }
@@ -325,13 +325,13 @@ fn main() {
 struct Sink {}
 
 impl Sink {
-  fn write(bytes: [Byte]) Int!Str {
+  fn write(bytes: [Byte]) Int!Error {
     Result::ok(bytes.size())
   }
 }
 
 impl io::Writer for Sink {
-  fn write(bytes: [Byte]) Int!Str {
+  fn write(bytes: [Byte]) Int!Error {
     Result::ok(bytes.size())
   }
 }`,
@@ -346,7 +346,7 @@ struct Sink {
 }
 
 impl Sink {
-  fn mut write(bytes: [Byte]) Int!Str {
+  fn mut write(bytes: [Byte]) Int!Error {
     self.written =+ bytes.size()
     Result::ok(bytes.size())
   }
@@ -489,7 +489,7 @@ func TestGoImportResolvesExportedPackageFunction(t *testing.T) {
 			name: "fmt Println accepts any single Ard value and returns Result",
 			input: `use go:fmt
 
-fn main() Int!Str {
+fn main() Int!Error {
   fmt::Println("hello")
 }`,
 			output: &checker.Program{
@@ -497,7 +497,7 @@ fn main() Int!Str {
 					{Expr: &checker.FunctionDef{
 						Name:       "main",
 						Parameters: []checker.Parameter{},
-						ReturnType: checker.MakeResult(checker.Int, checker.Str),
+						ReturnType: checker.MakeResult(checker.Int, checker.BuiltinError),
 						Body: &checker.Block{Stmts: []checker.Statement{
 							{Expr: &checker.ForeignFunctionCall{
 								Target:             "go",
@@ -512,7 +512,7 @@ fn main() Int!Str {
 										Destination: checker.Any,
 										Mode:        checker.InterfaceValue,
 									}},
-									ReturnType: checker.MakeResult(checker.Int, checker.Str),
+									ReturnType: checker.MakeResult(checker.Int, checker.BuiltinError),
 								},
 							}},
 						}},
@@ -576,7 +576,7 @@ func TestGoImportResolvesErrorOnlyFunction(t *testing.T) {
 			name: "os Setenv returns Void result",
 			input: `use go:os
 
-fn main() Void!Str {
+fn main() Void!Error {
   os::Setenv("ARD_TEST", "ok")
 }`,
 			output: &checker.Program{
@@ -584,7 +584,7 @@ fn main() Void!Str {
 					{Expr: &checker.FunctionDef{
 						Name:       "main",
 						Parameters: []checker.Parameter{},
-						ReturnType: checker.MakeResult(checker.Void, checker.Str),
+						ReturnType: checker.MakeResult(checker.Void, checker.BuiltinError),
 						Body: &checker.Block{Stmts: []checker.Statement{
 							{Expr: &checker.ForeignFunctionCall{
 								Target:             "go",
@@ -595,7 +595,7 @@ fn main() Void!Str {
 								Call: &checker.FunctionCall{
 									Name:       "Setenv",
 									Args:       []checker.Expression{&checker.StrLiteral{Value: "ARD_TEST"}, &checker.StrLiteral{Value: "ok"}},
-									ReturnType: checker.MakeResult(checker.Void, checker.Str),
+									ReturnType: checker.MakeResult(checker.Void, checker.BuiltinError),
 								},
 							}},
 						}},
@@ -622,9 +622,9 @@ fn main() Bool {
 			name: "bound method value with adapted result return",
 			input: `use go:time
 
-fn main() [Byte]!Str {
+fn main() [Byte]!Error {
   let when = time::Now()
-  let marshal: fn() [Byte]!Str = when.MarshalText
+  let marshal: fn() [Byte]!Error = when.MarshalText
   marshal()
 }`,
 		},
@@ -632,9 +632,9 @@ fn main() [Byte]!Str {
 			name: "pointer receiver method value on mutable opaque value",
 			input: `use go:time
 
-fn main() Void!Str {
+fn main() Void!Error {
   let when = mut time::Now()
-  let unmarshal: fn(mut [Byte]) Void!Str = when.UnmarshalText
+  let unmarshal: fn(mut [Byte]) Void!Error = when.UnmarshalText
   let text = "2024-01-02T00:00:00Z".bytes()
   unmarshal(mut text)
 }`,
@@ -685,7 +685,7 @@ fn main() Str {
 			name: "pointer receiver method on referenced opaque value",
 			input: `use go:time
 
-fn main() Void!Str {
+fn main() Void!Error {
   let when = mut time::Now()
   let text = "2024-01-02T00:00:00Z".bytes()
   when.UnmarshalText(mut text)
@@ -881,7 +881,7 @@ fn size(n: json::Number) Int {
 			name: "real Go methods on the newtype win over primitive fallback",
 			input: `use go:encoding/json
 
-fn as_float(n: json::Number) Float64!Str {
+fn as_float(n: json::Number) Float64!Error {
   n.Float64()
 }`,
 		},
