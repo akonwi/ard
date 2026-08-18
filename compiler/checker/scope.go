@@ -877,6 +877,7 @@ func replaceGeneric(t Type, genericName string, concreteType Type) Type {
 			Name:             t.Name,
 			ModulePath:       t.ModulePath,
 			Fields:           newFields,
+			JSONFields:       t.JSONFields,
 			Self:             t.Self,
 			Traits:           t.Traits,
 			GenericParams:    append([]string(nil), t.GenericParams...),
@@ -945,6 +946,17 @@ func StructFields(def *StructDef) map[string]Type {
 // ordered arguments.
 func StructField(def *StructDef, name string) (Type, bool) {
 	return structField(def, name)
+}
+
+// StructFieldJSON returns normalized JSON metadata from the canonical struct
+// declaration. Generic applications inherit their declaration's metadata.
+func StructFieldJSON(def *StructDef, name string) (JSONFieldOptions, bool) {
+	definition := canonicalStructDefinition(def)
+	if definition == nil || definition.JSONFields == nil {
+		return JSONFieldOptions{}, false
+	}
+	options, ok := definition.JSONFields[name]
+	return options, ok
 }
 
 func canonicalStructDefinition(def *StructDef) *StructDef {
@@ -1325,6 +1337,7 @@ func copyStructWithTypeVarMapSeen(structDef *StructDef, typeVarMap map[string]*T
 		Name:             structDef.Name,
 		ModulePath:       structDef.ModulePath,
 		Fields:           newFields,
+		JSONFields:       structDef.JSONFields,
 		Self:             structDef.Self,
 		Traits:           structDef.Traits,
 		GenericParams:    append([]string(nil), structDef.GenericParams...),

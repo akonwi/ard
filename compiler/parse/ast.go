@@ -418,8 +418,44 @@ type StructDefinition struct {
 }
 
 type StructField struct {
-	Name Identifier
-	Type DeclaredType
+	Name       Identifier
+	Type       DeclaredType
+	Attributes []Attribute
+}
+
+// Attribute is compile-time metadata attached to a struct field. Attribute
+// syntax is intentionally represented generically even though #json is the
+// only registered attribute today.
+type Attribute struct {
+	Location
+	Name      Identifier
+	Arguments []AttributeArgument
+}
+
+type AttributeArgument struct {
+	Location
+	// Name is empty for a positional argument.
+	Name         string
+	NameLocation Location
+	Value        AttributeValue
+}
+
+type AttributeValueKind string
+
+const (
+	AttributeString  AttributeValueKind = "string"
+	AttributeInteger AttributeValueKind = "integer"
+	AttributeBool    AttributeValueKind = "bool"
+	AttributeSymbol  AttributeValueKind = "symbol"
+	AttributeList    AttributeValueKind = "list"
+)
+
+type AttributeValue struct {
+	Location
+	Kind  AttributeValueKind
+	Text  string
+	Bool  bool
+	Items []AttributeValue
 }
 
 func (s StructDefinition) String() string {

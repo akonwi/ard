@@ -312,6 +312,9 @@ func (p printer) renderStructDefinitionDoc(node *parse.StructDefinition) doc {
 	commentIndex := 0
 	for _, field := range node.Fields {
 		fieldRow := field.Name.Location.Start.Row
+		if len(field.Attributes) > 0 && field.Attributes[0].Location.Start.Row > 0 {
+			fieldRow = field.Attributes[0].Location.Start.Row
+		}
 		for commentIndex < len(node.Comments) && (fieldRow == 0 || node.Comments[commentIndex].Location.Start.Row < fieldRow) {
 			comment := node.Comments[commentIndex]
 			items = append(items, structItem{
@@ -325,9 +328,32 @@ func (p printer) renderStructDefinitionDoc(node *parse.StructDefinition) doc {
 		if fieldEnd <= 0 {
 			fieldEnd = field.Name.Location.End.Row
 		}
+		fieldDoc := dText(fmt.Sprintf("%s: %s,", field.Name.Name, p.renderType(field.Type)))
+		if len(field.Attributes) > 0 {
+			type fieldPrefix struct {
+				row int
+				doc doc
+			}
+			prefixes := make([]fieldPrefix, 0, len(field.Attributes))
+			for _, attribute := range field.Attributes {
+				prefixes = append(prefixes, fieldPrefix{row: attribute.Location.Start.Row, doc: p.renderAttributeDoc(attribute)})
+			}
+			for commentIndex < len(node.Comments) && node.Comments[commentIndex].Location.Start.Row < field.Name.Location.Start.Row {
+				comment := node.Comments[commentIndex]
+				prefixes = append(prefixes, fieldPrefix{row: comment.Location.Start.Row, doc: dText(p.renderComment(comment.Value))})
+				commentIndex++
+			}
+			sort.SliceStable(prefixes, func(i, j int) bool { return prefixes[i].row < prefixes[j].row })
+			prefixDocs := make([]doc, 0, len(prefixes)*2+1)
+			for _, prefix := range prefixes {
+				prefixDocs = append(prefixDocs, prefix.doc, dHardLine())
+			}
+			prefixDocs = append(prefixDocs, fieldDoc)
+			fieldDoc = dConcat(prefixDocs...)
+		}
 		items = append(items, structItem{
-			doc:      dText(fmt.Sprintf("%s: %s,", field.Name.Name, p.renderType(field.Type))),
-			startRow: field.Name.Location.Start.Row,
+			doc:      fieldDoc,
+			startRow: fieldRow,
 			endRow:   fieldEnd,
 		})
 	}
@@ -358,6 +384,58 @@ func (p printer) renderStructDefinitionDoc(node *parse.StructDefinition) doc {
 		dHardLine(),
 		dText("}"),
 	))
+}
+
+func (p printer) renderAttributeDoc(attribute parse.Attribute) doc {
+	prefix := "#" + attribute.Name.Name
+	if len(attribute.Arguments) == 0 {
+		return dText(prefix)
+	}
+	arguments := make([]doc, 0, len(attribute.Arguments))
+	for _, argument := range attribute.Arguments {
+		value := p.renderAttributeValueDoc(argument.Value)
+		if argument.Name != "" {
+			value = dConcat(dText(argument.Name+": "), value)
+		}
+		arguments = append(arguments, value)
+	}
+	body := dJoin(dConcat(dText(","), dLine()), arguments)
+	body = dConcat(body, dIfBreak(dText(","), dText("")))
+	return dGroup(dConcat(
+		dText(prefix+"("),
+		dIndent(dConcat(dSoftLine(), body)),
+		dSoftLine(),
+		dText(")"),
+	))
+}
+
+func (p printer) renderAttributeValueDoc(value parse.AttributeValue) doc {
+	switch value.Kind {
+	case parse.AttributeString:
+		return dText(quoteArdString(value.Text))
+	case parse.AttributeInteger, parse.AttributeSymbol:
+		return dText(value.Text)
+	case parse.AttributeBool:
+		return dText(strconv.FormatBool(value.Bool))
+	case parse.AttributeList:
+		if len(value.Items) == 0 {
+			return dText("[]")
+		}
+		items := make([]doc, 0, len(value.Items))
+		for _, item := range value.Items {
+			items = append(items, p.renderAttributeValueDoc(item))
+		}
+		body := dJoin(dConcat(dText(","), dLine()), items)
+		body = dConcat(body, dIfBreak(dText(","), dText("")))
+		return dGroup(dConcat(
+			dText("["),
+			dIndent(dConcat(dSoftLine(), body)),
+			dSoftLine(),
+			dText("]"),
+		))
+	default:
+		return dText("")
+	}
 }
 
 func (p printer) renderEnumDefinitionDoc(node *parse.EnumDefinition) doc {

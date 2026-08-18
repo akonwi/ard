@@ -217,6 +217,16 @@ type FieldInfo struct {
 	Name  string
 	Type  TypeID
 	Index int
+	JSON  JSONFieldInfo
+}
+
+// JSONFieldInfo carries normalized, target-neutral JSON field semantics across
+// the frontend/backend boundary.
+type JSONFieldInfo struct {
+	Name     string
+	HasName  bool
+	OmitNone bool
+	Skip     bool
 }
 
 type VariantInfo struct {

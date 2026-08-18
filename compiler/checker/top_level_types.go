@@ -297,12 +297,17 @@ func (c *Checker) populateStructDefinition(def *StructDef, decl *parse.StructDef
 	def.Name = decl.Name.Name
 	def.ModulePath = c.typeOwnerPath()
 	def.Fields = make(map[string]Type)
+	def.JSONFields = nil
 	def.GenericParams = declaredGenericParams
 	def.DeclaredGenerics = len(decl.TypeParams) > 0
 	def.Private = decl.Private
 	resolvedGenericParams := []string{}
 	seenGenerics := make(map[string]bool)
 	fieldLocations := make(map[string]parse.Location)
+	jsonNameLocations := make(map[string]parse.Location)
+	resolvedFields := 0
+	jsonRepresentableFields := 0
+	hasInvalidJSONMetadata := false
 	for _, field := range decl.Fields {
 		fieldType := c.resolveType(field.Type)
 		if fieldType == nil {
@@ -319,6 +324,34 @@ func (c *Checker) populateStructDefinition(def *StructDef, decl *parse.StructDef
 		}
 		fieldLocations[field.Name.Name] = field.Name.GetLocation()
 		def.Fields[field.Name.Name] = fieldType
+		resolvedFields++
+		jsonOptions, jsonNameLocation, hasJSON, validJSON := c.checkStructFieldAttributes(field, fieldType)
+		if hasJSON && validJSON {
+			if def.JSONFields == nil {
+				def.JSONFields = make(map[string]JSONFieldOptions)
+			}
+			def.JSONFields[field.Name.Name] = jsonOptions
+		}
+		if !validJSON {
+			hasInvalidJSONMetadata = true
+		} else if !jsonOptions.Skip {
+			jsonRepresentableFields++
+			jsonName := field.Name.Name
+			if jsonOptions.HasName {
+				jsonName = jsonOptions.Name
+			}
+			if original, duplicate := jsonNameLocations[jsonName]; duplicate {
+				c.addAttributeDiagnostic(
+					DiagnosticCodeDuplicateJSONFieldName,
+					"Duplicate JSON field name: "+jsonName,
+					"Duplicate JSON field name",
+					jsonNameLocation,
+					DiagnosticLabel{Span: c.sourceSpan(original), Message: "first field with this JSON name"},
+				)
+			} else {
+				jsonNameLocations[jsonName] = jsonNameLocation
+			}
+		}
 		if c.spans != nil {
 			c.spans.add(SpanRecord{
 				Loc:   field.Name.GetLocation(),
@@ -327,6 +360,14 @@ func (c *Checker) populateStructDefinition(def *StructDef, decl *parse.StructDef
 			})
 		}
 		collectGenericsFromType(fieldType, &resolvedGenericParams, seenGenerics)
+	}
+	if resolvedFields > 0 && !hasInvalidJSONMetadata && jsonRepresentableFields == 0 {
+		c.addAttributeDiagnostic(
+			DiagnosticCodeInvalidAttributeArgument,
+			"#json cannot skip every field in a non-empty struct",
+			"No JSON-representable fields",
+			decl.Name.GetLocation(),
+		)
 	}
 	def.GenericParams = appendUniqueStrings(declaredGenericParams, resolvedGenericParams...)
 	if len(def.GenericParams) == 0 {

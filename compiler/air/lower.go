@@ -1217,7 +1217,7 @@ func (l *lowerer) internStructApplicationWithInterner(typ *checker.StructDef, in
 		if err != nil {
 			return NoType, err
 		}
-		info.Fields[i] = FieldInfo{Name: fieldName, Type: fieldType, Index: i}
+		info.Fields[i] = lowerStructFieldInfo(typ, fieldName, fieldType, i)
 	}
 	l.program.Types[idx] = info
 	return id, nil
@@ -1306,7 +1306,7 @@ func (fl *functionLowerer) internStructTypeWithInterner(typ *checker.StructDef, 
 		if err != nil {
 			return NoType, err
 		}
-		info.Fields[i] = FieldInfo{Name: fieldName, Type: fieldType, Index: i}
+		info.Fields[i] = lowerStructFieldInfo(typ, fieldName, fieldType, i)
 	}
 	fl.l.program.Types[idx] = info
 	return id, nil
@@ -2256,7 +2256,7 @@ func (l *lowerer) internGenericStructDef(typ *checker.StructDef) (TypeID, error)
 			l.defParamOwner = prevOwner
 			return NoType, err
 		}
-		info.Fields[i] = FieldInfo{Name: name, Type: ftid, Index: i}
+		info.Fields[i] = lowerStructFieldInfo(typ, name, ftid, i)
 	}
 	l.defParams = prev
 	l.defParamOwner = prevOwner
@@ -2473,7 +2473,7 @@ func (l *lowerer) internType(t checker.Type) (TypeID, error) {
 			if err != nil {
 				return NoType, err
 			}
-			info.Fields[i] = FieldInfo{Name: name, Type: fieldType, Index: i}
+			info.Fields[i] = lowerStructFieldInfo(typ, name, fieldType, i)
 		}
 		// Tag concrete instantiations of a generic struct (ADR 0031). The
 		// generic definition is interned lazily from the checker module scope,
@@ -6845,6 +6845,19 @@ func topLevelExecutableStatements(stmts []checker.Statement) []checker.Statement
 		filtered = append(filtered, stmt)
 	}
 	return filtered
+}
+
+func lowerStructFieldInfo(def *checker.StructDef, name string, typeID TypeID, index int) FieldInfo {
+	field := FieldInfo{Name: name, Type: typeID, Index: index}
+	if options, ok := checker.StructFieldJSON(def, name); ok {
+		field.JSON = JSONFieldInfo{
+			Name:     options.Name,
+			HasName:  options.HasName,
+			OmitNone: options.OmitNone,
+			Skip:     options.Skip,
+		}
+	}
+	return field
 }
 
 func sortedFieldNames(fields map[string]checker.Type) []string {

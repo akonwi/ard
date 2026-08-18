@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/akonwi/ard/air"
 	"github.com/akonwi/ard/checker"
@@ -681,6 +682,48 @@ func isPredeclaredGoTypeName(name string) bool {
 	}
 }
 
+func jsonStructFieldTag(field air.FieldInfo) *ast.BasicLit {
+	if field.JSON.Skip {
+		return &ast.BasicLit{Kind: token.STRING, Value: "`json:\"-\"`"}
+	}
+	name := field.Name
+	if field.JSON.HasName {
+		name = field.JSON.Name
+	}
+	option := jsonStructTagName(name)
+	if field.JSON.OmitNone {
+		option += ",omitzero"
+	}
+	tag := "json:" + strconv.Quote(option)
+	literal := "`" + tag + "`"
+	if strings.Contains(tag, "`") {
+		literal = strconv.Quote(tag)
+	}
+	return &ast.BasicLit{Kind: token.STRING, Value: literal}
+}
+
+func jsonStructTagName(name string) string {
+	if validPlainJSONStructTagName(name) && name != "-" {
+		return name
+	}
+	quoted := strconv.Quote(name)
+	inner := strings.ReplaceAll(quoted[1:len(quoted)-1], "'", `\'`)
+	return "'" + inner + "'"
+}
+
+func validPlainJSONStructTagName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for _, char := range name {
+		if unicode.IsLetter(char) || unicode.IsDigit(char) || strings.ContainsRune("!#$%&()*+-./:;<=>?@[]^_{|}~ ", char) {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
 func (l *lowerer) runtimePreludeDecls() []ast.Decl {
 	parts := []string{"package main\n"}
 	if l.runtimeHelpers["list_to_any_slice"] {
@@ -720,7 +763,7 @@ func (l *lowerer) lowerTypeDecls(typ air.TypeInfo) ([]ast.Decl, error) {
 			fields = append(fields, &ast.Field{
 				Names: []*ast.Ident{l.ident(l.goFieldName(typ, field.Name))},
 				Type:  fieldType,
-				Tag:   &ast.BasicLit{Kind: token.STRING, Value: fmt.Sprintf("`json:%q`", field.Name)},
+				Tag:   jsonStructFieldTag(field),
 			})
 		}
 		return []ast.Decl{&ast.GenDecl{Tok: token.TYPE, Specs: []ast.Spec{&ast.TypeSpec{Name: l.ident(l.typeName(typ)), TypeParams: l.goTypeParamList(typ), Type: &ast.StructType{Fields: &ast.FieldList{List: fields}}}}}}, nil

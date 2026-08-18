@@ -55,6 +55,9 @@
 (extern_binding (qualified_identifier) @function)
 (extern_binding_entry target: (extern_binding_target) @variable.builtin)
 (enum_variant name: (identifier) @constant)
+(attribute "#" @punctuation.special)
+(attribute name: (identifier) @attribute)
+(attribute_named_argument name: (identifier) @property)
 
 ; Parameters
 (parameter name: (identifier) @variable.parameter)

@@ -14,9 +14,9 @@ struct Person {
 var personStruct = &StructDefinition{
 	Name: Identifier{Name: "Person"},
 	Fields: []StructField{
-		{Identifier{Name: "name"}, &StringType{}},
-		{Identifier{Name: "age"}, &IntType{}},
-		{Identifier{Name: "employed"}, &BooleanType{}},
+		{Name: Identifier{Name: "name"}, Type: &StringType{}},
+		{Name: Identifier{Name: "age"}, Type: &IntType{}},
+		{Name: Identifier{Name: "employed"}, Type: &BooleanType{}},
 	},
 }
 
@@ -90,7 +90,7 @@ func TestStructDefinitions(t *testing.T) {
 						Name:       Identifier{Name: "State"},
 						TypeParams: []string{"T"},
 						Fields: []StructField{
-							{Identifier{Name: "handle"}, &CustomType{Name: "StateHandle"}},
+							{Name: Identifier{Name: "handle"}, Type: &CustomType{Name: "StateHandle"}},
 						},
 					},
 				},
@@ -107,7 +107,7 @@ func TestStructDefinitions(t *testing.T) {
 					&StructDefinition{
 						Name: Identifier{Name: "Context"},
 						Fields: []StructField{
-							{Identifier{Name: "tree"}, &MutableType{Inner: &CustomType{Name: "ViewTree"}}},
+							{Name: Identifier{Name: "tree"}, Type: &MutableType{Inner: &CustomType{Name: "ViewTree"}}},
 						},
 					},
 				},
