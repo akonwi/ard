@@ -1598,10 +1598,21 @@ func (u Union) hasTrait(trait *Trait) bool {
 	return len(u.Types) > 0
 }
 
+// JSONFieldOptions is normalized JSON metadata for an Ard-owned struct field.
+// The canonical StructDef owns these options; generic applications inherit
+// them through their Definition.
+type JSONFieldOptions struct {
+	Name     string
+	HasName  bool
+	OmitNone bool
+	Skip     bool
+}
+
 type StructDef struct {
 	Name          string
 	ModulePath    string
 	Fields        map[string]Type
+	JSONFields    map[string]JSONFieldOptions
 	Self          string
 	Traits        []*Trait
 	GenericParams []string

@@ -73,6 +73,33 @@ let explicit = Config{name: "app", timeout: Maybe::new(30)}
 
 This is the same implicit wrapping behavior available for [nullable function parameters](/guide/functions#nullable-parameters).
 
+## JSON Field Metadata
+
+Ard structs work directly with Go's JSON APIs. By default, every field uses its original Ard name in JSON, including names converted when generating exported Go fields.
+
+Use `#json` immediately before a field to customize its JSON representation:
+
+```ard
+struct User {
+  #json(name: "displayName")
+  display_name: Str,
+
+  #json(omit: none)
+  nickname: Str?,
+
+  #json(skip: true)
+  password_hash: Str,
+}
+```
+
+- `name: "..."` changes the object-member name for marshaling and unmarshaling.
+- `omit: none` is valid on nullable fields. It omits `none`, but retains present empty values such as `some("")`.
+- `skip: true` excludes the field from marshaling and unmarshaling. It does not make the field optional when constructing an Ard value.
+
+`name` and `omit` may be combined. `skip` cannot be combined with either. JSON names must be unique within a struct.
+
+Attributes are currently supported only on struct fields, and `#json` is the only available attribute.
+
 ## Methods
 
 Methods are like normal functions and are only available on instances of a struct.

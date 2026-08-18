@@ -31,6 +31,7 @@ const (
 	backtick           = "backtick"
 	dollar             = "dollar"
 	at_sign            = "at_sign"
+	hash               = "hash"
 
 	colon_colon        = "colon_colon"
 	bang               = "bang"
@@ -379,6 +380,8 @@ func (l *lexer) take() (token, bool) {
 	case '@':
 		// Simply return the at_sign token
 		return currentChar.asToken(at_sign), true
+	case '#':
+		return currentChar.asToken(hash), true
 	case '$':
 		if l.hasMore() && l.peek().isAlpha() {
 			l.start = l.cursor - 1

@@ -368,6 +368,11 @@ func (p *parser) parseStatement() (Statement, error) {
 	if p.match(new_line) {
 		return nil, nil
 	}
+	if p.match(hash) {
+		p.addError(p.previous(), "Attributes are only supported on struct fields")
+		p.synchronize()
+		return nil, nil
+	}
 	if p.match(break_) {
 		return p.breakStatement(), nil
 	}
@@ -888,6 +893,153 @@ func (p *parser) enumDef(private bool) Statement {
 	return enum
 }
 
+func (p *parser) parseAttribute() (Attribute, bool) {
+	start := p.peek()
+	if !p.match(hash) {
+		return Attribute{}, false
+	}
+	attribute := Attribute{Location: start.getLocation()}
+	if !p.check(identifier) {
+		p.addError(p.peek(), "Expected attribute name after '#'")
+		return attribute, false
+	}
+	name := p.advance()
+	attribute.Name = Identifier{Name: name.text, Location: name.getLocation()}
+	attribute.Location.End = name.getLocation().End
+	if !p.match(left_paren) {
+		return attribute, true
+	}
+
+	p.skipNewlines()
+	if p.match(right_paren) {
+		attribute.Location.End = p.previous().getLocation().End
+		return attribute, true
+	}
+	named := p.check(identifier, colon)
+	for !p.check(right_paren) && !p.check(right_brace) && !p.isAtEnd() {
+		argumentStart := p.peek()
+		argument := AttributeArgument{Location: argumentStart.getLocation()}
+		parseValue := true
+		if named {
+			if !p.check(identifier, colon) {
+				p.addError(p.peek(), "Attribute arguments cannot mix named and positional forms")
+				p.synchronizeToTokens(comma, right_paren)
+				parseValue = false
+			} else {
+				argumentName := p.advance()
+				argument.Name = argumentName.text
+				argument.NameLocation = argumentName.getLocation()
+				p.advance() // colon
+			}
+		} else if p.check(identifier, colon) {
+			p.addError(p.peek(), "Attribute arguments cannot mix positional and named forms")
+			p.synchronizeToTokens(comma, right_paren)
+			parseValue = false
+		}
+
+		if parseValue {
+			value, ok := p.parseAttributeValue()
+			if ok {
+				argument.Value = value
+				argument.Location.End = value.GetLocation().End
+				attribute.Arguments = append(attribute.Arguments, argument)
+			}
+		}
+		p.skipNewlines()
+		if p.match(comma) {
+			p.skipNewlines()
+			continue
+		}
+		if !p.check(right_paren) {
+			p.addError(p.peek(), "Expected ',' or ')' after attribute argument")
+			p.synchronizeToTokens(right_paren)
+		}
+	}
+	if !p.match(right_paren) {
+		p.addError(p.peek(), "Expected ')' after attribute arguments")
+		return attribute, true
+	}
+	attribute.Location.End = p.previous().getLocation().End
+	return attribute, true
+}
+
+func (p *parser) parseAttributeValue() (AttributeValue, bool) {
+	start := p.peek()
+	if start == nil {
+		return AttributeValue{}, false
+	}
+	if p.match(string_) {
+		expression, err := p.string()
+		if err != nil {
+			p.addError(start, err.Error())
+			return AttributeValue{}, false
+		}
+		literal, ok := expression.(*StrLiteral)
+		if !ok {
+			p.addError(start, "Attribute strings cannot contain interpolation")
+			return AttributeValue{}, false
+		}
+		return AttributeValue{Location: literal.Location, Kind: AttributeString, Text: literal.Value}, true
+	}
+	if p.match(minus) {
+		minusToken := p.previous()
+		if !p.match(number) || strings.Contains(p.previous().text, ".") {
+			p.addError(start, "Attribute numbers must be integers")
+			return AttributeValue{}, false
+		}
+		numberToken := p.previous()
+		return AttributeValue{
+			Location: Location{Start: minusToken.getLocation().Start, End: numberToken.getLocation().End},
+			Kind:     AttributeInteger,
+			Text:     "-" + numberToken.text,
+		}, true
+	}
+	if p.match(number) {
+		numberToken := p.previous()
+		if strings.Contains(numberToken.text, ".") {
+			p.addError(numberToken, "Attribute numbers must be integers")
+			return AttributeValue{}, false
+		}
+		return AttributeValue{Location: numberToken.getLocation(), Kind: AttributeInteger, Text: numberToken.text}, true
+	}
+	if p.match(true_, false_) {
+		valueToken := p.previous()
+		return AttributeValue{Location: valueToken.getLocation(), Kind: AttributeBool, Bool: valueToken.kind == true_}, true
+	}
+	if p.match(identifier) {
+		valueToken := p.previous()
+		return AttributeValue{Location: valueToken.getLocation(), Kind: AttributeSymbol, Text: valueToken.text}, true
+	}
+	if p.match(left_bracket) {
+		opening := p.previous()
+		value := AttributeValue{Location: opening.getLocation(), Kind: AttributeList, Items: []AttributeValue{}}
+		p.skipNewlines()
+		for !p.check(right_bracket) && !p.check(right_paren) && !p.check(right_brace) && !p.isAtEnd() {
+			item, ok := p.parseAttributeValue()
+			if ok {
+				value.Items = append(value.Items, item)
+			}
+			p.skipNewlines()
+			if p.match(comma) {
+				p.skipNewlines()
+				continue
+			}
+			if !p.check(right_bracket) {
+				p.addError(p.peek(), "Expected ',' or ']' after attribute list item")
+				p.synchronizeToTokens(right_bracket, right_paren, right_brace)
+			}
+		}
+		if !p.match(right_bracket) {
+			p.addError(p.peek(), "Expected ']' after attribute list")
+			return value, false
+		}
+		value.Location.End = p.previous().getLocation().End
+		return value, true
+	}
+	p.addError(start, "Expected static attribute value")
+	return AttributeValue{}, false
+}
+
 func (p *parser) structDef(private bool) Statement {
 	structToken := p.previous()
 	if !p.check(identifier) {
@@ -928,6 +1080,26 @@ func (p *parser) structDef(private bool) Statement {
 			continue
 		}
 
+		var attributes []Attribute
+		for p.check(hash) {
+			attribute, ok := p.parseAttribute()
+			if ok {
+				attributes = append(attributes, attribute)
+			}
+			p.skipNewlines()
+			for p.check(comment) {
+				if c := p.parseInlineComment(); c != nil {
+					structDef.Comments = append(structDef.Comments, *c)
+				}
+				p.match(new_line)
+				p.skipNewlines()
+			}
+		}
+		if len(attributes) > 0 && p.check(right_brace) {
+			p.addError(p.peek(), "Expected field after attribute")
+			break
+		}
+
 		// Check for field name (identifier or allowed keywords)
 		current := p.peek()
 		if !(current.kind == identifier || p.isAllowedIdentifierKeyword(current.kind)) {
@@ -964,7 +1136,8 @@ func (p *parser) structDef(private bool) Statement {
 				Name:     fieldName.text,
 				Location: fieldName.getLocation(),
 			},
-			Type: fieldType,
+			Type:       fieldType,
+			Attributes: attributes,
 		})
 
 		// Check for inline comment after field type

@@ -30,6 +30,19 @@ ard format --check <file-or-dir>
 - wrapped function parameters are one per line
 - empty map literal is `[:]`
 
+## Attributes
+
+Struct-field attributes use `#name(...)`, appear one per line immediately before their field, and wrap their arguments when needed:
+
+```ard
+struct User {
+  #json(name: "displayName", omit: none)
+  display_name: Str?,
+}
+```
+
+Argument-free marker attributes omit parentheses. Attributes are currently accepted only on struct fields.
+
 ## Struct Literals
 
 - `0-2` properties may stay on one line if they fit

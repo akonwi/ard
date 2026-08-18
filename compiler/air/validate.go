@@ -88,6 +88,8 @@ func validateTypeInfo(program *Program, typ TypeInfo) error {
 			return fmt.Errorf("type %s has invalid err type %d", typ.Name, typ.Error)
 		}
 	case TypeStruct:
+		jsonNames := make(map[string]bool, len(typ.Fields))
+		jsonRepresentableFields := 0
 		for i, field := range typ.Fields {
 			if field.Index != i {
 				return fmt.Errorf("type %s field %s has index %d, want %d", typ.Name, field.Name, field.Index, i)
@@ -95,6 +97,26 @@ func validateTypeInfo(program *Program, typ TypeInfo) error {
 			if !validTypeID(program, field.Type) {
 				return fmt.Errorf("type %s field %s has invalid type %d", typ.Name, field.Name, field.Type)
 			}
+			if field.JSON.OmitNone && program.Types[field.Type-1].Kind != TypeMaybe {
+				return fmt.Errorf("type %s field %s omits none but is not Maybe", typ.Name, field.Name)
+			}
+			if field.JSON.Skip && (field.JSON.HasName || field.JSON.OmitNone) {
+				return fmt.Errorf("type %s field %s has conflicting JSON metadata", typ.Name, field.Name)
+			}
+			if !field.JSON.Skip {
+				jsonRepresentableFields++
+				jsonName := field.Name
+				if field.JSON.HasName {
+					jsonName = field.JSON.Name
+				}
+				if jsonNames[jsonName] {
+					return fmt.Errorf("type %s has duplicate JSON field name %q", typ.Name, jsonName)
+				}
+				jsonNames[jsonName] = true
+			}
+		}
+		if len(typ.Fields) > 0 && jsonRepresentableFields == 0 {
+			return fmt.Errorf("type %s has no JSON-representable fields", typ.Name)
 		}
 	case TypeUnion:
 		for _, member := range typ.Members {
