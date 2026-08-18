@@ -7,6 +7,9 @@ concurrency:
   group: test-compiler-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+env:
+  GOEXPERIMENT: jsonv2
+
 jobs:
   test-compiler:
     runs-on: ubuntu-latest
