@@ -4,7 +4,7 @@
 
 Accepted
 
-Superseded in part by ADR 0063. The builtin `Error` contract and its value/ABI representation remain current, but imported conventional error returns and callbacks now preserve identity through `!Error` instead of reducing errors to `Str`.
+Superseded in part by ADRs 0063 and 0065. The builtin `Error` contract and its value/ABI representation remain current, imported conventional error returns and callbacks preserve identity through `!Error`, and Ard-defined implementations must now use a non-mutating receiver.
 
 ## Context
 
@@ -49,7 +49,7 @@ impl Error for ValidationError {
 
 On the Go target, this implementation emits an `Error() string` method and intentionally makes the generated Go type satisfy Go's `error` interface. An inherent method with the same shape does not establish Ard-level `Error` conformance; the explicit implementation is required.
 
-The initial contract supports Ard structs. A non-mutating implementation gives the generated value type an `Error` method; a mutating implementation follows ordinary Ard method lowering and requires mutable addressability because only the generated pointer type satisfies Go's `error` interface.
+The contract supports Ard structs. As amended by ADR 0065, `Error.error()` is a non-mutating trait method, so an Ard-defined mutating implementation is rejected. A non-mutating implementation gives the generated value type an `Error` method; its pointer type also satisfies Go's `error` interface through Go's ordinary method-set rules.
 
 ### Constructing message-only errors
 
@@ -149,4 +149,6 @@ Other Ard traits do not gain special Go error behavior merely by declaring a met
 - `docs/adrs/0031-go-backend-lowering-contract.md`
 - `docs/adrs/0038-use-idiomatic-go-abi-for-result-and-maybe-returns.md`
 - `docs/adrs/0039-support-explicit-go-interface-interop.md`
+- `docs/adrs/0063-preserve-imported-go-error-identity.md`
+- `docs/adrs/0065-declare-mutating-trait-receiver-methods.md`
 - `docs/language-philosophy.md`

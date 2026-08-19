@@ -174,14 +174,17 @@ func validateImpl(program *Program, impl Impl) error {
 			return fmt.Errorf("impl %d method %s has %d params, want receiver plus %d trait params", impl.ID, method.Name, len(method.Signature.Params), len(traitMethod.Signature.Params))
 		}
 		receiverType := method.Signature.Params[0].Type
-		receiverMatches := receiverType == impl.ForType
-		if !receiverMatches {
-			if receiver, err := typeInfo(program, receiverType); err == nil {
-				receiverMatches = receiver.Kind == TypeReference && receiver.Elem == impl.ForType
-			}
+		receiver, err := typeInfo(program, receiverType)
+		if err != nil {
+			return fmt.Errorf("impl %d method %s receiver: %w", impl.ID, method.Name, err)
 		}
+		receiverMutates := receiver.Kind == TypeReference
+		receiverMatches := receiverType == impl.ForType || (receiverMutates && receiver.Elem == impl.ForType)
 		if !receiverMatches {
 			return fmt.Errorf("impl %d method %s receiver type %d does not match impl type %d", impl.ID, method.Name, receiverType, impl.ForType)
+		}
+		if receiverMutates && !traitMethod.Mutates {
+			return fmt.Errorf("impl %d method %s mutates its receiver, but trait %s does not allow receiver mutation", impl.ID, method.Name, trait.Name)
 		}
 		for paramIndex, traitParam := range traitMethod.Signature.Params {
 			methodParam := method.Signature.Params[paramIndex+1]
@@ -956,6 +959,15 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 			return fmt.Errorf("trait call has invalid method index %d for trait %s", expr.Method, trait.Name)
 		}
 		method := trait.Methods[expr.Method]
+		if method.Mutates {
+			target, err := typeInfo(program, expr.Target.Type)
+			if err != nil {
+				return err
+			}
+			if target.Kind != TypeReference {
+				return fmt.Errorf("mutating trait method %s requires a reference target", method.Name)
+			}
+		}
 		if len(expr.Args) != len(method.Signature.Params) {
 			return fmt.Errorf("trait call method %s expects %d args, got %d", method.Name, len(method.Signature.Params), len(expr.Args))
 		}

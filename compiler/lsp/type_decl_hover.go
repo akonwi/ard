@@ -94,6 +94,9 @@ func renderTraitDecl(decl *parse.TraitDefinition) string {
 	for i := range decl.Methods {
 		method := &decl.Methods[i]
 		b.WriteString("  fn ")
+		if method.Mutates {
+			b.WriteString("mut ")
+		}
 		b.WriteString(method.Name)
 		b.WriteString("(")
 		params := make([]string, 0, len(method.Parameters))

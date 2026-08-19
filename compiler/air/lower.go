@@ -141,6 +141,28 @@ func (l *lowerer) structMethods(def *checker.StructDef) map[string]*checker.Func
 	return checker.StructMethodsInModules(l.moduleByName, checker.StructMethodOwner(def))
 }
 
+func (l *lowerer) traitMethods(typ checker.Type, trait *checker.Trait) map[string]*checker.FunctionDef {
+	owner, ok := checker.MethodOwnerForType(typ)
+	if !ok {
+		return nil
+	}
+	return checker.TraitMethodsInModules(l.moduleByName, owner, trait)
+}
+
+func (l *lowerer) requiredGoMethods(def *checker.StructDef) map[string]*checker.FunctionDef {
+	if def == nil {
+		return nil
+	}
+	return checker.RequiredGoMethodsInModules(l.moduleByName, checker.StructMethodOwner(def))
+}
+
+func (l *lowerer) inherentMethods(def *checker.StructDef) map[string]*checker.FunctionDef {
+	if def == nil {
+		return nil
+	}
+	return checker.InherentMethodsInModules(l.moduleByName, checker.StructMethodOwner(def))
+}
+
 func (l *lowerer) findReachableModule(path string) checker.Module {
 	if mod, ok := l.moduleByName[path]; ok {
 		return mod
@@ -1533,29 +1555,32 @@ func (l *lowerer) declareRequiredGenericGoMethods(module ModuleID, def *checker.
 	if err != nil {
 		return err
 	}
-	methods := l.structMethods(def)
-	names := make([]string, 0, len(methods))
-	for name, method := range methods {
-		if method != nil && method.RequiredGoMethodName != "" {
-			names = append(names, name)
+	requiredMethods := map[string]*checker.FunctionDef{}
+	for _, method := range l.requiredGoMethods(def) {
+		if method != nil {
+			requiredMethods[method.Name] = method
 		}
 	}
 	for _, trait := range def.Traits {
 		if !checker.IsBuiltinError(trait) {
 			continue
 		}
-		for _, method := range trait.GetMethods() {
-			if methods[method.Name] != nil {
-				names = append(names, method.Name)
+		for name, method := range l.traitMethods(def, trait) {
+			if method != nil {
+				requiredMethods[name] = method
 			}
 		}
+	}
+	names := make([]string, 0, len(requiredMethods))
+	for name := range requiredMethods {
+		names = append(names, name)
 	}
 	sort.Strings(names)
 	names = slices.Compact(names)
 	fl := &functionLowerer{l: l}
 	declaredMethods := map[string]FunctionID{}
 	for _, name := range names {
-		method := methods[name]
+		method := requiredMethods[name]
 		id, _, err := fl.declareGenericInstanceMethodFunction(module, selfType, def, method)
 		if err != nil {
 			return fmt.Errorf("declare required Go method %s.%s: %w", def.Name, method.RequiredGoMethodName, err)
@@ -1604,17 +1629,29 @@ func (l *lowerer) declareInherentImplMethodsForStruct(module ModuleID, def *chec
 	if !ok {
 		return fmt.Errorf("invalid struct method owner type %d", ownerType)
 	}
-	traitMethodNames := map[string]bool{}
+	traitMethodDefs := map[*checker.FunctionDef]bool{}
 	for _, trait := range def.Traits {
 		if trait == nil {
 			continue
 		}
-		for _, method := range trait.GetMethods() {
-			traitMethodNames[method.Name] = true
+		for _, method := range l.traitMethods(def, trait) {
+			traitMethodDefs[method] = true
 		}
 	}
-	for name, method := range l.structMethods(def) {
-		if traitMethodNames[name] || method == nil || functionHasUnresolvedTypeVar(method) {
+	for _, method := range l.requiredGoMethods(def) {
+		if method == nil || traitMethodDefs[method] || functionHasUnresolvedTypeVar(method) {
+			continue
+		}
+		id, err := l.declareInstanceMethodFunction(module, ownerInfo.Name, ownerType, method, nil, NoType)
+		if err != nil {
+			return err
+		}
+		if err := l.lowerInstanceMethodFunction(id, method); err != nil {
+			return err
+		}
+	}
+	for _, method := range l.inherentMethods(def) {
+		if method == nil || functionHasUnresolvedTypeVar(method) {
 			continue
 		}
 		id, err := l.declareInstanceMethodFunction(module, ownerInfo.Name, ownerType, method, nil, NoType)
@@ -1635,14 +1672,11 @@ func (l *lowerer) declareTraitImplsForType(module ModuleID, typ checker.Type) er
 	}
 
 	var traits []*checker.Trait
-	var methods map[string]*checker.FunctionDef
 	switch typed := typ.(type) {
 	case *checker.StructDef:
 		traits = typed.Traits
-		methods = l.structMethods(typed)
 	case *checker.Enum:
 		traits = typed.Traits
-		methods = typed.Methods
 	default:
 		return nil
 	}
@@ -1651,6 +1685,7 @@ func (l *lowerer) declareTraitImplsForType(module ModuleID, typ checker.Type) er
 		if trait == nil {
 			continue
 		}
+		methods := l.traitMethods(typ, trait)
 		if _, err := l.declareImpl(module, trait, typ, forType, methods); err != nil {
 			return err
 		}
@@ -1677,7 +1712,7 @@ func (l *lowerer) declareImpl(module ModuleID, trait *checker.Trait, owner check
 		if methodDef == nil {
 			return 0, fmt.Errorf("missing method %s for impl %s on %s", traitMethod.Name, trait.Name, owner.String())
 		}
-		methodID, err := l.declareMethodFunction(module, owner, trait.Name, ownerType, methodDef)
+		methodID, err := l.declareMethodFunction(module, owner, checkerTraitKey(trait), trait.Name, ownerType, methodDef)
 		if err != nil {
 			return 0, err
 		}
@@ -1778,8 +1813,8 @@ func (l *lowerer) declareBuiltinToStringMethod(module ModuleID, ownerInfo TypeIn
 	return id, nil
 }
 
-func (l *lowerer) declareMethodFunction(module ModuleID, owner checker.Type, traitName string, ownerType TypeID, def *checker.FunctionDef) (FunctionID, error) {
-	key := methodFunctionKey(module, owner.String(), traitName, def.Name)
+func (l *lowerer) declareMethodFunction(module ModuleID, owner checker.Type, traitKey, traitName string, ownerType TypeID, def *checker.FunctionDef) (FunctionID, error) {
+	key := methodFunctionKey(module, owner.String(), traitKey, def.Name)
 	if id, ok := l.functions[key]; ok {
 		return id, nil
 	}
@@ -2035,9 +2070,11 @@ func (fl *functionLowerer) declareGenericInstanceMethodFunction(module ModuleID,
 	}
 
 	orig := callDef
-	if methods := fl.l.structMethods(structType); methods != nil {
-		if m, ok := methods[callDef.Name]; ok && m != nil {
-			orig = m
+	if callDef.RequiredGoMethodName == "" {
+		if methods := fl.l.inherentMethods(structType); methods != nil {
+			if method := methods[callDef.Name]; method != nil {
+				orig = method
+			}
 		}
 	}
 
@@ -2739,7 +2776,7 @@ func (l *lowerer) internTrait(trait *checker.Trait) (TraitID, error) {
 		if err != nil {
 			return 0, err
 		}
-		loweredMethods[i] = TraitMethod{Name: method.Name, Signature: sig}
+		loweredMethods[i] = TraitMethod{Name: method.Name, Mutates: method.Mutates, Signature: sig}
 	}
 	l.program.Traits[id] = Trait{
 		ID:                  id,
@@ -6276,6 +6313,9 @@ func (fl *functionLowerer) lowerStaticTraitMethod(typeID TypeID, target *Expr, m
 			return nil, false, fmt.Errorf("impl %d references invalid trait %d", impl.ID, impl.Trait)
 		}
 		trait := fl.l.program.Traits[impl.Trait]
+		if method.DispatchTrait != nil && (trait.ModulePath != method.DispatchTrait.ModulePath || trait.Name != method.DispatchTrait.Name) {
+			continue
+		}
 		for i, traitMethod := range trait.Methods {
 			if traitMethod.Name != method.Method.Name {
 				continue

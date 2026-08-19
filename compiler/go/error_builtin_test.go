@@ -96,8 +96,7 @@ struct GenericMutableError<$T> {
 }
 
 impl Error for GenericMutableError {
-  fn mut error() Str {
-    self.calls =+ 1
+  fn error() Str {
     "generic mutable"
   }
 }
@@ -111,8 +110,7 @@ impl Error for BothStringAndError {
 }
 
 impl Error for MutableError {
-  fn mut error() Str {
-    self.calls =+ 1
+  fn error() Str {
     self.message
   }
 }
@@ -147,11 +145,10 @@ fn main() {
   let custom = ValidationError{message: "custom"}
   if not ffi::Message(custom) == "custom" { panic("custom Error implementation failed") }
   if not ffi::Message(Error::new("simple")) == "simple" { panic("Error::new failed") }
-  mut mutable_error = MutableError{message: "mutable", calls: 0}
-  if not ffi::Message(mutable_error) == "mutable" { panic("mutable Error implementation failed") }
+  let mutable_error = MutableError{message: "mutable", calls: 0}
+  if not ffi::Message(mutable_error) == "mutable" { panic("Error implementation failed") }
   let interpolation_error: mut MutableError = mut MutableError{message: "interpolated", calls: 0}
-  if not "{interpolation_error}" == "interpolated" { panic("mutable Error interpolation failed") }
-  if not interpolation_error.calls == 1 { panic("mutable Error interpolation lost its receiver") }
+  if not "{interpolation_error}" == "interpolated" { panic("referenced Error interpolation failed") }
   let holder = ffi::Holder{Err: custom}
   if not ffi::HolderMessage(holder) == "custom" { panic("Go error field failed") }
   let message = match passthrough(fail()) {
@@ -244,11 +241,9 @@ fn main() {
   let generic_as_error: Error = generic_error
   if not "{generic_as_error}" == "generic" { panic("generic Error upcast failed") }
   let generic_mutable: mut GenericMutableError<Int> = mut GenericMutableError<Int>{value: 1, calls: 0}
-  if not "{generic_mutable}" == "generic mutable" { panic("generic mutable Error interpolation failed") }
-  if not generic_mutable.calls == 1 { panic("generic mutable Error interpolation lost its receiver") }
+  if not "{generic_mutable}" == "generic mutable" { panic("generic referenced Error interpolation failed") }
   let generic_mutable_as_error: Error = generic_mutable
-  if not "{generic_mutable_as_error}" == "generic mutable" { panic("generic mutable Error upcast failed") }
-  if not generic_mutable.calls == 2 { panic("generic mutable Error upcast lost its receiver") }
+  if not "{generic_mutable_as_error}" == "generic mutable" { panic("generic referenced Error upcast failed") }
 }
 `), 0o644); err != nil {
 		t.Fatal(err)

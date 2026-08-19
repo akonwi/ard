@@ -23,6 +23,10 @@ type Program struct {
 	GoImports             map[string]*GoPackage
 	Statements            []Statement
 	StructMethods         map[MethodOwner]map[string]*FunctionDef
+	InherentMethods       map[MethodOwner]map[string]*FunctionDef
+	TraitMethods          map[TraitMethodOwner]map[string]*FunctionDef
+	AmbiguousTraitMethods map[MethodOwner]map[string]bool
+	RequiredGoMethods     map[MethodOwner]map[string]*FunctionDef
 	ForeignInterfaceImpls map[MethodOwner][]*ForeignType
 }
 
@@ -648,6 +652,10 @@ func New(filePath string, input *parse.Program, moduleResolver *ModuleResolver, 
 			GoImports:             map[string]*GoPackage{},
 			Statements:            []Statement{},
 			StructMethods:         map[MethodOwner]map[string]*FunctionDef{},
+			InherentMethods:       map[MethodOwner]map[string]*FunctionDef{},
+			TraitMethods:          map[TraitMethodOwner]map[string]*FunctionDef{},
+			AmbiguousTraitMethods: map[MethodOwner]map[string]bool{},
+			RequiredGoMethods:     map[MethodOwner]map[string]*FunctionDef{},
 			ForeignInterfaceImpls: map[MethodOwner][]*ForeignType{},
 		},
 		scope:                   &rootScope,
@@ -704,7 +712,12 @@ func (c *Checker) planTraitGoInterfaces() {
 		count  int
 		traits map[*Trait]bool
 	}
+	type sourceMethodKey struct {
+		owner  MethodOwner
+		method string
+	}
 	plans := map[methodKey]*methodPlan{}
+	traitProviders := map[sourceMethodKey]map[*Trait]bool{}
 	record := func(target Type, method string, trait *Trait) {
 		if target == nil {
 			return
@@ -718,6 +731,15 @@ func (c *Checker) planTraitGoInterfaces() {
 		plan.count++
 		if trait != nil {
 			plan.traits[trait] = true
+			if owner, ok := MethodOwnerForType(target); ok {
+				key := sourceMethodKey{owner: owner, method: method}
+				providers := traitProviders[key]
+				if providers == nil {
+					providers = map[*Trait]bool{}
+					traitProviders[key] = providers
+				}
+				providers[trait] = true
+			}
 		}
 	}
 
@@ -745,7 +767,7 @@ func (c *Checker) planTraitGoInterfaces() {
 				continue
 			}
 			target, ok := targetSymbol.Type.(*StructDef)
-			if !ok {
+			if !ok || IsBuiltinError(trait) {
 				continue
 			}
 			for _, method := range trait.GetMethods() {
@@ -767,7 +789,14 @@ func (c *Checker) planTraitGoInterfaces() {
 			continue
 		}
 		for trait := range plan.traits {
-			trait.goInterfaceFallback = true
+			if !IsBuiltinError(trait) {
+				trait.goInterfaceFallback = true
+			}
+		}
+	}
+	for key, providers := range traitProviders {
+		if len(providers) > 1 {
+			c.program.MarkAmbiguousTraitMethod(key.owner, key.method)
 		}
 	}
 }
@@ -2501,6 +2530,7 @@ func (c *Checker) checkForeignInterfaceImplementation(s *parse.TraitImplementati
 	pendingMethods := map[string]*FunctionDef{}
 	pendingMethodSpans := map[string]SourceSpan{}
 	receiverGenerics := genericParamsForType(targetType)
+	owner := StructMethodOwner(targetType)
 	for _, method := range s.Methods {
 		if len(method.TypeParams) > 0 {
 			validImpl = false
@@ -2651,7 +2681,8 @@ func (c *Checker) checkForeignInterfaceImplementation(s *parse.TraitImplementati
 		fnDef.Mutates = method.Mutates
 		fnDef.Name = goMethodNameToArdName(interfaceMethodName)
 		fnDef.RequiredGoMethodName = interfaceMethodName
-		if _, exists := c.structMethod(targetType, fnDef.Name); exists {
+		_, inherentExists := c.program.InherentMethod(owner, fnDef.Name)
+		if inherentExists || c.program.HasRequiredGoMethodNamed(owner, fnDef.Name) {
 			validImpl = false
 			invalidImplementedMethods[method.Name] = true
 			c.addDiagnostic(duplicateMethodDiagnostic{Method: fnDef.Name, Span: c.sourceSpan(method.GetLocation())}.build())
@@ -2682,9 +2713,11 @@ func (c *Checker) checkForeignInterfaceImplementation(s *parse.TraitImplementati
 		return nil
 	}
 	for _, method := range pendingMethods {
+		if c.program.HasTraitMethodNamed(owner, method.Name) {
+			c.program.MarkAmbiguousTraitMethod(owner, method.Name)
+		}
 		c.addStructMethod(targetType, method)
 	}
-	owner := StructMethodOwner(targetType)
 	c.program.ForeignInterfaceImpls[owner] = append(c.program.ForeignInterfaceImpls[owner], iface)
 	return &Statement{Stmt: targetType}
 }
@@ -2905,9 +2938,13 @@ func (c *Checker) foreignInterfaceImplRequiresPointer(def *StructDef, iface *For
 	if def == nil || iface == nil {
 		return false
 	}
-	methods := c.structMethods(def)
+	owner := StructMethodOwner(def)
+	methods := c.program.RequiredGoMethodsFor(owner)
+	if methods == nil {
+		methods = RequiredGoMethodsInModules(c.program.Imports, owner)
+	}
 	for goName := range iface.Methods {
-		if method := methods[goMethodNameToArdName(goName)]; method != nil && method.Mutates {
+		if method := methods[goName]; method != nil && method.Mutates {
 			return true
 		}
 	}
@@ -3056,6 +3093,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				methods[i] = FunctionDef{
 					Private:    false,
 					Name:       method.Name,
+					Mutates:    method.Mutates,
 					Parameters: params,
 					ReturnType: returnType,
 				}
@@ -3136,28 +3174,48 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 			}
 
 			if IsBuiltinError(trait) {
-				if _, ok := typeSym.Type.(*StructDef); !ok {
+				targetType, ok := typeSym.Type.(*StructDef)
+				if !ok {
 					legacy := fmt.Sprintf("%s cannot implement Error", s.ForType.Name)
 					c.addDiagnostic(invalidImplementationTargetDiagnostic{
 						Target: s.ForType.Name, ContractKind: "trait", Span: c.sourceSpan(s.ForType.GetLocation()), LegacyMessage: legacy,
 					}.build())
 					return nil
 				}
+				for _, method := range s.Methods {
+					if method.Name != "error" {
+						continue
+					}
+					methodSpan := c.sourceSpan(method.GetLocation())
+					if fieldName, fieldSpan, collision := c.generatedGoFieldCollision(targetType, "Error"); collision {
+						c.addDiagnostic(goMethodFieldCollisionDiagnostic{
+							Type: targetType.Name, Field: fieldName, Method: "Error", MethodSpan: methodSpan, FieldSpan: fieldSpan,
+						}.build())
+						return nil
+					}
+					if _, exists := c.program.RequiredGoMethod(StructMethodOwner(targetType), "Error"); exists {
+						c.addDiagnostic(duplicateMethodDiagnostic{Method: method.Name, Span: methodSpan}.build())
+						return nil
+					}
+				}
 			}
 
 			switch targetType := typeSym.Type.(type) {
 			case *StructDef:
+				structMethodOwner := StructMethodOwner(targetType)
 				// Verify that all required methods are implemented.
 				traitMethods := trait.GetMethods()
-				for _, traitMethod := range traitMethods {
-					methodName := goname.NaturalIdentifier(traitMethod.Name, true)
-					if methodName == "MarshalJSONTo" || methodName == "UnmarshalJSONFrom" {
-						trait.goInterfaceFallback = true
-					}
-					for fieldName := range targetType.Fields {
-						if goname.NaturalIdentifier(fieldName, true) == methodName {
+				if !IsBuiltinError(trait) {
+					for _, traitMethod := range traitMethods {
+						methodName := goname.NaturalIdentifier(traitMethod.Name, true)
+						if methodName == "MarshalJSONTo" || methodName == "UnmarshalJSONFrom" {
 							trait.goInterfaceFallback = true
-							break
+						}
+						for fieldName := range targetType.Fields {
+							if goname.NaturalIdentifier(fieldName, true) == methodName {
+								trait.goInterfaceFallback = true
+								break
+							}
 						}
 					}
 				}
@@ -3234,6 +3292,12 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 						continue
 					}
 
+					if method.Mutates && !traitMethod.Mutates {
+						c.addDiagnostic(implementationReceiverMutabilityDiagnostic{
+							Method: method.Name, Contract: trait.name(), Span: c.sourceSpan(method.GetLocation()),
+						}.build())
+					}
+
 					// if we made it this far, it's a valid implementation
 					c.pushMethodGenericAllowlist(receiverGenerics)
 					fnDef := c.checkFunction(&method, func() {
@@ -3247,6 +3311,13 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					}
 					fnDef.Receiver = s.Receiver.Name
 					fnDef.Mutates = method.Mutates
+					if IsBuiltinError(trait) {
+						fnDef.RequiredGoMethodName = "Error"
+					}
+					if c.program.HasRequiredGoMethodNamed(structMethodOwner, fnDef.Name) {
+						c.program.MarkAmbiguousTraitMethod(structMethodOwner, fnDef.Name)
+					}
+					c.program.AddTraitMethod(structMethodOwner, trait, fnDef.Name, fnDef)
 					// add the method to the struct method table
 					c.addStructMethod(targetType, fnDef)
 				}
@@ -3268,6 +3339,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				return &Statement{Stmt: targetType}
 
 			case *Enum:
+				enumMethodOwner := MethodOwner{ModulePath: targetType.ModulePath, TypeName: targetType.Name}
 				// Verify that all required methods are implemented (same logic as structs)
 				traitMethods := trait.GetMethods()
 				implementedMethods := make(map[string]bool)
@@ -3343,6 +3415,12 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 						continue
 					}
 
+					if method.Mutates && !traitMethod.Mutates {
+						c.addDiagnostic(implementationReceiverMutabilityDiagnostic{
+							Method: method.Name, Contract: trait.name(), Span: c.sourceSpan(method.GetLocation()),
+						}.build())
+					}
+
 					// if we made it this far, it's a valid implementation
 					c.pushMethodGenericAllowlist(receiverGenerics)
 					fnDef := c.checkFunction(&method, func() {
@@ -3360,6 +3438,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 						c.addDiagnostic(mutatingEnumMethodDiagnostic{Span: c.sourceSpan(method.GetLocation())}.build())
 					}
 					fnDef.Mutates = false // Enums are always immutable
+					c.program.AddTraitMethod(enumMethodOwner, trait, fnDef.Name, fnDef)
 
 					// Ensure enum has Methods map initialized
 					if targetType.Methods == nil {
@@ -7302,6 +7381,13 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 				// Struct methods live in the checker's side table rather than on
 				// the shape type. Resolve an existing to_str before Error so the
 				// established interpolation behavior keeps precedence.
+				if c.hasAmbiguousTraitMethod(cx.Type(), "to_str") {
+					c.addDiagnostic(ambiguousTraitMethodDiagnostic{
+						Receiver: cx.Type().String(), Method: "to_str", Span: c.sourceSpan(s.Chunks[i].GetLocation()),
+					}.build())
+					chunks[i] = &StrLiteral{}
+					continue
+				}
 				if structDef, ok := cx.Type().(*StructDef); ok {
 					if toStr, ok := c.structMethod(structDef, "to_str"); ok && toStr.ReturnType == Str && len(toStr.Parameters) == 0 {
 						methodNode := c.createInterpolationMethodNode(original, cx, toStr, s.Chunks[i].GetLocation())
@@ -7315,7 +7401,12 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 				}
 
 				if toStr, ok := cx.Type().get("to_str").(*FunctionDef); ok && toStr.ReturnType == Str && len(toStr.Parameters) == 0 {
-					chunks[i] = c.createPrimitiveMethodNode(cx, toStr.Name, []Expression{}, toStr, nil, parse.Location{})
+					methodNode := c.createInterpolationMethodNode(original, cx, toStr, s.Chunks[i].GetLocation())
+					if methodNode == nil {
+						chunks[i] = &StrLiteral{}
+					} else {
+						chunks[i] = methodNode
+					}
 					continue
 				}
 
@@ -7337,18 +7428,13 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 				_, errorObject := cx.Type().(*Trait)
 				if (concreteError || errorObject) && cx.Type().hasTrait(BuiltinError) {
 					errorMethod := BuiltinError.methods[0]
-					if structDef, ok := cx.Type().(*StructDef); ok {
-						if implementation, ok := c.structMethod(structDef, errorMethod.Name); ok {
-							// Keep builtin trait dispatch (and its native Go Error
-							// method metadata), but carry the concrete receiver's
-							// mutability through normal reference checks.
-							errorMethod.Mutates = implementation.Mutates
-						}
-					}
 					methodNode := c.createInterpolationMethodNode(original, cx, &errorMethod, s.Chunks[i].GetLocation())
 					if methodNode == nil {
 						chunks[i] = &StrLiteral{}
 					} else {
+						if instanceMethod, ok := methodNode.(*InstanceMethod); ok {
+							instanceMethod.DispatchTrait = BuiltinError
+						}
 						chunks[i] = methodNode
 					}
 					continue
@@ -7593,7 +7679,14 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 			// A reference-valued subject resolves members through its referent:
 			// method calls are observational reads of the receiver expression
 			// (ADR 0057).
-			if structDef, ok := derefMutableRef(subj.Type()).(*StructDef); ok {
+			memberType := derefMutableRef(subj.Type())
+			if c.hasAmbiguousTraitMethod(memberType, s.Method.Name) {
+				c.addDiagnostic(ambiguousTraitMethodDiagnostic{
+					Receiver: memberType.String(), Method: s.Method.Name, Span: c.sourceSpan(s.Method.GetLocation()),
+				}.build())
+				return nil
+			}
+			if structDef, ok := memberType.(*StructDef); ok {
 				if method, ok := c.structMethod(structDef, s.Method.Name); ok {
 					sig = method
 				}

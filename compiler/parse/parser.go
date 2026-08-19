@@ -1318,6 +1318,10 @@ func (p *parser) traitDef(private bool) *TraitDefinition {
 			break
 		}
 		fnToken := p.advance()
+		mutates := p.check(mut) && !p.check(mut, left_paren)
+		if mutates {
+			p.advance()
+		}
 
 		if !p.check(identifier) && !p.isKeyword(p.peek().kind) {
 			p.addError(p.peek(), "Expected function name")
@@ -1399,6 +1403,7 @@ func (p *parser) traitDef(private bool) *TraitDefinition {
 		traitDef.Methods = append(traitDef.Methods, FunctionDeclaration{
 			Location:   fnLocation,
 			Name:       name.text,
+			Mutates:    mutates,
 			Parameters: params,
 			ReturnType: returnType,
 			Body:       nil, // No body for trait method signatures

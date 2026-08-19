@@ -22,6 +22,10 @@ trait String {
 }
 ```
 
+As amended by ADR 0065, a trait method that permits receiver mutation declares
+that capability with `fn mut`; calls to that method require mutable receiver
+access.
+
 A concrete type implements a trait with an `impl Trait for Type` block:
 
 ```ard
@@ -53,3 +57,4 @@ The checker should validate that trait implementations provide the required meth
 ## Related
 
 - `docs/adrs/0002-use-air-as-backend-boundary.md`
+- `docs/adrs/0065-declare-mutating-trait-receiver-methods.md`

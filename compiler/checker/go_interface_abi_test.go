@@ -51,6 +51,10 @@ type Namer interface {
 	Name() string
 }
 
+type Errorer interface {
+	Error() string
+}
+
 type URLer interface {
 	URL() string
 }
@@ -252,6 +256,144 @@ impl ffi::ValueTaker for Impl {
 				}
 			}
 		})
+	}
+}
+
+func TestGoRequiredAndOrdinaryTraitMethodCollisionIsOrderIndependent(t *testing.T) {
+	root := t.TempDir()
+	writeGoInterfaceABIPackage(t, root)
+	resolver := checker.NewGoPackagesResolver(root, nil)
+	implementations := []string{
+		`impl ffi::Namer for Person {
+  fn name() Str { "foreign" }
+}
+impl Label for Person {
+  fn name() Str { "label" }
+}`,
+		`impl Label for Person {
+  fn name() Str { "label" }
+}
+impl ffi::Namer for Person {
+  fn name() Str { "foreign" }
+}`,
+	}
+	for _, impls := range implementations {
+		source := `use go:example.com/app/ffi
+trait Label {
+  fn name() Str
+}
+struct Person {}
+` + impls + `
+let person = Person{}
+person.name()
+`
+		result := parse.Parse([]byte(source), "test.ard")
+		if len(result.Errors) > 0 {
+			t.Fatalf("parse error: %s", result.Errors[0].Message)
+		}
+		c := checker.New("test.ard", result.Program, nil, checker.CheckOptions{GoResolver: resolver})
+		c.Check()
+		diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeAmbiguousTraitMethod)
+		if diagnostic.Message != "Method 'name' is ambiguous on Person" {
+			t.Fatalf("diagnostic = %#v", diagnostic)
+		}
+	}
+}
+
+func TestGoRequiredMutatingMethodKeepsPointerRequirementAcrossTraitCollision(t *testing.T) {
+	root := t.TempDir()
+	writeGoInterfaceABIPackage(t, root)
+	resolver := checker.NewGoPackagesResolver(root, nil)
+	implementations := []string{
+		`impl ffi::Namer for Person {
+  fn mut name() Str { "foreign" }
+}
+impl Label for Person {
+  fn name() Str { "label" }
+}`,
+		`impl Label for Person {
+  fn name() Str { "label" }
+}
+impl ffi::Namer for Person {
+  fn mut name() Str { "foreign" }
+}`,
+	}
+	for _, impls := range implementations {
+		source := `use go:example.com/app/ffi
+trait Label {
+  fn name() Str
+}
+struct Person {}
+` + impls + `
+fn pass(value: ffi::Namer) {}
+let person = Person{}
+pass(person)
+`
+		result := parse.Parse([]byte(source), "test.ard")
+		if len(result.Errors) > 0 {
+			t.Fatalf("parse error: %s", result.Errors[0].Message)
+		}
+		c := checker.New("test.ard", result.Program, nil, checker.CheckOptions{GoResolver: resolver})
+		c.Check()
+		if c.HasErrors() {
+			t.Fatalf("checker diagnostics: %v", c.Diagnostics())
+		}
+		statements := c.Module().Program().Statements
+		call, ok := statements[len(statements)-1].Expr.(*checker.FunctionCall)
+		if !ok || len(call.Args) != 1 {
+			t.Fatalf("last expression = %#v, want one-argument function call", statements[len(statements)-1].Expr)
+		}
+		conversion, ok := call.Args[0].(*checker.InterfaceConversion)
+		if !ok || conversion.Mode != checker.InterfaceOwnedPointer {
+			t.Fatalf("argument = %#v, want owned-pointer interface conversion", call.Args[0])
+		}
+	}
+}
+
+func TestBuiltinErrorAndGoErrorMethodRejectDuplicateInEitherOrder(t *testing.T) {
+	root := t.TempDir()
+	writeGoInterfaceABIPackage(t, root)
+	resolver := checker.NewGoPackagesResolver(root, nil)
+	implementations := []string{
+		`impl ffi::Errorer for Problem {
+  fn error() Str { "foreign" }
+}
+impl Error for Problem {
+  fn error() Str { "builtin" }
+}`,
+		`impl Error for Problem {
+  fn error() Str { "builtin" }
+}
+impl ffi::Errorer for Problem {
+  fn error() Str { "foreign" }
+}`,
+		`trait Label {
+  fn error() Str
+}
+impl ffi::Errorer for Problem {
+  fn error() Str { "foreign" }
+}
+impl Label for Problem {
+  fn error() Str { "label" }
+}
+impl Error for Problem {
+  fn error() Str { "builtin" }
+}`,
+	}
+	for _, impls := range implementations {
+		source := `use go:example.com/app/ffi
+struct Problem {}
+` + impls
+		result := parse.Parse([]byte(source), "test.ard")
+		if len(result.Errors) > 0 {
+			t.Fatalf("parse error: %s", result.Errors[0].Message)
+		}
+		c := checker.New("test.ard", result.Program, nil, checker.CheckOptions{GoResolver: resolver})
+		c.Check()
+		diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeDuplicateMethod)
+		if diagnostic.Message != "Duplicate method: error" {
+			t.Fatalf("diagnostic = %#v", diagnostic)
+		}
 	}
 }
 

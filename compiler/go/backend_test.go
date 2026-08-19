@@ -4015,7 +4015,7 @@ func TestLowerProgramKeepsImportedOrdinaryTraitNativeWhenDefiningModuleUsesMutab
 
 trait View {
   fn value() Int
-  fn set(number: Int)
+  fn mut set(number: Int)
 }
 
 struct Box { number: Int }
@@ -4389,7 +4389,7 @@ func TestLowerProgramRetainsStandaloneReservedStructMethods(t *testing.T) {
 func TestLowerProgramPassesPointerReceiverForMutatingTraitImpl(t *testing.T) {
 	program := lowerSource(t, `
 		trait Writer {
-			fn write(text: Str)
+			fn mut write(text: Str)
 		}
 
 		struct Buffer {
@@ -4402,13 +4402,13 @@ func TestLowerProgramPassesPointerReceiverForMutatingTraitImpl(t *testing.T) {
 			}
 		}
 
-		fn send(w: Writer) {
+		fn send(w: mut Writer) {
 			w.write("hi")
 		}
 
 		fn main() {
-			mut buffer = Buffer{contents: ""}
-			send(buffer)
+			let buffer = Buffer{contents: ""}
+			send(mut buffer)
 		}
 	`)
 
@@ -4475,7 +4475,7 @@ use nestprobe/tui/core/widget
 struct Text { content: Str }
 
 impl widget::Widget for Text {
-  fn mut render(frame: widget::Frame) { () }
+  fn render(frame: widget::Frame) { () }
 }
 
 fn plain(content: Str) widget::Widget {
@@ -4488,7 +4488,7 @@ use nestprobe/tui/core/widget
 struct Box { child: widget::Widget }
 
 impl widget::Widget for Box {
-  fn mut render(frame: widget::Frame) {
+  fn render(frame: widget::Frame) {
     self.child.render(frame)
   }
 }
@@ -4570,7 +4570,7 @@ use aliasprobe/widget
 struct Text { content: Str }
 
 impl widget::Widget for Text {
-  fn mut render(frame: widget::Frame) { () }
+  fn render(frame: widget::Frame) { () }
 }
 
 fn new(content: Str) widget::Widget { Text{content: content} }
@@ -4581,7 +4581,7 @@ use aliasprobe/widget
 struct Box { child: widget::Widget }
 
 impl widget::Widget for Box {
-  fn mut render(frame: widget::Frame) { self.child.render(frame) }
+  fn render(frame: widget::Frame) { self.child.render(frame) }
 }
 
 fn new(child: widget::Widget) widget::Widget { Box{child: child} }

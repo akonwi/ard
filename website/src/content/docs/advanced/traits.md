@@ -29,6 +29,34 @@ trait Drawable {
 }
 ```
 
+### Mutating trait methods
+
+Mark a trait method with `fn mut` when implementations may mutate their
+receiver:
+
+```ard
+trait Counter {
+  fn mut set(value: Int)
+  fn value() Int
+}
+```
+
+Calling `set` requires mutable receiver access:
+
+```ard
+fn update(counter: mut Counter) {
+  counter.set(2)
+}
+
+fn inspect(counter: Counter) Int {
+  counter.value()
+}
+```
+
+A mutating implementation cannot satisfy a trait method that omits `mut`.
+A non-mutating implementation may satisfy a mutating method because it requires
+less receiver capability than the contract permits.
+
 ## Implementing Traits
 
 Use `impl TraitName for TypeName` to implement a trait for a specific type:

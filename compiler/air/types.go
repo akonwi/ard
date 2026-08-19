@@ -252,6 +252,7 @@ type Trait struct {
 
 type TraitMethod struct {
 	Name      string
+	Mutates   bool
 	Signature Signature
 }
 

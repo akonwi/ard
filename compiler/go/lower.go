@@ -1518,7 +1518,8 @@ func (l *lowerer) collectFunctionComparableTypeParams() map[air.FunctionID]map[s
 
 func (l *lowerer) directGoMethodName(fn air.Function) (string, bool) {
 	key, methodName, ok := l.goMethodKey(fn)
-	if !ok || l.goMethodCollisions[key] || len(fn.Captures) != 0 {
+	collisionBlocksMethod := l.goMethodCollisions[key] && fn.RequiredGoMethodName == ""
+	if !ok || collisionBlocksMethod || len(fn.Captures) != 0 {
 		return "", false
 	}
 	receiverTypeID := fn.Receiver

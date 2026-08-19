@@ -204,7 +204,7 @@ enum Color {
 }
 
 trait Render {
-  fn describe() Str
+  fn mut describe() Str
 }
 
 type Fallback = Str | Int
@@ -239,7 +239,7 @@ type Cells = [Str]
 	})
 	t.Run("trait with method signatures", func(t *testing.T) {
 		content := spanHover(t, source, 18, 7)
-		want := "trait Render {\n  fn describe() Str\n}"
+		want := "trait Render {\n  fn mut describe() Str\n}"
 		if !strings.Contains(content, want) {
 			t.Fatalf("trait hover = %q, want contains %q", content, want)
 		}

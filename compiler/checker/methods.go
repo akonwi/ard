@@ -25,7 +25,7 @@ func (c *Checker) prepareInherentImplSignatures() {
 		case *StructDef:
 			owner = StructMethodOwner(target)
 			receiverGenerics = genericParamsForType(target)
-			addMethod = func(method *FunctionDef) { c.addStructMethod(target, method) }
+			addMethod = func(method *FunctionDef) { c.addInherentStructMethod(target, method) }
 		case *Enum:
 			owner = MethodOwner{ModulePath: target.ModulePath, TypeName: target.Name}
 			receiverGenerics = genericParamsForType(target)
@@ -82,6 +82,114 @@ func StructMethodOwner(def *StructDef) MethodOwner {
 	return MethodOwner{ModulePath: def.ModulePath, TypeName: def.Name}
 }
 
+func MethodOwnerForType(typ Type) (MethodOwner, bool) {
+	switch typed := typ.(type) {
+	case *StructDef:
+		return StructMethodOwner(typed), true
+	case *Enum:
+		return MethodOwner{ModulePath: typed.ModulePath, TypeName: typed.Name}, true
+	default:
+		return MethodOwner{}, false
+	}
+}
+
+type TraitMethodOwner struct {
+	MethodOwner
+	TraitModulePath string
+	TraitName       string
+}
+
+func traitMethodOwner(owner MethodOwner, trait *Trait) TraitMethodOwner {
+	if trait == nil {
+		return TraitMethodOwner{MethodOwner: owner}
+	}
+	return TraitMethodOwner{MethodOwner: owner, TraitModulePath: trait.ModulePath, TraitName: trait.Name}
+}
+
+func (p *Program) AddInherentMethod(owner MethodOwner, name string, method *FunctionDef) {
+	if p == nil || owner.TypeName == "" || name == "" || method == nil {
+		return
+	}
+	if p.InherentMethods == nil {
+		p.InherentMethods = map[MethodOwner]map[string]*FunctionDef{}
+	}
+	methods := p.InherentMethods[owner]
+	if methods == nil {
+		methods = map[string]*FunctionDef{}
+		p.InherentMethods[owner] = methods
+	}
+	methods[name] = method
+}
+
+func (p *Program) InherentMethod(owner MethodOwner, name string) (*FunctionDef, bool) {
+	if p == nil || p.InherentMethods == nil {
+		return nil, false
+	}
+	method, ok := p.InherentMethods[owner][name]
+	return method, ok
+}
+
+func (p *Program) InherentMethodsFor(owner MethodOwner) map[string]*FunctionDef {
+	if p == nil || p.InherentMethods == nil {
+		return nil
+	}
+	return p.InherentMethods[owner]
+}
+
+func (p *Program) AddTraitMethod(owner MethodOwner, trait *Trait, name string, method *FunctionDef) {
+	if p == nil || owner.TypeName == "" || trait == nil || name == "" || method == nil {
+		return
+	}
+	if p.TraitMethods == nil {
+		p.TraitMethods = map[TraitMethodOwner]map[string]*FunctionDef{}
+	}
+	key := traitMethodOwner(owner, trait)
+	methods := p.TraitMethods[key]
+	if methods == nil {
+		methods = map[string]*FunctionDef{}
+		p.TraitMethods[key] = methods
+	}
+	methods[name] = method
+}
+
+func (p *Program) TraitMethodsFor(owner MethodOwner, trait *Trait) map[string]*FunctionDef {
+	if p == nil || p.TraitMethods == nil || trait == nil {
+		return nil
+	}
+	return p.TraitMethods[traitMethodOwner(owner, trait)]
+}
+
+func (p *Program) HasTraitMethodNamed(owner MethodOwner, name string) bool {
+	if p == nil {
+		return false
+	}
+	for key, methods := range p.TraitMethods {
+		if key.MethodOwner == owner && methods[name] != nil {
+			return true
+		}
+	}
+	return false
+}
+
+func (p *Program) MarkAmbiguousTraitMethod(owner MethodOwner, name string) {
+	if p == nil || owner.TypeName == "" || name == "" {
+		return
+	}
+	if p.AmbiguousTraitMethods == nil {
+		p.AmbiguousTraitMethods = map[MethodOwner]map[string]bool{}
+	}
+	methods := p.AmbiguousTraitMethods[owner]
+	if methods == nil {
+		methods = map[string]bool{}
+		p.AmbiguousTraitMethods[owner] = methods
+	}
+	methods[name] = true
+}
+
+func (p *Program) HasAmbiguousTraitMethod(owner MethodOwner, name string) bool {
+	return p != nil && p.AmbiguousTraitMethods[owner][name]
+}
+
 func (p *Program) AddStructMethod(owner MethodOwner, name string, method *FunctionDef) {
 	if p == nil || owner.TypeName == "" || name == "" || method == nil {
 		return
@@ -95,6 +203,45 @@ func (p *Program) AddStructMethod(owner MethodOwner, name string, method *Functi
 		p.StructMethods[owner] = methods
 	}
 	methods[name] = method
+}
+
+func (p *Program) AddRequiredGoMethod(owner MethodOwner, name string, method *FunctionDef) {
+	if p == nil || owner.TypeName == "" || name == "" || method == nil {
+		return
+	}
+	if p.RequiredGoMethods == nil {
+		p.RequiredGoMethods = map[MethodOwner]map[string]*FunctionDef{}
+	}
+	methods := p.RequiredGoMethods[owner]
+	if methods == nil {
+		methods = map[string]*FunctionDef{}
+		p.RequiredGoMethods[owner] = methods
+	}
+	methods[name] = method
+}
+
+func (p *Program) RequiredGoMethod(owner MethodOwner, name string) (*FunctionDef, bool) {
+	if p == nil || p.RequiredGoMethods == nil {
+		return nil, false
+	}
+	method, ok := p.RequiredGoMethods[owner][name]
+	return method, ok
+}
+
+func (p *Program) RequiredGoMethodsFor(owner MethodOwner) map[string]*FunctionDef {
+	if p == nil || p.RequiredGoMethods == nil {
+		return nil
+	}
+	return p.RequiredGoMethods[owner]
+}
+
+func (p *Program) HasRequiredGoMethodNamed(owner MethodOwner, name string) bool {
+	for _, method := range p.RequiredGoMethodsFor(owner) {
+		if method != nil && method.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 func (p *Program) StructMethod(owner MethodOwner, name string) (*FunctionDef, bool) {
@@ -136,6 +283,22 @@ func StructMethodsInModules(modules map[string]Module, owner MethodOwner) map[st
 	return structMethodsInModulesSeen(modules, owner, map[string]bool{})
 }
 
+func InherentMethodsInModules(modules map[string]Module, owner MethodOwner) map[string]*FunctionDef {
+	return inherentMethodsInModulesSeen(modules, owner, map[string]bool{})
+}
+
+func TraitMethodsInModules(modules map[string]Module, owner MethodOwner, trait *Trait) map[string]*FunctionDef {
+	return traitMethodsInModulesSeen(modules, owner, trait, map[string]bool{})
+}
+
+func AmbiguousTraitMethodInModules(modules map[string]Module, owner MethodOwner, name string) bool {
+	return ambiguousTraitMethodInModulesSeen(modules, owner, name, map[string]bool{})
+}
+
+func RequiredGoMethodsInModules(modules map[string]Module, owner MethodOwner) map[string]*FunctionDef {
+	return requiredGoMethodsInModulesSeen(modules, owner, map[string]bool{})
+}
+
 func StructDefinitionInModules(modules map[string]Module, owner MethodOwner) (*StructDef, bool) {
 	return structDefinitionInModulesSeen(modules, owner, map[string]bool{})
 }
@@ -155,6 +318,23 @@ func foreignInterfaceImplementationInModulesSeen(modules map[string]Module, owne
 			continue
 		}
 		if program.implementsForeignInterface(owner, iface) || foreignInterfaceImplementationInModulesSeen(program.Imports, owner, iface, seen) {
+			return true
+		}
+	}
+	return false
+}
+
+func ambiguousTraitMethodInModulesSeen(modules map[string]Module, owner MethodOwner, name string, seen map[string]bool) bool {
+	for _, mod := range modules {
+		if mod == nil || seen[mod.Path()] {
+			continue
+		}
+		seen[mod.Path()] = true
+		program := mod.Program()
+		if program == nil {
+			continue
+		}
+		if program.HasAmbiguousTraitMethod(owner, name) || ambiguousTraitMethodInModulesSeen(program.Imports, owner, name, seen) {
 			return true
 		}
 	}
@@ -196,6 +376,90 @@ func structMethodsInModulesSeen(modules map[string]Module, owner MethodOwner, se
 		}
 	}
 	return nil
+}
+
+func inherentMethodsInModulesSeen(modules map[string]Module, owner MethodOwner, seen map[string]bool) map[string]*FunctionDef {
+	for _, mod := range modules {
+		if methods := inherentMethodsInModuleSeen(mod, owner, seen); methods != nil {
+			return methods
+		}
+	}
+	return nil
+}
+
+func inherentMethodsInModuleSeen(mod Module, owner MethodOwner, seen map[string]bool) map[string]*FunctionDef {
+	if mod == nil {
+		return nil
+	}
+	path := mod.Path()
+	if seen[path] {
+		return nil
+	}
+	seen[path] = true
+	program := mod.Program()
+	if program == nil {
+		return nil
+	}
+	if methods := program.InherentMethodsFor(owner); methods != nil {
+		return methods
+	}
+	return inherentMethodsInModulesSeen(program.Imports, owner, seen)
+}
+
+func traitMethodsInModulesSeen(modules map[string]Module, owner MethodOwner, trait *Trait, seen map[string]bool) map[string]*FunctionDef {
+	for _, mod := range modules {
+		if methods := traitMethodsInModuleSeen(mod, owner, trait, seen); methods != nil {
+			return methods
+		}
+	}
+	return nil
+}
+
+func requiredGoMethodsInModulesSeen(modules map[string]Module, owner MethodOwner, seen map[string]bool) map[string]*FunctionDef {
+	for _, mod := range modules {
+		if methods := requiredGoMethodsInModuleSeen(mod, owner, seen); methods != nil {
+			return methods
+		}
+	}
+	return nil
+}
+
+func requiredGoMethodsInModuleSeen(mod Module, owner MethodOwner, seen map[string]bool) map[string]*FunctionDef {
+	if mod == nil {
+		return nil
+	}
+	path := mod.Path()
+	if seen[path] {
+		return nil
+	}
+	seen[path] = true
+	program := mod.Program()
+	if program == nil {
+		return nil
+	}
+	if methods := program.RequiredGoMethodsFor(owner); methods != nil {
+		return methods
+	}
+	return requiredGoMethodsInModulesSeen(program.Imports, owner, seen)
+}
+
+func traitMethodsInModuleSeen(mod Module, owner MethodOwner, trait *Trait, seen map[string]bool) map[string]*FunctionDef {
+	if mod == nil {
+		return nil
+	}
+	path := mod.Path()
+	if seen[path] {
+		return nil
+	}
+	seen[path] = true
+	program := mod.Program()
+	if program == nil {
+		return nil
+	}
+	if methods := program.TraitMethodsFor(owner, trait); methods != nil {
+		return methods
+	}
+	return traitMethodsInModulesSeen(program.Imports, owner, trait, seen)
 }
 
 func structMethodsInModuleSeen(mod Module, owner MethodOwner, seen map[string]bool) map[string]*FunctionDef {
@@ -249,11 +513,29 @@ func structDefinitionInModuleSeen(mod Module, owner MethodOwner, seen map[string
 	return structDefinitionInModulesSeen(program.Imports, owner, seen)
 }
 
+func (c *Checker) addInherentStructMethod(def *StructDef, method *FunctionDef) {
+	if def == nil || method == nil {
+		return
+	}
+	owner := StructMethodOwner(def)
+	c.program.AddInherentMethod(owner, method.Name, method)
+	c.program.AddStructMethod(owner, method.Name, method)
+}
+
 func (c *Checker) addStructMethod(def *StructDef, method *FunctionDef) {
 	if def == nil || method == nil {
 		return
 	}
-	c.program.AddStructMethod(StructMethodOwner(def), method.Name, method)
+	owner := StructMethodOwner(def)
+	c.program.AddStructMethod(owner, method.Name, method)
+	if method.RequiredGoMethodName != "" {
+		c.program.AddRequiredGoMethod(owner, method.RequiredGoMethodName, method)
+	}
+}
+
+func (c *Checker) hasAmbiguousTraitMethod(typ Type, name string) bool {
+	owner, ok := MethodOwnerForType(typ)
+	return ok && (c.program.HasAmbiguousTraitMethod(owner, name) || AmbiguousTraitMethodInModules(c.program.Imports, owner, name))
 }
 
 func (c *Checker) structMethod(def *StructDef, name string) (*FunctionDef, bool) {
@@ -261,6 +543,14 @@ func (c *Checker) structMethod(def *StructDef, name string) (*FunctionDef, bool)
 		return nil, false
 	}
 	owner := StructMethodOwner(def)
+	if method, ok := c.program.InherentMethod(owner, name); ok {
+		return method, true
+	}
+	if methods := InherentMethodsInModules(c.program.Imports, owner); methods != nil {
+		if method := methods[name]; method != nil && c.canAccessStructMethod(owner, method) {
+			return method, true
+		}
+	}
 	if method, ok := c.program.StructMethod(owner, name); ok {
 		return method, true
 	}
