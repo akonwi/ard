@@ -321,10 +321,11 @@ type InstanceMethod struct {
 	ReceiverMode *ReferenceMode
 	ReceiverType Type
 
-	ReceiverKind InstanceReceiverKind
-	StructType   *StructDef
-	EnumType     *Enum
-	TraitType    *Trait
+	ReceiverKind  InstanceReceiverKind
+	StructType    *StructDef
+	EnumType      *Enum
+	TraitType     *Trait
+	DispatchTrait *Trait
 }
 
 func (i *InstanceMethod) Type() Type {

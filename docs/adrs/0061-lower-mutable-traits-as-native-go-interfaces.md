@@ -162,15 +162,18 @@ independent shallow dynamic snapshot.
 
 ### Calls and method mutability
 
-Ard continues to enforce binding, receiver, and reference rules in the source
-checker. Go does not encode Ard's source-level mutability distinction, so Go
-callers may perform any operation admitted by the generated interface. This is
-intentional: Ard restrictions are additive source guarantees, not a replacement
-runtime capability model.
+As amended by ADR 0065, trait declarations record whether each method may
+mutate its receiver. Ard requires mutable receiver capability when calling a
+`fn mut` trait method, rejects mutating implementations of non-mutating trait
+methods, and allows read-only implementations of mutating contracts. Go does
+not encode this source-level effect, so Go callers may perform any operation
+admitted by the generated interface. This is intentional: Ard restrictions are
+additive source guarantees, not a replacement runtime capability model.
 
-Trait implementation mutability continues to determine whether an Ard concrete
-implementation uses a Go value or pointer receiver. The canonical trait
-interface itself is shared by ordinary and mutable trait values.
+Implementation mutability determines whether an Ard concrete implementation
+uses a Go value or pointer receiver. Trait-method mutability does not alter the
+Go interface signature, and the canonical trait interface remains shared by
+ordinary and mutable trait values.
 
 ### Natural and fallback interfaces
 
@@ -333,3 +336,4 @@ snapshot operation.
 - `docs/adrs/0056-preserve-ard-value-semantics-when-lowering-go-interfaces.md`
 - `docs/adrs/0057-separate-binding-mutability-from-reference-values.md`
 - `docs/adrs/0060-adopt-postfix-value-at-dereference-syntax.md`
+- `docs/adrs/0065-declare-mutating-trait-receiver-methods.md`

@@ -735,6 +735,38 @@ func TestLowerTraitObjectDispatch(t *testing.T) {
 		t.Fatalf("upcast impl = %d, want %d", script.Body.Result.Args[0].Impl, program.Impls[0].ID)
 	}
 }
+func TestLowerMutatingTraitMethodContract(t *testing.T) {
+	program := lowerSource(t, `
+trait Counter {
+  fn mut set(value: Int)
+}
+struct Box { value: Int }
+impl Counter for Box {
+  fn mut set(value: Int) { self.value = value }
+}
+fn mutate(counter: mut Counter) {
+  counter.set(2)
+}
+`)
+
+	if got := len(program.Traits); got != 1 {
+		t.Fatalf("trait count = %d, want 1", got)
+	}
+	method := program.Traits[0].Methods[0]
+	if !method.Mutates {
+		t.Fatal("trait method Mutates = false, want true")
+	}
+
+	mutate := findFunction(t, program, "mutate")
+	call := mutate.Body.Result
+	if call == nil || call.Kind != ExprCallTrait || call.Target == nil {
+		t.Fatalf("mutate call = %#v, want ExprCallTrait with target", call)
+	}
+	if kind := typeKind(t, program, call.Target.Type); kind != TypeReference {
+		t.Fatalf("mutating trait call target kind = %v, want TypeReference", kind)
+	}
+}
+
 func TestLowerContextualMaybeTypesInNestedExpressions(t *testing.T) {
 	program := lowerSource(t, `
 

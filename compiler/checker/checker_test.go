@@ -84,7 +84,7 @@ var compareOptions = cmp.Options{
 	cmpopts.IgnoreFields(checker.EnumMatch{}, "DiscriminantToIndex", "ResultType"),
 	cmpopts.IgnoreFields(checker.EnumVariant{}, "EnumType", "Discriminant"),
 	cmpopts.IgnoreFields(checker.ListLiteral{}, "ListType"),
-	cmpopts.IgnoreFields(checker.InstanceMethod{}, "ReceiverKind", "StructType", "EnumType", "TraitType"),
+	cmpopts.IgnoreFields(checker.InstanceMethod{}, "ReceiverKind", "StructType", "EnumType", "TraitType", "DispatchTrait"),
 	cmpopts.IgnoreFields(checker.ModuleStructInstance{}, "StructType"),
 	cmpopts.IgnoreFields(checker.FunctionCall{}, "ReturnType"),
 	cmpopts.IgnoreFields(checker.FunctionDef{}, "CallGenericParams", "DefaultVoidGeneric", "DeferCallCompleteness"),

@@ -60,7 +60,7 @@ let error_fallback = "{widened_error}"
 	}
 }
 
-func TestErrorInterpolationRejectsMutatingImplementationOnValue(t *testing.T) {
+func TestBuiltinErrorRejectsMutatingImplementation(t *testing.T) {
 	source := `struct CountingError {
   calls: Int,
 }
@@ -81,8 +81,30 @@ let message = "{error}"
 	}
 	c := checker.New("main.ard", result.Program, nil)
 	c.Check()
-	if !c.HasErrors() {
-		t.Fatal("checker succeeded; expected mutating Error interpolation to require a reference")
+	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeImplReceiverMutability)
+	if diagnostic.Message != "Trait method 'error' does not allow a mutating receiver" {
+		t.Fatalf("diagnostic = %#v", diagnostic)
+	}
+}
+
+func TestBuiltinErrorRejectsGeneratedGoFieldCollision(t *testing.T) {
+	source := `struct Problem {
+  error: Str,
+}
+
+impl Error for Problem {
+  fn error() Str { self.error }
+}
+`
+	result := parse.Parse([]byte(source), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	c := checker.New("main.ard", result.Program, nil)
+	c.Check()
+	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeGoMethodFieldCollision)
+	if diagnostic.Message != "Ard property 'Problem.error' lowers to Go field 'Error', which conflicts with Go interface method 'Error'" {
+		t.Fatalf("diagnostic = %#v", diagnostic)
 	}
 }
 

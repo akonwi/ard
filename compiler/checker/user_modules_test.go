@@ -80,6 +80,44 @@ ard = ">= 0.1.0"`
 		t.Errorf("Expected nested path '%s', got '%s'", expectedPath, filePath)
 	}
 }
+func TestImportedTraitPreservesMutatingReceiverContract(t *testing.T) {
+	projectDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "counter.ard"), []byte(`trait Counter {
+  fn mut set(value: Int)
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(projectDir, "main.ard")
+	mainSource := `use demo/counter
+
+fn valid(value: mut counter::Counter) {
+  value.set(1)
+}
+
+fn invalid(value: counter::Counter) {
+  value.set(1)
+}
+`
+	result := parse.Parse([]byte(mainSource), mainPath)
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	resolver, err := checker.NewModuleResolver(projectDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := checker.New(mainPath, result.Program, resolver)
+	c.Check()
+	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeValueInteriorMutation)
+	if diagnostic.Message != "Cannot call mutating method 'value.set': receiver is not a reference" {
+		t.Fatalf("diagnostic = %#v", diagnostic)
+	}
+}
+
 func TestQualifiedModuleTypePatternsInClosedUnions(t *testing.T) {
 	projectDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {

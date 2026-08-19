@@ -290,6 +290,169 @@ func TestTraitDefinitions(t *testing.T) {
 	})
 }
 
+func TestTraitReceiverMutability(t *testing.T) {
+	run(t, []test{
+		{
+			name: "mutating contract accepts mutating implementation through reference",
+			input: `trait Counter {
+  fn mut set(value: Int)
+}
+struct Box { value: Int }
+impl Counter for Box {
+  fn mut set(value: Int) { self.value = value }
+}
+fn mutate(counter: mut Counter) {
+  counter.set(2)
+}
+let box = Box{value: 1}
+mutate(mut box)
+`,
+		},
+		{
+			name: "mutating trait method rejects ordinary trait receiver",
+			input: `trait Counter {
+  fn mut set(value: Int)
+}
+struct Box { value: Int }
+impl Counter for Box {
+  fn mut set(value: Int) { self.value = value }
+}
+fn mutate(counter: Counter) {
+  counter.set(2)
+}
+`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Cannot call mutating method 'counter.set': receiver is not a reference"}},
+		},
+		{
+			name: "non-mutating contract rejects mutating implementation",
+			input: `trait Counter {
+  fn set(value: Int)
+}
+struct Box { value: Int }
+impl Counter for Box {
+  fn mut set(value: Int) { self.value = value }
+}
+`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Trait method 'set' does not allow a mutating receiver"}},
+		},
+		{
+			name: "mutating contract accepts non-mutating implementation",
+			input: `trait Counter {
+  fn mut set(value: Int)
+}
+struct Noop {}
+impl Counter for Noop {
+  fn set(value: Int) {}
+}
+fn mutate(counter: mut Counter) {
+  counter.set(2)
+}
+let noop = Noop{}
+mutate(mut noop)
+`,
+		},
+		{
+			name: "mutating trait interpolation rejects ordinary receiver",
+			input: `trait Renderable {
+  fn mut to_str() Str
+}
+fn render(value: Renderable) Str {
+  "{value}"
+}
+`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Cannot call mutating method 'value.to_str': receiver is not a reference"}},
+		},
+		{
+			name: "mutating trait interpolation accepts reference receiver",
+			input: `trait Renderable {
+  fn mut to_str() Str
+}
+fn render(value: mut Renderable) Str {
+  "{value}"
+}
+`,
+		},
+	})
+}
+
+func TestTraitImplementationsPreserveSameNamedMethodsPerTrait(t *testing.T) {
+	implementationsByOrder := []string{
+		`impl Reader for Device {
+  fn act() {}
+}
+impl Writer for Device {
+  fn mut act() {}
+}`,
+		`impl Writer for Device {
+  fn mut act() {}
+}
+impl Reader for Device {
+  fn act() {}
+}`,
+	}
+	for _, implementations := range implementationsByOrder {
+		run(t, []test{{
+			name: "trait dispatch preserves each implementation",
+			input: `trait Reader {
+  fn act()
+}
+trait Writer {
+  fn mut act()
+}
+struct Device {}
+` + implementations,
+		}, {
+			name: "direct concrete call is ambiguous",
+			input: `trait Reader {
+  fn act()
+}
+trait Writer {
+  fn mut act()
+}
+struct Device {}
+` + implementations + `
+let device = Device{}
+device.act()
+`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Method 'act' is ambiguous on Device"}},
+		}})
+	}
+}
+
+func TestTraitInterpolationRejectsAmbiguousConcreteToString(t *testing.T) {
+	implementations := []string{
+		`impl First for Value {
+  fn to_str() Str { "first" }
+}
+impl Second for Value {
+  fn to_str() Str { "second" }
+}`,
+		`impl Second for Value {
+  fn to_str() Str { "second" }
+}
+impl First for Value {
+  fn to_str() Str { "first" }
+}`,
+	}
+	for _, impls := range implementations {
+		run(t, []test{{
+			name: "implicit concrete to_str requires unambiguous trait",
+			input: `trait First {
+  fn to_str() Str
+}
+trait Second {
+  fn to_str() Str
+}
+struct Value {}
+` + impls + `
+let value = Value{}
+let rendered = "{value}"
+`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Method 'to_str' is ambiguous on Value"}},
+		}})
+	}
+}
+
 func TestTraitsAsTypes(t *testing.T) {
 	run(t, []test{
 		{

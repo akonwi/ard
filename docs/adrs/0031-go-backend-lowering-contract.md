@@ -4,12 +4,13 @@
 
 Accepted
 
-Superseded in part by ADR 0057. Ard-owned mutable references require explicit
-reference arguments, pointer-copy/rebind behavior, reference-aware capture
-metadata, and mutable-trait forwarding. Concrete references should use ordinary
-Go pointers where possible; trait and descriptor forwarding remain justified
-specialized representations. References use pointer identity for equality, map
-keys, and `comparable` constraints. Exact direct-Go ABI forms remain unchanged.
+Superseded in part by ADRs 0057, 0061, and 0065. Ard-owned mutable references
+require explicit reference arguments, pointer-copy/rebind behavior, and
+reference-aware capture metadata. Concrete references use ordinary Go pointers
+where possible, while `Trait` and `mut Trait` share one native Go interface.
+Trait declarations now include receiver-mutability contracts. References use
+pointer identity for equality, map keys, and `comparable` constraints. Exact
+direct-Go ABI forms remain unchanged.
 
 ## Context
 
@@ -353,7 +354,16 @@ This supersedes, for Go lowering, the mutable-trait forwarding-table representat
 
 #### Mutation through pointer receivers
 
-Mutability is a property of an implementation, not of the trait: a trait declares required methods, and an `impl` decides whether its implementation mutates `self`. An impl method that mutates `self` lowers to a pointer-receiver method, so that implementer satisfies the trait as `*T`. When such a value is used as a trait object, it is held as a pointer, and the checker must guarantee the upcast value is addressable. Each implementer independently satisfies the interface as `T` or `*T` according to its own methods.
+A trait method marked `fn mut` declares that calls require mutable receiver
+capability (ADR 0065). A mutating implementation is rejected for a trait method
+that omits `mut`; a non-mutating implementation may satisfy a mutating contract
+because it requires less capability. An implementation that mutates `self`
+lowers to a pointer-receiver method, so that implementer satisfies the Go
+interface as `*T`. A non-mutating implementation lowers to a value receiver and
+satisfies the same interface as `T` and `*T`. When a pointer implementation is
+used as a trait object, it is held as a pointer, and the checker guarantees that
+the upcast source is addressable. Receiver mutability remains a source-level
+contract and does not alter the canonical Go interface method signature.
 
 #### Traits implemented for primitives
 

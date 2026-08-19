@@ -715,7 +715,7 @@ func TestADR0061TraitBorrowCapturesCurrentGoInterfaceValue(t *testing.T) {
 	program := lowerParitySource(t, `
 		trait View {
 			fn value() Int
-			fn set(value: Int)
+			fn mut set(value: Int)
 		}
 		struct Box { number: Int }
 		struct Other { number: Int }
@@ -746,7 +746,7 @@ func TestADR0061MutableTraitDereferenceCreatesShallowDynamicSnapshot(t *testing.
 	program := lowerParitySource(t, `
 		trait View {
 			fn value() Int
-			fn set(value: Int)
+			fn mut set(value: Int)
 		}
 		struct Box { number: Int }
 		impl View for Box {

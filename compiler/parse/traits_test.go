@@ -59,3 +59,31 @@ func TestTraitDefinitions(t *testing.T) {
 		},
 	})
 }
+
+func TestTraitMethodReceiverMutability(t *testing.T) {
+	result := Parse([]byte(`trait Counter {
+  fn mut set(value: Int)
+  fn mut()
+  fn mut mut()
+}`), "test.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	trait := result.Program.Statements[0].(*TraitDefinition)
+	if got := len(trait.Methods); got != 3 {
+		t.Fatalf("method count = %d, want 3", got)
+	}
+	want := []struct {
+		name    string
+		mutates bool
+	}{
+		{name: "set", mutates: true},
+		{name: "mut", mutates: false},
+		{name: "mut", mutates: true},
+	}
+	for i, method := range trait.Methods {
+		if method.Name != want[i].name || method.Mutates != want[i].mutates {
+			t.Fatalf("method %d = %q mutates=%t, want %q mutates=%t", i, method.Name, method.Mutates, want[i].name, want[i].mutates)
+		}
+	}
+}

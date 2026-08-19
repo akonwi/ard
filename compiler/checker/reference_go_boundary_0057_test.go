@@ -185,7 +185,7 @@ let view: mut View = mut value
 let echoed = ffi::Identity(view)
 take(echoed)`},
 		{name: "mutable trait interface satisfies Go method constraint", source: `trait Bumpable {
-  fn bump()
+  fn mut bump()
 }
 struct Native { N: Int }
 impl Bumpable for Native {

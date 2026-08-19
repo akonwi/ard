@@ -29,7 +29,7 @@ Standalone lowering remains only when Go cannot legally or safely attach the nat
 
 ADR 0061 makes `Trait` and `mut Trait` share one canonical Go interface. Mutable trait values capture the current dynamic object rather than forwarding replacement of a trait-typed storage slot. Copying, rebinding, equality, hashing, `Any`, and generic behavior therefore follow Go interface semantics directly.
 
-Natural implementations expose the trait's natural Go methods. Selector collisions and other legal Ard implementations use collision-proof generated receiver methods behind the same native interface. The backend emits no mutable-trait handle, adapter, vtable, registry, registration initializer, or storage projection hook. `mut Trait -> Trait` is representation-free. Explicit `.@` uses one isolated reflective helper to shallow-copy the hidden dynamic concrete value into an ordinary trait; reflection is not involved in normal storage, copying, or dispatch.
+Natural implementations expose the trait's natural Go methods. Trait receiver mutability is enforced in Ard source (ADR 0065) but erased from the canonical Go interface signature; mutating implementations use pointer receivers while read-only implementations may satisfy contracts that permit mutation. Selector collisions and other legal Ard implementations use collision-proof generated receiver methods behind the same native interface. The backend emits no mutable-trait handle, adapter, vtable, registry, registration initializer, or storage projection hook. `mut Trait -> Trait` is representation-free. Explicit `.@` uses one isolated reflective helper to shallow-copy the hidden dynamic concrete value into an ordinary trait; reflection is not involved in normal storage, copying, or dispatch.
 
 ### Generated names and packages are artifact-oriented
 
@@ -71,15 +71,15 @@ If Go-facing adapters are needed later, they should be wrappers at the boundary,
 
 2. **Generate Go interfaces for Go-representable Ard traits.**
    - Emit the canonical interface in the package that defines the Ard trait.
-   - Treat trait definitions as method requirements only; do not encode implementation mutability in the trait interface.
+   - Preserve trait receiver-mutability requirements in source and AIR, but do not encode them in the generated Go interface signature.
    - Represent mutating implementations with pointer receiver methods, so `*T` satisfies the same interface when mutation is required.
-   - Keep `mut Trait` valid at use sites as an addressability/mutability requirement for the instance being used.
+   - Require `mut Trait` or equivalent mutable receiver access when calling a trait method declared `fn mut`.
    - Lower `Trait` and `mut Trait` to the same canonical Go interface and use Go interface copying/rebinding semantics.
    - Avoid changing traits whose method signatures need Ard-only runtime adaptation.
    - Initial implementation notes:
      - The Go target now emits a native Go interface declaration for each Go-representable Ard trait object type.
      - Immutable trait object types use that interface when every known implementation can satisfy it with generated Go receiver methods.
-     - Traits with mutating receiver implementations use pointer receiver methods, so `*T` satisfies the same interface used by ordinary and mutable trait source types.
+     - Trait methods may declare receiver mutation. Mutating implementations use pointer receiver methods, so `*T` satisfies the same interface used by ordinary and mutable trait source types; non-mutating implementations may satisfy mutating contracts with value receivers.
      - Project/dependency FFI boundaries adapt top-level `Trait`, `Trait?`, and `Trait!E` returns where practical, but fall back to the old `any` representation for container-shaped FFI signatures that are not recursively adapted yet.
      - ADR 0061 supersedes the forwarding-table design. Fallback traits remain native interfaces by using collision-proof generated methods rather than `any` and concrete type switches.
 
@@ -119,7 +119,6 @@ If Go-facing adapters are needed later, they should be wrappers at the boundary,
 - How should selector collisions and concrete generic-instantiation methods be diagnosed or represented so the remaining standalone method fallbacks can be removed?
 - How should Ard visibility map to exported Go identifiers in a single generated package?
 - Should generated Go interfaces for traits be exported only for public traits?
-- How should method name collisions be handled when multiple Ard traits define the same method name for one type?
 - What syntax or metadata should request Go-facing wrappers for `Result`/`Maybe`, if any?
 
 ## Related

@@ -16,6 +16,7 @@ import (
 
 	"github.com/akonwi/ard/air"
 	"github.com/akonwi/ard/checker"
+	"github.com/akonwi/ard/frontend"
 	"github.com/akonwi/ard/parse"
 )
 
@@ -1797,7 +1798,7 @@ func TestGoTargetParityClosureSnapshotsReassignedMutableLocal(t *testing.T) {
 func TestGoTargetParityMutatingTraitImplClosureCapturesSelf(t *testing.T) {
 	program := lowerParitySource(t, `
 		trait Initializer {
-			fn init()
+			fn mut init()
 		}
 
 		struct Box {
@@ -1940,7 +1941,7 @@ func TestGoTargetParityFallbackTraitMutableStorage(t *testing.T) {
 
 			trait Counter {
 				fn value() Int
-				fn set(value: Int)
+				fn mut set(value: Int)
 			}
 
 			struct Box { value: Int }
@@ -2021,6 +2022,271 @@ func TestGoTargetParityFallbackTraitMutableStorage(t *testing.T) {
 	})
 }
 
+func TestGoTargetParityMutatingTraitContractAcceptsReadOnlyImplementation(t *testing.T) {
+	program := lowerParitySource(t, `
+		trait Reader {
+			fn mut read() Int
+		}
+
+		struct Value { number: Int }
+
+		impl Reader for Value {
+			fn read() Int { self.number }
+		}
+
+		fn read(value: mut Reader) Int {
+			value.read()
+		}
+
+		fn main() Int {
+			let value = Value{number: 42}
+			read(mut value)
+		}
+	`)
+	if got := runGoTargetParityJSON(t, program); got != "42" {
+		t.Fatalf("got %s, want 42", got)
+	}
+}
+
+func TestGoTargetParitySameNamedTraitMethodsKeepOwnBodies(t *testing.T) {
+	implementations := []string{
+		`impl Reader for Device {
+  fn act() Int { self.value }
+}
+impl Writer for Device {
+  fn mut act() Int {
+    self.value =+ 1
+    self.value
+  }
+}`,
+		`impl Writer for Device {
+  fn mut act() Int {
+    self.value =+ 1
+    self.value
+  }
+}
+impl Reader for Device {
+  fn act() Int { self.value }
+}`,
+	}
+	for i, impls := range implementations {
+		program := lowerParitySource(t, `trait Reader {
+  fn act() Int
+}
+trait Writer {
+  fn mut act() Int
+}
+struct Device { value: Int }
+`+impls+`
+fn read(value: Reader) Int { value.act() }
+fn write(value: mut Writer) Int { value.act() }
+fn main() Int {
+  let device = Device{value: 1}
+  let before = read(device)
+  let after = write(mut device)
+  before * 10 + after
+}
+`)
+		if got := runGoTargetParityJSON(t, program); got != "12" {
+			t.Fatalf("implementation order %d: got %s, want 12", i, got)
+		}
+	}
+}
+
+func TestGoTargetParityBuiltinErrorKeepsNaturalMethodDuringTraitCollision(t *testing.T) {
+	implementations := []string{
+		`impl Error for Problem {
+  fn error() Str { "go-error" }
+}
+impl Label for Problem {
+  fn error() Str { "label" }
+}`,
+		`impl Label for Problem {
+  fn error() Str { "label" }
+}
+impl Error for Problem {
+  fn error() Str { "go-error" }
+}`,
+	}
+	for i, impls := range implementations {
+		program := lowerParitySource(t, `trait Label {
+  fn error() Str
+}
+struct Problem {}
+`+impls+`
+fn error_message(value: Error) Str { value.error() }
+fn label(value: Label) Str { value.error() }
+fn main() Str {
+  let problem = Problem{}
+  "{error_message(problem)}:{label(problem)}:{problem}"
+}
+`)
+		if got := runGoTargetParityJSON(t, program); got != `"go-error:label:go-error"` {
+			t.Fatalf("implementation order %d: got %s, want distinct Error, Label, and concrete interpolation dispatch", i, got)
+		}
+	}
+}
+
+func TestGoTargetParityRequiredGoMethodSurvivesOrdinaryTraitCollision(t *testing.T) {
+	implementations := []string{
+		`impl ffi::Stringer for Value {
+  fn mut string() Str {
+    self.calls =+ 1
+    "foreign"
+  }
+}
+impl Label for Value {
+  fn string() Str { "label" }
+}`,
+		`impl Label for Value {
+  fn string() Str { "label" }
+}
+impl ffi::Stringer for Value {
+  fn mut string() Str {
+    self.calls =+ 1
+    "foreign"
+  }
+}`,
+	}
+	for i, impls := range implementations {
+		projectDir := t.TempDir()
+		files := map[string]string{
+			"ard.toml": "name = \"requiredcollision\"\nard = \">= 0.1.0\"\n",
+			"go.mod":   "module requiredcollision\n\ngo 1.26\n",
+			"ffi/ffi.go": `package ffi
+
+type Stringer interface {
+	String() string
+}
+
+func CallString(value Stringer) string { return value.String() }
+`,
+			"main.ard": `use go:requiredcollision/ffi
+
+trait Label {
+  fn string() Str
+}
+struct Value { calls: Int }
+` + impls + `
+fn label(value: Label) Str { value.string() }
+fn main() {
+  let value = Value{calls: 0}
+  if not ffi::CallString(value) == "foreign" { panic("wrong owned-pointer Stringer implementation") }
+  if not value.calls == 0 { panic("owned pointer unexpectedly mutated the source value") }
+  if not ffi::CallString(mut value) == "foreign" { panic("wrong referenced Stringer implementation") }
+  if not value.calls == 1 { panic("foreign pointer receiver did not mutate") }
+  if not label(value) == "label" { panic("wrong Label implementation") }
+}
+`,
+		}
+		for name, content := range files {
+			path := filepath.Join(projectDir, name)
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		mainPath := filepath.Join(projectDir, "main.ard")
+		loaded, err := frontend.LoadModule(mainPath)
+		if err != nil {
+			t.Fatalf("implementation order %d: load module: %v", i, err)
+		}
+		program, err := air.Lower(loaded.Module)
+		if err != nil {
+			t.Fatalf("implementation order %d: lower: %v", i, err)
+		}
+		if err := RunProgram(program, []string{"ard", "run", mainPath}, loaded.ProjectInfo); err != nil {
+			t.Fatalf("implementation order %d: run: %v", i, err)
+		}
+	}
+}
+
+func TestGoTargetParitySameNamedTraitsFromDifferentModulesKeepOwnBodies(t *testing.T) {
+	projectDir := t.TempDir()
+	files := map[string]string{
+		"ard.toml": "name = \"traitidentity\"\nard = \">= 0.1.0\"\n",
+		"left.ard": `trait Action {
+  fn act() Int
+}
+`,
+		"right.ard": `trait Action {
+  fn act() Int
+}
+`,
+		"main.ard": `use traitidentity/left
+use traitidentity/right
+
+struct Device {}
+
+impl left::Action for Device {
+  fn act() Int { 1 }
+}
+
+impl right::Action for Device {
+  fn act() Int { 2 }
+}
+
+fn left_act(value: left::Action) Int { value.act() }
+fn right_act(value: right::Action) Int { value.act() }
+
+fn main() {
+  let device = Device{}
+  if not left_act(device) == 1 { panic("wrong left Action implementation") }
+  if not right_act(device) == 2 { panic("wrong right Action implementation") }
+}
+`,
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(projectDir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mainPath := filepath.Join(projectDir, "main.ard")
+	loaded, err := frontend.LoadModule(mainPath)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	if err := RunProgram(program, []string{"ard", "run", mainPath}, loaded.ProjectInfo); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+}
+
+func TestGoTargetParityMutatingTraitInterpolationUsesReferenceReceiver(t *testing.T) {
+	program := lowerParitySource(t, `
+		trait Renderable {
+			fn mut to_str() Str
+		}
+
+		struct Counter { calls: Int }
+
+		impl Renderable for Counter {
+			fn mut to_str() Str {
+				self.calls =+ 1
+				"rendered"
+			}
+		}
+
+		fn render(value: mut Renderable) Str {
+			"{value}"
+		}
+
+		fn main() Str {
+			let counter = Counter{calls: 0}
+			let output = render(mut counter)
+			"{output}:{counter.calls}"
+		}
+	`)
+	if got := runGoTargetParityJSON(t, program); got != `"rendered:1"` {
+		t.Fatalf("got %s, want mutating interpolation to update the referenced receiver", got)
+	}
+}
+
 func TestGoTargetParityMutableTraitMethodNamesDoNotCollideWithForwarderHooks(t *testing.T) {
 	program := lowerParitySource(t, `
 		trait Weird {
@@ -2054,7 +2320,7 @@ func TestGoTargetParityMutableTraitMethodNamesDoNotCollideWithForwarderHooks(t *
 func TestGoTargetParityMutatingTraitDispatchUpdatesStoredTraitObject(t *testing.T) {
 	program := lowerParitySource(t, `
 		trait View {
-			fn handle_event()
+			fn mut handle_event()
 			fn value() Int
 		}
 
@@ -2229,7 +2495,7 @@ func TestGoTargetParityMutableReferenceReturnUpdatesSharedStorage(t *testing.T) 
 	t.Run("mutable trait", func(t *testing.T) {
 		program := lowerParitySource(t, `
 			trait View {
-				fn set(value: Int)
+				fn mut set(value: Int)
 				fn value() Int
 			}
 

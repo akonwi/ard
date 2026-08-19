@@ -1073,6 +1073,20 @@ func TestImplementationDiagnosticsAreStructured(t *testing.T) {
 			secondaryLabels: 1,
 		},
 		{
+			name:           "receiver mutability",
+			source:         "trait T {\n  fn update()\n}\nstruct S {}\nimpl T for S {\n  fn mut update() {}\n}\n",
+			code:           checker.DiagnosticCodeImplReceiverMutability,
+			legacyMessage:  "Trait method 'update' does not allow a mutating receiver",
+			primaryMessage: "`update` mutates its receiver",
+		},
+		{
+			name:           "ambiguous trait method",
+			source:         "trait First {\n  fn run()\n}\ntrait Second {\n  fn run()\n}\nstruct S {}\nimpl First for S {\n  fn run() {}\n}\nimpl Second for S {\n  fn run() {}\n}\nlet value = S{}\nvalue.run()\n",
+			code:           checker.DiagnosticCodeAmbiguousTraitMethod,
+			legacyMessage:  "Method 'run' is ambiguous on S",
+			primaryMessage: "multiple trait implementations define `run`",
+		},
+		{
 			name:          "return type",
 			source:        "trait T {\n  fn id() Int\n}\nstruct S {}\nimpl T for S {\n  fn id() Str { \"s\" }\n}\n",
 			code:          checker.DiagnosticCodeImplReturnType,

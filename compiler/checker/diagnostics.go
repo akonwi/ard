@@ -90,9 +90,11 @@ const (
 	DiagnosticCodeUnexpectedImplMethod          DiagnosticCode = "unexpected_implementation_method"
 	DiagnosticCodeImplParameterCount            DiagnosticCode = "implementation_parameter_count"
 	DiagnosticCodeImplParameterMutability       DiagnosticCode = "implementation_parameter_mutability"
+	DiagnosticCodeImplReceiverMutability        DiagnosticCode = "implementation_receiver_mutability"
 	DiagnosticCodeImplReturnType                DiagnosticCode = "implementation_return_type"
 	DiagnosticCodeMissingImplMethod             DiagnosticCode = "missing_implementation_method"
 	DiagnosticCodeDuplicateMethod               DiagnosticCode = "duplicate_method"
+	DiagnosticCodeAmbiguousTraitMethod          DiagnosticCode = "ambiguous_trait_method"
 	DiagnosticCodeGoMethodFieldCollision        DiagnosticCode = "go_method_field_collision"
 	DiagnosticCodeMutatingEnumMethod            DiagnosticCode = "mutating_enum_method"
 	DiagnosticCodeEmptyEnum                     DiagnosticCode = "empty_enum"
@@ -1107,6 +1109,42 @@ func (d implementationParameterMutabilityDiagnostic) build() Diagnostic {
 		secondary...,
 	)
 	diagnostic.Code = DiagnosticCodeImplParameterMutability
+	return diagnostic
+}
+
+type ambiguousTraitMethodDiagnostic struct {
+	Receiver string
+	Method   string
+	Span     SourceSpan
+}
+
+func (d ambiguousTraitMethodDiagnostic) build() Diagnostic {
+	diagnostic := newLabeledDiagnostic(
+		Error,
+		fmt.Sprintf("Method '%s' is ambiguous on %s", d.Method, d.Receiver),
+		"Ambiguous trait method",
+		"Call the method through a value typed as the intended trait.",
+		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("multiple trait implementations define `%s`", d.Method)},
+	)
+	diagnostic.Code = DiagnosticCodeAmbiguousTraitMethod
+	return diagnostic
+}
+
+type implementationReceiverMutabilityDiagnostic struct {
+	Method   string
+	Contract string
+	Span     SourceSpan
+}
+
+func (d implementationReceiverMutabilityDiagnostic) build() Diagnostic {
+	diagnostic := newLabeledDiagnostic(
+		Error,
+		fmt.Sprintf("Trait method '%s' does not allow a mutating receiver", d.Method),
+		"Implementation receiver mutability mismatch",
+		fmt.Sprintf("Remove `mut` or declare `%s.%s` with a mutating receiver.", d.Contract, d.Method),
+		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("`%s` mutates its receiver", d.Method)},
+	)
+	diagnostic.Code = DiagnosticCodeImplReceiverMutability
 	return diagnostic
 }
 
