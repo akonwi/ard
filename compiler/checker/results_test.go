@@ -323,6 +323,27 @@ func TestResults(t *testing.T) {
 func TestTry(t *testing.T) {
 	run(t, []test{
 		{
+			name: "trying a method through a mutable reference",
+			input: `
+				struct Box {
+					value: Int?,
+				}
+
+				impl Box {
+					fn value_or_none() Int? {
+						self.value
+					}
+				}
+
+				fn unwrap() Int {
+					let box = mut Box{value: 1}
+					let value = try box.value_or_none() -> _ { 0 }
+					value
+				}
+			`,
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
 			name: "trying a result with compatible error types",
 			input: `
 				fn do_stuff() Int!Bool {
