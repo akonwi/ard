@@ -2,13 +2,93 @@ package air
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"testing"
 
 	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/parse"
 )
+
+func TestLowerFunctionParameterWithIndirectMutuallyRecursiveStructs(t *testing.T) {
+	const helperEnv = "ARD_TEST_AIR_RECURSIVE_TYPE_BINDING"
+	const input = `
+		struct Child {
+			node: Node,
+		}
+
+		struct Node {
+			children: [Child],
+		}
+
+		fn visit(node: Node) Int {
+			node.children.size()
+		}
+
+		fn main() {
+			visit(Node{children: []})
+		}
+	`
+
+	if os.Getenv(helperEnv) == "1" {
+		debug.SetMaxStack(1 << 20)
+		lowerSource(t, input)
+		assertRecursiveGenericTypeVarBinding(t)
+		return
+	}
+
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(executable, "-test.run=^TestLowerFunctionParameterWithIndirectMutuallyRecursiveStructs$")
+	cmd.Env = append(os.Environ(), helperEnv+"=1")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("AIR lowering failed for finite recursive structs: %v\n%s", err, output)
+	}
+}
+
+func assertRecursiveGenericTypeVarBinding(t *testing.T) {
+	t.Helper()
+	module := checkedModuleWithPath(t, "test", `
+		struct Node<$T> {
+			value: $T,
+			children: [Node<$T>],
+		}
+	`)
+	node, ok := module.Get("Node").Type.(*checker.StructDef)
+	if !ok {
+		t.Fatalf("Node definition = %#v", module.Get("Node").Type)
+	}
+	children, ok := node.Fields["children"].(*checker.List)
+	if !ok {
+		t.Fatalf("Node.children = %#v", node.Fields["children"])
+	}
+	recursiveNode, ok := children.Of().(*checker.StructDef)
+	if !ok {
+		t.Fatalf("Node.children element = %#v", children.Of())
+	}
+	// Generic applications normally borrow their canonical definition's fields.
+	// Materialize them here to exercise binding through a recursive generic graph.
+	recursiveNode.Fields = node.Fields
+
+	lowerer := &lowerer{program: Program{Types: []TypeInfo{
+		{ID: 1, Kind: TypeInt, Name: "Int"},
+		{ID: 2, Kind: TypeStruct, Name: "Node<Int>", Fields: []FieldInfo{
+			{Name: "value", Type: 1},
+			{Name: "children", Type: 3},
+		}},
+		{ID: 3, Kind: TypeList, Name: "[Node<Int>]", Elem: 2},
+	}}}
+	function := &functionLowerer{l: lowerer, typeVars: map[string]TypeID{}}
+	function.bindTypeVars(node, 2)
+	if got := function.typeVars["T"]; got != 1 {
+		t.Fatalf("$T bound to %d, want Int type 1", got)
+	}
+}
 
 func TestVariadicCallableTypeSurvivesAIRInterning(t *testing.T) {
 	program := lowerSource(t, `

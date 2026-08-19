@@ -825,9 +825,25 @@ func (l *lowerer) newFunctionLowerer(fn *Function, def *checker.FunctionDef, par
 	return fl
 }
 
+type typeVarBindingVisit struct {
+	pattern *checker.StructDef
+	actual  TypeID
+}
+
 func (fl *functionLowerer) bindTypeVars(pattern checker.Type, actual TypeID) {
+	fl.bindTypeVarsSeen(pattern, actual, map[typeVarBindingVisit]struct{}{})
+}
+
+func (fl *functionLowerer) bindTypeVarsSeen(pattern checker.Type, actual TypeID, seen map[typeVarBindingVisit]struct{}) {
 	if pattern == nil || actual == NoType || !validTypeID(&fl.l.program, actual) {
 		return
+	}
+	if structPattern, ok := pattern.(*checker.StructDef); ok {
+		visit := typeVarBindingVisit{pattern: structPattern, actual: actual}
+		if _, ok := seen[visit]; ok {
+			return
+		}
+		seen[visit] = struct{}{}
 	}
 	if tv, ok := pattern.(*checker.TypeVar); ok {
 		if _, ok := fl.typeVars[tv.Name()]; !ok {
@@ -842,50 +858,50 @@ func (fl *functionLowerer) bindTypeVars(pattern checker.Type, actual TypeID) {
 	switch typ := pattern.(type) {
 	case *checker.List:
 		if actualInfo.Kind == TypeList {
-			fl.bindTypeVars(typ.Of(), actualInfo.Elem)
+			fl.bindTypeVarsSeen(typ.Of(), actualInfo.Elem, seen)
 		}
 	case *checker.Slice:
 		if actualInfo.Kind == TypeSlice {
-			fl.bindTypeVars(typ.Of(), actualInfo.Elem)
+			fl.bindTypeVarsSeen(typ.Of(), actualInfo.Elem, seen)
 		}
 	case *checker.Chan:
 		if actualInfo.Kind == TypeChannel {
-			fl.bindTypeVars(typ.Of(), actualInfo.Elem)
+			fl.bindTypeVarsSeen(typ.Of(), actualInfo.Elem, seen)
 		}
 	case *checker.Receiver:
 		if actualInfo.Kind == TypeReceiver {
-			fl.bindTypeVars(typ.Of(), actualInfo.Elem)
+			fl.bindTypeVarsSeen(typ.Of(), actualInfo.Elem, seen)
 		}
 	case *checker.Sender:
 		if actualInfo.Kind == TypeSender {
-			fl.bindTypeVars(typ.Of(), actualInfo.Elem)
+			fl.bindTypeVarsSeen(typ.Of(), actualInfo.Elem, seen)
 		}
 	case *checker.Map:
 		if actualInfo.Kind == TypeMap {
-			fl.bindTypeVars(typ.Key(), actualInfo.Key)
-			fl.bindTypeVars(typ.Value(), actualInfo.Value)
+			fl.bindTypeVarsSeen(typ.Key(), actualInfo.Key, seen)
+			fl.bindTypeVarsSeen(typ.Value(), actualInfo.Value, seen)
 		}
 	case *checker.Maybe:
 		if actualInfo.Kind == TypeMaybe {
-			fl.bindTypeVars(typ.Of(), actualInfo.Elem)
+			fl.bindTypeVarsSeen(typ.Of(), actualInfo.Elem, seen)
 		}
 	case *checker.MutableRef:
 		if actualInfo.Kind == TypeReference {
-			fl.bindTypeVars(typ.Of(), actualInfo.Elem)
+			fl.bindTypeVarsSeen(typ.Of(), actualInfo.Elem, seen)
 		}
 	case *checker.Result:
 		if actualInfo.Kind == TypeResult {
-			fl.bindTypeVars(typ.Val(), actualInfo.Value)
-			fl.bindTypeVars(typ.Err(), actualInfo.Error)
+			fl.bindTypeVarsSeen(typ.Val(), actualInfo.Value, seen)
+			fl.bindTypeVarsSeen(typ.Err(), actualInfo.Error, seen)
 		}
 	case *checker.FunctionDef:
 		if actualInfo.Kind == TypeFunction {
 			for i, param := range typ.Parameters {
 				if i < len(actualInfo.Params) {
-					fl.bindTypeVars(param.Type, actualInfo.Params[i])
+					fl.bindTypeVarsSeen(param.Type, actualInfo.Params[i], seen)
 				}
 			}
-			fl.bindTypeVars(typ.ReturnType, actualInfo.Return)
+			fl.bindTypeVarsSeen(typ.ReturnType, actualInfo.Return, seen)
 		}
 	case *checker.StructDef:
 		if actualInfo.Kind == TypeStruct {
@@ -895,7 +911,7 @@ func (fl *functionLowerer) bindTypeVars(pattern checker.Type, actual TypeID) {
 			}
 			for name, fieldType := range typ.Fields {
 				if field, ok := fieldsByName[name]; ok {
-					fl.bindTypeVars(fieldType, field.Type)
+					fl.bindTypeVarsSeen(fieldType, field.Type, seen)
 				}
 			}
 		}
