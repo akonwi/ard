@@ -12935,13 +12935,14 @@ func (c *Checker) checkAccessorChainWithMaybes(parseExpr parse.Expression) Expre
 			return nil
 		}
 
-		// Try to get the method signature
-		innerType := target.Type()
-		var isMaybe bool
-		if maybeType, ok := innerType.(*Maybe); ok {
-			innerType = maybeType.of
-			isMaybe = true
+		// Non-Maybe receivers do not need accessor-chain rewriting. Delegate to
+		// the canonical method checker so every receiver shape follows the same
+		// method resolution and mutability rules.
+		maybeType, isMaybe := target.Type().(*Maybe)
+		if !isMaybe {
+			return c.checkExpr(parseExpr)
 		}
+		innerType := maybeType.of
 
 		var sig Type
 		if structDef, ok := innerType.(*StructDef); ok {
@@ -12967,11 +12968,6 @@ func (c *Checker) checkAccessorChainWithMaybes(parseExpr parse.Expression) Expre
 			}
 		}
 		if sig == nil {
-			if !isMaybe {
-				if call, ok := c.checkFunctionFieldCall(target, p.Method, p.GetLocation(), nil); ok {
-					return call
-				}
-			}
 			c.addDiagnostic(undefinedMemberDiagnostic{
 				Kind:     undefinedMethod,
 				Receiver: fmt.Sprint(innerType),
@@ -12987,15 +12983,8 @@ func (c *Checker) checkAccessorChainWithMaybes(parseExpr parse.Expression) Expre
 			return nil
 		}
 
-		// For now, just check the method normally and return if not Maybe
-		// (full method call handling is complex, only handle property accessor chains for now)
-		if !isMaybe {
-			// Fall back to normal checking for non-Maybe methods
-			return c.checkExpr(parseExpr)
-		}
-
-		// If the target is Maybe, we'd need to wrap the entire method call
-		// For simplicity, just check normally - the user should use property access if they want cascading
+		// Full method-call handling for a Maybe target is not implemented here.
+		// For simplicity, check normally; use property access for cascading.
 		return c.checkExpr(parseExpr)
 
 	default:
