@@ -16,6 +16,52 @@ func TestGenericBindingRejectsStructuralOccursCycle(t *testing.T) {
 	}
 }
 
+func TestBindInferredTypeVarsTerminatesAfterRecursiveFieldBinding(t *testing.T) {
+	inferred := &TypeVar{name: "T"}
+	expected := &StructDef{Name: "Node"}
+	actual := &StructDef{Name: "Node"}
+	expected.Fields = map[string]Type{
+		"children": MakeList(expected),
+		"value":    inferred,
+	}
+	actual.Fields = map[string]Type{
+		"children": MakeList(actual),
+		"value":    Int,
+	}
+
+	bindInferredTypeVars(expected, actual)
+	// A second traversal starts with the recursive field variable bound. It must
+	// retain stable graph identities and terminate without rebuilding the cycle.
+	bindInferredTypeVars(expected, actual)
+
+	if inferred.actual != Int || !inferred.bound {
+		t.Fatalf("recursive field binding = %+v, want Int", inferred)
+	}
+}
+
+func TestBindInferredTypeVarsVisitsTypeArgsBeforeSharedDefinitionGuard(t *testing.T) {
+	definition := &StructDef{Name: "Box", GenericParams: []string{"T"}}
+	first := &TypeVar{name: "First"}
+	second := &TypeVar{name: "Second"}
+	expected := &StructDef{Name: "Pair", Fields: map[string]Type{
+		"first":  newStructApplication(definition, []Type{first}),
+		"second": newStructApplication(definition, []Type{second}),
+	}}
+	actual := &StructDef{Name: "Pair", Fields: map[string]Type{
+		"first":  newStructApplication(definition, []Type{Int}),
+		"second": newStructApplication(definition, []Type{Str}),
+	}}
+
+	bindInferredTypeVars(expected, actual)
+
+	if first.actual != Int || !first.bound {
+		t.Fatalf("first type argument binding = %+v, want Int", first)
+	}
+	if second.actual != Str || !second.bound {
+		t.Fatalf("second type argument binding = %+v, want Str", second)
+	}
+}
+
 func TestTraitEqualityIncludesModulePath(t *testing.T) {
 	left := &Trait{Name: "Drawable", ModulePath: "ui/drawable.ard"}
 	right := &Trait{Name: "Drawable", ModulePath: "svg/drawable.ard"}

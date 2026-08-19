@@ -10120,14 +10120,26 @@ func (c *Checker) areTypesComparable(left, right Type) bool {
 	return false
 }
 
+type inferredTypeBindingVisit struct {
+	expected *StructDef
+	actual   *StructDef
+}
+
 // use this when we know what the expr's Type should be
 func bindInferredTypeVars(expected Type, actual Type) {
+	bindInferredTypeVarsSeen(expected, actual, map[inferredTypeBindingVisit]struct{}{})
+}
+
+func bindInferredTypeVarsSeen(expected Type, actual Type, seen map[inferredTypeBindingVisit]struct{}) {
 	if expected == nil || actual == nil {
 		return
 	}
 
-	expected = derefType(expected)
-	actual = derefType(actual)
+	// Resolve only the current node. Deep dereferencing can rebuild a recursive
+	// struct graph after one of its type variables is bound, defeating the
+	// stable struct-pair identities used below to stop cycles.
+	expected = deref(expected)
+	actual = deref(actual)
 
 	switch exp := expected.(type) {
 	case *TypeVar:
@@ -10139,40 +10151,40 @@ func bindInferredTypeVars(expected Type, actual Type) {
 			exp.bound = true
 			return
 		}
-		bindInferredTypeVars(exp.actual, actual)
+		bindInferredTypeVarsSeen(exp.actual, actual, seen)
 	case *Maybe:
 		if act, ok := actual.(*Maybe); ok {
-			bindInferredTypeVars(exp.Of(), act.Of())
+			bindInferredTypeVarsSeen(exp.Of(), act.Of(), seen)
 		}
 	case *Result:
 		if act, ok := actual.(*Result); ok {
-			bindInferredTypeVars(exp.Val(), act.Val())
-			bindInferredTypeVars(exp.Err(), act.Err())
+			bindInferredTypeVarsSeen(exp.Val(), act.Val(), seen)
+			bindInferredTypeVarsSeen(exp.Err(), act.Err(), seen)
 		}
 	case *List:
 		if act, ok := actual.(*List); ok {
-			bindInferredTypeVars(exp.Of(), act.Of())
+			bindInferredTypeVarsSeen(exp.Of(), act.Of(), seen)
 		}
 	case *Slice:
 		if act, ok := actual.(*Slice); ok {
-			bindInferredTypeVars(exp.Of(), act.Of())
+			bindInferredTypeVarsSeen(exp.Of(), act.Of(), seen)
 		}
 	case *Chan:
 		if act, ok := actual.(*Chan); ok {
-			bindInferredTypeVars(exp.Of(), act.Of())
+			bindInferredTypeVarsSeen(exp.Of(), act.Of(), seen)
 		}
 	case *Receiver:
 		if act, ok := actual.(*Receiver); ok {
-			bindInferredTypeVars(exp.Of(), act.Of())
+			bindInferredTypeVarsSeen(exp.Of(), act.Of(), seen)
 		}
 	case *Sender:
 		if act, ok := actual.(*Sender); ok {
-			bindInferredTypeVars(exp.Of(), act.Of())
+			bindInferredTypeVarsSeen(exp.Of(), act.Of(), seen)
 		}
 	case *Map:
 		if act, ok := actual.(*Map); ok {
-			bindInferredTypeVars(exp.Key(), act.Key())
-			bindInferredTypeVars(exp.Value(), act.Value())
+			bindInferredTypeVarsSeen(exp.Key(), act.Key(), seen)
+			bindInferredTypeVarsSeen(exp.Value(), act.Value(), seen)
 		}
 	case *StructDef:
 		if act, ok := actual.(*StructDef); ok && exp.Name == act.Name && !namedTypeOwnersDiffer(exp.ModulePath, act.ModulePath) {
@@ -10181,11 +10193,20 @@ func bindInferredTypeVars(expected Type, actual Type) {
 				limit = len(act.TypeArgs)
 			}
 			for i := 0; i < limit; i++ {
-				bindInferredTypeVars(exp.TypeArgs[i], act.TypeArgs[i])
+				bindInferredTypeVarsSeen(exp.TypeArgs[i], act.TypeArgs[i], seen)
 			}
+
+			visit := inferredTypeBindingVisit{
+				expected: canonicalStructDefinition(exp),
+				actual:   canonicalStructDefinition(act),
+			}
+			if _, ok := seen[visit]; ok {
+				return
+			}
+			seen[visit] = struct{}{}
 			for fieldName, expectedField := range exp.Fields {
 				if actualField, ok := act.Fields[fieldName]; ok {
-					bindInferredTypeVars(expectedField, actualField)
+					bindInferredTypeVarsSeen(expectedField, actualField, seen)
 				}
 			}
 		}
@@ -10196,9 +10217,9 @@ func bindInferredTypeVars(expected Type, actual Type) {
 				limit = len(act.Parameters)
 			}
 			for i := 0; i < limit; i++ {
-				bindInferredTypeVars(exp.Parameters[i].Type, act.Parameters[i].Type)
+				bindInferredTypeVarsSeen(exp.Parameters[i].Type, act.Parameters[i].Type, seen)
 			}
-			bindInferredTypeVars(exp.ReturnType, act.ReturnType)
+			bindInferredTypeVarsSeen(exp.ReturnType, act.ReturnType, seen)
 		}
 	}
 }

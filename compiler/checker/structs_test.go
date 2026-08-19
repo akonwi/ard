@@ -2,11 +2,47 @@ package checker_test
 
 import (
 	"fmt"
+	"os"
+	"os/exec"
+	"runtime/debug"
 	"strings"
 	"testing"
 
 	checker "github.com/akonwi/ard/checker"
 )
+
+func TestMatchReturningRecursiveStructDoesNotOverflowTypeBinding(t *testing.T) {
+	const helperEnv = "ARD_TEST_CHECKER_RECURSIVE_TYPE_BINDING"
+	const input = `
+struct Node {
+  children: [Node],
+}
+
+fn choose(flag: Bool, node: Node) Node {
+  match flag {
+    true => node,
+    false => node,
+  }
+}
+`
+
+	if os.Getenv(helperEnv) == "1" {
+		debug.SetMaxStack(1 << 20)
+		run(t, []test{{name: "recursive struct match result", input: input}})
+		return
+	}
+
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(executable, "-test.run=^TestMatchReturningRecursiveStructDoesNotOverflowTypeBinding$")
+	cmd.Env = append(os.Environ(), helperEnv+"=1")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("checking a recursive struct match result failed: %v\n%s", err, output)
+	}
+}
 
 func TestRecursiveGenericStructThroughFunctionField(t *testing.T) {
 	run(t, []test{{
