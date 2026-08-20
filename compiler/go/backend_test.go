@@ -1150,6 +1150,46 @@ func TestRunProgramExecutesGoPrimitiveScalarFunction(t *testing.T) {
 	}
 }
 
+func TestRunProgramPreservesTypedScalarLocals(t *testing.T) {
+	program := lowerSource(t, `
+		use go:bytes
+		use go:math
+		use go:math/bits
+		use go:time
+
+		fn local_rune() Rune {
+			let value = 'A'
+			value
+		}
+
+		fn keep_int8(value: Int8) Int8 {
+			value
+		}
+
+		fn main() {
+			let float_value: Float32 = 1.5
+			let negative: Int8 = -1
+			let seconds: Int64 = 0
+			let word: Uint = 0
+			let ascii: Byte = 65
+			mut data: [Byte] = [65]
+			let delay: time::Duration = 0
+
+			let _ = math::Float32bits(float_value)
+			let _ = keep_int8(negative)
+			let _ = time::Unix(seconds, seconds)
+			let _ = bits::OnesCount(word)
+			let _ = bytes::IndexByte(mut data, ascii)
+			let _ = local_rune()
+			time::Sleep(delay)
+		}
+	`)
+
+	if err := RunProgram(program, []string{"ard", "run", "sample.ard"}); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
+
 func TestRunProgramExecutesGoNamedScalarLiteralCall(t *testing.T) {
 	program := lowerSource(t, `
 		use go:time
