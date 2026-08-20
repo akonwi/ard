@@ -2366,9 +2366,9 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 	case air.ExprConstVoid:
 		return loweredExpr{expr: l.voidValueExpr()}, nil
 	case air.ExprConstInt:
-		return loweredExpr{expr: &ast.BasicLit{Kind: token.INT, Value: expr.Int}}, nil
+		return l.lowerNumericConstant(expr.Type, token.INT, expr.Int)
 	case air.ExprConstFloat:
-		return loweredExpr{expr: &ast.BasicLit{Kind: token.FLOAT, Value: expr.Float}}, nil
+		return l.lowerNumericConstant(expr.Type, token.FLOAT, expr.Float)
 	case air.ExprConstBool:
 		if expr.Bool {
 			return loweredExpr{expr: l.ident("true")}, nil
@@ -3396,6 +3396,23 @@ func (l *lowerer) lowerValueBlock(fn air.Function, block air.Block, resultType a
 		}
 	}
 	return stmts, nil
+}
+
+// lowerNumericConstant materializes AIR scalar types that differ from Go's
+// default int and float64 types before short declarations can erase them.
+func (l *lowerer) lowerNumericConstant(typeID air.TypeID, kind token.Token, value string) (loweredExpr, error) {
+	literal := &ast.BasicLit{Kind: kind, Value: value}
+	if validTypeID(l.program, typeID) {
+		typeKind := l.program.Types[typeID-1].Kind
+		if (kind == token.INT && typeKind == air.TypeInt) || (kind == token.FLOAT && typeKind == air.TypeFloat64) {
+			return loweredExpr{expr: literal}, nil
+		}
+	}
+	typ, err := l.goType(typeID)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	return loweredExpr{expr: &ast.CallExpr{Fun: typ, Args: []ast.Expr{literal}}}, nil
 }
 
 func (l *lowerer) lowerExprWithExpectedType(fn air.Function, expr air.Expr, expectedType air.TypeID) (loweredExpr, error) {
