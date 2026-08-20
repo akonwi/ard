@@ -55,6 +55,56 @@ impl View for Leaf {
 `,
 	}})
 }
+
+func TestMutableTraitProjectionRequiresKnownImplementation(t *testing.T) {
+	run(t, []test{
+		{
+			name: "generic body lacks mutable trait constraint",
+			input: `trait Widget {
+  fn mut event()
+}
+
+fn drive(root: mut Widget) {
+  root.event()
+}
+
+fn forward(root: mut $W) {
+  drive(root)
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected mut Widget, got mut $W"}},
+		},
+		{
+			name: "concrete implementation projects to mutable trait",
+			input: `trait Widget {
+  fn mut event()
+}
+
+struct Root {}
+
+impl Widget for Root {
+  fn mut event() {}
+}
+
+fn drive(root: mut Widget) {
+  root.event()
+}
+
+fn main() {
+  let root = mut Root{}
+  drive(root)
+}`,
+		},
+		{
+			name: "generic reference forwards to generic parameter",
+			input: `fn pass(value: mut $T) {}
+
+fn forward(value: mut $W) {
+  pass(value)
+}`,
+		},
+	})
+}
+
 func TestMatchAllowsConcreteTraitImplementationBranch(t *testing.T) {
 	traitFixture := `trait View {
   fn render()
