@@ -3204,6 +3204,14 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 
 			switch targetType := typeSym.Type.(type) {
 			case *StructDef:
+				// Make this implementation visible while checking its method bodies so
+				// self can project to the trait it is currently implementing. Generic
+				// trait implementations retain their existing late registration until
+				// AIR can represent their implementation methods.
+				registerTraitBeforeBody := len(targetType.GenericParams) == 0
+				if registerTraitBeforeBody {
+					targetType.Traits = append(targetType.Traits, trait)
+				}
 				structMethodOwner := StructMethodOwner(targetType)
 				// Verify that all required methods are implemented.
 				traitMethods := trait.GetMethods()
@@ -3334,13 +3342,17 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					}
 				}
 
-				// Add the trait to the struct type's traits list
-				targetType.Traits = append(targetType.Traits, trait)
+				if !registerTraitBeforeBody {
+					targetType.Traits = append(targetType.Traits, trait)
+				}
 
 				// Return the struct so downstream backends can register the new trait methods
 				return &Statement{Stmt: targetType}
 
 			case *Enum:
+				// Keep enum conformance registration aligned with structs: method bodies
+				// should observe the trait currently being implemented.
+				targetType.Traits = append(targetType.Traits, trait)
 				enumMethodOwner := MethodOwner{ModulePath: targetType.ModulePath, TypeName: targetType.Name}
 				// Verify that all required methods are implemented (same logic as structs)
 				traitMethods := trait.GetMethods()
@@ -3459,9 +3471,6 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 						}.build())
 					}
 				}
-
-				// Add the trait to the enum type's traits list
-				targetType.Traits = append(targetType.Traits, trait)
 
 				// Return the enum so downstream backends can register the new trait methods
 				return &Statement{Stmt: targetType}
