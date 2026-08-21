@@ -11,30 +11,32 @@ type typeEqualContext struct {
 	seen                   map[typeEqualKey]struct{}
 	allowUnboundWildcard   bool
 	allowInferenceWildcard bool
+	allowUnionMembership   bool
 }
 
 func equalTypes(left Type, right Type) bool {
-	return equalTypesWithMode(left, right, true, true)
+	return equalTypesWithMode(left, right, true, true, true)
 }
 
 // validationEqualTypes compares representation identity during compatibility
 // checking. Declaration generics are not wildcards here, while call-local and
 // provisional variables remain matchable until inference binds or rejects them.
 func validationEqualTypes(left Type, right Type) bool {
-	return equalTypesWithMode(left, right, false, true)
+	return equalTypesWithMode(left, right, false, true, false)
 }
 
 // strictEqualTypes compares identity without inference wildcards. It is used
 // in contexts such as equality where no later binding or conversion occurs.
 func strictEqualTypes(left Type, right Type) bool {
-	return equalTypesWithMode(left, right, false, false)
+	return equalTypesWithMode(left, right, false, false, false)
 }
 
-func equalTypesWithMode(left Type, right Type, allowUnboundWildcard, allowInferenceWildcard bool) bool {
+func equalTypesWithMode(left Type, right Type, allowUnboundWildcard, allowInferenceWildcard, allowUnionMembership bool) bool {
 	return equalTypesSeen(left, right, &typeEqualContext{
 		seen:                   map[typeEqualKey]struct{}{},
 		allowUnboundWildcard:   allowUnboundWildcard,
 		allowInferenceWildcard: allowInferenceWildcard,
+		allowUnionMembership:   allowUnionMembership,
 	})
 }
 
@@ -288,7 +290,7 @@ func namedTypeOwnersDiffer(left string, right string) bool {
 
 func equalUnionSeen(left Union, right Type, context *typeEqualContext) bool {
 	if r, ok := right.(*Union); ok {
-		if namedTypeOwnersDiffer(left.ModulePath, r.ModulePath) || len(left.Types) != len(r.Types) {
+		if left.Name != r.Name || namedTypeOwnersDiffer(left.ModulePath, r.ModulePath) || len(left.Types) != len(r.Types) {
 			return false
 		}
 		for _, leftType := range left.Types {
@@ -304,6 +306,9 @@ func equalUnionSeen(left Union, right Type, context *typeEqualContext) bool {
 			}
 		}
 		return true
+	}
+	if !context.allowUnionMembership {
+		return false
 	}
 	for _, t := range left.Types {
 		if equalTypesSeen(t, right, context) {

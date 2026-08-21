@@ -287,7 +287,7 @@ fn main() {
 }`,
 		},
 		{
-			name: "resolved generic trait reference preserves concrete projection",
+			name: "mutable generic field rejects interface-shaped type argument",
 			input: `trait Widget {
   fn mut event()
 }
@@ -305,6 +305,7 @@ fn main() {
   let root = mut Root{}
   let holder = Holder<Widget>{value: root}
 }`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type argument Widget cannot be used for $T in Holder: direct mutable generic fields cannot specialize to an Ard trait"}},
 		},
 		{
 			name: "phantom generic still requires contextual or explicit type",

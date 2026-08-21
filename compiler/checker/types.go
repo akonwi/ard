@@ -7,6 +7,17 @@ import (
 
 // todo: this can return an error with more detailed messaging for the scenario
 func areCompatible(expected Type, actual Type) bool {
+	if union, ok := expected.(*Union); ok {
+		if validationEqualTypes(union, actual) {
+			return true
+		}
+		for _, member := range union.Types {
+			if strictEqualTypes(member, actual) {
+				return true
+			}
+		}
+		return false
+	}
 	if trait, ok := expected.(*Trait); ok {
 		return actual.hasTrait(trait)
 	}

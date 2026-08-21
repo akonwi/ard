@@ -85,6 +85,77 @@ fn forward(value: ffi::Getter<$T>) {
 			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected ffi::Getter<Int>, got ffi::Getter<$T>"}},
 		},
 		{
+			name: "generic interfaces preserve the same declaration generic during structural assignment",
+			input: `use go:example.com/app/ffi
+
+fn narrow(value: ffi::ReadWriter<$T>) ffi::Reader<$T> {
+  value
+}`,
+		},
+		{
+			name: "generic concrete Go type satisfies generic interface with the same declaration generic",
+			input: `use go:example.com/app/ffi
+
+fn getter(value: ffi::Box<$T>) ffi::Getter<$T> {
+  value
+}`,
+		},
+		{
+			name: "nested generic interface arguments share declaration generic identity",
+			input: `use go:example.com/app/ffi
+
+fn narrow(value: ffi::ReadWriter<ffi::Box<$T>>) ffi::Reader<ffi::Box<$T>> {
+  value
+}`,
+		},
+		{
+			name: "later comparable interface constraint applies to shared declaration generic",
+			input: `use go:example.com/app/ffi
+
+fn getter(value: ffi::Box<$T>) ffi::GetterComparable<$T> {
+  value
+}`,
+		},
+		{
+			name: "generic interface assignment preserves Go ABI distinctions",
+			input: `use go:example.com/app/ffi
+
+fn invalid(value: ffi::SliceConsumer<$T>) ffi::SlicePointerConsumer<$T> {
+  value
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected ffi::SlicePointerConsumer<$T>, got ffi::SliceConsumer<$T>"}},
+		},
+		{
+			name: "declaration generic cannot bypass a Go constraint",
+			input: `use go:example.com/app/ffi
+
+fn invalid(value: ffi::StringBox<$T>) {}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type argument $T does not satisfy Go constraint fmt.Stringer"}},
+		},
+		{
+			name: "nested generic argument must satisfy outer comparable constraint",
+			input: `use go:example.com/app/ffi
+
+fn invalid(value: ffi::ComparableHolder<ffi::Box<$T>>) {}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type argument ffi::Box<$T> does not satisfy Go constraint comparable"}},
+		},
+		{
+			name: "generic Go struct literal infers an enclosing declaration generic",
+			input: `use go:example.com/app/ffi
+
+fn box(value: $T) ffi::Box<$T> {
+  ffi::Box{Value: value}
+}`,
+		},
+		{
+			name: "coupled Go constraints preserve repeated declaration generic identity",
+			input: `use go:example.com/app/ffi
+
+fn pair(value: $T, values: [$T]) ffi::CoupledPair<$T, [$T]> {
+  ffi::CoupledPair{Value: value, Values: values}
+}`,
+		},
+		{
 			name: "promoted generic method keeps substituted Error as an ordinary value",
 			input: `use go:example.com/app/ffi
 
@@ -220,6 +291,8 @@ func writeGoGenericStructPackage(t *testing.T, root string) {
 	}
 	contents := `package ffi
 
+import "fmt"
+
 type Box[T any] struct {
 	Value T
 	Label string
@@ -273,6 +346,40 @@ func (Holder[T]) Array(value T) Producers[T] {
 
 type Getter[T any] interface {
 	Get() T
+}
+
+type GetterComparable[T comparable] interface {
+	Get() T
+}
+
+type Reader[T any] interface {
+	Read() T
+}
+
+type ReadWriter[T any] interface {
+	Read() T
+	Write(T)
+}
+
+type SliceConsumer[T any] interface {
+	Take([]T)
+}
+
+type SlicePointerConsumer[T any] interface {
+	Take(*[]T)
+}
+
+type StringBox[T fmt.Stringer] struct {
+	Value T
+}
+
+type CoupledPair[E any, S ~[]E] struct {
+	Value E
+	Values S
+}
+
+type ComparableHolder[T comparable] struct {
+	Value T
 }
 
 func AsGetter[T any](value T) Getter[T] { return Box[T]{Value: value} }

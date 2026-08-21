@@ -1,9 +1,62 @@
 package air
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestLowerPreservesGenericGoInterfaceWidening(t *testing.T) {
+	project := t.TempDir()
+	if err := os.WriteFile(filepath.Join(project, "ard.toml"), []byte("name = \"probe\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(project, "go.mod"), []byte("module example.com/probe\n\ngo 1.26\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ffi := filepath.Join(project, "ffi")
+	if err := os.MkdirAll(ffi, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ffi, "ffi.go"), []byte(`package ffi
+
+type Reader[T any] interface { Read() T }
+type ReadWriter[T any] interface { Read() T; Write(T) }
+type Box[T any] struct { Value T }
+func (b Box[T]) Read() T { return b.Value }
+type Getter[T any] interface { Read() T }
+type StringReadWriter struct{}
+func (StringReadWriter) Read() string { return "reader" }
+func (StringReadWriter) Write(string) {}
+func NewReadWriter() ReadWriter[string] { return StringReadWriter{} }
+func NewBox() Box[string] { return Box[string]{Value: "box"} }
+func NewBoxPointer() *Box[string] { return &Box[string]{Value: "pointer"} }
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	lowerProjectSource(t, project, `use go:example.com/probe/ffi
+
+fn narrow(value: ffi::ReadWriter<$T>) ffi::Reader<$T> {
+  value
+}
+
+fn getter(value: ffi::Box<$T>) ffi::Getter<$T> {
+  value
+}
+
+fn pointer_getter(value: mut ffi::Box<$T>) ffi::Getter<$T> {
+  value
+}
+
+fn main() Str {
+  let reader = narrow(ffi::NewReadWriter())
+  let getter_value = getter(ffi::NewBox())
+  let pointer_value = pointer_getter(ffi::NewBoxPointer())
+  "{reader.Read()}:{getter_value.Read()}:{pointer_value.Read()}"
+}`)
+}
 
 func TestLowerPreservesAnyConversionOwnership(t *testing.T) {
 	program := lowerSource(t, `

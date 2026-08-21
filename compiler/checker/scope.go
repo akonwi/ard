@@ -222,11 +222,12 @@ func (st *SymbolTable) bindGeneric(genericName string, concreteType Type) error 
 	}
 
 	if typeVar.bound {
-		// Already bound - verify consistency
-		// Dereference both sides to handle chains
+		// Already bound - verify consistency. A binding to an enclosing
+		// declaration generic is rigid here; it must not act as a wildcard for
+		// later evidence in this inference scope.
 		actual := deref(typeVar.actual)
 		concrete := deref(concreteType)
-		if !actual.equal(concrete) {
+		if !validationEqualTypes(actual, concrete) {
 			return &genericBindingConflictError{Name: genericName, Existing: actual, Incoming: concrete}
 		}
 		return nil
@@ -309,6 +310,104 @@ func extractGenericNames(t Type, names map[string]bool) {
 		}
 		extractGenericNames(t.ReturnType, names)
 	}
+}
+
+type genericMutableVisit struct {
+	typeValue Type
+	mutable   bool
+}
+
+func genericAppearsUnderMutableRepresentation(t Type, name string) bool {
+	return genericAppearsUnderMutableRepresentationSeen(t, name, false, map[genericMutableVisit]struct{}{})
+}
+
+func genericAppearsUnderMutableRepresentationSeen(t Type, name string, mutable bool, seen map[genericMutableVisit]struct{}) bool {
+	if t == nil {
+		return false
+	}
+	visit := genericMutableVisit{typeValue: t, mutable: mutable}
+	if _, ok := seen[visit]; ok {
+		return false
+	}
+	seen[visit] = struct{}{}
+	switch typ := t.(type) {
+	case *TypeVar:
+		if typ.actual != nil {
+			return genericAppearsUnderMutableRepresentationSeen(typ.actual, name, mutable, seen)
+		}
+		return mutable && typ.name == name
+	case *MutableRef:
+		return genericAppearsUnderMutableRepresentationSeen(typ.Of(), name, true, seen)
+	case *List:
+		return genericAppearsUnderMutableRepresentationSeen(typ.Of(), name, false, seen)
+	case *Slice:
+		return genericAppearsUnderMutableRepresentationSeen(typ.Of(), name, false, seen)
+	case *FixedArray:
+		return genericAppearsUnderMutableRepresentationSeen(typ.Of(), name, false, seen)
+	case *Chan:
+		return genericAppearsUnderMutableRepresentationSeen(typ.Of(), name, false, seen)
+	case *Receiver:
+		return genericAppearsUnderMutableRepresentationSeen(typ.Of(), name, false, seen)
+	case *Sender:
+		return genericAppearsUnderMutableRepresentationSeen(typ.Of(), name, false, seen)
+	case *Map:
+		return genericAppearsUnderMutableRepresentationSeen(typ.Key(), name, false, seen) ||
+			genericAppearsUnderMutableRepresentationSeen(typ.Value(), name, false, seen)
+	case *Maybe:
+		return genericAppearsUnderMutableRepresentationSeen(typ.Of(), name, false, seen)
+	case *Result:
+		return genericAppearsUnderMutableRepresentationSeen(typ.Val(), name, false, seen) ||
+			genericAppearsUnderMutableRepresentationSeen(typ.Err(), name, false, seen)
+	case *FunctionDef:
+		for _, parameter := range typ.Parameters {
+			if genericAppearsUnderMutableRepresentationSeen(parameter.Type, name, parameter.Mutable, seen) {
+				return true
+			}
+		}
+		return genericAppearsUnderMutableRepresentationSeen(typ.ReturnType, name, false, seen)
+	case *StructDef:
+		for _, fieldType := range structFields(typ) {
+			if genericAppearsUnderMutableRepresentationSeen(fieldType, name, false, seen) {
+				return true
+			}
+		}
+	case *ForeignType:
+		for _, argument := range typ.TypeArgs {
+			if genericAppearsUnderMutableRepresentationSeen(argument, name, false, seen) {
+				return true
+			}
+		}
+	case *Union:
+		for _, member := range typ.Types {
+			if genericAppearsUnderMutableRepresentationSeen(member, name, false, seen) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func hasPointerErasingTraitRepresentation(t Type) bool {
+	t = derefType(t)
+	if reference, ok := t.(*MutableRef); ok {
+		return hasPointerErasingTraitRepresentation(reference.Of())
+	}
+	_, ok := t.(*Trait)
+	return ok
+}
+
+func mutableGenericTraitArgument(patterns []Type, params []string, args []Type) (string, Type, bool) {
+	for i, param := range params {
+		if i >= len(args) || !hasPointerErasingTraitRepresentation(args[i]) {
+			continue
+		}
+		for _, pattern := range patterns {
+			if genericAppearsUnderMutableRepresentation(pattern, param) {
+				return param, args[i], true
+			}
+		}
+	}
+	return "", nil, false
 }
 
 // hasGenericsInType checks if a type contains any generic parameters.
@@ -1060,6 +1159,13 @@ func foreignTypeWithArgs(typ *ForeignType, args []Type) *ForeignType {
 	goTypeContext := newCheckerGoTypeContext()
 	for i, arg := range args {
 		converted, ok := checkerTypeToGoTypeWithContext(arg, goTypeContext)
+		// Generic Ard arguments need concrete local placeholders while loading
+		// instantiated Go methods. The placeholders are substituted back to the
+		// original Ard arguments below, avoiding unsupported go/types TypeParam
+		// metadata from escaping through the foreign loader.
+		if hasGenericsInType(arg) {
+			ok = false
+		}
 		if !ok {
 			// A local placeholder lets go/types instantiate method selections;
 			// method/field types are mapped back to the original Ard argument

@@ -1,6 +1,9 @@
 package checker
 
-import "go/types"
+import (
+	"fmt"
+	"go/types"
+)
 
 // ForeignType is a named type owned by a foreign target. It is distinct from
 // its underlying Ard representation. When Underlying is nil, the value is opaque
@@ -215,8 +218,119 @@ func foreignGoAssignableTo(actual *ForeignType, expected *ForeignType) bool {
 	if actual == nil || expected == nil || actual.Target != "go" || expected.Target != "go" || actual.GoType == nil || expected.GoType == nil {
 		return false
 	}
-	// Both types come from the resolver's single primed go/packages session
-	// (ADR 0044), so go/types object identity holds and plain assignability
-	// is sufficient.
-	return types.AssignableTo(actual.GoType, expected.GoType)
+	// Both types ordinarily come from the resolver's single primed go/packages
+	// session (ADR 0044), so object identity makes plain assignability enough.
+	if types.AssignableTo(actual.GoType, expected.GoType) {
+		return true
+	}
+	// Symbolic Ard arguments are represented by local placeholders while type
+	// metadata is loaded. Re-instantiate both sides in one go/types context so
+	// equal Ard declaration generics share identity and Go retains the complete
+	// method ABI, including unexported methods and pointer/descriptor shapes.
+	context := newCheckerGoTypeContext()
+	collectForeignGoTypeConstraints(actual, context, map[*ForeignType]struct{}{})
+	collectForeignGoTypeConstraints(expected, context, map[*ForeignType]struct{}{})
+	actualGo, err := foreignGoTypeWithContext(actual, context)
+	if err != nil {
+		return false
+	}
+	expectedGo, err := foreignGoTypeWithContext(expected, context)
+	if err != nil {
+		return false
+	}
+	return types.AssignableTo(actualGo, expectedGo)
+}
+
+func foreignGoTypeWithContext(foreign *ForeignType, context *checkerGoTypeContext) (types.Type, error) {
+	if foreign == nil || foreign.GoType == nil {
+		return nil, fmt.Errorf("foreign type has no Go representation")
+	}
+	goType := foreign.GoType
+	pointer := false
+	if ptr, ok := goType.(*types.Pointer); ok {
+		goType = ptr.Elem()
+		pointer = true
+	}
+	named, ok := goType.(*types.Named)
+	if !ok || len(foreign.TypeArgs) == 0 {
+		return foreign.GoType, nil
+	}
+	params := named.Origin().TypeParams()
+	if params == nil || params.Len() != len(foreign.TypeArgs) {
+		return nil, fmt.Errorf("Go type argument count mismatch")
+	}
+	collectForeignGoTypeConstraints(foreign, context, map[*ForeignType]struct{}{})
+	args := make([]types.Type, len(foreign.TypeArgs))
+	for i, argument := range foreign.TypeArgs {
+		converted, ok := checkerTypeToGoTypeWithContext(argument, context)
+		if !ok {
+			return nil, fmt.Errorf("type argument %s has no Go representation", argument)
+		}
+		args[i] = converted
+	}
+	instantiated, err := types.Instantiate(types.NewContext(), named.Origin(), args, true)
+	if err != nil {
+		return nil, err
+	}
+	if pointer {
+		return types.NewPointer(instantiated), nil
+	}
+	return instantiated, nil
+}
+
+func collectForeignGoTypeConstraints(foreign *ForeignType, context *checkerGoTypeContext, seen map[*ForeignType]struct{}) {
+	if foreign == nil || context == nil {
+		return
+	}
+	if _, ok := seen[foreign]; ok {
+		return
+	}
+	seen[foreign] = struct{}{}
+	goType := foreign.GoType
+	if pointer, ok := goType.(*types.Pointer); ok {
+		goType = pointer.Elem()
+	}
+	named, _ := goType.(*types.Named)
+	if named != nil {
+		params := named.Origin().TypeParams()
+		for i, argument := range foreign.TypeArgs {
+			if params == nil || i >= params.Len() {
+				break
+			}
+			typeVar, ok := derefType(argument).(*TypeVar)
+			if !ok || typeVar.actual != nil || typeVar.owner != 0 {
+				continue
+			}
+			constraint, ok := params.At(i).Constraint().Underlying().(*types.Interface)
+			if ok && constraint.Complete().IsComparable() {
+				context.comparableTypeVars[checkerTypeVarKey(typeVar)] = true
+			}
+		}
+	}
+	for _, argument := range foreign.TypeArgs {
+		collectCheckerTypeGoConstraints(argument, context, seen)
+	}
+}
+
+func collectCheckerTypeGoConstraints(t Type, context *checkerGoTypeContext, seen map[*ForeignType]struct{}) {
+	switch typ := derefType(t).(type) {
+	case *ForeignType:
+		collectForeignGoTypeConstraints(typ, context, seen)
+	case *MutableRef:
+		collectCheckerTypeGoConstraints(typ.Of(), context, seen)
+	case *List:
+		collectCheckerTypeGoConstraints(typ.Of(), context, seen)
+	case *Slice:
+		collectCheckerTypeGoConstraints(typ.Of(), context, seen)
+	case *FixedArray:
+		collectCheckerTypeGoConstraints(typ.Of(), context, seen)
+	case *Map:
+		collectCheckerTypeGoConstraints(typ.Key(), context, seen)
+		collectCheckerTypeGoConstraints(typ.Value(), context, seen)
+	case *Maybe:
+		collectCheckerTypeGoConstraints(typ.Of(), context, seen)
+	case *Result:
+		collectCheckerTypeGoConstraints(typ.Val(), context, seen)
+		collectCheckerTypeGoConstraints(typ.Err(), context, seen)
+	}
 }
