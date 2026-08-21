@@ -2,7 +2,6 @@ package air
 
 import (
 	"fmt"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -297,8 +296,8 @@ func (l *lowerer) lowerModule(module checker.Module) error {
 		stmt := prog.Statements[i]
 		switch node := stmt.Stmt.(type) {
 		case *checker.StructDef:
-			if typeHasUnresolvedTypeVar(node) {
-				if err := l.declareRequiredGenericGoMethods(modID, node); err != nil {
+			if len(node.GenericParams) > 0 {
+				if err := l.declareGenericStructMethodsAndTraitImpls(modID, node); err != nil {
 					return err
 				}
 				continue
@@ -1559,7 +1558,7 @@ func (fl *functionLowerer) internCompositeType(t checker.Type) (TypeID, error) {
 	}
 }
 
-func (l *lowerer) declareRequiredGenericGoMethods(module ModuleID, def *checker.StructDef) error {
+func (l *lowerer) declareGenericStructMethodsAndTraitImpls(module ModuleID, def *checker.StructDef) error {
 	if def == nil || len(def.GenericParams) == 0 {
 		return nil
 	}
@@ -1571,6 +1570,11 @@ func (l *lowerer) declareRequiredGenericGoMethods(module ModuleID, def *checker.
 	if err != nil {
 		return err
 	}
+	fl := &functionLowerer{l: l}
+	pendingMethods := map[FunctionID]*checker.FunctionDef{}
+
+	// Required Go methods use their exact native name. Builtin Error shares
+	// that method function with its Ard trait implementation.
 	requiredMethods := map[string]*checker.FunctionDef{}
 	for _, method := range l.requiredGoMethods(def) {
 		if method != nil {
@@ -1592,43 +1596,83 @@ func (l *lowerer) declareRequiredGenericGoMethods(module ModuleID, def *checker.
 		names = append(names, name)
 	}
 	sort.Strings(names)
-	names = slices.Compact(names)
-	fl := &functionLowerer{l: l}
-	declaredMethods := map[string]FunctionID{}
+	declaredRequired := map[string]FunctionID{}
 	for _, name := range names {
 		method := requiredMethods[name]
-		id, _, err := fl.declareGenericInstanceMethodFunction(module, selfType, def, method)
+		key := "genericmethod:" + def.ModulePath + ":" + def.Name + ":" + method.Name
+		id, _, err := fl.declareGenericMethodFunction(module, selfType, method, key, def.Name+"."+method.Name, "genericmethod")
 		if err != nil {
 			return fmt.Errorf("declare required Go method %s.%s: %w", def.Name, method.RequiredGoMethodName, err)
 		}
-		declaredMethods[name] = id
+		declaredRequired[name] = id
+		pendingMethods[id] = method
 	}
 
-	// Builtin Error is both a required native Go method and an Ard trait.
-	// Register its generic implementation so static interpolation dispatch can
-	// call the same generic receiver method for concrete instantiations.
+	type implPlan struct {
+		key     string
+		trait   TraitID
+		methods []FunctionID
+	}
+	plans := []implPlan{}
+	plannedKeys := map[string]bool{}
 	for _, trait := range def.Traits {
-		if !checker.IsBuiltinError(trait) {
+		if trait == nil {
 			continue
 		}
+		key := implKey(module, checkerTraitKey(trait), def.String())
+		if _, exists := l.impls[key]; exists || plannedKeys[key] {
+			continue
+		}
+		plannedKeys[key] = true
 		traitID, err := l.internTrait(trait)
 		if err != nil {
 			return err
 		}
-		if _, exists := l.lookupImpl(traitID, selfType); exists {
-			continue
-		}
 		traitMethods := trait.GetMethods()
 		methodIDs := make([]FunctionID, len(traitMethods))
-		for i, traitMethod := range traitMethods {
-			id, ok := declaredMethods[traitMethod.Name]
-			if !ok {
-				return fmt.Errorf("generic Error implementation %s is missing method %s", def.Name, traitMethod.Name)
+		if checker.IsBuiltinError(trait) {
+			for i, traitMethod := range traitMethods {
+				id, ok := declaredRequired[traitMethod.Name]
+				if !ok {
+					return fmt.Errorf("generic Error implementation %s is missing method %s", def.Name, traitMethod.Name)
+				}
+				methodIDs[i] = id
 			}
-			methodIDs[i] = id
+		} else {
+			methods := l.traitMethods(def, trait)
+			for i, traitMethod := range traitMethods {
+				method := methods[traitMethod.Name]
+				if method == nil {
+					return fmt.Errorf("generic trait implementation %s for %s is missing method %s", trait.Name, def.Name, traitMethod.Name)
+				}
+				id, err := fl.declareGenericTraitMethodFunction(module, selfType, def, trait, method)
+				if err != nil {
+					return fmt.Errorf("declare generic trait method %s.%s: %w", def.Name, method.Name, err)
+				}
+				methodIDs[i] = id
+				pendingMethods[id] = method
+			}
 		}
+		plans = append(plans, implPlan{key: key, trait: traitID, methods: methodIDs})
+	}
+
+	// Register every implementation before lowering any method body. Required,
+	// Error, and ordinary trait methods may project self across these contracts.
+	for _, plan := range plans {
 		id := ImplID(len(l.program.Impls))
-		l.program.Impls = append(l.program.Impls, Impl{ID: id, Trait: traitID, ForType: selfType, Methods: methodIDs})
+		l.impls[plan.key] = id
+		l.program.Impls = append(l.program.Impls, Impl{ID: id, Trait: plan.trait, ForType: selfType, Methods: plan.methods})
+	}
+	methodIDs := make([]int, 0, len(pendingMethods))
+	for id := range pendingMethods {
+		methodIDs = append(methodIDs, int(id))
+	}
+	sort.Ints(methodIDs)
+	for _, rawID := range methodIDs {
+		id := FunctionID(rawID)
+		if err := l.lowerFunctionByID(id, pendingMethods[id]); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -2071,20 +2115,10 @@ func methodUsesOnlyStructTypeParams(def *checker.FunctionDef, structParams []str
 }
 
 func (fl *functionLowerer) declareGenericInstanceMethodFunction(module ModuleID, instanceType TypeID, structType *checker.StructDef, callDef *checker.FunctionDef) (FunctionID, []TypeID, error) {
-	info, ok := fl.l.typeInfo(instanceType)
-	if !ok || info.Generic == NoType {
-		return NoFunction, nil, fmt.Errorf("generic method receiver %d is not a generic instantiation", instanceType)
+	definition := checker.StructDefinition(structType)
+	if definition == nil {
+		return NoFunction, nil, fmt.Errorf("generic method %s has no struct definition", callDef.Name)
 	}
-	defID := info.Generic
-	structDef := fl.l.program.Types[defID-1]
-	paramNames := structDef.TypeParams
-	typeArgs := info.GenericArgs
-
-	key := "genericmethod:" + structDef.ModulePath + ":" + structDef.Name + ":" + callDef.Name
-	if id, ok := fl.l.genericMethodDefs[key]; ok {
-		return id, typeArgs, nil
-	}
-
 	orig := callDef
 	if callDef.RequiredGoMethodName == "" {
 		if methods := fl.l.inherentMethods(structType); methods != nil {
@@ -2093,12 +2127,49 @@ func (fl *functionLowerer) declareGenericInstanceMethodFunction(module ModuleID,
 			}
 		}
 	}
+	key := "genericmethod:" + definition.ModulePath + ":" + definition.Name + ":" + callDef.Name
+	id, typeArgs, err := fl.declareGenericMethodFunction(module, instanceType, orig, key, definition.Name+"."+callDef.Name, "genericmethod")
+	if err != nil {
+		return NoFunction, nil, err
+	}
+	if err := fl.l.lowerFunctionByID(id, orig); err != nil {
+		return NoFunction, nil, err
+	}
+	return id, typeArgs, nil
+}
+
+func (fl *functionLowerer) declareGenericTraitMethodFunction(module ModuleID, instanceType TypeID, structType *checker.StructDef, trait *checker.Trait, method *checker.FunctionDef) (FunctionID, error) {
+	definition := checker.StructDefinition(structType)
+	if definition == nil {
+		return NoFunction, fmt.Errorf("generic trait method %s has no struct definition", method.Name)
+	}
+	traitKey := checkerTraitKey(trait)
+	key := "generictraitmethod:" + definition.ModulePath + ":" + definition.Name + ":" + traitKey + ":" + method.Name
+	id, _, err := fl.declareGenericMethodFunction(module, instanceType, method, key, definition.Name+"."+trait.Name+"."+method.Name, "generictraitmethod:"+traitKey)
+	return id, err
+}
+
+// declareGenericMethodFunction declares a generic receiver method without
+// lowering its body. Trait implementations use this split phase so their AIR
+// Impl can be registered before a body projects self to its current trait.
+func (fl *functionLowerer) declareGenericMethodFunction(module ModuleID, instanceType TypeID, method *checker.FunctionDef, key, functionName, discriminator string) (FunctionID, []TypeID, error) {
+	info, ok := fl.l.typeInfo(instanceType)
+	if !ok || info.Generic == NoType {
+		return NoFunction, nil, fmt.Errorf("generic method receiver %d is not a generic instantiation", instanceType)
+	}
+	defID := info.Generic
+	structDef := fl.l.program.Types[defID-1]
+	paramNames := structDef.TypeParams
+	typeArgs := info.GenericArgs
+	if id, ok := fl.l.genericMethodDefs[key]; ok {
+		return id, typeArgs, nil
+	}
 
 	recvType, err := fl.l.genericSelfInstance(defID)
 	if err != nil {
 		return NoFunction, nil, err
 	}
-	receiver := orig.Receiver
+	receiver := method.Receiver
 	if receiver == "" {
 		receiver = "self"
 	}
@@ -2112,15 +2183,15 @@ func (fl *functionLowerer) declareGenericInstanceMethodFunction(module ModuleID,
 	prevOwner := fl.l.defParamOwner
 	fl.l.defParams = params
 	fl.l.defParamOwner = paramOwner
-	receiverType, err := fl.l.methodReceiverType(recvType, orig.Mutates)
+	receiverType, err := fl.l.methodReceiverType(recvType, method.Mutates)
 	if err != nil {
 		fl.l.defParams = prev
 		fl.l.defParamOwner = prevOwner
 		return NoFunction, nil, err
 	}
-	methodParams := make([]Param, 0, len(orig.Parameters)+1)
+	methodParams := make([]Param, 0, len(method.Parameters)+1)
 	methodParams = append(methodParams, Param{Name: receiver, Type: receiverType})
-	for _, p := range orig.Parameters {
+	for _, p := range method.Parameters {
 		tid, err := fl.l.internType(p.Type)
 		if err != nil {
 			fl.l.defParams = prev
@@ -2129,7 +2200,7 @@ func (fl *functionLowerer) declareGenericInstanceMethodFunction(module ModuleID,
 		}
 		methodParams = append(methodParams, Param{Name: p.Name, Type: tid, ABI: lowerABIParamMode(p)})
 	}
-	returnType, err := fl.l.internType(orig.ReturnType)
+	returnType, err := fl.l.internType(method.ReturnType)
 	fl.l.defParams = prev
 	fl.l.defParamOwner = prevOwner
 	if err != nil {
@@ -2139,14 +2210,14 @@ func (fl *functionLowerer) declareGenericInstanceMethodFunction(module ModuleID,
 	signature := Signature{Params: methodParams, Return: returnType}
 	id := FunctionID(len(fl.l.program.Functions))
 	fl.l.genericMethodDefs[key] = id
-	fl.l.functions[concreteFunctionKey(module, structDef.Name+"."+callDef.Name, signature, "genericmethod")] = id
+	fl.l.functions[concreteFunctionKey(module, functionName, signature, discriminator)] = id
 	fl.l.program.Functions = append(fl.l.program.Functions, Function{
 		ID:                   id,
 		Module:               module,
-		Name:                 structDef.Name + "." + callDef.Name,
+		Name:                 functionName,
 		Receiver:             recvType,
-		MethodName:           callDef.Name,
-		RequiredGoMethodName: orig.RequiredGoMethodName,
+		MethodName:           method.Name,
+		RequiredGoMethodName: method.RequiredGoMethodName,
 		Signature:            signature,
 		TypeParams:           paramNames,
 	})
@@ -2160,9 +2231,6 @@ func (fl *functionLowerer) declareGenericInstanceMethodFunction(module ModuleID,
 		typeVars[p] = tp
 	}
 	fl.l.setFunctionTypeVars(id, typeVars)
-	if err := fl.l.lowerFunctionByID(id, orig); err != nil {
-		return NoFunction, nil, err
-	}
 	return id, typeArgs, nil
 }
 
@@ -6294,6 +6362,11 @@ func (fl *functionLowerer) lowerUserInstanceMethod(typeID TypeID, target *Expr, 
 			target = &Expr{Kind: ExprDeref, Type: reference.Elem, Target: target, Observational: true}
 		}
 	}
+	if method.DispatchTrait != nil {
+		if expr, ok, err := fl.lowerStaticTraitMethod(typeID, target, method); ok || err != nil {
+			return expr, err
+		}
+	}
 	if def == nil || def.Body == nil {
 		if expr, ok, err := fl.lowerStaticTraitMethod(typeID, target, method); ok || err != nil {
 			return expr, err
@@ -6572,7 +6645,10 @@ func (l *lowerer) ensureModuleTraitImplsDeclared(modulePath string) error {
 	for _, stmt := range prog.Statements {
 		switch node := stmt.Stmt.(type) {
 		case *checker.StructDef:
-			if typeHasUnresolvedTypeVar(node) {
+			if len(node.GenericParams) > 0 {
+				if err := l.declareGenericStructMethodsAndTraitImpls(modID, node); err != nil {
+					return err
+				}
 				continue
 			}
 			if err := l.declareTraitImplsForType(modID, node); err != nil {
@@ -6605,6 +6681,12 @@ func (l *lowerer) ensureModuleTypesDeclared(modulePath string) error {
 	for _, stmt := range prog.Statements {
 		switch node := stmt.Stmt.(type) {
 		case *checker.StructDef:
+			if len(node.GenericParams) > 0 {
+				if _, err := l.internGenericStructDef(node); err != nil {
+					return err
+				}
+				continue
+			}
 			if typeHasUnresolvedTypeVar(node) {
 				continue
 			}

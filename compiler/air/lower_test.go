@@ -1344,6 +1344,211 @@ func TestLowerImportedGenericStdlibFunctionLowersAsGoGeneric(t *testing.T) {
 		}
 	}
 }
+func TestLowerGenericStructTraitImplementation(t *testing.T) {
+	program := lowerSource(t, `
+		trait View {
+			fn label() Str
+		}
+
+		struct Box<$T> {
+			value: $T,
+		}
+
+		impl View for Box {
+			fn label() Str { "box" }
+		}
+
+		fn int_view() View { Box<Int>{value: 1} }
+		fn str_view() View { Box<Str>{value: "value"} }
+		fn direct_label() Str {
+			let box = Box<Int>{value: 1}
+			box.label()
+		}
+	`)
+
+	if len(program.Impls) != 1 {
+		t.Fatalf("impl count = %d, want 1", len(program.Impls))
+	}
+	impl := program.Impls[0]
+	implType := testTypeInfo(t, program, impl.ForType)
+	if implType.Generic == NoType || len(implType.GenericArgs) != 1 || typeKind(t, program, implType.GenericArgs[0]) != TypeParam {
+		t.Fatalf("impl type = %#v, want Box<T> generic self instance", implType)
+	}
+	if len(impl.Methods) != 1 {
+		t.Fatalf("impl methods = %v, want one method", impl.Methods)
+	}
+	method := program.Functions[impl.Methods[0]]
+	if method.Name != "Box.View.label" || len(method.TypeParams) != 1 {
+		t.Fatalf("method = %#v, want generic Box.View.label", method)
+	}
+	if method.Receiver != impl.ForType {
+		t.Fatalf("method receiver = %d, want impl type %d", method.Receiver, impl.ForType)
+	}
+	for _, name := range []string{"int_view", "str_view"} {
+		fn := findFunction(t, program, name)
+		if fn.Body.Result == nil || fn.Body.Result.Kind != ExprTraitUpcast || fn.Body.Result.Impl != impl.ID {
+			t.Fatalf("%s result = %#v, want upcast through impl %d", name, fn.Body.Result, impl.ID)
+		}
+	}
+	direct := findFunction(t, program, "direct_label")
+	if direct.Body.Result == nil || direct.Body.Result.Kind != ExprCall || direct.Body.Result.Function != impl.Methods[0] {
+		t.Fatalf("direct result = %#v, want exact trait method %d", direct.Body.Result, impl.Methods[0])
+	}
+}
+
+func TestLowerPhantomGenericStructTraitImplementation(t *testing.T) {
+	program := lowerSource(t, `
+		trait View {
+			fn label() Str
+		}
+		struct Marker<$T> {}
+		impl View for Marker {
+			fn label() Str { "marker" }
+		}
+		fn make() View { Marker<Int>{} }
+	`)
+	if len(program.Impls) != 1 {
+		t.Fatalf("impl count = %d, want one phantom generic implementation", len(program.Impls))
+	}
+	implType := testTypeInfo(t, program, program.Impls[0].ForType)
+	if implType.Generic == NoType || len(implType.GenericArgs) != 1 || typeKind(t, program, implType.GenericArgs[0]) != TypeParam {
+		t.Fatalf("impl type = %#v, want Marker<T>", implType)
+	}
+}
+
+func TestLowerGenericErrorRegistersBeforeSelfProjection(t *testing.T) {
+	program := lowerSource(t, `
+		struct Failure<$T> {
+			value: $T,
+		}
+		impl Error for Failure {
+			fn error() Str {
+				let current: Error = self
+				"failure"
+			}
+		}
+	`)
+	if len(program.Impls) != 1 || len(program.Impls[0].Methods) != 1 {
+		t.Fatalf("impls = %#v, want one generic Error implementation", program.Impls)
+	}
+	method := program.Functions[program.Impls[0].Methods[0]]
+	if len(method.Body.Stmts) == 0 || method.Body.Stmts[0].Value == nil || method.Body.Stmts[0].Value.Kind != ExprTraitUpcast {
+		t.Fatalf("Error method body = %#v, want self upcast after impl registration", method.Body)
+	}
+}
+
+func TestLowerGenericRequiredMethodSeesAllTraitImplementations(t *testing.T) {
+	program := lowerSource(t, `
+		trait View {
+			fn value() Int
+		}
+		struct Failure<$T> {
+			value: $T,
+		}
+		impl View for Failure {
+			fn value() Int { 1 }
+		}
+		impl Error for Failure {
+			fn error() Str {
+				let current: View = self
+				"failure"
+			}
+		}
+	`)
+	method := findFunction(t, program, "Failure.error")
+	if len(method.Body.Stmts) == 0 || method.Body.Stmts[0].Value == nil || method.Body.Stmts[0].Value.Kind != ExprTraitUpcast {
+		t.Fatalf("Error method body = %#v, want projection to ordinary trait", method.Body)
+	}
+}
+
+func TestLowerGenericTraitImplRegistersBeforeSelfProjection(t *testing.T) {
+	program := lowerSource(t, `
+		trait View {
+			fn mut self_ref() mut View
+		}
+
+		struct Box<$T> {
+			value: $T,
+		}
+
+		impl View for Box {
+			fn mut self_ref() mut View { self }
+		}
+	`)
+
+	if len(program.Impls) != 1 || len(program.Impls[0].Methods) != 1 {
+		t.Fatalf("impls = %#v, want one generic implementation method", program.Impls)
+	}
+	impl := program.Impls[0]
+	method := program.Functions[impl.Methods[0]]
+	if method.Body.Result == nil || method.Body.Result.Kind != ExprTraitRefProject || method.Body.Result.Impl != impl.ID {
+		t.Fatalf("method result = %#v, want self projection through impl %d", method.Body.Result, impl.ID)
+	}
+	if len(method.Signature.Params) != 1 || typeKind(t, program, method.Signature.Params[0].Type) != TypeReference {
+		t.Fatalf("method receiver = %#v, want mutable generic receiver", method.Signature.Params)
+	}
+}
+
+func TestLowerGenericSameNamedTraitMethodsKeepDistinctImplementations(t *testing.T) {
+	program := lowerSource(t, `
+		trait Reader {
+			fn act() Str
+		}
+		trait Writer {
+			fn act() Str
+		}
+
+		struct Device<$T> {
+			value: $T,
+		}
+
+		impl Reader for Device {
+			fn act() Str { "read" }
+		}
+		impl Writer for Device {
+			fn act() Str { "write" }
+		}
+	`)
+
+	if len(program.Impls) != 2 {
+		t.Fatalf("impl count = %d, want 2", len(program.Impls))
+	}
+	methods := map[FunctionID]bool{}
+	for _, impl := range program.Impls {
+		if len(impl.Methods) != 1 {
+			t.Fatalf("impl %d methods = %v, want one", impl.ID, impl.Methods)
+		}
+		methods[impl.Methods[0]] = true
+		implType := testTypeInfo(t, program, impl.ForType)
+		if implType.Generic == NoType || len(implType.GenericArgs) != 1 || typeKind(t, program, implType.GenericArgs[0]) != TypeParam {
+			t.Fatalf("impl %d type = %#v, want Device<T>", impl.ID, implType)
+		}
+	}
+	if len(methods) != 2 {
+		t.Fatalf("generic trait methods were merged: %#v", program.Impls)
+	}
+}
+
+func TestLowerDuplicateGenericTraitImplementationIsIdempotent(t *testing.T) {
+	program := lowerSource(t, `
+		trait View {
+			fn label() Str
+		}
+		struct Box<$T> {
+			value: $T,
+		}
+		impl View for Box {
+			fn label() Str { "first" }
+		}
+		impl View for Box {
+			fn label() Str { "second" }
+		}
+	`)
+	if len(program.Impls) != 1 {
+		t.Fatalf("impl count = %d, want one implementation for duplicate declarations", len(program.Impls))
+	}
+}
+
 func TestLowerGenericStructMethodBodyUsesReceiverBindings(t *testing.T) {
 	program := lowerSource(t, `
 		struct Box {

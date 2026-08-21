@@ -533,6 +533,25 @@ func (c *Checker) addStructMethod(def *StructDef, method *FunctionDef) {
 	}
 }
 
+func (c *Checker) traitForStructMethod(def *StructDef, method *FunctionDef) *Trait {
+	if def == nil || method == nil {
+		return nil
+	}
+	definition := canonicalStructDefinition(def)
+	owner := StructMethodOwner(definition)
+	for _, trait := range definition.Traits {
+		methods := c.program.TraitMethodsFor(owner, trait)
+		if methods == nil {
+			methods = TraitMethodsInModules(c.program.Imports, owner, trait)
+		}
+		candidate := methods[method.Name]
+		if candidate == method || candidate != nil && candidate.Body != nil && candidate.Body == method.Body {
+			return trait
+		}
+	}
+	return nil
+}
+
 func (c *Checker) hasAmbiguousTraitMethod(typ Type, name string) bool {
 	owner, ok := MethodOwnerForType(typ)
 	return ok && (c.program.HasAmbiguousTraitMethod(owner, name) || AmbiguousTraitMethodInModules(c.program.Imports, owner, name))
