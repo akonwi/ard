@@ -74,6 +74,17 @@ let getter = ffi::AsGetter(Error::new("boom"))
 let error: Error = getter.Get()`,
 		},
 		{
+			name: "generic interface argument does not accept an unconstrained declaration generic",
+			input: `use go:example.com/app/ffi
+
+fn consume(value: ffi::Getter<Int>) {}
+
+fn forward(value: ffi::Getter<$T>) {
+  consume(value)
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected ffi::Getter<Int>, got ffi::Getter<$T>"}},
+		},
+		{
 			name: "promoted generic method keeps substituted Error as an ordinary value",
 			input: `use go:example.com/app/ffi
 

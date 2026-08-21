@@ -10,14 +10,14 @@ func areCompatible(expected Type, actual Type) bool {
 	if trait, ok := expected.(*Trait); ok {
 		return actual.hasTrait(trait)
 	}
-	return expected.equal(actual)
+	return validationEqualTypes(expected, actual)
 }
 
 func commonResultType(a Type, b Type) (Type, bool) {
 	if a == nil || b == nil {
 		return nil, false
 	}
-	if a.equal(b) {
+	if validationEqualTypes(a, b) {
 		return a, true
 	}
 	if a == Void || b == Void {

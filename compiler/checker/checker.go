@@ -545,6 +545,24 @@ func equalityReferenceOperand(expr Expression) (Expression, bool) {
 	return nil, false
 }
 
+func referenceIdentityTypesComparable(left, right Type) bool {
+	if strictEqualTypes(left, right) {
+		return true
+	}
+	leftRef, leftIsRef := left.(*MutableRef)
+	rightRef, rightIsRef := right.(*MutableRef)
+	if !leftIsRef || !rightIsRef {
+		return false
+	}
+	if trait, ok := leftRef.Of().(*Trait); ok && rightRef.Of().hasTrait(trait) {
+		return true
+	}
+	if trait, ok := rightRef.Of().(*Trait); ok && leftRef.Of().hasTrait(trait) {
+		return true
+	}
+	return false
+}
+
 func expressionBindingSpan(expr Expression) *SourceSpan {
 	var span SourceSpan
 	switch e := expr.(type) {
@@ -2281,7 +2299,7 @@ func mergeMatchResultType(c *Checker, current Type, next Type, loc parse.Locatio
 		}.build())
 		return nil, false
 	}
-	if current.equal(next) || next.equal(current) {
+	if validationEqualTypes(current, next) || validationEqualTypes(next, current) {
 		bindInferredTypeVars(current, next)
 		bindInferredTypeVars(next, current)
 		current = derefType(current)
@@ -2365,7 +2383,7 @@ func (c *Checker) areCompatible(expected Type, actual Type) bool {
 		}
 		actualBase, actualIsReference := mutableRefBase(actual)
 		if actualForeign, ok := actualBase.(*ForeignType); ok {
-			return actualForeign.equal(iface) || foreignGoAssignableTo(actualForeign, iface)
+			return validationEqualTypes(actualForeign, iface) || foreignGoAssignableTo(actualForeign, iface)
 		}
 		if def, ok := actualBase.(*StructDef); ok {
 			if !c.structImplementsForeignInterface(def, iface) {
@@ -2390,7 +2408,7 @@ func (c *Checker) areCompatible(expected Type, actual Type) bool {
 			if trait, ok := expectedRef.Of().(*Trait); ok {
 				return actualRef.Of().hasTrait(trait)
 			}
-			if expectedRef.Of().equal(actualRef.Of()) {
+			if validationEqualTypes(expectedRef.Of(), actualRef.Of()) {
 				return true
 			}
 			// Descriptor boundaries project the descriptor value, so Go's
@@ -2406,14 +2424,14 @@ func (c *Checker) areCompatible(expected Type, actual Type) bool {
 	// mirroring Go's unnamed-to-named assignability.
 	if foreign, ok := expected.(*ForeignType); ok && !foreign.Pointer && foreign.MapKey != nil && foreign.MapValue != nil {
 		if actualMap, ok := actual.(*Map); ok {
-			return foreign.MapKey.equal(actualMap.Key()) && foreign.MapValue.equal(actualMap.Value())
+			return validationEqualTypes(foreign.MapKey, actualMap.Key()) && validationEqualTypes(foreign.MapValue, actualMap.Value())
 		}
 	}
 	// A named Go slice type accepts an Ard list with the same element type,
 	// mirroring Go's unnamed-to-named assignability.
 	if foreign, ok := expected.(*ForeignType); ok && !foreign.Pointer && foreign.Elem != nil {
 		if actualList, ok := actual.(*List); ok {
-			return foreign.Elem.equal(actualList.of)
+			return validationEqualTypes(foreign.Elem, actualList.of)
 		}
 	}
 	// A named Go array type accepts an Ard fixed array with the same element
@@ -2421,7 +2439,7 @@ func (c *Checker) areCompatible(expected Type, actual Type) bool {
 	if foreign, ok := expected.(*ForeignType); ok && !foreign.Pointer {
 		if expectedArray, ok := foreign.Underlying.(*FixedArray); ok {
 			if actualArray, ok := actual.(*FixedArray); ok {
-				return expectedArray.length == actualArray.length && expectedArray.of.equal(actualArray.of)
+				return expectedArray.length == actualArray.length && validationEqualTypes(expectedArray.of, actualArray.of)
 			}
 		}
 	}
@@ -2430,7 +2448,7 @@ func (c *Checker) areCompatible(expected Type, actual Type) bool {
 	if expectedArray, ok := expected.(*FixedArray); ok {
 		if foreign, ok := actual.(*ForeignType); ok && !foreign.Pointer {
 			if actualArray, ok := foreign.Underlying.(*FixedArray); ok {
-				return expectedArray.length == actualArray.length && expectedArray.of.equal(actualArray.of)
+				return expectedArray.length == actualArray.length && validationEqualTypes(expectedArray.of, actualArray.of)
 			}
 		}
 	}
@@ -2452,7 +2470,7 @@ func (c *Checker) areCompatible(expected Type, actual Type) bool {
 			}
 		}
 	}
-	return expected.equal(actual)
+	return validationEqualTypes(expected, actual)
 }
 
 // sliceDescriptorProjectionCompatible permits the one nominal conversion
@@ -2471,9 +2489,9 @@ func sliceDescriptorProjectionCompatible(expected Type, actual Type) bool {
 	}
 	switch target := expectedRef.Of().(type) {
 	case *List:
-		return target.Of().equal(actualSlice.Of())
+		return validationEqualTypes(target.Of(), actualSlice.Of())
 	case *ForeignType:
-		return !target.Pointer && target.Elem != nil && target.Elem.equal(actualSlice.Of())
+		return !target.Pointer && target.Elem != nil && validationEqualTypes(target.Elem, actualSlice.Of())
 	default:
 		return false
 	}
@@ -2835,7 +2853,7 @@ func (c *Checker) interfaceConversion(expected Type, actual Expression) (Express
 	if actual == nil {
 		return nil, false
 	}
-	if conversion, ok := actual.(*InterfaceConversion); ok && conversion.Destination.equal(expected) {
+	if conversion, ok := actual.(*InterfaceConversion); ok && validationEqualTypes(conversion.Destination, expected) {
 		return conversion, true
 	}
 
@@ -2896,7 +2914,7 @@ func referenceTraitProjection(expected Type, actual Expression) (Expression, boo
 		return nil, false
 	}
 	actualRef, ok := actual.Type().(*MutableRef)
-	if !ok || actualRef.Of().equal(trait) || !actualRef.Of().hasTrait(trait) {
+	if !ok || validationEqualTypes(actualRef.Of(), trait) || !actualRef.Of().hasTrait(trait) {
 		return nil, false
 	}
 	return &ReferenceTraitProjection{Value: actual, Destination: expected}, true
@@ -3265,7 +3283,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					for i, param := range method.Parameters {
 						paramType, paramMutable := c.resolveParameterType(param.Type)
 						expectedType := traitMethod.Parameters[i].Type
-						if !paramType.equal(expectedType) {
+						if !validationEqualTypes(paramType, expectedType) {
 							c.addTypeMismatch(expectedType, paramType, param.GetLocation())
 						}
 
@@ -3285,7 +3303,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					if method.ReturnType != nil {
 						returnType = c.resolveType(method.ReturnType)
 					}
-					if !traitMethod.ReturnType.equal(returnType) {
+					if !validationEqualTypes(traitMethod.ReturnType, returnType) {
 						location := method.GetLocation()
 						if method.ReturnType != nil {
 							location = method.ReturnType.GetLocation()
@@ -3388,7 +3406,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					for i, param := range method.Parameters {
 						paramType, paramMutable := c.resolveParameterType(param.Type)
 						expectedType := traitMethod.Parameters[i].Type
-						if !paramType.equal(expectedType) {
+						if !validationEqualTypes(paramType, expectedType) {
 							c.addTypeMismatch(expectedType, paramType, param.GetLocation())
 						}
 
@@ -3408,7 +3426,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					if method.ReturnType != nil {
 						returnType = c.resolveType(method.ReturnType)
 					}
-					if !traitMethod.ReturnType.equal(returnType) {
+					if !validationEqualTypes(traitMethod.ReturnType, returnType) {
 						location := method.GetLocation()
 						if method.ReturnType != nil {
 							location = method.ReturnType.GetLocation()
@@ -4395,7 +4413,7 @@ func (c *Checker) checkList(declaredType Type, expr *parse.ListLiteral) *ListLit
 		if elementType == nil {
 			elementType = element.Type()
 			elementSpan = item.GetLocation()
-		} else if !elementType.equal(element.Type()) {
+		} else if !validationEqualTypes(elementType, element.Type()) {
 			c.addDiagnostic(homogeneousListMismatchDiagnostic{
 				Expected:     elementType,
 				Actual:       element.Type(),
@@ -5575,7 +5593,7 @@ func (c *Checker) checkMap(declaredType Type, expr *parse.MapLiteral) *MapLitera
 			keyType = Void
 			continue
 		}
-		if !keyType.equal(key.Type()) {
+		if !validationEqualTypes(keyType, key.Type()) {
 			legacyMessage := fmt.Sprintf("Map key type mismatch: Expected %s, got %s", keyType, key.Type())
 			c.addTypeMismatchWithLegacy(keyType, key.Type(), legacyMessage, expr.Entries[i].Key.GetLocation())
 			continue
@@ -5587,7 +5605,7 @@ func (c *Checker) checkMap(declaredType Type, expr *parse.MapLiteral) *MapLitera
 			valueType = Void
 			continue
 		}
-		if !valueType.equal(value.Type()) {
+		if !validationEqualTypes(valueType, value.Type()) {
 			legacyMessage := fmt.Sprintf("Map value type mismatch: Expected %s, got %s", valueType, value.Type())
 			c.addTypeMismatchWithLegacy(valueType, value.Type(), legacyMessage, expr.Entries[i].Value.GetLocation())
 			continue
@@ -6125,8 +6143,10 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 			}
 		}
 
-		// Create generic scope and fresh struct copy
-		genericScope = c.scope.createGenericScope(genericParams)
+		// Struct literal type arguments are inferred at this expression, like
+		// call-local generics, rather than declaration generics that may flow
+		// unresolved through a generic body.
+		genericScope = c.createCallGenericScope(genericParams)
 		structDefCopy = copyStructWithTypeVarMap(structType, *genericScope.genericContext)
 
 		// Bind explicit type arguments (`Box<Str>{...}`) before checking
@@ -6184,11 +6204,15 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 
 			// A `mut T` (MutableRef) field accepts an existing `mut T` reference value
 			// directly (a stored handle), in addition to borrowing a mutable base-type
-			// lvalue below (ADR 0031). Try the reference value first.
-			if _, ok := mutableRefBase(field); ok {
+			// lvalue below (ADR 0031). Try the reference value first once generic
+			// arguments are resolved; unresolved reference fields must unify below.
+			fieldHasUnresolvedGeneric := genericScope != nil && hasUnresolvedGenericsFrom(field, genericScope.genericContext)
+			if _, ok := mutableRefBase(field); ok && !fieldHasUnresolvedGeneric {
 				diagCount := len(c.diagnostics)
 				spansMark := c.spansMark()
-				if checked := c.checkExprAs(property.Value, field); checked != nil && checked.Type().equal(field) {
+				resolvedField := derefType(field)
+				if checked := c.checkExprAs(property.Value, resolvedField); checked != nil && validationEqualTypes(checked.Type(), resolvedField) {
+					field = resolvedField
 					fields[fieldName] = checked
 					fieldTypes[fieldName] = field
 					continue
@@ -6212,6 +6236,25 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 					continue
 				}
 
+				if fieldIsMutableRef {
+					if !isReferenceValued(checkVal) {
+						c.addDiagnostic(referenceDestinationDiagnostic{
+							Expected: field,
+							Actual:   checkVal.Type(),
+							Span:     c.sourceSpan(property.GetLocation()),
+						}.build())
+						continue
+					}
+					if err := c.unifyTypes(field, checkVal.Type(), genericScope); err != nil {
+						c.addUnificationTypeMismatch(err, field, checkVal.Type(), property.Value.GetLocation())
+						continue
+					}
+					field = derefType(field)
+					fields[fieldName] = checkVal
+					fieldTypes[fieldName] = field
+					continue
+				}
+
 				// Implicit Maybe wrapping: if field is Maybe<T> and value is T, wrap in Maybe::new()
 				if maybeField, isMaybe := fieldExpected.(*Maybe); isMaybe {
 					if valType := checkVal.Type(); !valType.equal(fieldExpected) {
@@ -6221,28 +6264,13 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 					}
 				}
 
-				if fieldIsMutableRef && !isReferenceValued(checkVal) {
-					// A reference-valued field accepts only an actual reference;
-					// a writable binding no longer borrows implicitly (ADR 0057).
-					c.addDiagnostic(referenceDestinationDiagnostic{
-						Expected: MakeMutableRef(fieldExpected),
-						Actual:   checkVal.Type(),
-						Span:     c.sourceSpan(property.GetLocation()),
-					}.build())
-					continue
-				}
-
 				if err := c.unifyTypes(fieldExpected, checkVal.Type(), genericScope); err != nil {
 					c.addUnificationTypeMismatch(err, fieldExpected, checkVal.Type(), property.Value.GetLocation())
 					continue
 				}
 				// After unification, dereference to get the actual type
 				fieldExpected = derefType(fieldExpected)
-				if fieldIsMutableRef {
-					field = MakeMutableRef(fieldExpected)
-				} else {
-					field = fieldExpected
-				}
+				field = fieldExpected
 
 				fields[fieldName] = checkVal
 				fieldTypes[fieldName] = field
@@ -7058,7 +7086,7 @@ func (c *Checker) checkIfChain(s *parse.IfStatement) Expression {
 			c.expectedExpr = nil
 			block := c.checkBlockWithExpected(current.Body, nil, expectedType, false)
 			c.expectedExpr = expectedType
-			if referenceType != nil && !block.Type().equal(referenceType) {
+			if referenceType != nil && !validationEqualTypes(block.Type(), referenceType) {
 				if referenceType == Void || block.Type() == Void {
 					if referenceType != Void {
 						for i := range branches {
@@ -7102,7 +7130,7 @@ func (c *Checker) checkIfChain(s *parse.IfStatement) Expression {
 		if referenceType == nil {
 			referenceType = body.Type()
 			referenceSpan = bodyResultLocation(current.Body, current.GetLocation())
-		} else if !body.Type().equal(referenceType) {
+		} else if !validationEqualTypes(body.Type(), referenceType) {
 			if referenceType == Void || body.Type() == Void {
 				if referenceType != Void {
 					for i := range branches {
@@ -8106,12 +8134,15 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 					// `!=` compare current pointer identity (ADR 0057).
 					if leftRef, ok := equalityReferenceOperand(left); ok {
 						if rightRef, ok := equalityReferenceOperand(right); ok {
-							if leftRef.Type().equal(rightRef.Type()) || c.areCompatible(leftRef.Type(), rightRef.Type()) || c.areCompatible(rightRef.Type(), leftRef.Type()) {
+							if referenceIdentityTypesComparable(leftRef.Type(), rightRef.Type()) {
 								if s.Operator == parse.NotEqual {
 									return &Inequality{leftRef, rightRef}
 								}
 								return &Equality{leftRef, rightRef}
 							}
+							legacy := fmt.Sprintf("Invalid: %s %s %s", leftRef.Type(), operator, rightRef.Type())
+							c.addInvalidEquality(operator, leftRef, rightRef, s.Left.GetLocation(), s.Right.GetLocation(), legacy, false)
+							return nil
 						}
 					}
 
@@ -10046,7 +10077,7 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 			if expectedResult, ok := c.expectedExpr.(*Result); ok {
 				expectedValue = expectedResult.val
 			}
-			unsafeReturnType := MakeResult(&TypeVar{name: "Unsafe"}, Str)
+			unsafeReturnType := MakeResult(&TypeVar{name: "Unsafe", provisional: true}, Str)
 			var block *Block
 			if expectedValue != nil {
 				block = c.checkBlockWithExpected(s.Statements, func() {
@@ -10115,7 +10146,7 @@ func (c *Checker) isEnum(t Type) bool {
 // This allows Enum vs Int and Int vs Enum comparisons
 func (c *Checker) areTypesComparable(left, right Type) bool {
 	// Same type is always comparable
-	if left.equal(right) {
+	if validationEqualTypes(left, right) {
 		return true
 	}
 	// Allow Enum vs Int comparisons

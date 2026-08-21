@@ -105,6 +105,221 @@ fn forward(value: mut $W) {
 	})
 }
 
+func TestNestedMutableTraitProjectionRequiresKnownImplementation(t *testing.T) {
+	run(t, []test{
+		{
+			name: "nullable generic reference cannot project to nullable trait reference",
+			input: `trait Widget {
+  fn mut event()
+}
+
+fn take(value: (mut Widget)?) {}
+
+fn forward(value: (mut $W)?) {
+  take(value)
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected (mut Widget)?, got (mut $W)?"}},
+		},
+		{
+			name: "list of generic references cannot project to list of trait references",
+			input: `trait Widget {
+  fn mut event()
+}
+
+fn take(value: [mut Widget]) {}
+
+fn forward(value: [mut $W]) {
+  take(value)
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected [mut Widget], got [mut $W]"}},
+		},
+		{
+			name: "inferred list rejects mixed trait and generic references",
+			input: `trait Widget {
+  fn mut event()
+}
+
+fn combine(left: mut Widget, right: mut $W) {
+  let values = [left, right]
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: A list can only contain values of single type"}},
+		},
+		{
+			name: "inferred map rejects mixed trait and generic references",
+			input: `trait Widget {
+  fn mut event()
+}
+
+fn combine(left: mut Widget, right: mut $W) {
+  let values = ["left": left, "right": right]
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Map value type mismatch: Expected mut Widget, got mut $W"}},
+		},
+		{
+			name: "if branches reject nested generic and trait references",
+			input: `trait Widget {
+  fn mut event()
+}
+
+fn choose(condition: Bool, left: (mut Widget)?, right: (mut $W)?) (mut Widget)? {
+  if condition == true {
+    left
+  } else {
+    right
+  }
+}`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "All branches must have the same result type"},
+				{Kind: checker.Error, Message: "Type mismatch: Expected (mut Widget)?, got Void"},
+			},
+		},
+		{
+			name: "match branches reject nested generic and trait references",
+			input: `trait Widget {
+  fn mut event()
+}
+
+fn choose(condition: Bool, left: (mut Widget)?, right: (mut $W)?) {
+  let chosen = match condition {
+    true => left,
+    false => right,
+  }
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected (mut Widget)?, got (mut $W)?"}},
+		},
+		{
+			name: "nested reference forwards through the same inferred generic",
+			input: `fn take(value: [(mut $T)?]) {}
+
+fn forward(value: [(mut $W)?]) {
+  take(value)
+}`,
+		},
+	})
+}
+
+func TestGenericReferenceEqualityRequiresCompatibleReferents(t *testing.T) {
+	run(t, []test{
+		{
+			name: "trait and unconstrained generic references cannot compare",
+			input: `trait Widget {
+  fn mut event()
+}
+
+fn compare(left: mut Widget, right: mut $W) {
+  let equal = left == right
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Invalid: mut Widget == mut $W"}},
+		},
+		{
+			name: "distinct generic references cannot compare",
+			input: `fn compare(left: mut $T, right: mut $W) {
+  let equal = left == right
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Invalid: mut $T == mut $W"}},
+		},
+		{
+			name: "reference equality rejects unresolved literal inference",
+			input: `struct Marker<$T> {
+  value: Int,
+}
+
+fn compare() {
+  let equal = mut Marker{value: 1} == mut Marker<Int>{value: 2}
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Invalid: mut Marker<$T> == mut Marker<Int>"}},
+		},
+		{
+			name: "references to the same generic can compare",
+			input: `fn same(left: mut $T, right: mut $T) Bool {
+  left == right
+}`,
+		},
+		{
+			name: "concrete reference can compare with implemented trait reference",
+			input: `trait Widget {
+  fn mut event()
+}
+
+struct Root {}
+
+impl Widget for Root {
+  fn mut event() {}
+}
+
+fn same(left: mut Widget, right: mut Root) Bool {
+  left == right
+}`,
+		},
+	})
+}
+
+func TestGenericTraitImplementationSignatureRequiresExactTypes(t *testing.T) {
+	run(t, []test{{
+		name: "receiver generic cannot satisfy concrete trait parameter",
+		input: `trait Consumer {
+  fn consume(value: Int)
+}
+
+struct Box<$T> {}
+
+impl Consumer for Box {
+  fn consume(value: $T) {}
+}`,
+		diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected Int, got $T"}},
+	}})
+}
+
+func TestGenericStructReferenceFieldInfersReferent(t *testing.T) {
+	run(t, []test{
+		{
+			name: "mutable generic field infers from reference value",
+			input: `struct Box<$T> {
+  value: mut $T,
+}
+
+struct User {}
+
+fn main() {
+  let user = mut User{}
+  let box = Box{value: user}
+  let value: mut User = box.value
+}`,
+		},
+		{
+			name: "resolved generic trait reference preserves concrete projection",
+			input: `trait Widget {
+  fn mut event()
+}
+
+struct Root {}
+impl Widget for Root {
+  fn mut event() {}
+}
+
+struct Holder<$T> {
+  value: mut $T,
+}
+
+fn main() {
+  let root = mut Root{}
+  let holder = Holder<Widget>{value: root}
+}`,
+		},
+		{
+			name: "phantom generic still requires contextual or explicit type",
+			input: `struct Marker<$T> {
+  value: Int,
+}
+
+fn main() {
+  let marker = Marker{value: 1}
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Unresolved generic: $T"}},
+		},
+	})
+}
+
 func TestTraitImplementationCanProjectSelfToCurrentTrait(t *testing.T) {
 	run(t, []test{
 		{
