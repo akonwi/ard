@@ -8,7 +8,9 @@ import (
 	"testing"
 
 	"github.com/akonwi/ard/air"
+	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/frontend"
+	"github.com/akonwi/ard/parse"
 )
 
 func TestGenericStructTraitImplementationDispatchesForConcreteApplications(t *testing.T) {
@@ -107,7 +109,7 @@ func TestGenericTraitImplementationCanProjectMutatingSelf(t *testing.T) {
 }
 
 func TestGenericTraitMethodRejectsConstraintsMissingFromReceiver(t *testing.T) {
-	program := lowerParitySource(t, `
+	program := lowerGenericTraitConstraintSource(t, `
 		trait Contains {
 			fn contains() Bool
 		}
@@ -188,13 +190,38 @@ impl Same for Box {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			program := lowerParitySource(t, tt.source)
+			program := lowerGenericTraitConstraintSource(t, tt.source)
 			_, err := lowerProgram(program, Options{PackageName: "main"})
 			if err == nil || !strings.Contains(err.Error(), "requires constraints not provided by receiver") {
 				t.Fatalf("lower error = %v, want missing generic receiver constraint", err)
 			}
 		})
 	}
+}
+
+func lowerGenericTraitConstraintSource(t *testing.T, source string) *air.Program {
+	t.Helper()
+	result := parse.Parse([]byte(source), "test.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse error: %s", result.Errors[0].Message)
+	}
+	checked := checker.New("test.ard", result.Program, nil)
+	checked.Check()
+	found := false
+	for _, diagnostic := range checked.Diagnostics() {
+		if diagnostic.Code == checker.DiagnosticCodeImplReceiverConstraint {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("checker diagnostics = %v, want generic receiver constraint diagnostic", checked.Diagnostics())
+	}
+	program, err := air.Lower(checked.Module())
+	if err != nil {
+		t.Fatalf("AIR lower error: %v", err)
+	}
+	return program
 }
 
 func TestGenericTraitMethodAcceptsConstraintsProvidedByReceiver(t *testing.T) {

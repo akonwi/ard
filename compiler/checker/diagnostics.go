@@ -91,6 +91,7 @@ const (
 	DiagnosticCodeImplParameterCount            DiagnosticCode = "implementation_parameter_count"
 	DiagnosticCodeImplParameterMutability       DiagnosticCode = "implementation_parameter_mutability"
 	DiagnosticCodeImplReceiverMutability        DiagnosticCode = "implementation_receiver_mutability"
+	DiagnosticCodeImplReceiverConstraint        DiagnosticCode = "implementation_receiver_constraint"
 	DiagnosticCodeImplReturnType                DiagnosticCode = "implementation_return_type"
 	DiagnosticCodeMissingImplMethod             DiagnosticCode = "missing_implementation_method"
 	DiagnosticCodeDuplicateMethod               DiagnosticCode = "duplicate_method"
@@ -1145,6 +1146,39 @@ func (d implementationReceiverMutabilityDiagnostic) build() Diagnostic {
 		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("`%s` mutates its receiver", d.Method)},
 	)
 	diagnostic.Code = DiagnosticCodeImplReceiverMutability
+	return diagnostic
+}
+
+type genericTraitReceiverConstraintDiagnostic struct {
+	Contract     string
+	ContractKind string
+	Target       string
+	Generic      string
+	Actual       Type
+	Span         SourceSpan
+}
+
+func (d genericTraitReceiverConstraintDiagnostic) build() Diagnostic {
+	kind := d.ContractKind
+	if kind == "" {
+		kind = "Trait"
+	}
+	legacy := fmt.Sprintf("%s implementation %s for %s requires $%s to be comparable, but %s does not provide that constraint", kind, d.Contract, d.Target, d.Generic, d.Target)
+	label := fmt.Sprintf("this operation requires `$%s` to be comparable, but `%s<$%s>` permits non-comparable types", d.Generic, d.Target, d.Generic)
+	help := fmt.Sprintf("This implementation must work for every `%s<$%s>`. Conditional implementations are not supported yet; remove this operation or make `$%s` comparable in `%s`'s declaration (for example, use `$%s` as a map key).", d.Target, d.Generic, d.Generic, d.Target, d.Generic)
+	if d.Actual != nil {
+		legacy = fmt.Sprintf("%s implementation %s for %s uses non-comparable type %s where comparable is required", kind, d.Contract, d.Target, d.Actual)
+		label = fmt.Sprintf("`%s` can never satisfy the required comparable constraint", d.Actual)
+		help = "Pass a comparable value to the constrained helper or remove that call from the unconditional implementation."
+	}
+	diagnostic := newLabeledDiagnostic(
+		Error,
+		legacy,
+		"Generic implementation receiver lacks required constraint",
+		help,
+		DiagnosticLabel{Span: d.Span, Message: label},
+	)
+	diagnostic.Code = DiagnosticCodeImplReceiverConstraint
 	return diagnostic
 }
 
