@@ -5081,18 +5081,82 @@ func TestLocalNameKeepsBareNameWhenShadowingUnusedOuter(t *testing.T) {
 		t.Fatalf("expected bare shadowing loop variable:\n%s", joined)
 	}
 }
-func TestRenderTestRunnerAliasesImportsAroundTopLevelNames(t *testing.T) {
-	program := &air.Program{Functions: []air.Function{
-		{ID: 0, Module: 0, Name: "os", Private: true},
-	}}
-	runner := renderTestRunner(program, nil, false, nil)
-	if !strings.Contains(runner, "os_1 \"os\"") {
-		t.Fatalf("test runner did not alias conflicting imports:\n%s", runner)
+func TestRenderTestRunnerAliasesTestModuleAroundStandardImport(t *testing.T) {
+	program := &air.Program{
+		Modules:   []air.Module{{ID: 0, Path: "os.ard", Functions: []air.FunctionID{0}}},
+		Functions: []air.Function{{ID: 0, Module: 0, Name: "enum_test", IsTest: true}},
 	}
-	if !strings.Contains(runner, "os_1.Stderr") {
-		t.Fatalf("test runner did not use aliased imports:\n%s", runner)
+	runner := renderTestRunner(program, []TestCase{{Function: 0}}, false, nil)
+	if !strings.Contains(runner, "os_1 \"generated/os\"") {
+		t.Fatalf("test runner did not alias a test module that conflicts with a standard import:\n%s", runner)
+	}
+	if !strings.Contains(runner, "os.Stderr") {
+		t.Fatalf("test runner did not preserve the standard import alias:\n%s", runner)
 	}
 }
+
+func TestTestRunnerImportAliasIgnoresImportedEnumVariants(t *testing.T) {
+	program := &air.Program{
+		Modules: []air.Module{
+			{ID: 0, Path: "values.ard", Types: []air.TypeID{1}},
+			{ID: 1, Path: "fmT.ard", Functions: []air.FunctionID{0}},
+		},
+		Types: []air.TypeInfo{{
+			ID:         1,
+			Kind:       air.TypeEnum,
+			Name:       "fm",
+			ModulePath: "values.ard",
+			Private:    true,
+			Variants:   []air.VariantInfo{{Name: "t", Discriminant: 0}},
+		}},
+		Functions: []air.Function{{ID: 0, Module: 1, Name: "enum_test", IsTest: true}},
+	}
+
+	imports := testRunnerImportAliases(program, []TestCase{{Function: 0}})
+	if got := imports.modules[1]; got != "fmT" {
+		t.Fatalf("test module alias = %q, want fmT; declarations in imported packages cannot collide with runner imports", got)
+	}
+}
+
+func TestTestRunnerImportAliasesAvoidRunnerUsedNames(t *testing.T) {
+	for _, name := range []string{"append", "ardRunTest", "ardTestOutcome", "error", "len", "nil", "outcomes", "recover", "string"} {
+		t.Run(name, func(t *testing.T) {
+			program := &air.Program{
+				Modules:   []air.Module{{ID: 0, Path: name + ".ard", Functions: []air.FunctionID{0}}},
+				Functions: []air.Function{{ID: 0, Module: 0, Name: "enum_test", IsTest: true}},
+			}
+			imports := testRunnerImportAliases(program, []TestCase{{Function: 0}})
+			if got, want := imports.modules[0], name+"_1"; got != want {
+				t.Fatalf("test module alias = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+func TestTestRunnerImportAliasAvoidsRunnerLocalNames(t *testing.T) {
+	dir := t.TempDir()
+	program := &air.Program{
+		Modules:   []air.Module{{ID: 0, Path: "outcomes.ard", Functions: []air.FunctionID{0}}},
+		Functions: []air.Function{{ID: 0, Module: 0, Name: "enum_test", IsTest: true}},
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "outcomes"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module generated\n\ngo 1.26.0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "outcomes", "outcomes.go"), []byte("package outcomes\n\nfunc EnumTest() error { return nil }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runner := renderTestRunner(program, []TestCase{{Function: 0}}, false, nil)
+	if err := os.WriteFile(filepath.Join(dir, "ard_tests.go"), []byte(runner), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := buildGeneratedProgram(dir, filepath.Join(dir, "ard-tests")); err != nil {
+		t.Fatalf("build test runner with a module matching a runner local: %v\n%s", err, runner)
+	}
+}
+
 func TestLowererImportAliasAvoidsSinglePackageTopLevelNamesAcrossModules(t *testing.T) {
 	program := &air.Program{
 		Modules: []air.Module{
