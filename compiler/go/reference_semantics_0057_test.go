@@ -767,6 +767,27 @@ func TestADR0061MutableTraitDereferenceCreatesShallowDynamicSnapshot(t *testing.
 	}
 }
 
+func TestTraitImplementationCanProjectMutatingSelfToTraitReference(t *testing.T) {
+	program := lowerParitySource(t, `
+		trait View {
+			fn mut self_reference() mut View
+		}
+		struct Node {}
+		impl View for Node {
+			fn mut self_reference() mut View { self }
+		}
+
+		fn main() Bool {
+			let node = Node{}
+			let reference = mut node
+			reference.self_reference() == reference
+		}
+	`)
+	if got := runGoTargetParityJSON(t, program); got != `true` {
+		t.Fatalf("result = %s, want projected self to preserve target identity", got)
+	}
+}
+
 func TestADR0057MixedConcreteAndTraitReferencesCompareTargetIdentity(t *testing.T) {
 	program := lowerParitySource(t, `
 		trait View {

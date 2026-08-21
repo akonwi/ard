@@ -105,6 +105,72 @@ fn forward(value: mut $W) {
 	})
 }
 
+func TestTraitImplementationCanProjectSelfToCurrentTrait(t *testing.T) {
+	run(t, []test{
+		{
+			name: "mutating self projects to current trait reference",
+			input: `trait View {
+  fn mut attach(child: mut View)
+}
+
+struct Node {
+  children: [mut View],
+}
+
+impl View for Node {
+  fn mut attach(child: mut View) {
+    let parent: mut View = self
+    self.children.push(child)
+  }
+}`,
+		},
+		{
+			name: "ordinary struct self projects to current trait value",
+			input: `trait View {
+  fn as_view() View
+}
+
+struct Node {}
+
+impl View for Node {
+  fn as_view() View { self }
+}`,
+		},
+		{
+			name: "enum self projects to current trait value",
+			input: `trait View {
+  fn as_view() View
+}
+
+enum Node {
+  item
+}
+
+impl View for Node {
+  fn as_view() View { self }
+}`,
+		},
+	})
+}
+
+func TestGenericTraitImplementationSelfProjectionRequiresAIRSupport(t *testing.T) {
+	run(t, []test{{
+		name: "generic self projection remains rejected until generic trait impls lower",
+		input: `trait View {
+  fn mut self_ref() mut View
+}
+
+struct Box<$T> {
+  value: $T,
+}
+
+impl View for Box {
+  fn mut self_ref() mut View { self }
+}`,
+		diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected mut View, got mut Box"}},
+	}})
+}
+
 func TestMatchAllowsConcreteTraitImplementationBranch(t *testing.T) {
 	traitFixture := `trait View {
   fn render()
