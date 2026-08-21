@@ -1556,6 +1556,46 @@ func TestImmutableAssignmentUsesInnermostBindingProvenance(t *testing.T) {
 	}
 }
 
+func TestGenericMutableTraitProjectionDiagnosticPointsToGenericBody(t *testing.T) {
+	result := parse.Parse([]byte(`trait Widget {
+  fn mut event()
+}
+
+fn drive(root: mut Widget) {
+  root.event()
+}
+
+fn forward(root: mut $W) {
+  drive(root)
+}
+`), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	drive := result.Program.Statements[1].(*parse.FunctionDeclaration)
+	forward := result.Program.Statements[2].(*parse.FunctionDeclaration)
+	call := forward.Body[0].(*parse.FunctionCall)
+
+	c := checker.New("main.ard", result.Program, nil)
+	c.Check()
+	if len(c.Diagnostics()) != 1 {
+		t.Fatalf("diagnostics = %#v, want one", c.Diagnostics())
+	}
+	diagnostic := c.Diagnostics()[0]
+	if diagnostic.Code != checker.DiagnosticCodeIncorrectArgumentType || diagnostic.Message != "Type mismatch: Expected mut Widget, got mut $W" {
+		t.Fatalf("diagnostic = %#v", diagnostic)
+	}
+	if diagnostic.Primary.Span.Location != call.Args[0].Value.GetLocation() || diagnostic.Primary.Message != "this argument has type `mut $W`" {
+		t.Fatalf("primary = %#v", diagnostic.Primary)
+	}
+	if len(diagnostic.Secondary) != 1 || diagnostic.Secondary[0].Span.Location != drive.Parameters[0].GetLocation() {
+		t.Fatalf("secondary = %#v, want drive parameter", diagnostic.Secondary)
+	}
+	if diagnostic.Secondary[0].Message != "parameter `root` requires `mut Widget`" {
+		t.Fatalf("secondary label = %q", diagnostic.Secondary[0].Message)
+	}
+}
+
 func TestReferenceArgumentMismatchPointsToParameter(t *testing.T) {
 	result := parse.Parse([]byte("fn bump(value: mut Int) {}\nmut value = 1\nbump(value)\n"), "main.ard")
 	if len(result.Errors) > 0 {

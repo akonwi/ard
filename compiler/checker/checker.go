@@ -2385,11 +2385,13 @@ func (c *Checker) areCompatible(expected Type, actual Type) bool {
 	// referent storage shapes would differ.
 	if expectedRef, ok := expected.(*MutableRef); ok {
 		if actualRef, ok := actual.(*MutableRef); ok {
-			if expectedRef.Of().equal(actualRef.Of()) {
-				return true
-			}
+			// Trait projection is a compatibility obligation, not inference.
+			// Check it before equality, where an unbound type variable is a wildcard.
 			if trait, ok := expectedRef.Of().(*Trait); ok {
 				return actualRef.Of().hasTrait(trait)
+			}
+			if expectedRef.Of().equal(actualRef.Of()) {
+				return true
 			}
 			// Descriptor boundaries project the descriptor value, so Go's
 			// unnamed-to-named slice/map assignability applies through the
