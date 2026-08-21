@@ -58,6 +58,15 @@ fn f(value: Any) Str {
 let doubled: Str = ffi::Identity("hello")`,
 		},
 		{
+			name: "declaration generic remains rigid across repeated Go type parameter",
+			input: `use go:example.com/app/ffi
+
+fn forward(value: $W) {
+  let paired = ffi::Pair(value, 1)
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Conflicting inferred type arguments for T: $W and Int"}},
+		},
+		{
 			name: "infer type arg from later argument",
 			input: `use go:example.com/app/ffi
 

@@ -716,7 +716,7 @@ func inferGoFuncTypeArgs(pattern types.Type, actual Type, tparams *types.TypePar
 			if tparams.At(i) != pattern {
 				continue
 			}
-			if inferred[i] != nil && !inferred[i].equal(actual) {
+			if inferred[i] != nil && !validationEqualTypes(inferred[i], actual) {
 				return false, pattern, inferred[i], actual, inferredSpans[i]
 			}
 			if inferred[i] == nil {

@@ -1562,3 +1562,34 @@ mut private_variable: Str = "secret"
 		t.Error("Expected nonexistent symbol to be nil")
 	}
 }
+
+func TestContextualGenericArgumentsReachQualifiedStructLiterals(t *testing.T) {
+	project := t.TempDir()
+	if err := os.WriteFile(filepath.Join(project, "ard.toml"), []byte("name = \"example\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(project, "models.ard"), []byte(`struct Marker<$T> {
+  value: Int,
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	resolver, err := checker.NewModuleResolver(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := `use example/models
+
+fn make(seed: $T) models::Marker<$T> {
+  models::Marker{value: 1}
+}`
+	result := parse.Parse([]byte(source), filepath.Join(project, "main.ard"))
+	if len(result.Errors) > 0 {
+		t.Fatal(result.Errors[0].Message)
+	}
+	checked := checker.New(filepath.Join(project, "main.ard"), result.Program, resolver)
+	checked.Check()
+	if checked.HasErrors() {
+		t.Fatalf("unexpected diagnostics: %v", checked.Diagnostics())
+	}
+}

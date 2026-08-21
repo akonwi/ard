@@ -164,6 +164,42 @@ func TestTypeEquality(t *testing.T) {
 	}
 }
 
+func TestValidationTypeEqualityRejectsDeclarationGenericWildcards(t *testing.T) {
+	declarationT := &TypeVar{name: "T"}
+	sameDeclarationT := &TypeVar{name: "T"}
+	declarationW := &TypeVar{name: "W"}
+	callT := &TypeVar{name: "T", owner: 1}
+
+	if !equalTypes(MakeMaybe(declarationT), MakeMaybe(Int)) {
+		t.Fatal("inference equality should retain unbound wildcard matching")
+	}
+	if validationEqualTypes(MakeMaybe(declarationT), MakeMaybe(Int)) {
+		t.Fatal("validation equality should reject an unbound declaration generic against a concrete type")
+	}
+	if !validationEqualTypes(MakeMutableRef(declarationT), MakeMutableRef(sameDeclarationT)) {
+		t.Fatal("validation equality should accept repeated uses of the same declaration generic")
+	}
+	if validationEqualTypes(MakeMutableRef(declarationT), MakeMutableRef(declarationW)) {
+		t.Fatal("validation equality should reject distinct declaration generics")
+	}
+	foreignGeneric := &ForeignType{Target: "go", Namespace: "example.com/box", Name: "Box", TypeArgs: []Type{declarationT}}
+	foreignConcrete := &ForeignType{Target: "go", Namespace: "example.com/box", Name: "Box", TypeArgs: []Type{Int}}
+	if validationEqualTypes(foreignGeneric, foreignConcrete) {
+		t.Fatal("validation equality should recurse through foreign generic arguments")
+	}
+	if !validationEqualTypes(callT, Int) {
+		t.Fatal("validation equality should retain call-local inference placeholders")
+	}
+	if strictEqualTypes(callT, Int) {
+		t.Fatal("strict equality should reject unresolved call-local inference")
+	}
+
+	bound := &TypeVar{name: "T", actual: Int, bound: true, owner: 3}
+	if !validationEqualTypes(bound, Int) {
+		t.Fatal("validation equality should follow resolved generic bindings")
+	}
+}
+
 // Diagnostics render types in formatter-canonical Ard syntax: parameters are
 // comma-space separated and map entries colon-space separated, matching the
 // formatter's output (`ard format` emits `[Str: Int]` for map annotations).

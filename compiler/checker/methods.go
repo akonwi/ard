@@ -268,7 +268,7 @@ func (p *Program) implementsForeignInterface(owner MethodOwner, iface *ForeignTy
 		return false
 	}
 	for _, implemented := range p.ForeignInterfaceImpls[owner] {
-		if implemented != nil && implemented.equal(iface) {
+		if implemented != nil && validationEqualTypes(implemented, iface) {
 			return true
 		}
 	}

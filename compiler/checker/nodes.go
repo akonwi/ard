@@ -1112,8 +1112,9 @@ type IfBranch struct {
 }
 
 type If struct {
-	Branches []IfBranch
-	Else     *Block
+	Branches   []IfBranch
+	Else       *Block
+	ResultType Type
 }
 
 func (i *If) Type() Type {
@@ -1122,6 +1123,9 @@ func (i *If) Type() Type {
 	// backend materialized the missing path as a zero value.
 	if i.Else == nil {
 		return Void
+	}
+	if i.ResultType != nil {
+		return i.ResultType
 	}
 	if len(i.Branches) == 0 || i.Branches[0].Body == nil {
 		return Void
