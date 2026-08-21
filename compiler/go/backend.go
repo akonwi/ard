@@ -229,7 +229,31 @@ type testRunnerImports struct {
 
 func testRunnerImportAliases(program *air.Program, tests []TestCase) testRunnerImports {
 	imports := testRunnerImports{std: map[string]string{}, modules: map[air.ModuleID]string{}}
-	used := testRunnerReservedTopLevelNames(program)
+	// The runner is a synthetic package main. Ard declarations live in imported
+	// module packages, so they cannot collide with imports here. Reserve only the
+	// runner's own declarations and locals plus the predeclared identifiers its
+	// generated code uses; a package alias matching one of these would shadow or
+	// be shadowed at its use site.
+	used := map[string]bool{
+		"append":         true,
+		"ardRunTest":     true,
+		"ardTestOutcome": true,
+		"data":           true,
+		"displayName":    true,
+		"err":            true,
+		"error":          true,
+		"fn":             true,
+		"len":            true,
+		"main":           true,
+		"name":           true,
+		"nil":            true,
+		"out":            true,
+		"outcomes":       true,
+		"path":           true,
+		"recover":        true,
+		"recovered":      true,
+		"string":         true,
+	}
 	for _, base := range []string{"json", "fmt", "os"} {
 		alias := base
 		for i := 1; used[alias]; i++ {
@@ -260,30 +284,6 @@ func testRunnerImportAliases(program *air.Program, tests []TestCase) testRunnerI
 		used[alias] = true
 	}
 	return imports
-}
-
-func testRunnerReservedTopLevelNames(program *air.Program) map[string]bool {
-	reserved := map[string]bool{"main": true, "ardRunTest": true, "ardTestOutcome": true}
-	if program == nil {
-		return reserved
-	}
-	traitLowerer := &lowerer{program: program}
-	for _, typ := range program.Types {
-		reserved[typeName(program, typ)] = true
-		for _, variant := range typ.Variants {
-			reserved[enumVariantName(program, typ, variant)] = true
-		}
-	}
-	for _, trait := range program.Traits {
-		reserved[traitLowerer.traitInterfaceTypeName(trait)] = true
-	}
-	for _, global := range program.Globals {
-		reserved[globalName(program, global)] = true
-	}
-	for _, fn := range program.Functions {
-		reserved[functionName(program, fn)] = true
-	}
-	return reserved
 }
 
 func renderTestRunner(program *air.Program, tests []TestCase, failFast bool, projectInfo *checker.ProjectInfo) string {
