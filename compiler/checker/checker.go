@@ -3205,13 +3205,8 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 			switch targetType := typeSym.Type.(type) {
 			case *StructDef:
 				// Make this implementation visible while checking its method bodies so
-				// self can project to the trait it is currently implementing. Generic
-				// trait implementations retain their existing late registration until
-				// AIR can represent their implementation methods.
-				registerTraitBeforeBody := len(targetType.GenericParams) == 0
-				if registerTraitBeforeBody {
-					targetType.Traits = append(targetType.Traits, trait)
-				}
+				// self can project to the trait it is currently implementing.
+				targetType.Traits = append(targetType.Traits, trait)
 				structMethodOwner := StructMethodOwner(targetType)
 				// Verify that all required methods are implemented.
 				traitMethods := trait.GetMethods()
@@ -3340,10 +3335,6 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 							Method: method.Name, Contract: trait.name(), ContractKind: "trait", Span: c.sourceSpan(s.GetLocation()), LegacyMessage: legacy,
 						}.build())
 					}
-				}
-
-				if !registerTraitBeforeBody {
-					targetType.Traits = append(targetType.Traits, trait)
 				}
 
 				// Return the struct so downstream backends can register the new trait methods
@@ -7766,6 +7757,10 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 				c.addNonCallable(fmt.Sprintf("%s.%s", subj, s.Method.Name), s.Method.GetLocation(), nil, nonCallableSuffix)
 				return nil
 			}
+			var dispatchTrait *Trait
+			if receiver, ok := derefMutableRef(subj.Type()).(*StructDef); ok {
+				dispatchTrait = c.traitForStructMethod(receiver, fnDef)
+			}
 
 			if fnDef.Mutates && !c.permitsInteriorMutation(subj) {
 				// A mutating method is interior mutation of the receiver: it
@@ -7874,6 +7869,9 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 			// Create function call. Slice bounds retain source evaluation order even
 			// though named arguments are stored by destination parameter index.
 			node := c.createPrimitiveMethodNode(subj, s.Method.Name, args, fnToUse, callTypeArgs, s.Method.GetLocation())
+			if instance, ok := node.(*InstanceMethod); ok {
+				instance.DispatchTrait = dispatchTrait
+			}
 			return applySliceArgumentOrder(node, s.Method.Args, fnToUse.Parameters)
 		}
 	case *parse.MutRef:

@@ -153,9 +153,9 @@ impl View for Node {
 	})
 }
 
-func TestGenericTraitImplementationSelfProjectionRequiresAIRSupport(t *testing.T) {
+func TestGenericTraitImplementationCanProjectSelf(t *testing.T) {
 	run(t, []test{{
-		name: "generic self projection remains rejected until generic trait impls lower",
+		name: "generic self projects to current trait reference",
 		input: `trait View {
   fn mut self_ref() mut View
 }
@@ -167,7 +167,6 @@ struct Box<$T> {
 impl View for Box {
   fn mut self_ref() mut View { self }
 }`,
-		diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected mut View, got mut Box"}},
 	}})
 }
 

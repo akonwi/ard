@@ -842,6 +842,9 @@ func (l *lowerer) traitDispatchMethodDecls(trait air.Trait, impl air.Impl) ([]as
 			return nil, fmt.Errorf("impl %d missing method %d for trait %s", impl.ID, methodIndex, trait.Name)
 		}
 		methodFn := l.program.Functions[impl.Methods[methodIndex]]
+		if !l.goMethodReceiverProvidesConstraints(methodFn, impl.ForType) {
+			return nil, fmt.Errorf("generic trait method %s.%s requires constraints not provided by receiver %s", trait.Name, traitMethod.Name, l.program.Types[impl.ForType-1].Name)
+		}
 		methodType, err := l.traitInterfaceMethodType(traitMethod)
 		if err != nil {
 			return nil, err
@@ -1453,6 +1456,14 @@ func (l *lowerer) comparableTypeParams(signature air.Signature, locals []air.Loc
 	if body != nil {
 		walkBlockExprs(*body, func(expr air.Expr) {
 			walk(expr.Type, false)
+			if expr.Kind == air.ExprEq || expr.Kind == air.ExprNotEq {
+				if expr.Left != nil {
+					walk(expr.Left.Type, true)
+				}
+				if expr.Right != nil {
+					walk(expr.Right.Type, true)
+				}
+			}
 		})
 	}
 	for _, root := range comparableRoots {
