@@ -639,6 +639,7 @@ type Checker struct {
 	topLevelTypeAliases               map[string]*parse.TypeDeclaration
 	hoistedTopLevelFunctions          map[*parse.FunctionDeclaration]*FunctionDef
 	preparedInherentMethods           map[*parse.FunctionDeclaration]preparedInherentMethod
+	preparedTraitMethods              map[*parse.FunctionDeclaration]preparedTraitMethod
 	resolvingTopLevelStructs          map[string]bool
 	resolvedTopLevelStructs           map[string]bool
 	resolvingTopLevelAliases          map[string]bool
@@ -693,6 +694,7 @@ func New(filePath string, input *parse.Program, moduleResolver *ModuleResolver, 
 		goTypesContext:            gotypes.NewContext(),
 		foreignABIParameters:      map[*parse.FunctionDeclaration][]ForeignParameterABI{},
 		preparedInherentMethods:   map[*parse.FunctionDeclaration]preparedInherentMethod{},
+		preparedTraitMethods:      map[*parse.FunctionDeclaration]preparedTraitMethod{},
 		constraintFunctionStack:   []*FunctionDef{},
 		comparableConstraintCalls: []comparableConstraintCall{},
 	}
@@ -751,6 +753,7 @@ func (c *Checker) planTraitGoInterfaces() {
 	}
 	plans := map[methodKey]*methodPlan{}
 	traitProviders := map[sourceMethodKey]map[*Trait]bool{}
+	requiredGoProviders := map[sourceMethodKey]bool{}
 	record := func(target Type, method string, trait *Trait) {
 		if target == nil {
 			return
@@ -786,11 +789,20 @@ func (c *Checker) planTraitGoInterfaces() {
 				}
 			}
 		case *parse.TraitImplementation:
+			targetSymbol, ok := c.scope.get(implementation.ForType.Name)
 			trait := c.resolveTraitImplementationContract(implementation.Trait)
 			if trait == nil {
+				if ok && c.resolveForeignInterfaceImplementationContract(implementation.Trait) != nil {
+					owner, hasOwner := MethodOwnerForType(targetSymbol.Type)
+					for _, method := range implementation.Methods {
+						record(targetSymbol.Type, method.Name, nil)
+						if hasOwner {
+							requiredGoProviders[sourceMethodKey{owner: owner, method: method.Name}] = true
+						}
+					}
+				}
 				continue
 			}
-			targetSymbol, ok := c.scope.get(implementation.ForType.Name)
 			for _, method := range implementation.Methods {
 				if ok {
 					record(targetSymbol.Type, method.Name, trait)
@@ -828,10 +840,34 @@ func (c *Checker) planTraitGoInterfaces() {
 		}
 	}
 	for key, providers := range traitProviders {
-		if len(providers) > 1 {
+		if len(providers) > 1 || len(providers) > 0 && requiredGoProviders[key] {
 			c.program.MarkAmbiguousTraitMethod(key.owner, key.method)
 		}
 	}
+}
+
+func (c *Checker) resolveForeignInterfaceImplementationContract(name parse.Expression) *ForeignType {
+	property, ok := name.(parse.StaticProperty)
+	if !ok {
+		return nil
+	}
+	target, ok := property.Target.(*parse.Identifier)
+	if !ok {
+		return nil
+	}
+	member, ok := property.Property.(*parse.Identifier)
+	if !ok {
+		return nil
+	}
+	pkg := c.program.GoImports[target.Name]
+	if pkg == nil {
+		return nil
+	}
+	contract, ok := pkg.Types[member.Name].(*ForeignType)
+	if !ok || !contract.Interface {
+		return nil
+	}
+	return contract
 }
 
 func (c *Checker) resolveTraitImplementationContract(name parse.Expression) *Trait {
@@ -998,6 +1034,7 @@ func (c *Checker) Check() {
 	c.populateTopLevelTypeDefinitions()
 	c.prepareTraitImplementationConformance()
 	c.planTraitGoInterfaces()
+	c.prepareTraitImplSignatures()
 	c.prepareInherentImplSignatures()
 	c.hoistTopLevelFunctionSignatures()
 
@@ -3351,7 +3388,8 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				receiverGenerics := genericParamsForType(targetType)
 
 				// Check each method in the implementation
-				for _, method := range s.Methods {
+				for i := range s.Methods {
+					method := &s.Methods[i]
 					if len(method.TypeParams) > 0 {
 						c.addMethodIntroducedGeneric("", methodGenericExplicitDeclaration, method.GetLocation())
 						invalidImplementedMethods[method.Name] = true
@@ -3383,9 +3421,18 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 						continue
 					}
 
+					prepared := c.preparedTraitMethods[method]
+					c.diagnostics = append(c.diagnostics, prepared.Diagnostics...)
 					params := make([]Parameter, len(method.Parameters))
 					for i, param := range method.Parameters {
-						paramType, paramMutable := c.resolveParameterType(param.Type)
+						var paramType Type
+						var paramMutable bool
+						if prepared.Signature != nil {
+							paramType = prepared.Signature.Parameters[i].Type
+							paramMutable = prepared.Signature.Parameters[i].Mutable
+						} else {
+							paramType, paramMutable = c.resolveParameterType(param.Type)
+						}
 						expectedType := traitMethod.Parameters[i].Type
 						if !validationEqualTypes(paramType, expectedType) {
 							c.addTypeMismatch(expectedType, paramType, param.GetLocation())
@@ -3404,7 +3451,9 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 
 					// Check return type
 					var returnType Type = Void
-					if method.ReturnType != nil {
+					if prepared.Signature != nil {
+						returnType = prepared.Signature.ReturnType
+					} else if method.ReturnType != nil {
 						returnType = c.resolveType(method.ReturnType)
 					}
 					if !validationEqualTypes(traitMethod.ReturnType, returnType) {
@@ -3427,9 +3476,9 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 
 					// if we made it this far, it's a valid implementation
 					c.pushMethodGenericAllowlist(receiverGenerics)
-					fnDef := c.checkFunction(&method, func() {
+					fnDef := c.checkFunctionWithSignature(method, func() {
 						c.scope.add(s.Receiver.Name, receiverBindingType(targetType, method.Mutates), false)
-					}, receiverGenerics...)
+					}, prepared.Signature, receiverGenerics...)
 					c.popMethodGenericAllowlist()
 					if fnDef != nil && !methodUsesOnlyReceiverGenerics(fnDef, receiverGenerics) {
 						c.addMethodIntroducedGeneric("", methodGenericSemanticLeak, method.GetLocation())
@@ -3479,7 +3528,8 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				receiverGenerics := genericParamsForType(targetType)
 
 				// Check each method in the implementation
-				for _, method := range s.Methods {
+				for i := range s.Methods {
+					method := &s.Methods[i]
 					if len(method.TypeParams) > 0 {
 						c.addMethodIntroducedGeneric("", methodGenericExplicitDeclaration, method.GetLocation())
 						invalidImplementedMethods[method.Name] = true
@@ -3511,9 +3561,18 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 						continue
 					}
 
+					prepared := c.preparedTraitMethods[method]
+					c.diagnostics = append(c.diagnostics, prepared.Diagnostics...)
 					params := make([]Parameter, len(method.Parameters))
 					for i, param := range method.Parameters {
-						paramType, paramMutable := c.resolveParameterType(param.Type)
+						var paramType Type
+						var paramMutable bool
+						if prepared.Signature != nil {
+							paramType = prepared.Signature.Parameters[i].Type
+							paramMutable = prepared.Signature.Parameters[i].Mutable
+						} else {
+							paramType, paramMutable = c.resolveParameterType(param.Type)
+						}
 						expectedType := traitMethod.Parameters[i].Type
 						if !validationEqualTypes(paramType, expectedType) {
 							c.addTypeMismatch(expectedType, paramType, param.GetLocation())
@@ -3532,7 +3591,9 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 
 					// Check return type
 					var returnType Type = Void
-					if method.ReturnType != nil {
+					if prepared.Signature != nil {
+						returnType = prepared.Signature.ReturnType
+					} else if method.ReturnType != nil {
 						returnType = c.resolveType(method.ReturnType)
 					}
 					if !validationEqualTypes(traitMethod.ReturnType, returnType) {
@@ -3555,9 +3616,9 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 
 					// if we made it this far, it's a valid implementation
 					c.pushMethodGenericAllowlist(receiverGenerics)
-					fnDef := c.checkFunction(&method, func() {
+					fnDef := c.checkFunctionWithSignature(method, func() {
 						c.scope.add(s.Receiver.Name, targetType, false) // Enums are immutable, so always false
-					}, receiverGenerics...)
+					}, prepared.Signature, receiverGenerics...)
 					c.popMethodGenericAllowlist()
 					if fnDef != nil && !methodUsesOnlyReceiverGenerics(fnDef, receiverGenerics) {
 						c.addMethodIntroducedGeneric("", methodGenericSemanticLeak, method.GetLocation())
