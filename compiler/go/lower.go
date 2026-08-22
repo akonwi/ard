@@ -189,6 +189,9 @@ func (l *lowerer) lowerModule(module air.Module) (*ast.File, error) {
 	defer func() { l.currentModule = previousModule }()
 	l.currentImports = map[string]string{}
 	l.resolvedImportAliases = map[importAliasKey]string{}
+	// Import aliases are scoped to one generated Go package. Do not let aliases
+	// selected for an earlier Ard module affect this module's naming.
+	l.reservedGoIdentifiers = l.buildReservedGoIdentifiers()
 	l.goTypeCache = map[air.TypeID]ast.Expr{}
 	l.importErr = nil
 	l.runtimeHelpers = map[string]bool{}
@@ -6469,35 +6472,24 @@ func (l *lowerer) lowerInlineClosure(parent air.Function, expr air.Expr, closure
 		return loweredExpr{}, err
 	}
 	inlineFn := closureFn
-	inlineFn.Captures = append([]air.Capture(nil), closureFn.Captures...)
-	inlineFn.Locals = append([]air.Local(nil), closureFn.Locals...)
-	for i, name := range captureNames {
-		capture := &inlineFn.Captures[i]
+	// Allocate source locals before pinning captures to generated snapshot names.
+	// Reallocating after replacing a capture with `_tmp_n` can unnecessarily
+	// suffix a source local such as `tmp_n`, making its final name invisible to
+	// the module's import-collision plan.
+	sourceNames := l.allocateLocalNames(closureFn)
+	allocatedNames := make(map[air.LocalID]string, len(sourceNames))
+	for local, name := range sourceNames {
+		allocatedNames[local] = name
+	}
+	l.localNameCache[inlineFn.ID] = allocatedNames
+	defer func() { l.localNameCache[inlineFn.ID] = sourceNames }()
+	for i, capture := range inlineFn.Captures {
 		if int(capture.Local) < 0 || int(capture.Local) >= len(inlineFn.Locals) {
 			return loweredExpr{}, fmt.Errorf("closure %s has invalid capture local %d", closureFn.Name, capture.Local)
 		}
-		capture.Name = name
-		inlineFn.Locals[capture.Local].Name = name
-	}
-	// inlineFn is a mutated copy sharing the original closure's FunctionID. Drop
-	// any cached name table (e.g. populated eagerly by buildReservedGoIdentifiers)
-	// so names recompute from the rewritten capture names, and restore the entry
-	// afterwards so the original closure's table is never observed as the inline
-	// one.
-	prevLocalNames, hadLocalNames := l.localNameCache[inlineFn.ID]
-	delete(l.localNameCache, inlineFn.ID)
-	defer func() {
-		if hadLocalNames {
-			l.localNameCache[inlineFn.ID] = prevLocalNames
-		} else {
-			delete(l.localNameCache, inlineFn.ID)
-		}
-	}()
-	allocatedNames := l.allocateLocalNames(inlineFn)
-	for i, capture := range inlineFn.Captures {
 		// Generated temps start with `_`, while Ard local names are sanitized to
-		// omit leading underscores. Pin captures to the exact outer snapshot name
-		// after allocating every source local so neither side can shadow the other.
+		// omit leading underscores, so the pinned snapshot cannot shadow a source
+		// local allocated above.
 		allocatedNames[capture.Local] = captureNames[i]
 	}
 

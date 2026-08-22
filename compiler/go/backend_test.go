@@ -3058,6 +3058,191 @@ fn go() Void {
 		t.Fatalf("build: %v", err)
 	}
 }
+func TestBuildProgramAvoidsDependencyImportAliasShadowedByParameter(t *testing.T) {
+	workspace := t.TempDir()
+	libraryDir := filepath.Join(workspace, "style-shadow-lib")
+	appDir := filepath.Join(workspace, "style-shadow-app")
+	for _, dir := range []string{libraryDir, appDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	files := map[string]string{
+		filepath.Join(libraryDir, "ard.toml"): `name = "style-shadow-lib"
+ard = ">= 0.1.0"
+`,
+		filepath.Join(libraryDir, "style.ard"): `struct Style {
+  width: Int,
+}
+
+fn new() Style {
+  Style{width: 1}
+}
+`,
+		filepath.Join(libraryDir, "text.ard"): `use style-shadow-lib/style as layout_style
+
+fn configured(style: layout_style::Style?) layout_style::Style {
+  style.or(layout_style::new())
+}
+`,
+		filepath.Join(libraryDir, "generic.ard"): `use style-shadow-lib/style as layout_style
+
+struct Wrapped<$style> {
+  value: $style,
+  fallback: layout_style::Style,
+}
+
+fn configured(value: $style) Wrapped<$style> {
+  Wrapped{value: value, fallback: layout_style::new()}
+}
+
+fn identity(style: $style) $style {
+  style
+}
+`,
+		filepath.Join(appDir, "ard.toml"): `name = "style-shadow-app"
+ard = ">= 0.1.0"
+
+[dependencies]
+style-shadow-lib = { path = "../style-shadow-lib" }
+`,
+		filepath.Join(appDir, "main.ard"): `use style-shadow-lib/generic
+use style-shadow-lib/text
+
+fn main() {
+  let value = text::configured()
+  let wrapped = generic::configured(1)
+  let identity = generic::identity(1)
+  if not value.width == 1 or not wrapped.fallback.width == 1 or not identity == 1 {
+    panic("unexpected")
+  }
+}
+`,
+	}
+	for path, source := range files {
+		if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mainPath := filepath.Join(appDir, "main.ard")
+	loaded, err := frontend.LoadModule(mainPath)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	if _, err := BuildProgram(program, filepath.Join(appDir, "app"), loaded.ProjectInfo); err != nil {
+		t.Fatalf("build: %v", err)
+	}
+}
+
+func TestBuildProgramAvoidsImportAliasShadowedByInlineClosureLocal(t *testing.T) {
+	projectDir := t.TempDir()
+	files := map[string]string{
+		"ard.toml": `name = "collision"
+ard = ">= 0.1.0"
+`,
+		"tmp_0_0.ard": `struct Style {
+  width: Int,
+}
+
+fn new() Style {
+  Style{width: 1}
+}
+`,
+		"main.ard": `use collision/tmp_0_0
+
+fn configured() tmp_0_0::Style {
+  let captured = 2
+  let style = tmp_0_0::new()
+  Maybe::new(style).map(fn(tmp_0: tmp_0_0::Style) tmp_0_0::Style {
+    let _ = captured
+    tmp_0_0::new()
+  }).or(tmp_0_0::new())
+}
+
+fn main() {
+  let _ = configured()
+}
+`,
+	}
+	for name, source := range files {
+		if err := os.WriteFile(filepath.Join(projectDir, name), []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mainPath := filepath.Join(projectDir, "main.ard")
+	loaded, err := frontend.LoadModule(mainPath)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	if _, err := BuildProgram(program, filepath.Join(projectDir, "app"), loaded.ProjectInfo); err != nil {
+		t.Fatalf("build: %v", err)
+	}
+}
+
+func TestLowerProgramScopesImportAliasReservationsPerModule(t *testing.T) {
+	projectDir := t.TempDir()
+	files := map[string]string{
+		"ard.toml": `name = "imports"
+ard = ">= 0.1.0"
+`,
+		"a.ard": `use go:fmt
+
+fn text() Str {
+  fmt::Sprint("a")
+}
+`,
+		"b.ard": `use go:fmt
+
+fn text() Str {
+  fmt::Sprint("b")
+}
+`,
+		"main.ard": `use imports/a
+use imports/b
+
+fn main() {
+  let _ = "{a::text()}{b::text()}"
+}
+`,
+	}
+	for name, source := range files {
+		if err := os.WriteFile(filepath.Join(projectDir, name), []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mainPath := filepath.Join(projectDir, "main.ard")
+	loaded, err := frontend.LoadModule(mainPath)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	generated := lowerProgramAST(t, program, Options{PackageName: "main", ProjectInfo: loaded.ProjectInfo})
+	canonicalImports := 0
+	for _, file := range generated {
+		ast.Inspect(file, func(node ast.Node) bool {
+			spec, ok := node.(*ast.ImportSpec)
+			if ok && spec.Name != nil && spec.Name.Name == "fmt" && spec.Path.Value == `"fmt"` {
+				canonicalImports++
+			}
+			return true
+		})
+	}
+	if canonicalImports != 2 {
+		t.Fatalf("canonical fmt imports = %d, want 2", canonicalImports)
+	}
+}
+
 func TestRunProgramAllowsModuleWithoutEntry(t *testing.T) {
 	program := lowerSource(t, `
 		fn add(a: Int, b: Int) Int {

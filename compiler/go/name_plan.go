@@ -353,6 +353,7 @@ func nameScopesOverlap(left air.ModuleID, leftKnown bool, right air.ModuleID, ri
 }
 
 func (p *namePlan) buildImportCollisionSets(l *lowerer) {
+	localNames := p.plannedFunctionLocalNames(l)
 	for _, typ := range p.program.Types {
 		p.addTypeNames(p.programTopLevel, typ)
 	}
@@ -365,6 +366,12 @@ func (p *namePlan) buildImportCollisionSets(l *lowerer) {
 	for _, fn := range p.program.Functions {
 		if !l.inlineClosures[fn.ID] {
 			p.programTopLevel[p.functionName(fn)] = true
+		}
+		for _, name := range fn.TypeParams {
+			p.programTopLevel[name] = true
+		}
+		for _, name := range localNames[fn.ID] {
+			p.programTopLevel[name] = true
 		}
 	}
 
@@ -396,8 +403,18 @@ func (p *namePlan) buildImportCollisionSets(l *lowerer) {
 			}
 		}
 		for _, functionID := range l.functionsForModule(module.ID) {
-			if validFunctionID(p.program, functionID) && !l.inlineClosures[functionID] {
-				occupied[p.functionName(p.program.Functions[functionID])] = true
+			if !validFunctionID(p.program, functionID) {
+				continue
+			}
+			fn := p.program.Functions[functionID]
+			if !l.inlineClosures[functionID] {
+				occupied[p.functionName(fn)] = true
+			}
+			for _, name := range fn.TypeParams {
+				occupied[name] = true
+			}
+			for _, name := range localNames[functionID] {
+				occupied[name] = true
 			}
 		}
 		for _, trait := range p.program.Traits {
@@ -409,8 +426,33 @@ func (p *namePlan) buildImportCollisionSets(l *lowerer) {
 	}
 }
 
+// plannedFunctionLocalNames computes the exact generated local identifiers
+// before import aliases are selected. Imports are package-scoped in Go, so an
+// alias must avoid every local in the generated module even when the import is
+// first discovered while lowering a function body.
+func (p *namePlan) plannedFunctionLocalNames(l *lowerer) map[air.FunctionID][]string {
+	planner := *l
+	planner.namePlan = p
+	planner.topLevelReserved = p.localReserved
+	planner.localNameCache = nil
+
+	result := make(map[air.FunctionID][]string, len(p.program.Functions))
+	for _, fn := range p.program.Functions {
+		allocated := planner.allocateLocalNames(fn)
+		names := make([]string, 0, len(allocated))
+		for _, name := range allocated {
+			names = append(names, name)
+		}
+		result[fn.ID] = names
+	}
+	return result
+}
+
 func (p *namePlan) addTypeNames(occupied map[string]bool, typ air.TypeInfo) {
 	occupied[p.typeName(typ)] = true
+	for _, name := range typ.TypeParams {
+		occupied[name] = true
+	}
 	for _, variant := range typ.Variants {
 		occupied[p.enumVariantName(typ, variant)] = true
 	}

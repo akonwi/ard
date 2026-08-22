@@ -756,7 +756,15 @@ func (n *localNamer) push() { n.frames = append(n.frames, map[string]air.LocalID
 func (n *localNamer) pop() { n.frames = n.frames[:len(n.frames)-1] }
 
 func (n *localNamer) reservedName(name string) bool {
-	return token.IsKeyword(name) || isReservedLocalName(name) || n.l.topLevelReservedName(name)
+	if token.IsKeyword(name) || isReservedLocalName(name) || n.l.topLevelReservedName(name) {
+		return true
+	}
+	for _, typeParam := range n.fn.TypeParams {
+		if name == typeParam {
+			return true
+		}
+	}
+	return false
 }
 
 // mustSuffix reports whether name cannot be used bare for a local whose scope
