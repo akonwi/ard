@@ -103,6 +103,67 @@ fn main() {
 	})
 }
 
+func TestSpanHoverGenericBuiltinMethodSignaturesUseSurfaceTypeParameters(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		want   string
+	}{
+		{
+			name: "Maybe map",
+			source: `fn main() {
+  let value: Int? = Maybe::new(1)
+  value.ma|p(fn(item) { "{item}" })
+}
+`,
+			want: "fn Int?.map(with: fn(Int) $U) $U?",
+		},
+		{
+			name: "Maybe and_then",
+			source: `fn main() {
+  let value: Int? = Maybe::new(1)
+  value.and_|then(fn(item) { Maybe::new("{item}") })
+}
+`,
+			want: "fn Int?.and_then(with: fn(Int) $U?) $U?",
+		},
+		{
+			name: "Result map",
+			source: `fn main() {
+  let value: Int!Str = Result::ok(1)
+  value.ma|p(fn(item) { "{item}" })
+}
+`,
+			want: "fn Int!Str.map(with: fn(Int) $U) $U!Str",
+		},
+		{
+			name: "Result map_err",
+			source: `fn main() {
+  let value: Int!Str = Result::ok(1)
+  value.map_|err(fn(err) { err.size() })
+}
+`,
+			want: "fn Int!Str.map_err(with: fn(Str) $F) Int!$F",
+		},
+		{
+			name: "Result and_then",
+			source: `fn main() {
+  let value: Int!Str = Result::ok(1)
+  value.and_|then(fn(item) { Result::ok("{item}") })
+}
+`,
+			want: "fn Int!Str.and_then(with: fn(Int) $U!Str) $U!Str",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			source, line, char := sourceMarkerPosition(t, tt.source)
+			requireSpanHover(t, source, line, char, tt.want)
+		})
+	}
+}
+
 // Ported parity scenarios: expression and variable hovers.
 func TestSpanHoverExpressions(t *testing.T) {
 	source := `struct Board {
