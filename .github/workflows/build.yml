@@ -18,6 +18,9 @@ concurrency:
   group: release
   cancel-in-progress: false
 
+env:
+  GOEXPERIMENT: jsonv2
+
 jobs:
   validate:
     runs-on: ubuntu-latest
