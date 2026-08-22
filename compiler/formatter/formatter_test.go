@@ -207,6 +207,34 @@ func TestFormatMutRefExpressions(t *testing.T) {
 	}
 }
 
+func TestFormatParenthesizesMutRefExpressionStatements(t *testing.T) {
+	input := `struct Holder {
+  value: Int,
+}
+
+fn make() mut Holder {
+  (mut Holder{value: 1})
+}
+`
+	formatted, err := Format([]byte(input), "test.ard")
+	if err != nil {
+		t.Fatalf("format: %v", err)
+	}
+	if string(formatted) != input {
+		t.Fatalf("formatted:\n%s\nwant:\n%s", formatted, input)
+	}
+	if result := parse.Parse(formatted, "test.ard"); len(result.Errors) > 0 {
+		t.Fatalf("formatted output does not parse: %v", result.Errors)
+	}
+	again, err := Format(formatted, "test.ard")
+	if err != nil {
+		t.Fatalf("second format: %v", err)
+	}
+	if string(again) != input {
+		t.Fatalf("formatter is not idempotent:\n%s", again)
+	}
+}
+
 func TestFormatStringBraceEscapes(t *testing.T) {
 	tests := []struct {
 		name  string

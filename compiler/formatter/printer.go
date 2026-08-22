@@ -162,7 +162,11 @@ func (p printer) renderStatementDoc(statement parse.Statement) doc {
 		return p.renderTypeDeclarationDoc(node)
 	default:
 		if expr, ok := statement.(parse.Expression); ok {
-			return p.renderExpressionValueDoc(expr, 0)
+			rendered := p.renderExpressionValueDoc(expr, 0)
+			if isMutRefExpression(expr) {
+				return dConcat(dText("("), rendered, dText(")"))
+			}
+			return rendered
 		}
 		return dText(statement.String())
 	}
