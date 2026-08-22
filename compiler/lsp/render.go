@@ -23,6 +23,12 @@ type hoverParam struct {
 	Mutable bool
 }
 
+var builtinGenericDisplayNames = strings.NewReplacer(
+	"$__ard_maybe_mapped", "$U",
+	"$__ard_result_mapped_val", "$U",
+	"$__ard_result_mapped_err", "$F",
+)
+
 // asciiPositionToPoint converts an LSP position to a parse point assuming
 // byte columns equal UTF-16 columns. Only valid for ASCII-safe scanning
 // (paren matching, completion-context detection); position-sensitive
@@ -69,7 +75,7 @@ func checkerTypeString(t checker.Type) string {
 	case "Boolean":
 		return "Bool"
 	}
-	return s
+	return normalizeDisplayType(s)
 }
 
 // simpleHover builds a hoverInfo from a label string.
@@ -79,6 +85,7 @@ func simpleHover(label string) *hoverInfo {
 }
 
 func normalizeDisplayType(t string) string {
+	t = builtinGenericDisplayNames.Replace(t)
 	if strings.HasPrefix(t, "?") && len(t) > 1 {
 		return strings.TrimPrefix(t, "?") + "?"
 	}

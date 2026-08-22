@@ -1050,7 +1050,10 @@ func callableTypeString(params []Parameter, returnType Type) string {
 	}
 	rendered := fmt.Sprintf("fn(%s)", strings.Join(paramStrs, ", "))
 	// Ard syntax omits the return type for non-returning functions.
-	if returnType == nil || returnType.equal(Void) {
+	// Use identity rather than inference equality: an unbound type variable
+	// compares equal to Void while it is still acting as a wildcard, but its
+	// generic return must remain visible in user-facing type strings.
+	if returnType == nil || returnType == Void {
 		return rendered
 	}
 	return rendered + " " + typeSyntaxString(returnType)

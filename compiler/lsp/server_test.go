@@ -1672,6 +1672,40 @@ impl Board {
 	assertSignature(t, help, "fn mut [Str].set(index: Int, value: Str) Bool", 1)
 }
 
+func TestSignatureHelpGenericBuiltinMethodsUsesSurfaceTypeParameters(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		want   string
+	}{
+		{
+			name: "Maybe and_then",
+			source: `fn main() {
+  let value: Int? = Maybe::new(1)
+  value.and_then(|fn(item) { Maybe::new("{item}") })
+}
+`,
+			want: "fn Int?.and_then(with: fn(Int) $U?) $U?",
+		},
+		{
+			name: "Result map_err",
+			source: `fn main() {
+  let value: Int!Str = Result::ok(1)
+  value.map_err(|fn(err) { err.size() })
+}
+`,
+			want: "fn Int!Str.map_err(with: fn(Str) $F) Int!$F",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			help, _ := requireSignatureHelpAtMarker(t, tt.source, "test.ard")
+			assertSignature(t, help, tt.want, 0)
+		})
+	}
+}
+
 // TestSignatureHelpImportedGenericMethod verifies imported generic method signatures substitute type args.
 func TestSignatureHelpImportedGenericMethod(t *testing.T) {
 	root := t.TempDir()
