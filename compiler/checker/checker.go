@@ -786,7 +786,7 @@ func (c *Checker) planTraitGoInterfaces() {
 				}
 			}
 		case *parse.TraitImplementation:
-			trait := c.traitForGoInterfacePlan(implementation.Trait)
+			trait := c.resolveTraitImplementationContract(implementation.Trait)
 			if trait == nil {
 				continue
 			}
@@ -834,7 +834,7 @@ func (c *Checker) planTraitGoInterfaces() {
 	}
 }
 
-func (c *Checker) traitForGoInterfacePlan(name parse.Expression) *Trait {
+func (c *Checker) resolveTraitImplementationContract(name parse.Expression) *Trait {
 	var symbol Symbol
 	switch value := name.(type) {
 	case parse.Identifier:
@@ -996,6 +996,7 @@ func (c *Checker) Check() {
 	c.hoistTopLevelTypeDeclarations()
 	c.predeclareTopLevelTypeAliases()
 	c.populateTopLevelTypeDefinitions()
+	c.prepareTraitImplementationConformance()
 	c.planTraitGoInterfaces()
 	c.prepareInherentImplSignatures()
 	c.hoistTopLevelFunctionSignatures()
@@ -3325,9 +3326,9 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 
 			switch targetType := typeSym.Type.(type) {
 			case *StructDef:
-				// Make this implementation visible while checking its method bodies so
-				// self can project to the trait it is currently implementing.
-				targetType.Traits = append(targetType.Traits, trait)
+				// Keep this idempotent with the top-level conformance prepass so self
+				// can still project to the trait while checking implementation bodies.
+				registerTraitConformance(targetType, trait)
 				structMethodOwner := StructMethodOwner(targetType)
 				// Verify that all required methods are implemented.
 				traitMethods := trait.GetMethods()
@@ -3467,9 +3468,9 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				return &Statement{Stmt: targetType}
 
 			case *Enum:
-				// Keep enum conformance registration aligned with structs: method bodies
-				// should observe the trait currently being implemented.
-				targetType.Traits = append(targetType.Traits, trait)
+				// Keep enum conformance registration aligned with structs and with the
+				// top-level conformance prepass.
+				registerTraitConformance(targetType, trait)
 				enumMethodOwner := MethodOwner{ModulePath: targetType.ModulePath, TypeName: targetType.Name}
 				// Verify that all required methods are implemented (same logic as structs)
 				traitMethods := trait.GetMethods()

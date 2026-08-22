@@ -115,6 +115,58 @@ func (c *Checker) populateTopLevelTypeDefinitions() {
 	}
 }
 
+// prepareTraitImplementationConformance makes source-level trait declarations
+// order-independent without checking implementation method bodies early. The
+// ordinary statement pass remains responsible for validating each contract.
+func (c *Checker) prepareTraitImplementationConformance() {
+	for _, statement := range c.input.Statements {
+		implementation, ok := statement.(*parse.TraitImplementation)
+		if !ok {
+			continue
+		}
+		trait := c.resolveTraitImplementationContract(implementation.Trait)
+		if trait == nil {
+			continue
+		}
+		target, ok := c.scope.get(implementation.ForType.Name)
+		if !ok {
+			continue
+		}
+		// Specialized generic aliases do not currently carry independent
+		// conformance through compatibility and method lookup. Leave them to the
+		// ordinary implementation pass rather than widening the canonical type.
+		if target, ok := target.Type.(*StructDef); ok && target.Definition != nil {
+			continue
+		}
+		registerTraitConformance(target.Type, trait)
+	}
+}
+
+func registerTraitConformance(target Type, trait *Trait) {
+	if trait == nil {
+		return
+	}
+	var traits *[]*Trait
+	switch target := target.(type) {
+	case *StructDef:
+		traits = &target.Traits
+	case *Enum:
+		// Builtin Error implementations are restricted to structs.
+		if IsBuiltinError(trait) {
+			return
+		}
+		traits = &target.Traits
+	default:
+		return
+	}
+	for _, implemented := range *traits {
+		if implemented.equal(trait) {
+			return
+		}
+	}
+	*traits = append(*traits, trait)
+}
+
 func isTopLevelTypeDeclaration(stmt parse.Statement) bool {
 	_, _, ok := topLevelTypeDeclarationName(stmt)
 	return ok
