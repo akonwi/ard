@@ -10,8 +10,8 @@ import (
 	"github.com/akonwi/ard/air"
 )
 
-func TestSpecialJSONFieldNamesRoundTripThroughGoTags(t *testing.T) {
-	names := []string{"", "-", "a,b", `a"b`, "a'b", "a`b", "snow☃"}
+func TestSupportedJSONFieldNamesRoundTripThroughGoTags(t *testing.T) {
+	names := []string{"displayName", "with space", "snow☃", "emoji💡", "!#$%&()*+-./:;<=>?@[]^_{|}~ "}
 	for _, name := range names {
 		t.Run(strconv.Quote(name), func(t *testing.T) {
 			literal := jsonStructFieldTag(air.FieldInfo{Name: "field", JSON: air.JSONFieldInfo{Name: name, HasName: true}})
@@ -102,23 +102,23 @@ func TestRunProgramHonorsJSONFieldAttributes(t *testing.T) {
 	}
 }
 
-func TestRunProgramSupportsSpecialJSONFieldNames(t *testing.T) {
+func TestRunProgramSupportsUnicodeJSONFieldNames(t *testing.T) {
 	program := lowerSource(t, `
 		use go:encoding/json
 		use go:fmt
 
 		struct Labels {
-			#json(name: "-")
-			dash: Int,
-			#json(name: "a,b")
-			comma: Int,
+			#json(name: "snow☃")
+			snow: Int,
+			#json(name: "emoji💡")
+			emoji: Int,
 		}
 
 		fn main() {
-			let bytes = try json::Marshal(Labels{dash: 1, comma: 2}) -> err { panic(err) }
+			let bytes = try json::Marshal(Labels{snow: 1, emoji: 2}) -> err { panic(err) }
 			let encoded = fmt::Sprintf("%s", bytes)
-			if not encoded.contains("\"-\":1") or not encoded.contains("\"a,b\":2") {
-				panic("special JSON names missing: {encoded}")
+			if not encoded.contains("\"snow☃\":1") or not encoded.contains("\"emoji💡\":2") {
+				panic("Unicode JSON names missing: {encoded}")
 			}
 		}
 	`)

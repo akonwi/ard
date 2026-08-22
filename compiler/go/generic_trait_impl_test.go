@@ -321,7 +321,7 @@ func TestGenericRequiredGoMethodSeesOrdinaryTraitImplementation(t *testing.T) {
 	projectDir := t.TempDir()
 	files := map[string]string{
 		"ard.toml": "name = \"genericrequired\"\nard = \">= 0.1.0\"\n",
-		"go.mod":   "module genericrequired\n\ngo 1.26\n",
+		"go.mod":   "module genericrequired\n\ngo 1.27\n",
 		"ffi/ffi.go": `package ffi
 
 type Stringer interface {

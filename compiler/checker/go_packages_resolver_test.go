@@ -293,6 +293,9 @@ func TestGoPackagesResolverUsesBuildTags(t *testing.T) {
 		t.Fatal(err)
 	}
 	withoutTag := checker.NewGoPackagesResolver(root, nil)
+	if len(withoutTag.BuildTags) != 0 {
+		t.Fatalf("compiler injected build tags = %v, want none", withoutTag.BuildTags)
+	}
 	if err := withoutTag.Prime([]string{"example.com/app/ffi"}); err != nil {
 		t.Fatalf("Prime(%s): %v", "example.com/app/ffi", err)
 	}
@@ -304,6 +307,9 @@ func TestGoPackagesResolverUsesBuildTags(t *testing.T) {
 		t.Fatal("Tagged should not be visible without build tag")
 	}
 	withTag := checker.NewGoPackagesResolver(root, []string{"special"})
+	if len(withTag.BuildTags) != 1 || withTag.BuildTags[0] != "special" {
+		t.Fatalf("configured build tags = %v, want [special]", withTag.BuildTags)
+	}
 	if err := withTag.Prime([]string{"example.com/app/ffi"}); err != nil {
 		t.Fatalf("Prime(%s): %v", "example.com/app/ffi", err)
 	}

@@ -1,6 +1,10 @@
 package air
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/akonwi/ard/checker"
+)
 
 func Validate(program *Program) error {
 	if program == nil {
@@ -102,6 +106,9 @@ func validateTypeInfo(program *Program, typ TypeInfo) error {
 			}
 			if field.JSON.Skip && (field.JSON.HasName || field.JSON.OmitNone) {
 				return fmt.Errorf("type %s field %s has conflicting JSON metadata", typ.Name, field.Name)
+			}
+			if field.JSON.HasName && !checker.JSONFieldNameRepresentable(field.JSON.Name) {
+				return fmt.Errorf("type %s field %s has unrepresentable JSON field name %q", typ.Name, field.Name, field.JSON.Name)
 			}
 			if !field.JSON.Skip {
 				jsonRepresentableFields++

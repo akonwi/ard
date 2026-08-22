@@ -10,7 +10,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"unicode"
 
 	"github.com/akonwi/ard/air"
 	"github.com/akonwi/ard/checker"
@@ -693,7 +692,7 @@ func jsonStructFieldTag(field air.FieldInfo) *ast.BasicLit {
 	if field.JSON.HasName {
 		name = field.JSON.Name
 	}
-	option := jsonStructTagName(name)
+	option := name
 	if field.JSON.OmitNone {
 		option += ",omitzero"
 	}
@@ -703,28 +702,6 @@ func jsonStructFieldTag(field air.FieldInfo) *ast.BasicLit {
 		literal = strconv.Quote(tag)
 	}
 	return &ast.BasicLit{Kind: token.STRING, Value: literal}
-}
-
-func jsonStructTagName(name string) string {
-	if validPlainJSONStructTagName(name) && name != "-" {
-		return name
-	}
-	quoted := strconv.Quote(name)
-	inner := strings.ReplaceAll(quoted[1:len(quoted)-1], "'", `\'`)
-	return "'" + inner + "'"
-}
-
-func validPlainJSONStructTagName(name string) bool {
-	if name == "" {
-		return false
-	}
-	for _, char := range name {
-		if unicode.IsLetter(char) || unicode.IsDigit(char) || strings.ContainsRune("!#$%&()*+-./:;<=>?@[]^_{|}~ ", char) {
-			continue
-		}
-		return false
-	}
-	return true
 }
 
 func (l *lowerer) runtimePreludeDecls() []ast.Decl {

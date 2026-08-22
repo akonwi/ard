@@ -14,7 +14,7 @@ import (
 // struct by value and by pointer, to pin the mut-parameter ABI rules.
 func writeGoInterfaceABIPackage(t *testing.T, root string) {
 	t.Helper()
-	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/app\n\ngo 1.26\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/app\n\ngo 1.27\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	ffiDir := filepath.Join(root, "ffi")

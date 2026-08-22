@@ -1,6 +1,6 @@
 module vaxis_demo
 
-go 1.26
+go 1.27
 
 require go.rockorager.dev/vaxis v0.16.1-0.20260604003537-24ba647481e9
 

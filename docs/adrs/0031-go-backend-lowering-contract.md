@@ -254,7 +254,7 @@ Generic struct literals accept explicit call-site type arguments (`Box<Str>{valu
 
 #### Type aliases
 
-A union type declaration (`type Name = A | B`) declares a named union and lowers to a named tagged struct, as in the Unions section. Any other type alias lowers to a Go type alias that mirrors the Ard alias, so the intended name appears in the generated API. For example `type Decoder<$T> = fn(Any) $T![Error]` lowers to a generic Go type alias `type Decoder[T any] = func(any) ard.Result[T, Error]`, and `type Primitive = Str | Bool | Void` follows the named-union lowering. Aliases remain transparent to type checking; the Go alias is for naming, not a distinct type. Parameterized type aliases require Go 1.24 or newer; the compiler and its generated programs target Go 1.26, so this is satisfied.
+A union type declaration (`type Name = A | B`) declares a named union and lowers to a named tagged struct, as in the Unions section. Any other type alias lowers to a Go type alias that mirrors the Ard alias, so the intended name appears in the generated API. For example `type Decoder<$T> = fn(Any) $T![Error]` lowers to a generic Go type alias `type Decoder[T any] = func(any) ard.Result[T, Error]`, and `type Primitive = Str | Bool | Void` follows the named-union lowering. Aliases remain transparent to type checking; the Go alias is for naming, not a distinct type. Parameterized type aliases require Go 1.24 or newer; the compiler and its generated programs target Go 1.27, so this is satisfied.
 
 #### Functions, traits, and foreign types
 
@@ -485,7 +485,7 @@ The marshalling support in generated output exists to make that interop correct:
 
 #### What is marshallable
 
-Marshalling applies to every JSON-representable type: `Any`, structs, lists, string-keyed maps, primitives, `Maybe`, `Result`, enums, and unions. A union marshals to its active member's value, unwrapped, so a `Str | Int` holding `"hi"` marshals to `"hi"` and one holding `5` marshals to `5`; the union tag is not part of the wire form. The generated union `MarshalJSON` method is the reason generated output imports `encoding/json/v2` and carries the `goexperiment.jsonv2` build tag (ADR 0035).
+Marshalling applies to every JSON-representable type: `Any`, structs, lists, string-keyed maps, primitives, `Maybe`, `Result`, enums, and unions. A union marshals to its active member's value, unwrapped, so a `Str | Int` holding `"hi"` marshals to `"hi"` and one holding `5` marshals to `5`; the union tag is not part of the wire form. The generated union `MarshalJSON` method imports `encoding/json/v2`, available by default under Ard's minimum Go 1.27 toolchain (ADR 0035).
 
 Unmarshalling into a union is not supported — choosing a member from arbitrary JSON is ambiguous — and unions carry no `UnmarshalJSON` method.
 

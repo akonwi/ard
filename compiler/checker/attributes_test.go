@@ -32,6 +32,8 @@ func TestJSONFieldAttributesAreChecked(t *testing.T) {
   display_name: Str?,
   #json(skip: true)
   password_hash: Str,
+  #json(name: "snow☃")
+  weather_code: Int,
 }`)
 	if diagnostics := c.Diagnostics(); len(diagnostics) != 0 {
 		t.Fatalf("diagnostics = %#v", diagnostics)
@@ -47,6 +49,10 @@ func TestJSONFieldAttributesAreChecked(t *testing.T) {
 	if !ok || !password.Skip || password.HasName || password.OmitNone {
 		t.Fatalf("password metadata = %#v, found=%v", password, ok)
 	}
+	weather, ok := checker.StructFieldJSON(def, "weather_code")
+	if !ok || !weather.HasName || weather.Name != "snow☃" {
+		t.Fatalf("weather metadata = %#v, found=%v", weather, ok)
+	}
 }
 
 func TestInvalidJSONFieldAttributesAreDiagnosed(t *testing.T) {
@@ -61,6 +67,13 @@ func TestInvalidJSONFieldAttributesAreDiagnosed(t *testing.T) {
 		{"duplicate attribute", `#json(name: "one")\n  #json(name: "two")\n  value: Str`, checker.DiagnosticCodeDuplicateAttribute, "Duplicate attribute: #json"},
 		{"duplicate argument", `#json(name: "one", name: "two")\n  value: Str`, checker.DiagnosticCodeInvalidAttributeArgument, "Duplicate #json argument: name"},
 		{"name type", `#json(name: true)\n  value: Str`, checker.DiagnosticCodeInvalidAttributeArgument, "#json argument `name` must be a string"},
+		{"empty name", `#json(name: "")\n  value: Str`, checker.DiagnosticCodeInvalidAttributeArgument, "#json name cannot be represented by Go 1.27 JSON struct tags"},
+		{"dash name", `#json(name: "-")\n  value: Str`, checker.DiagnosticCodeInvalidAttributeArgument, "#json name cannot be represented by Go 1.27 JSON struct tags"},
+		{"comma name", `#json(name: "a,b")\n  value: Str`, checker.DiagnosticCodeInvalidAttributeArgument, "#json name cannot be represented by Go 1.27 JSON struct tags"},
+		{"backslash name", `#json(name: "a\\b")\n  value: Str`, checker.DiagnosticCodeInvalidAttributeArgument, "#json name cannot be represented by Go 1.27 JSON struct tags"},
+		{"apostrophe name", `#json(name: "a'b")\n  value: Str`, checker.DiagnosticCodeInvalidAttributeArgument, "#json name cannot be represented by Go 1.27 JSON struct tags"},
+		{"quote name", `#json(name: "a\"b")\n  value: Str`, checker.DiagnosticCodeInvalidAttributeArgument, "#json name cannot be represented by Go 1.27 JSON struct tags"},
+		{"backtick name", "#json(name: \"a`b\")\\n  value: Str", checker.DiagnosticCodeInvalidAttributeArgument, "#json name cannot be represented by Go 1.27 JSON struct tags"},
 		{"omit value", `#json(omit: empty)\n  value: Str?`, checker.DiagnosticCodeInvalidAttributeArgument, "#json argument `omit` only supports `none`"},
 		{"omit type", `#json(omit: none)\n  value: Str`, checker.DiagnosticCodeInvalidAttributeArgument, "#json(omit: none) requires a nullable field"},
 		{"skip type", `#json(skip: "yes")\n  value: Str`, checker.DiagnosticCodeInvalidAttributeArgument, "#json argument `skip` must be `true`"},

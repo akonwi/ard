@@ -1228,7 +1228,7 @@ func TestRunProgramAssignsGoPackageVariable(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"pkgvars\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(projectDir, "go.mod"), []byte("module pkgvars\n\ngo 1.26\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(projectDir, "go.mod"), []byte("module pkgvars\n\ngo 1.27\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.MkdirAll(filepath.Join(projectDir, "ffi"), 0o755); err != nil {
@@ -1431,7 +1431,7 @@ func TestRunProgramSupportsEmbeddedGoFieldsWithoutPromotingThem(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"embeddedfields\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(projectDir, "go.mod"), []byte("module embeddedfields\n\ngo 1.26\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(projectDir, "go.mod"), []byte("module embeddedfields\n\ngo 1.27\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.MkdirAll(filepath.Join(projectDir, "ffi"), 0o755); err != nil {
@@ -1524,7 +1524,7 @@ func TestRunProgramConstructsGenericGoStructLiterals(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"genericstructs\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(projectDir, "go.mod"), []byte("module genericstructs\n\ngo 1.26\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(projectDir, "go.mod"), []byte("module genericstructs\n\ngo 1.27\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.MkdirAll(filepath.Join(projectDir, "ffi"), 0o755); err != nil {
@@ -1935,7 +1935,7 @@ func TestRunProgramExecutesUnsafeForeignMutableCast(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(projectDir, "ffi"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(projectDir, "go.mod"), []byte("module foreigncast\n\ngo 1.26\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(projectDir, "go.mod"), []byte("module foreigncast\n\ngo 1.27\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(projectDir, "ffi", "ffi.go"), []byte(`package ffi
@@ -2055,7 +2055,7 @@ func TestRunProgramExecutesGenericUnsafeMutableCastReference(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(projectDir, "ffi"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(projectDir, "go.mod"), []byte("module genericcast\n\ngo 1.26\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(projectDir, "go.mod"), []byte("module genericcast\n\ngo 1.27\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(projectDir, "ffi", "ffi.go"), []byte(`package ffi
@@ -2128,7 +2128,7 @@ func TestRunProgramExecutesUnsafeMutableCast(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(projectDir, "ffi"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(projectDir, "go.mod"), []byte("module anycast\n\ngo 1.26\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(projectDir, "go.mod"), []byte("module anycast\n\ngo 1.27\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(projectDir, "ffi", "ffi.go"), []byte(`package ffi
@@ -2177,7 +2177,7 @@ func TestRunProgramExecutesUnsafeIsNil(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(projectDir, "ffi"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(projectDir, "go.mod"), []byte("module isnil\n\ngo 1.26\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(projectDir, "go.mod"), []byte("module isnil\n\ngo 1.27\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(projectDir, "ffi", "ffi.go"), []byte(`package ffi
@@ -3448,7 +3448,7 @@ func TestArtifactWorkspaceKeepsOnlySelectedPurpose(t *testing.T) {
 		t.Fatal(err)
 	}
 	goRoot := filepath.Join(dir, "ard-out", "go")
-	cachedRunGoMod := []byte("module cached-run\n\ngo 1.26.0\n")
+	cachedRunGoMod := []byte("module cached-run\n\ngo 1.27.0\n")
 	for _, purpose := range []string{"run", "build", "test"} {
 		purposeDir := filepath.Join(goRoot, purpose)
 		if err := os.MkdirAll(purposeDir, 0o755); err != nil {
@@ -5327,7 +5327,7 @@ func TestTestRunnerImportAliasAvoidsRunnerLocalNames(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, "outcomes"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module generated\n\ngo 1.26.0\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module generated\n\ngo 1.27.0\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "outcomes", "outcomes.go"), []byte("package outcomes\n\nfunc EnumTest() error { return nil }\n"), 0o644); err != nil {
@@ -5798,7 +5798,7 @@ func TestRunProgramExecutesGenericGoFunctions(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(projectDir, "ffi"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(projectDir, "go.mod"), []byte("module genericfns\n\ngo 1.26\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(projectDir, "go.mod"), []byte("module genericfns\n\ngo 1.27\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(projectDir, "ffi", "ffi.go"), []byte(`package ffi
@@ -5949,7 +5949,7 @@ fn main() {}
 			if err := os.MkdirAll(filepath.Join(projectDir, "ffi"), 0o755); err != nil {
 				t.Fatal(err)
 			}
-			if err := os.WriteFile(filepath.Join(projectDir, "go.mod"), []byte("module genericptr\n\ngo 1.26\n"), 0o644); err != nil {
+			if err := os.WriteFile(filepath.Join(projectDir, "go.mod"), []byte("module genericptr\n\ngo 1.27\n"), 0o644); err != nil {
 				t.Fatal(err)
 			}
 			if err := os.WriteFile(filepath.Join(projectDir, "ffi", "ffi.go"), []byte(ffiSource), 0o644); err != nil {
@@ -6077,7 +6077,7 @@ func TestRunProgramExecutesNamedGoFuncValues(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(projectDir, "ffi"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(projectDir, "go.mod"), []byte("module namedfunc\n\ngo 1.26\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(projectDir, "go.mod"), []byte("module namedfunc\n\ngo 1.27\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(projectDir, "ffi", "ffi.go"), []byte(`package ffi
@@ -6132,7 +6132,7 @@ func TestRunProgramExecutesMutForeignFnTypeAnnotations(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(projectDir, "ffi"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(projectDir, "go.mod"), []byte("module mutfn\n\ngo 1.26\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(projectDir, "go.mod"), []byte("module mutfn\n\ngo 1.27\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(projectDir, "ffi", "ffi.go"), []byte(`package ffi

@@ -16,7 +16,7 @@ func TestGeneratedGoModCopiesProjectModuleAndRewritesRelativeReplace(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	goMod := "module example.com/app\n\ngo 1.21\n\nrequire example.com/localdep v0.0.0\n\nreplace example.com/localdep => ../localdep\n"
+	goMod := "module example.com/app\n\ngo 1.21\n\ntoolchain go1.26.0\n\nrequire example.com/localdep v0.0.0\n\nreplace example.com/localdep => ../localdep\n"
 	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte(goMod), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -28,9 +28,47 @@ func TestGeneratedGoModCopiesProjectModuleAndRewritesRelativeReplace(t *testing.
 	if !strings.Contains(generated, "module example.com/app") {
 		t.Fatalf("generated go.mod did not preserve module path:\n%s", generated)
 	}
+	if !strings.Contains(generated, "go 1.27.0") {
+		t.Fatalf("generated go.mod did not raise the project to Go 1.27:\n%s", generated)
+	}
+	if !strings.Contains(generated, "toolchain go1.27.0") {
+		t.Fatalf("generated go.mod retained a toolchain below Go 1.27:\n%s", generated)
+	}
 	wantReplace := "replace example.com/localdep => " + localDep
 	if !strings.Contains(generated, wantReplace) {
 		t.Fatalf("generated go.mod missing rewritten replace %q:\n%s", wantReplace, generated)
+	}
+}
+
+func TestGeneratedGoModPreservesNewerGoVersionAndToolchain(t *testing.T) {
+	root := t.TempDir()
+	goMod := "module example.com/app\n\ngo 1.28.0\n\ntoolchain go1.28.1\n"
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte(goMod), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	project := &checker.ProjectInfo{RootPath: root, ProjectName: "app"}
+	generated, err := generatedGoMod(t.TempDir(), &air.Program{}, project)
+	if err != nil {
+		t.Fatalf("generatedGoMod: %v", err)
+	}
+	if !strings.Contains(generated, "go 1.28.0") || !strings.Contains(generated, "toolchain go1.28.1") {
+		t.Fatalf("generated go.mod downgraded a newer toolchain:\n%s", generated)
+	}
+}
+
+func TestGeneratedGoModPreservesDefaultToolchainDirective(t *testing.T) {
+	root := t.TempDir()
+	goMod := "module example.com/app\n\ngo 1.27.0\n\ntoolchain default\n"
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte(goMod), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	project := &checker.ProjectInfo{RootPath: root, ProjectName: "app"}
+	generated, err := generatedGoMod(t.TempDir(), &air.Program{}, project)
+	if err != nil {
+		t.Fatalf("generatedGoMod: %v", err)
+	}
+	if !strings.Contains(generated, "toolchain default") {
+		t.Fatalf("generated go.mod replaced the default toolchain directive:\n%s", generated)
 	}
 }
 
@@ -61,6 +99,9 @@ func TestGeneratedGoModUsesSyntheticModuleWithoutProjectGoMod(t *testing.T) {
 	}
 	if !strings.Contains(generated, "module demo") {
 		t.Fatalf("generated go.mod did not use project name:\n%s", generated)
+	}
+	if !strings.Contains(generated, "go 1.27.0") {
+		t.Fatalf("generated go.mod did not require Go 1.27:\n%s", generated)
 	}
 }
 

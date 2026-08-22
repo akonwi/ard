@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"go/token"
+	goversion "go/version"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -442,16 +443,26 @@ func generatedGoModBase(projectInfo *checker.ProjectInfo) (string, error) {
 			return "", err
 		}
 		if strings.TrimSpace(projectInfo.ProjectName) != "" {
-			return fmt.Sprintf("module %s\n\ngo 1.26.0\n", projectInfo.ProjectName), nil
+			return fmt.Sprintf("module %s\n\ngo 1.27.0\n", projectInfo.ProjectName), nil
 		}
 	}
-	return "module generated\n\ngo 1.26.0\n", nil
+	return "module generated\n\ngo 1.27.0\n", nil
 }
 
 func rewriteRelativeReplaces(data []byte, projectRoot string) ([]byte, error) {
 	file, err := modfile.Parse("go.mod", data, nil)
 	if err != nil {
 		return nil, err
+	}
+	if file.Go == nil || goversion.Compare("go"+file.Go.Version, "go1.27.0") < 0 {
+		if err := file.AddGoStmt("1.27.0"); err != nil {
+			return nil, err
+		}
+	}
+	if file.Toolchain != nil && file.Toolchain.Name != "default" && goversion.Compare(file.Toolchain.Name, "go1.27.0") < 0 {
+		if err := file.AddToolchainStmt("go1.27.0"); err != nil {
+			return nil, err
+		}
 	}
 	type replacementRewrite struct {
 		oldPath    string
@@ -1090,18 +1101,10 @@ func writeGeneratedRuntimePackage(dir string) error {
 }
 
 func buildGeneratedProgram(dir string, outputPath string, buildTags ...string) error {
-	// The generated output imports encoding/json/v2 (union marshalling), so
-	// the jsonv2 experiment tag is part of the output contract and always
-	// applied here, regardless of caller or environment. The checker's
-	// go/packages resolution applies the same tag (checker.JSONV2BuildTag)
-	// so both sides see one build configuration.
-	tags := []string{checker.JSONV2BuildTag}
-	for _, tag := range buildTags {
-		if tag != checker.JSONV2BuildTag {
-			tags = append(tags, tag)
-		}
+	args := []string{"build", "-mod=mod", "-o", outputPath}
+	if len(buildTags) > 0 {
+		args = append(args, "-tags="+strings.Join(buildTags, ","))
 	}
-	args := []string{"build", "-mod=mod", "-o", outputPath, "-tags=" + strings.Join(tags, ",")}
 	args = append(args, ".")
 	cmd := exec.Command("go", args...)
 	cmd.Dir = dir

@@ -5,7 +5,7 @@ description: How to install and set up Ard on various platforms.
 
 ## Prerequisites
 
-Ard requires Go 1.26 or later to build and run. Ensure Go is installed on the system:
+Ard requires Go 1.27 or later to build and run. Ensure Go is installed on the system:
 
 ```bash
 go version
@@ -25,7 +25,7 @@ Currently, Ard is available only from source. Clone the repository and build:
 git clone https://github.com/akonwi/ard.git
 cd ard/compiler
 go mod download
-go build --tags=goexperiment.jsonv2 -o ard main.go
+go build -o ard .
 ```
 
 This creates an `ard` executable in the `compiler` directory.

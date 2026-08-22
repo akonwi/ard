@@ -1,6 +1,6 @@
 module github.com/akonwi/ard
 
-go 1.26.0
+go 1.27.0
 
 require github.com/google/go-cmp v0.6.0
 

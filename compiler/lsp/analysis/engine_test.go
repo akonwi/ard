@@ -654,7 +654,7 @@ func TestAnalyzeCtxHonorsCancellation(t *testing.T) {
 func TestGoSessionPrimesSharedUniverse(t *testing.T) {
 	root := writeProject(t, map[string]string{
 		"ard.toml": "name = \"universe\"\nard = \">= 0.1.0\"\n",
-		"go.mod":   "module universe\n\ngo 1.26\n",
+		"go.mod":   "module universe\n\ngo 1.27\n",
 		"ffi/shared/shared.go": `package shared
 
 type Record struct {
@@ -722,7 +722,7 @@ fn main() {
 func TestGoSessionRepricesForNewImports(t *testing.T) {
 	root := writeProject(t, map[string]string{
 		"ard.toml": "name = \"session\"\nard = \">= 0.1.0\"\n",
-		"go.mod":   "module session\n\ngo 1.26\n",
+		"go.mod":   "module session\n\ngo 1.27\n",
 		"main.ard": "use go:fmt\n\nfn main() {\n  fmt::Println(\"hi\")\n}\n",
 	})
 	engine := NewEngine(root)

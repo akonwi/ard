@@ -1,6 +1,7 @@
 package checker
 
 import (
+	"strings"
 	"unicode/utf8"
 
 	"github.com/akonwi/ard/parse"
@@ -100,6 +101,15 @@ func (c *Checker) checkStructFieldAttributes(field parse.StructField, fieldType 
 					)
 					continue
 				}
+				if !JSONFieldNameRepresentable(argument.Value.Text) {
+					c.addAttributeDiagnostic(
+						DiagnosticCodeInvalidAttributeArgument,
+						"#json name cannot be represented by Go 1.27 JSON struct tags",
+						"Unsupported #json name",
+						argument.Value.GetLocation(),
+					)
+					continue
+				}
 				options.Name = argument.Value.Text
 				options.HasName = true
 				jsonNameLocation = argument.Value.GetLocation()
@@ -161,4 +171,10 @@ func (c *Checker) checkStructFieldAttributes(field parse.StructField, fieldType 
 		)
 	}
 	return options, jsonNameLocation, seenJSON, len(c.diagnostics) == diagnosticCount
+}
+
+// JSONFieldNameRepresentable reports whether Go 1.27's JSON struct-tag
+// grammar can express name without changing its meaning.
+func JSONFieldNameRepresentable(name string) bool {
+	return utf8.ValidString(name) && name != "" && name != "-" && !strings.ContainsAny(name, ",\\'\"`")
 }
