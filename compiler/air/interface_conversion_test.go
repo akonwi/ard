@@ -12,7 +12,7 @@ func TestLowerPreservesGenericGoInterfaceWidening(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(project, "ard.toml"), []byte("name = \"probe\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(project, "go.mod"), []byte("module example.com/probe\n\ngo 1.26\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(project, "go.mod"), []byte("module example.com/probe\n\ngo 1.27\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	ffi := filepath.Join(project, "ffi")

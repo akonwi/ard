@@ -96,7 +96,7 @@ struct User {
 - `omit: none` is valid on nullable fields. It omits `none`, but retains present empty values such as `some("")`.
 - `skip: true` excludes the field from marshaling and unmarshaling. It does not make the field optional when constructing an Ard value.
 
-`name` and `omit` may be combined. `skip` cannot be combined with either. JSON names must be unique within a struct.
+`name` and `omit` may be combined. `skip` cannot be combined with either. JSON names must be unique within a struct. Names must also be representable by Go 1.27 JSON struct tags: they cannot be empty, equal `"-"`, or contain commas, backslashes, quotes, apostrophes, or backticks. Other UTF-8 names, including spaces and Unicode, are supported.
 
 Attributes are currently supported only on struct fields, and `#json` is the only available attribute.
 

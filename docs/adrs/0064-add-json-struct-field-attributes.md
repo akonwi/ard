@@ -68,7 +68,7 @@ type User struct {
 
 `omit: none` uses `omitzero`. Ard's pointer-backed `Maybe` is zero only when it is `none`; a `some` value remains nonzero even when its payload is empty. This gives the same absence behavior through `encoding/json` and `encoding/json/v2`.
 
-JSON names may be arbitrary valid strings, including `""`, `"-"`, commas, quotes, and Unicode. The backend uses Go's quoted JSON tag-name form when necessary and constructs a valid Go string literal rather than inserting source text directly.
+JSON names must be representable by Go 1.27 JSON struct tags. They must be non-empty, cannot be `"-"`, and cannot contain commas, backslashes, single or double quotes, or backticks. Other valid UTF-8 names, including spaces, punctuation, and Unicode, remain supported. The checker rejects unrepresentable names instead of emitting a tag that Go's JSON packages would ignore or reject. This restriction follows the removal of JSONv2's experimental single-quoted tag-name syntax when the package graduated in Go 1.27.
 
 ### Deferred functionality
 

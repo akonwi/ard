@@ -2177,7 +2177,7 @@ impl ffi::Stringer for Value {
 		projectDir := t.TempDir()
 		files := map[string]string{
 			"ard.toml": "name = \"requiredcollision\"\nard = \">= 0.1.0\"\n",
-			"go.mod":   "module requiredcollision\n\ngo 1.26\n",
+			"go.mod":   "module requiredcollision\n\ngo 1.27\n",
 			"ffi/ffi.go": `package ffi
 
 type Stringer interface {
@@ -3907,7 +3907,7 @@ func normalizeReflectValue(v reflect.Value) any {
 	if err := writeGeneratedRuntimePackage(tempDir); err != nil {
 		t.Fatalf("write generated runtime: %v", err)
 	}
-	goMod := "module generated\n\ngo 1.26.0\n"
+	goMod := "module generated\n\ngo 1.27.0\n"
 	if err := os.WriteFile(filepath.Join(tempDir, "go.mod"), []byte(goMod), 0o644); err != nil {
 		t.Fatalf("write go.mod: %v", err)
 	}
@@ -3939,7 +3939,7 @@ func runGoTargetSourceStdout(t *testing.T, input string) string {
 	if err := writeGeneratedRuntimePackage(tempDir); err != nil {
 		t.Fatalf("write generated runtime: %v", err)
 	}
-	goMod := "module generated\n\ngo 1.26.0\n"
+	goMod := "module generated\n\ngo 1.27.0\n"
 	if err := os.WriteFile(filepath.Join(tempDir, "go.mod"), []byte(goMod), 0o644); err != nil {
 		t.Fatalf("write go.mod: %v", err)
 	}

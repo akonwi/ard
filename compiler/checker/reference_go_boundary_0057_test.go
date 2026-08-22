@@ -413,7 +413,7 @@ func assertGoReferenceCheckerResult(t *testing.T, source string, resolver *check
 
 func writeADR0057GoBoundaryPackage(t *testing.T, root string) {
 	t.Helper()
-	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/app\n\ngo 1.26\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/app\n\ngo 1.27\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	ffiDir := filepath.Join(root, "ffi")

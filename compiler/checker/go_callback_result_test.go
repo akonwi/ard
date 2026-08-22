@@ -16,7 +16,7 @@ import (
 // beyond those stay rejected with an actionable diagnostic.
 func TestGoCallbackResultAdaptation(t *testing.T) {
 	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module cbshapes\n\ngo 1.26\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module cbshapes\n\ngo 1.27\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.MkdirAll(filepath.Join(root, "ffi"), 0o755); err != nil {

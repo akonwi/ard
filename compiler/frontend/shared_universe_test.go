@@ -69,7 +69,7 @@ func TestLoadModuleSharesOneGoTypeUniverse(t *testing.T) {
 	}
 
 	writeFile("ard.toml", "name = \"universe\"\nard = \">= 0.1.0\"\n")
-	writeFile("go.mod", "module universe\n\ngo 1.26\n")
+	writeFile("go.mod", "module universe\n\ngo 1.27\n")
 	writeFile("ffi/shared/shared.go", `package shared
 
 type Record struct {

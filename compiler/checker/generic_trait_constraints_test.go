@@ -288,7 +288,7 @@ func TestGenericTraitImplementationTracksForeignStructuralComparability(t *testi
 	if err := os.WriteFile(filepath.Join(project, "ard.toml"), []byte("name = \"repro\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(project, "go.mod"), []byte("module example.com/repro\n\ngo 1.26\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(project, "go.mod"), []byte("module example.com/repro\n\ngo 1.27\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	ffiDir := filepath.Join(project, "ffi")
