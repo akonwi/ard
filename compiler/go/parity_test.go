@@ -1058,6 +1058,51 @@ func TestGoTargetParityNullableStructFields(t *testing.T) {
 		},
 	})
 }
+
+func TestGoTargetParityCrossModuleValueWrapsForNullableStructField(t *testing.T) {
+	projectDir := t.TempDir()
+	files := map[string]string{
+		"ard.toml": "name = \"maybefieldrepro\"\nard = \">= 0.38.0\"\ntarget = \"go\"\n",
+		"item.ard": `struct Item {
+  value: Int,
+}
+`,
+		"main.ard": `use maybefieldrepro/item
+
+struct Box {
+  item: item::Item?,
+}
+
+fn make() Box {
+  Box{item: item::Item{value: 1}}
+}
+
+fn main() {
+  if not make().item.expect("item").value == 1 {
+    panic("cross-module value was not wrapped")
+  }
+}
+`,
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(projectDir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mainPath := filepath.Join(projectDir, "main.ard")
+	loaded, err := frontend.LoadModule(mainPath)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	if err := RunProgram(program, []string{"ard", "run", mainPath}, loaded.ProjectInfo); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+}
+
 func TestGoTargetParityTryOnMaybe(t *testing.T) {
 	runGoParityCases(t, []goParityCase{
 		{

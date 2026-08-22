@@ -11124,9 +11124,10 @@ func (c *Checker) checkExprAsInner(expr parse.Expression, expectedType Type, exp
 		}
 	case *parse.StaticProperty:
 		if _, ok := s.Property.(*parse.StructInstance); ok {
-			return c.withExpectedExpr(expectedType, func() Expression {
+			checked := c.withExpectedExpr(expectedType, func() Expression {
 				return c.checkExpr(s)
 			})
+			return c.finishCheckExprAs(expr, expectedType, expectation, argumentParameter, checked)
 		}
 	case *parse.MatchExpression:
 		return c.withExpectedExpr(expectedType, func() Expression {
@@ -11359,6 +11360,12 @@ func (c *Checker) checkExprAsInner(expr parse.Expression, expectedType Type, exp
 	default:
 		checked = c.checkExpr(expr)
 	}
+	return c.finishCheckExprAs(expr, expectedType, expectation, argumentParameter, checked)
+}
+
+// finishCheckExprAs applies the common conversion and compatibility contract
+// after an expression has been checked, including context-sensitive paths.
+func (c *Checker) finishCheckExprAs(expr parse.Expression, expectedType Type, expectation *typeExpectation, argumentParameter *Parameter, checked Expression) Expression {
 	if checked == nil {
 		return nil
 	}
