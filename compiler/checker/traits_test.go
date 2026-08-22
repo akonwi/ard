@@ -34,6 +34,134 @@ trait T {
 		},
 	})
 }
+
+func TestTraitConformanceIsHoistedBeforeBodies(t *testing.T) {
+	run(t, []test{
+		{
+			name: "mutable return projects before implementation",
+			input: `trait View {
+  fn value() Int
+}
+
+private struct Item {
+  n: Int,
+}
+
+fn make() mut View {
+  (mut Item{n: 1})
+}
+
+impl View for Item {
+  fn value() Int { self.n }
+}`,
+		},
+		{
+			name: "annotated mutable binding projects before implementation",
+			input: `trait View {
+  fn value() Int
+}
+
+struct Item {
+  n: Int,
+}
+
+fn make() mut View {
+  let item = mut Item{n: 1}
+  let view: mut View = item
+  view
+}
+
+impl View for Item {
+  fn value() Int { self.n }
+}`,
+		},
+		{
+			name: "value return projects before implementation",
+			input: `trait View {
+  fn value() Int
+}
+
+struct Item {
+  n: Int,
+}
+
+fn make() View {
+  Item{n: 1}
+}
+
+impl View for Item {
+  fn value() Int { self.n }
+}`,
+		},
+		{
+			name: "enum return projects before implementation",
+			input: `trait View {
+  fn value() Int
+}
+
+enum Item {
+  one
+}
+
+fn make() View {
+  Item::one
+}
+
+impl View for Item {
+  fn value() Int { 1 }
+}`,
+		},
+	})
+}
+
+func TestTraitConformancePrepassPreservesInvalidTargets(t *testing.T) {
+	run(t, []test{
+		{
+			name: "specialized alias implementation does not widen generic declaration",
+			input: `trait IntOnly {
+  fn label() Str
+}
+
+struct Box<$T> {
+  value: $T,
+}
+
+type IntBox = Box<Int>
+
+impl IntOnly for IntBox {
+  fn label() Str { "int" }
+}
+
+fn wrong() IntOnly {
+  Box<Str>{value: "wrong"}
+}`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Type mismatch: Expected implementation of IntOnly, got Box<Str>"},
+				{Kind: checker.Error, Message: "Type mismatch: Expected implementation of IntOnly, got Void"},
+			},
+		},
+		{
+			name: "enum cannot gain builtin Error conformance",
+			input: `enum Failure {
+  bad
+}
+
+fn make() Error {
+  Failure::bad
+}
+
+impl Error for Failure {
+  fn error() Str { "bad" }
+}`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Type mismatch: Expected implementation of Error, got Failure"},
+				{Kind: checker.Error, Message: "Type mismatch: Expected implementation of Error, got Void"},
+				{Kind: checker.Error, Message: "Failure cannot implement Error"},
+			},
+		},
+	})
+}
+
 func TestRecursiveTraitChildManagementTypeDoesNotOverflow(t *testing.T) {
 	run(t, []test{{
 		name: "struct method can accept list of trait that accepts struct",

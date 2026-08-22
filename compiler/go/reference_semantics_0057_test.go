@@ -767,6 +767,31 @@ func TestADR0061MutableTraitDereferenceCreatesShallowDynamicSnapshot(t *testing.
 	}
 }
 
+func TestTraitProjectionBeforeImplementationIsOrderIndependent(t *testing.T) {
+	program := lowerParitySource(t, `
+		trait View {
+			fn value() Int
+		}
+
+		private struct Item {
+			n: Int,
+		}
+
+		fn make() mut View {
+			(mut Item{n: 1})
+		}
+
+		impl View for Item {
+			fn value() Int { self.n }
+		}
+
+		fn main() Int { make().value() }
+	`)
+	if got := runGoTargetParityJSON(t, program); got != `1` {
+		t.Fatalf("result = %s, want trait projection before implementation to return 1", got)
+	}
+}
+
 func TestTraitImplementationCanProjectMutatingSelfToTraitReference(t *testing.T) {
 	program := lowerParitySource(t, `
 		trait View {
