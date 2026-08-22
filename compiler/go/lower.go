@@ -3662,6 +3662,9 @@ func (l *lowerer) lowerInterfaceConversion(fn air.Function, expr air.Expr) (lowe
 		return loweredExpr{}, fmt.Errorf("unsupported interface conversion mode %d", expr.InterfaceMode)
 	}
 	if validTypeID(l.program, expr.Type) && l.program.Types[expr.Type-1].Kind == air.TypeAny {
+		if l.isVoidType(expr.Target.Type) || isVoidExpr(target.expr) {
+			target = l.materializeVoidValue(target)
+		}
 		target.expr = &ast.CallExpr{Fun: l.ident("any"), Args: []ast.Expr{target.expr}}
 	}
 	return target, nil
