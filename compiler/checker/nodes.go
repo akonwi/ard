@@ -1247,6 +1247,10 @@ type FunctionDef struct {
 	Body                    *Block
 	Private                 bool
 	GenericBindings         map[string]Type
+	// requiredComparable records receiver or function generic parameters whose
+	// use in this body requires Go's comparable constraint.
+	requiredComparable map[string]SourceSpan
+	invalidComparable  *comparableConstraintFailure
 	// RequiredGoMethodName records an exact imported Go interface method name.
 	// Unlike ordinary Ard methods, this method may not fall back to a standalone
 	// helper because it must participate in a Go method set.
@@ -1277,6 +1281,14 @@ func (f FunctionDef) equal(other Type) bool {
 func (f FunctionDef) hasTrait(trait *Trait) bool {
 	return false
 }
+func (f *FunctionDef) requiresComparable(name string) bool {
+	if f == nil {
+		return false
+	}
+	_, ok := f.requiredComparable[name]
+	return ok
+}
+
 func (f *FunctionDef) hasGenerics() bool {
 	if len(f.GenericParams) > 0 {
 		return true

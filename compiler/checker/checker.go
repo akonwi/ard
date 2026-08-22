@@ -659,6 +659,9 @@ type Checker struct {
 	expectedCallExpectation           *typeExpectation
 	foreignABIParameters              map[*parse.FunctionDeclaration][]ForeignParameterABI
 	moduleFiles                       map[string]string
+	constraintFunctionStack           []*FunctionDef
+	comparableConstraintCalls         []comparableConstraintCall
+	genericTraitConstraintChecks      []genericTraitConstraintCheck
 }
 
 func New(filePath string, input *parse.Program, moduleResolver *ModuleResolver, options ...CheckOptions) *Checker {
@@ -686,10 +689,12 @@ func New(filePath string, input *parse.Program, moduleResolver *ModuleResolver, 
 			RequiredGoMethods:     map[MethodOwner]map[string]*FunctionDef{},
 			ForeignInterfaceImpls: map[MethodOwner][]*ForeignType{},
 		},
-		scope:                   &rootScope,
-		goTypesContext:          gotypes.NewContext(),
-		foreignABIParameters:    map[*parse.FunctionDeclaration][]ForeignParameterABI{},
-		preparedInherentMethods: map[*parse.FunctionDeclaration]preparedInherentMethod{},
+		scope:                     &rootScope,
+		goTypesContext:            gotypes.NewContext(),
+		foreignABIParameters:      map[*parse.FunctionDeclaration][]ForeignParameterABI{},
+		preparedInherentMethods:   map[*parse.FunctionDeclaration]preparedInherentMethod{},
+		constraintFunctionStack:   []*FunctionDef{},
+		comparableConstraintCalls: []comparableConstraintCall{},
 	}
 	if checkOptions.RecordSpans {
 		c.spans = &SpanIndex{}
@@ -1019,6 +1024,7 @@ func (c *Checker) Check() {
 		}
 	}
 
+	c.finalizeComparableConstraints()
 	c.validateTopLevelTypeAliases()
 	c.checkStructFieldMapKeyTypes()
 	c.checkRecursiveStructLayouts()
@@ -1412,6 +1418,7 @@ func (c *Checker) specializeAliasedType(originalType Type, typeArgs []parse.Decl
 // plain Go map (ADR 0031). Unresolved generic parameters are allowed; the
 // constraint applies when they are instantiated.
 func (c *Checker) validateMapKeyType(key Type, loc parse.Location) {
+	c.markCurrentComparableRequirement(key, loc)
 	if key == nil || isValidMapKeyType(key) {
 		return
 	}
@@ -1514,6 +1521,21 @@ func isValidMapKeyTypeSeen(t Type, context *mapKeyTypeContext) bool {
 	case *FixedArray:
 		return isValidMapKeyTypeSeen(ty.Of(), context)
 	case *ForeignType:
+		if len(ty.TypeArgs) > 0 {
+			requirement := comparableBindingRequirements(ty)
+			if requirement.impossible {
+				return false
+			}
+			provided := receiverProvidedComparableGenericNames(ty)
+			for name := range requirement.generics {
+				if !provided[name] {
+					// The Go target cannot currently infer structural constraints
+					// through an unconstrained foreign generic application.
+					return false
+				}
+			}
+			return true
+		}
 		return ty.GoType == nil || gotypes.Comparable(ty.GoType)
 	case *Maybe, *List, *Slice, *Map, *Result, *Union, *FunctionDef, *Trait, *anyType:
 		return false
@@ -2779,11 +2801,16 @@ func (c *Checker) checkForeignInterfaceImplementation(s *parse.TraitImplementati
 	if !validImpl {
 		return nil
 	}
-	for _, method := range pendingMethods {
+	for name, method := range pendingMethods {
 		if c.program.HasTraitMethodNamed(owner, method.Name) {
 			c.program.MarkAmbiguousTraitMethod(owner, method.Name)
 		}
 		c.addStructMethod(targetType, method)
+		if len(receiverGenerics) > 0 {
+			c.genericTraitConstraintChecks = append(c.genericTraitConstraintChecks, genericTraitConstraintCheck{
+				target: targetType, contract: iface.String(), contractKind: "Go interface", method: method, span: pendingMethodSpans[name],
+			})
+		}
 	}
 	c.program.ForeignInterfaceImpls[owner] = append(c.program.ForeignInterfaceImpls[owner], iface)
 	return &Statement{Stmt: targetType}
@@ -3417,6 +3444,11 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					c.program.AddTraitMethod(structMethodOwner, trait, fnDef.Name, fnDef)
 					// add the method to the struct method table
 					c.addStructMethod(targetType, fnDef)
+					if len(receiverGenerics) > 0 {
+						c.genericTraitConstraintChecks = append(c.genericTraitConstraintChecks, genericTraitConstraintCheck{
+							target: targetType, contract: trait.Name, contractKind: "Trait", method: fnDef, span: c.sourceSpan(method.GetLocation()),
+						})
+					}
 				}
 
 				// Check if all required methods are implemented
@@ -3691,6 +3723,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				}
 			}
 
+			c.markFunctionComparableRequirements(c.currentConstraintFunction(), __type, false, c.sourceSpan(s.GetLocation()))
 			if c.rejectUnresolvedCallType(__type, s.Value.GetLocation()) {
 				return nil
 			}
@@ -7523,6 +7556,7 @@ func (c *Checker) checkExprWithExpectedCall(expr parse.Expression, expectedRetur
 	result := c.checkExprInner(expr, expectedReturn)
 	if result != nil {
 		c.recordExprSpan(expr, result)
+		c.markFunctionComparableRequirements(c.currentConstraintFunction(), result.Type(), false, c.sourceSpan(expr.GetLocation()))
 	}
 	return result
 }
@@ -8368,6 +8402,9 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 							c.addInvalidEquality(operator, left, right, s.Left.GetLocation(), s.Right.GetLocation(), legacy, true)
 							return nil
 						}
+						if inner != Void {
+							c.markCurrentComparableRequirement(inner, s.GetLocation())
+						}
 						if s.Operator == parse.NotEqual {
 							return &Inequality{left, right}
 						}
@@ -8386,6 +8423,8 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 						c.addInvalidEquality(operator, left, right, s.Left.GetLocation(), s.Right.GetLocation(), legacy, true)
 						return nil
 					}
+					c.markCurrentComparableRequirement(left.Type(), s.GetLocation())
+					c.markCurrentComparableRequirement(right.Type(), s.GetLocation())
 					if s.Operator == parse.NotEqual {
 						return &Inequality{left, right}
 					}
@@ -8767,6 +8806,7 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 		return c.checkFunction(s, nil)
 	case *parse.AnonymousFunction:
 		{
+			parentConstraintFunction := c.currentConstraintFunction()
 			// Resolve parameters and return type (no type context for inference)
 			params := c.resolveParametersWithContext(s.Parameters, nil)
 			returnType := c.resolveReturnTypeWithContext(s.ReturnType, nil)
@@ -8792,6 +8832,7 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 				}
 			}
 			c.pushFunctionGenericContext(fn)
+			c.pushConstraintFunction(fn, s.GetLocation())
 			previousDeferredWorkDepth := c.deferredWorkDepth
 			c.deferredWorkDepth = 0
 			var body *Block
@@ -8810,7 +8851,9 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 				body = c.checkBlockWithExpected(s.Body, setup, returnType, true)
 			}
 			c.deferredWorkDepth = previousDeferredWorkDepth
+			c.popConstraintFunction()
 			c.popFunctionGenericContext()
+			c.recordComparableConstraintClosure(parentConstraintFunction, fn, s.GetLocation())
 
 			// Add function to scope after body is checked (for generic resolution support)
 			c.scope.add(uniqueName, fn, false)
@@ -11362,6 +11405,7 @@ func (c *Checker) checkFunctionBody(fn *FunctionDef, bodyStmts []parse.Statement
 
 	// Check function body
 	c.pushFunctionGenericContext(fn)
+	c.pushConstraintFunction(fn, location)
 	body := c.checkBlockWithExpected(bodyStmts, func() {
 		// Set the expected return type to the scope
 		c.scope.expectReturn(returnType)
@@ -11372,6 +11416,7 @@ func (c *Checker) checkFunctionBody(fn *FunctionDef, bodyStmts []parse.Statement
 			c.recordBinding(param.Loc, sym)
 		}
 	}, returnType, true)
+	c.popConstraintFunction()
 	c.popFunctionGenericContext()
 
 	// Check that the function's return type matches its body's type
@@ -11559,7 +11604,9 @@ func (c *Checker) checkFunctionWithSignature(def *parse.FunctionDeclaration, ini
 		fn.CallGenericParams = append([]string{}, genericParamsForFunction(fn)...)
 	}
 	diagnosticsBeforeBody := len(c.diagnostics)
+	parentConstraintFunction := c.currentConstraintFunction()
 	c.pushFunctionGenericContext(fn, extraGenericParams...)
+	c.pushConstraintFunction(fn, def.GetLocation())
 	body := c.checkBlockWithExpected(def.Body, func() {
 		c.scope.expectReturn(returnType)
 		for _, param := range params {
@@ -11569,7 +11616,9 @@ func (c *Checker) checkFunctionWithSignature(def *parse.FunctionDeclaration, ini
 			c.recordBinding(param.Loc, sym)
 		}
 	}, returnType, true)
+	c.popConstraintFunction()
 	c.popFunctionGenericContext()
+	c.recordComparableConstraintClosure(parentConstraintFunction, fn, def.GetLocation())
 
 	// Validate return type. Contextual checking may already have emitted the
 	// same non-exhaustive-if diagnostic, so avoid duplicating that one case.
@@ -12665,6 +12714,7 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 			return nil, nil
 		}
 	}
+	c.recordComparableConstraintCall(fnDef, resolvedGenericBindings, callLocation)
 
 	// Finalize generic resolution by creating the specialized function
 	var fnToUse *FunctionDef
