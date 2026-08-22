@@ -118,6 +118,87 @@ fn invalid(value: counter::Counter) {
 	}
 }
 
+func TestImportedFunctionValueCannotBeUsedAsTypeAlias(t *testing.T) {
+	projectDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "source.ard"), []byte("fn make() Str { \"value\" }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	barrelPath := filepath.Join(projectDir, "barrel.ard")
+	barrelSource := "use demo/source\n\ntype make = source::make\n"
+	result := parse.Parse([]byte(barrelSource), barrelPath)
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	resolver, err := checker.NewModuleResolver(projectDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := checker.New(barrelPath, result.Program, resolver)
+	c.Check()
+	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeExpectedType)
+	if diagnostic.Message != "Expected a type, but source::make is a value" {
+		t.Fatalf("diagnostic = %#v", diagnostic)
+	}
+}
+
+func TestImportedFunctionTypeAliasCannotBeUsedAsValue(t *testing.T) {
+	projectDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "types.ard"), []byte("type Handler = fn() Str\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(projectDir, "main.ard")
+	mainSource := "use demo/types\n\nfn capture() {\n  let handler = types::Handler\n}\n\nfn invoke() {\n  types::Handler()\n}\n"
+	result := parse.Parse([]byte(mainSource), mainPath)
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	resolver, err := checker.NewModuleResolver(projectDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := checker.New(mainPath, result.Program, resolver)
+	c.Check()
+	expectedValue := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeExpectedValue)
+	if expectedValue.Message != "Expected a value, but types::Handler is a type" {
+		t.Fatalf("expected-value diagnostic = %#v", expectedValue)
+	}
+	notCallable := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeNotCallable)
+	if notCallable.Message != "types::Handler is not a function" {
+		t.Fatalf("not-callable diagnostic = %#v", notCallable)
+	}
+}
+
+func TestImportedFunctionTypeAliasCanAnnotateFunctionValue(t *testing.T) {
+	projectDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "types.ard"), []byte("type Handler = fn() Str\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(projectDir, "main.ard")
+	mainSource := "use demo/types\n\nfn run(handler: types::Handler) Str {\n  handler()\n}\n"
+	result := parse.Parse([]byte(mainSource), mainPath)
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	resolver, err := checker.NewModuleResolver(projectDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := checker.New(mainPath, result.Program, resolver)
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("unexpected diagnostics: %v", c.Diagnostics())
+	}
+}
+
 func TestQualifiedModuleTypePatternsInClosedUnions(t *testing.T) {
 	projectDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
