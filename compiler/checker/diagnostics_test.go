@@ -150,6 +150,43 @@ func TestRemainingUnresolvedReferencesHaveStructuredDiagnostics(t *testing.T) {
 	}
 }
 
+func TestTypeAndValueSymbolsStayInTheirNamespaces(t *testing.T) {
+	tests := []struct {
+		name    string
+		source  string
+		code    checker.DiagnosticCode
+		message string
+	}{
+		{
+			name:    "value used as type",
+			source:  "fn main() {\n  let value = 1\n  let copy: value = 1\n}\n",
+			code:    checker.DiagnosticCodeExpectedType,
+			message: "Expected a type, but value is a value",
+		},
+		{
+			name:    "type called as value",
+			source:  "type Handler = fn() Str\nfn main() { Handler() }\n",
+			code:    checker.DiagnosticCodeNotCallable,
+			message: "Not a function: Handler",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := parse.Parse([]byte(tt.source), "main.ard")
+			if len(result.Errors) > 0 {
+				t.Fatalf("parse errors: %v", result.Errors)
+			}
+			c := checker.New("main.ard", result.Program, nil)
+			c.Check()
+			diagnostic := requireDiagnosticCode(t, c.Diagnostics(), tt.code)
+			if diagnostic.Message != tt.message || diagnostic.Primary.Message == "" {
+				t.Fatalf("diagnostic = %#v", diagnostic)
+			}
+		})
+	}
+}
+
 func TestUndefinedMembersInMaybeAccessorChainsHaveStructuredDiagnostics(t *testing.T) {
 	prefix := "struct Profile { name: Str }\nfn test() {\n  let profile: Profile? = Maybe::new(Profile{name: \"A\"})\n  try "
 	tests := []struct {

@@ -29,6 +29,8 @@ const (
 	DiagnosticCodeUndefinedMember               DiagnosticCode = "undefined_member"
 	DiagnosticCodeUndefinedName                 DiagnosticCode = "undefined_name"
 	DiagnosticCodeUndefinedType                 DiagnosticCode = "undefined_type"
+	DiagnosticCodeExpectedType                  DiagnosticCode = "expected_type"
+	DiagnosticCodeExpectedValue                 DiagnosticCode = "expected_value"
 	DiagnosticCodeUndefinedTrait                DiagnosticCode = "undefined_trait"
 	DiagnosticCodeUndefinedModule               DiagnosticCode = "undefined_module"
 	DiagnosticCodeUndefinedNamespace            DiagnosticCode = "undefined_namespace"
@@ -227,6 +229,33 @@ func (c *Checker) addRedundantNullableVoid(location parse.Location) {
 		}
 	}
 	c.addDiagnostic(redundantNullableVoidDiagnostic{Span: span}.build())
+}
+
+type symbolKindDiagnostic struct {
+	Name         string
+	Span         SourceSpan
+	ExpectedType bool
+}
+
+func (d symbolKindDiagnostic) build() Diagnostic {
+	expected, actual := "value", "type"
+	if d.ExpectedType {
+		expected, actual = "type", "value"
+	}
+	message := fmt.Sprintf("Expected a %s, but %s is a %s", expected, d.Name, actual)
+	diagnostic := newLabeledDiagnostic(
+		Error,
+		message,
+		"Expected a "+expected,
+		fmt.Sprintf("Only %s declarations can be used in this position.", expected),
+		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("`%s` is a %s, not a %s", d.Name, actual, expected)},
+	)
+	if d.ExpectedType {
+		diagnostic.Code = DiagnosticCodeExpectedType
+	} else {
+		diagnostic.Code = DiagnosticCodeExpectedValue
+	}
+	return diagnostic
 }
 
 type unresolvedReferenceKind uint8

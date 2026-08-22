@@ -1170,6 +1170,14 @@ func (c *Checker) addNonCallable(name string, location parse.Location, declarati
 	c.addDiagnostic(nonCallableDiagnostic{Name: name, Span: c.sourceSpan(location), DeclarationSpan: declaration, LegacyStyle: style}.build())
 }
 
+func (c *Checker) addExpectedType(name string, location parse.Location) {
+	c.addDiagnostic(symbolKindDiagnostic{Name: name, Span: c.sourceSpan(location), ExpectedType: true}.build())
+}
+
+func (c *Checker) addExpectedValue(name string, location parse.Location) {
+	c.addDiagnostic(symbolKindDiagnostic{Name: name, Span: c.sourceSpan(location)}.build())
+}
+
 func (c *Checker) addArgumentCount(expected string, actual int, location parse.Location, legacyMessage string) {
 	c.addDiagnostic(argumentCountDiagnostic{Expected: expected, Actual: actual, Span: c.sourceSpan(location), LegacyMessage: legacyMessage}.build())
 }
@@ -1817,6 +1825,10 @@ func (c *Checker) resolveType(t parse.DeclaredType) Type {
 		}
 
 		if sym, ok := c.scope.get(t.GetName()); ok {
+			if !sym.typeDeclaration {
+				c.addExpectedType(t.GetName(), ty.GetLocation())
+				return &TypeVar{name: "unknown"}
+			}
 			if isNominalType(sym.Type) && !strings.Contains(t.GetName(), "::") {
 				c.recordTypeRef(ty.GetLocation(), t.GetName())
 			}
@@ -1885,6 +1897,10 @@ func (c *Checker) resolveType(t parse.DeclaredType) Type {
 				propName := ty.Type.Property.(*parse.Identifier).Name
 				sym := mod.Get(propName)
 				if !sym.IsZero() {
+					if !sym.typeDeclaration {
+						c.addExpectedType(t.GetName(), ty.GetLocation())
+						return &TypeVar{name: "unknown"}
+					}
 					if c.spans != nil {
 						c.spans.add(SpanRecord{
 							Loc:    ty.GetLocation(),
@@ -7829,6 +7845,10 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 				}.build())
 				return nil
 			}
+			if fnSym.typeDeclaration {
+				c.addNonCallable(s.Name, s.GetLocation(), sourceSpanIfPresent(fnSym.declaredAt), nonCallablePrefix)
+				return nil
+			}
 
 			// Cast to FunctionDef
 			var fnDef *FunctionDef
@@ -8797,6 +8817,11 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 			if sym.IsZero() {
 				targetName := s.Target.String()
 				c.addUnresolvedReference(undefinedQualifiedMember, fmt.Sprintf("%s::%s", targetName, s.Function.Name), s.GetLocation())
+				return nil
+			}
+			if sym.typeDeclaration {
+				targetName := s.Target.String()
+				c.addNonCallable(fmt.Sprintf("%s::%s", targetName, s.Function.Name), s.GetLocation(), nil, nonCallableSuffix)
 				return nil
 			}
 
@@ -10036,6 +10061,10 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 						sym := mod.Get(prop.Name)
 						if sym.IsZero() {
 							c.addUnresolvedReference(undefinedQualifiedMember, fmt.Sprintf("%s::%s", id.Name, prop.Name), prop.GetLocation())
+							return nil
+						}
+						if sym.typeDeclaration {
+							c.addExpectedValue(fmt.Sprintf("%s::%s", id.Name, prop.Name), prop.GetLocation())
 							return nil
 						}
 						if c.rejectUnspecializedGenericFunctionValue(sym.Type, prop.GetLocation()) {
