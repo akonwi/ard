@@ -47,28 +47,16 @@ func TestExplicitNullableVoidHasStructuredWarning(t *testing.T) {
 	}
 }
 
-func TestLegacyDerefSyntaxHasStructuredDeprecationWarning(t *testing.T) {
+func TestPrefixDerefSyntaxNoLongerChecksAsDereference(t *testing.T) {
 	result := parse.Parse([]byte("let value = 1\nlet reference = mut value\nlet snapshot = deref reference\n"), "main.ard")
 	if len(result.Errors) > 0 {
 		t.Fatalf("parse errors: %v", result.Errors)
 	}
-	declaration := result.Program.Statements[2].(*parse.VariableDeclaration)
-	dereference := declaration.Value.(*parse.Deref)
 	c := checker.New("main.ard", result.Program, nil)
 	c.Check()
 
-	if c.HasErrors() {
-		t.Fatalf("warning made checker fail: %#v", c.Diagnostics())
-	}
-	if len(c.Diagnostics()) != 1 {
-		t.Fatalf("diagnostics = %#v, want one warning", c.Diagnostics())
-	}
-	diagnostic := c.Diagnostics()[0]
-	if diagnostic.Kind != checker.Warn || diagnostic.Code != checker.DiagnosticCodeDeprecatedDerefSyntax {
-		t.Fatalf("diagnostic = %#v", diagnostic)
-	}
-	wantLocation := parse.Location{Start: parse.Point{Row: 3, Col: 16}, End: parse.Point{Row: 3, Col: 20}}
-	if diagnostic.Title != "Deprecated deref syntax" || diagnostic.Primary.Span.Location != dereference.OperatorLocation || diagnostic.Primary.Span.Location != wantLocation {
+	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeUndefinedName)
+	if diagnostic.Primary.Span.Location.Start.Row != 3 {
 		t.Fatalf("diagnostic = %#v", diagnostic)
 	}
 }

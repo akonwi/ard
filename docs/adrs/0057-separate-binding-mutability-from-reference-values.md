@@ -254,9 +254,8 @@ let reference = mut user // T -> mut T
 let snapshot = reference.@ // mut T -> T
 ```
 
-During the one-release migration window, prefix `deref reference` parses with
-identical semantics, produces a deprecation warning, and is rewritten to
-`reference.@` by the formatter.
+The former prefix `deref reference` compatibility syntax has been removed.
+Code must use `reference.@`; `deref` is available as an ordinary identifier.
 
 The operation accepts only an actual reference value, removes exactly one outer
 `mut` layer, evaluates its operand once, and produces a non-place value. It is

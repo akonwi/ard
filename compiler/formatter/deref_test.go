@@ -41,32 +41,26 @@ Type::deref(value)
 	assertDerefFormat(t, input, want)
 }
 
-func TestFormatMigratesLegacyDerefSyntax(t *testing.T) {
-	input := `fn main() {
-let snapshot=deref reference
-let field=deref reference.field
-let selected=(deref reference).field
-let sum=deref reference+value
-let same=not deref reference==value
-let shallow=deref mut value
-let independent=mut deref reference
-let nested=deref deref reference
-let loaded=deref load()
-let invoked=(deref reference)()
+func TestFormatDerefAsOrdinaryIdentifier(t *testing.T) {
+	input := `struct Value {deref:Int}
+impl Value {
+fn deref(deref:Int) Int {self.deref+deref}
 }
+fn deref(deref:Int) Int {deref}
+let deref=1
 `
-	want := `fn main() {
-  let snapshot = reference.@
-  let field = reference.field.@
-  let selected = reference.@.field
-  let sum = reference.@ + value
-  let same = not reference.@ == value
-  let shallow = (mut value).@
-  let independent = mut reference.@
-  let nested = reference.@.@
-  let loaded = load().@
-  let invoked = reference.@()
+	want := `struct Value {
+  deref: Int,
 }
+impl Value {
+  fn deref(deref: Int) Int {
+    self.deref + deref
+  }
+}
+fn deref(deref: Int) Int {
+  deref
+}
+let deref = 1
 `
 
 	assertDerefFormat(t, input, want)

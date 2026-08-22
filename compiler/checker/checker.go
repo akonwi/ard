@@ -386,9 +386,6 @@ func referenceTypeForOperand(typ Type) Type {
 // and 0060). Only an actual reference value qualifies; the result is a shallow,
 // non-addressable copy of the current referent.
 func (c *Checker) checkDeref(s *parse.Deref) Expression {
-	if s.LegacyPrefix {
-		c.addDeprecatedDerefSyntax(s.OperatorLocation)
-	}
 	operand := c.checkExpr(s.Operand)
 	if operand == nil {
 		return nil

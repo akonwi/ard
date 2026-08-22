@@ -64,7 +64,6 @@ const (
 	DiagnosticCodeNonExhaustiveValueIf          DiagnosticCode = "non_exhaustive_value_if"
 	DiagnosticCodeInvalidDerefOperand           DiagnosticCode = "invalid_deref_operand"
 	DiagnosticCodeInvalidVariadicSpread         DiagnosticCode = "invalid_variadic_spread"
-	DiagnosticCodeDeprecatedDerefSyntax         DiagnosticCode = "deprecated_deref_syntax"
 	DiagnosticCodeNonAddressableBorrow          DiagnosticCode = "non_addressable_borrow"
 	DiagnosticCodeValueInteriorMutation         DiagnosticCode = "value_interior_mutation"
 	DiagnosticCodeWholeReferentAssignment       DiagnosticCode = "whole_referent_assignment"
@@ -486,32 +485,6 @@ func (d unsupportedMutableReferenceDiagnostic) build() Diagnostic {
 		nil,
 		"",
 	)
-}
-
-type deprecatedDerefSyntaxDiagnostic struct {
-	Span SourceSpan
-}
-
-func (d deprecatedDerefSyntaxDiagnostic) build() Diagnostic {
-	diagnostic := newLabeledDiagnostic(
-		Warn,
-		"Prefix `deref` syntax is deprecated; use postfix `.@`",
-		"Deprecated deref syntax",
-		"Prefix `deref reference` remains accepted during this migration release. Use `reference.@` instead; `ard format` rewrites the old syntax automatically.",
-		DiagnosticLabel{Span: d.Span, Message: "replace this prefix operator with postfix `.@`"},
-	)
-	diagnostic.Code = DiagnosticCodeDeprecatedDerefSyntax
-	return diagnostic
-}
-
-func (c *Checker) addDeprecatedDerefSyntax(location parse.Location) {
-	span := c.sourceSpan(location)
-	for _, diagnostic := range c.diagnostics {
-		if diagnostic.Code == DiagnosticCodeDeprecatedDerefSyntax && diagnostic.Primary.Span == span {
-			return
-		}
-	}
-	c.addDiagnostic(deprecatedDerefSyntaxDiagnostic{Span: span}.build())
 }
 
 type invalidDerefOperandDiagnostic struct {
