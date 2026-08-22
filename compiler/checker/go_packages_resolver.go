@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"golang.org/x/mod/modfile"
@@ -14,10 +15,9 @@ type GoPackagesResolver struct {
 	ProjectRoot string
 	BuildTags   []string
 	// DependencyModuleRoots maps a dependency's Go module path to the local
-	// directory backing it (its locked git checkout). Injected as go.mod
-	// replace directives during resolution so a dependency's Go FFI resolves
-	// at the same commit as its Ard source rather than whatever the consuming
-	// project's go.mod pins (#353).
+	// directory backing its Ard source (a locked Git checkout or path root).
+	// Injected into Go module resolution so dependency FFI is checked against
+	// the same source used by Ard (#353, #437).
 	DependencyModuleRoots map[string]string
 	modulePath            string
 	modulePathErr         error
@@ -102,7 +102,13 @@ func (r *GoPackagesResolver) Prime(paths []string) error {
 		r.recordFailure(pending, fmt.Errorf("read go.mod: %w", r.modulePathErr))
 		return nil
 	}
-	loaded, err := packages.Load(r.loadConfig(), pending...)
+	cfg, cleanup, err := r.loadConfigWithDependencies()
+	if err != nil {
+		r.recordFailure(pending, err)
+		return nil
+	}
+	defer cleanup()
+	loaded, err := packages.Load(cfg, pending...)
 	if err != nil {
 		r.recordFailure(pending, err)
 		return nil
@@ -144,17 +150,70 @@ func (r *GoPackagesResolver) loadConfig() *packages.Config {
 	if len(r.BuildTags) > 0 {
 		cfg.BuildFlags = []string{"-tags=" + strings.Join(r.BuildTags, ",")}
 	}
-	if overlay := r.dependencyReplaceOverlay(); overlay != nil {
-		cfg.Overlay = overlay
-	}
 	return cfg
 }
 
+func (r *GoPackagesResolver) loadConfigWithDependencies() (*packages.Config, func(), error) {
+	cfg := r.loadConfig()
+	if overlay := r.dependencyReplaceOverlay(); overlay != nil {
+		cfg.Overlay = overlay
+		return cfg, func() {}, nil
+	}
+	if len(r.DependencyModuleRoots) == 0 || r.ProjectRoot == "" {
+		return cfg, func() {}, nil
+	}
+	if _, err := os.Stat(filepath.Join(r.ProjectRoot, "go.mod")); err == nil || !os.IsNotExist(err) {
+		return cfg, func() {}, nil
+	}
+
+	// Without a consumer go.mod, resolve dependency FFI through a temporary Go
+	// workspace whose main modules are the dependency roots. Keeping Dir at the
+	// Ard project root preserves package diagnostics while avoiding any writes
+	// to the user's project (#437).
+	workspaceDir, err := os.MkdirTemp("", "ard-go-work-")
+	if err != nil {
+		return cfg, func() {}, fmt.Errorf("create dependency Go workspace: %w", err)
+	}
+	cleanup := func() { _ = os.RemoveAll(workspaceDir) }
+	roots := make([]string, 0, len(r.DependencyModuleRoots))
+	seen := map[string]bool{}
+	for _, root := range r.DependencyModuleRoots {
+		absRoot, err := filepath.Abs(root)
+		if err != nil || seen[absRoot] {
+			continue
+		}
+		seen[absRoot] = true
+		roots = append(roots, absRoot)
+	}
+	if len(roots) == 0 {
+		cleanup()
+		return cfg, func() {}, nil
+	}
+	sort.Strings(roots)
+	var workFile strings.Builder
+	workFile.WriteString("go 1.27.0\n\nuse (\n")
+	for _, root := range roots {
+		fmt.Fprintf(&workFile, "\t%q\n", filepath.ToSlash(root))
+	}
+	workFile.WriteString(")\n")
+	workPath := filepath.Join(workspaceDir, "go.work")
+	if err := os.WriteFile(workPath, []byte(workFile.String()), 0o644); err != nil {
+		cleanup()
+		return cfg, func() {}, fmt.Errorf("write dependency Go workspace: %w", err)
+	}
+	for _, entry := range os.Environ() {
+		if !strings.HasPrefix(entry, "GOWORK=") {
+			cfg.Env = append(cfg.Env, entry)
+		}
+	}
+	cfg.Env = append(cfg.Env, "GOWORK="+workPath)
+	return cfg, cleanup, nil
+}
+
 // dependencyReplaceOverlay synthesizes a go.mod overlay that redirects each
-// dependency's Go module to its locked checkout via a replace directive, so
-// go/packages resolves a dependency's FFI at the same commit as its Ard source
-// (#353). It returns nil when there is nothing to redirect or no project
-// go.mod to overlay. The user's on-disk go.mod is never modified.
+// dependency's Go module to the root backing its Ard source. It returns nil
+// when there is nothing to redirect or no project go.mod to overlay. The
+// user's on-disk go.mod is never modified.
 func (r *GoPackagesResolver) dependencyReplaceOverlay() map[string][]byte {
 	if len(r.DependencyModuleRoots) == 0 || r.ProjectRoot == "" {
 		return nil
@@ -222,19 +281,17 @@ func (r *GoPackagesResolver) packageFromLoadResult(path string, pkg *packages.Pa
 	return goPackageFromTypesPackage(path, pkg.Types), nil
 }
 
-// DependencyGoModuleRoots maps each git-sourced dependency's Go module path to
-// its locked checkout directory, so a dependency's Go FFI resolves from the
-// same commit as its Ard source instead of whatever the consuming project's
-// go.mod pins (#353). Dependencies without a Go module (pure-Ard, no FFI) are
-// omitted. Path dependencies are excluded: their Go module already resolves
-// from the same local directory as their Ard source, so they cannot drift.
+// DependencyGoModuleRoots maps each dependency's Go module path to the local
+// source root used for its Ard code. Git dependencies use their locked checkout
+// (#353), while path dependencies use their declared local root (#437).
+// Dependencies without a Go module (pure Ard, no FFI) are omitted.
 func DependencyGoModuleRoots(info *ProjectInfo) map[string]string {
 	if info == nil {
 		return nil
 	}
 	roots := map[string]string{}
-	add := func(git, root string) {
-		if git == "" || root == "" {
+	add := func(root string) {
+		if root == "" {
 			return
 		}
 		modulePath, err := readGoModulePath(root)
@@ -243,11 +300,27 @@ func DependencyGoModuleRoots(info *ProjectInfo) map[string]string {
 		}
 		roots[modulePath] = root
 	}
+	// Add path dependencies first so a locked Git checkout retains precedence
+	// if malformed dependency metadata names the same Go module from both.
 	for _, dep := range info.Dependencies {
-		add(dep.Git, dep.RootPath)
+		if dep.Git == "" {
+			add(dep.RootPath)
+		}
 	}
-	for _, pkg := range info.Packages {
-		add(pkg.Git, pkg.RootPath)
+	for packageID, pkg := range info.Packages {
+		if packageID != info.RootPackageID && pkg.Git == "" && pkg.Path != "" {
+			add(pkg.RootPath)
+		}
+	}
+	for _, dep := range info.Dependencies {
+		if dep.Git != "" {
+			add(dep.RootPath)
+		}
+	}
+	for packageID, pkg := range info.Packages {
+		if packageID != info.RootPackageID && pkg.Git != "" {
+			add(pkg.RootPath)
+		}
 	}
 	if len(roots) == 0 {
 		return nil

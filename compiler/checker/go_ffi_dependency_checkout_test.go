@@ -71,6 +71,47 @@ func NewFn() string { return "new" }
 	}
 }
 
+// TestGoPackagesResolverResolvesPathDependencyFFIWithoutConsumerGoModule pins
+// issue #437: a path dependency's Go module must be available to the checker
+// even when the consumer is outside that module and has no go.mod of its own.
+// Otherwise nested consumers pass accidentally through Go's parent-module
+// lookup while equivalent sibling projects fail to resolve the same FFI.
+func TestGoPackagesResolverResolvesPathDependencyFFIWithoutConsumerGoModule(t *testing.T) {
+	root := t.TempDir()
+	dependency := filepath.Join(root, "dependency")
+	consumer := filepath.Join(root, "consumer")
+	if err := os.MkdirAll(dependency, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(consumer, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeGoModule(t, dependency, "example.com/dep", `package ffi
+
+func Value() string { return "ok" }
+`)
+
+	project := &checker.ProjectInfo{Dependencies: map[string]checker.DependencyInfo{
+		"dep": {
+			Alias:      "dep",
+			SourcePath: dependency,
+			RootPath:   dependency,
+		},
+	}}
+	resolver := checker.NewGoPackagesResolver(consumer, nil)
+	resolver.DependencyModuleRoots = checker.DependencyGoModuleRoots(project)
+	if err := resolver.Prime([]string{"example.com/dep/ffi"}); err != nil {
+		t.Fatalf("Prime: %v", err)
+	}
+	pkg, err := resolver.ResolveGoPackage("example.com/dep/ffi")
+	if err != nil {
+		t.Fatalf("resolve path dependency FFI: %v", err)
+	}
+	if pkg.Functions["Value"] == nil {
+		t.Fatal("path dependency FFI did not expose Value")
+	}
+}
+
 func writeGoModule(t *testing.T, root, modulePath, ffiSource string) {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte(fmt.Sprintf("module %s\n\ngo 1.21\n", modulePath)), 0o644); err != nil {

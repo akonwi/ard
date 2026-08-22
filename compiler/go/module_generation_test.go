@@ -105,6 +105,55 @@ func TestGeneratedGoModUsesSyntheticModuleWithoutProjectGoMod(t *testing.T) {
 	}
 }
 
+func TestGeneratedGoModWiresPathDependencyModule(t *testing.T) {
+	dependency := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dependency, "go.mod"), []byte("module example.com/dep\n\ngo 1.27.0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ffiDir := filepath.Join(dependency, "ffi")
+	if err := os.MkdirAll(ffiDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ffiDir, "ffi.go"), []byte("package ffi\n\nfunc Value() string { return \"ok\" }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	project := &checker.ProjectInfo{
+		RootPath:    t.TempDir(),
+		ProjectName: "consumer",
+		Dependencies: map[string]checker.DependencyInfo{
+			"dep": {
+				Alias:      "dep",
+				SourcePath: dependency,
+				RootPath:   dependency,
+			},
+		},
+	}
+	generated, err := generatedGoMod(t.TempDir(), &air.Program{}, project)
+	if err != nil {
+		t.Fatalf("generatedGoMod: %v", err)
+	}
+	if !strings.Contains(generated, "example.com/dep v0.0.0") {
+		t.Fatalf("generated go.mod missing path dependency requirement:\n%s", generated)
+	}
+	wantReplace := "example.com/dep => " + dependency
+	if !strings.Contains(generated, wantReplace) {
+		t.Fatalf("generated go.mod missing path dependency replacement %q:\n%s", wantReplace, generated)
+	}
+
+	output := t.TempDir()
+	if err := os.WriteFile(filepath.Join(output, "go.mod"), []byte(generated), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainSource := "package main\n\nimport \"example.com/dep/ffi\"\n\nfunc main() { _ = ffi.Value() }\n"
+	if err := os.WriteFile(filepath.Join(output, "main.go"), []byte(mainSource), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := buildGeneratedProgram(output, filepath.Join(output, "consumer-bin")); err != nil {
+		t.Fatalf("build generated program with path dependency FFI: %v", err)
+	}
+}
+
 func TestBuildGeneratedProgramUsesConfiguredBuildTags(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module tagged\n\ngo 1.21\n"), 0644); err != nil {

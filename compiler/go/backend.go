@@ -398,17 +398,17 @@ func generatedGoMod(dir string, program *air.Program, projectInfo *checker.Proje
 
 	replaceSeen := replaceKeys(goMod)
 	replaces := make([]string, 0)
-	addDependencyGoModCheckoutReplaces(&replaces, replaceSeen, program, projectInfo)
+	addDependencyGoModRootReplaces(&replaces, replaceSeen, program, projectInfo)
 	addDependencyGoModReplaces(&replaces, replaceSeen, program, projectInfo)
 	goMod += formatReplaceBlock(replaces)
 	return goMod, nil
 }
 
-// addDependencyGoModCheckoutReplaces redirects each git dependency's Go module
-// to its locked checkout, so the generated program builds its FFI at the same
-// commit as the dependency's Ard source (#353). This mirrors the checker's
-// resolution overlay, keeping type-checking and the build in agreement.
-func addDependencyGoModCheckoutReplaces(out *[]string, seen map[string]bool, program *air.Program, projectInfo *checker.ProjectInfo) {
+// addDependencyGoModRootReplaces redirects each dependency's Go module to the
+// root backing its Ard source: a locked checkout for Git dependencies (#353)
+// or the declared source root for path dependencies (#437). This mirrors the
+// checker's resolution, keeping type-checking and the build in agreement.
+func addDependencyGoModRootReplaces(out *[]string, seen map[string]bool, program *air.Program, projectInfo *checker.ProjectInfo) {
 	for modulePath, root := range dependencyGoModPackages(program, projectInfo) {
 		abs, err := filepath.Abs(root)
 		if err != nil {
@@ -496,8 +496,15 @@ func isRelativeLocalReplacePath(path string) bool {
 }
 
 func addDependencyGoModRequirements(out *[]string, seen map[string]bool, program *air.Program, projectInfo *checker.ProjectInfo) {
-	for _, root := range dependencyGoModPackages(program, projectInfo) {
+	packages := dependencyGoModPackages(program, projectInfo)
+	for _, root := range packages {
 		addGoModRequirementsFromFile(out, seen, filepath.Join(root, "go.mod"))
+	}
+	for modulePath := range packages {
+		if !seen[modulePath] {
+			seen[modulePath] = true
+			*out = append(*out, modulePath+" v0.0.0")
+		}
 	}
 }
 
