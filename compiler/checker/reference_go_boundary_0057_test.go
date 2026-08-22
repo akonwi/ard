@@ -381,7 +381,7 @@ func assertGoReferenceCheckerResult(t *testing.T, source string, resolver *check
 	if len(result.Errors) > 0 {
 		t.Fatalf("parse errors: %v", result.Errors)
 	}
-	if (strings.Contains(source, "deref ") || strings.Contains(source, ".@")) && !containsParsedDeref(reflect.ValueOf(result.Program)) {
+	if strings.Contains(source, ".@") && !containsParsedDeref(reflect.ValueOf(result.Program)) {
 		t.Fatal("parser did not produce a dereference expression")
 	}
 	checked := checker.New("test.ard", result.Program, nil, checker.CheckOptions{GoResolver: resolver})

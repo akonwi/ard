@@ -36,7 +36,6 @@
 (impl_block "impl" @keyword)
 (impl_block "for" @keyword)
 (impl_block "as" @keyword)
-(unary_expression "deref" @keyword)
 
 ; Types
 (primitive_type) @type.builtin

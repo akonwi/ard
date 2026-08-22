@@ -108,16 +108,14 @@ not whole-referent assignment through a dereference expression.
 
 ### Migration
 
-The syntax changes over two minor releases:
+The two-release migration is complete. Prefix `deref reference` is no longer
+accepted as dereference syntax, its deprecation warning and formatter rewrite
+have been removed, and `deref` is now an ordinary identifier. `reference.@`
+is the only dereference syntax.
 
-1. In the introduction release, both `reference.@` and `deref reference` parse
-   to the same dereference expression. Prefix `deref` produces a deprecation
-   warning. The formatter always emits `.@`, providing an automatic migration.
-2. In the following minor release, prefix `deref` is removed and `deref`
-   becomes available as an ordinary identifier.
-
-The formatter preserves operation order while migrating precedence-sensitive
-forms:
+Code that still uses the prefix form must be migrated before upgrading. Run
+`ard format` with an older Ard release that still supports the compatibility
+syntax, or rewrite precedence-sensitive forms directly:
 
 ```ard
 deref reference.field   // becomes reference.field.@
@@ -126,8 +124,8 @@ deref mut value         // becomes (mut value).@
 mut deref reference     // becomes mut reference.@
 ```
 
-During the transition, `deref` remains reserved in expression-level identifier
-positions. Existing member names such as `reader.deref()` remain valid.
+Names such as `let deref`, `fn deref(...)`, and `reader.deref()` are now valid
+ordinary declarations and expressions.
 
 ## Consequences
 
@@ -135,13 +133,13 @@ positions. Existing member names such as `reader.deref()` remain valid.
 - One-layer and repeated dereferences are visually concise.
 - The unique `.@` sigil communicates “value at” without promising an
   addressable place.
-- Existing code has a formatter-driven migration path and one release of
-  compatibility.
+- Code using the removed prefix form must migrate before upgrading; the current
+  formatter no longer parses or rewrites it.
 - The lexer, parser, formatter, Tree-sitter grammar, highlighting, diagnostics,
   documentation, samples, and downstream code must agree on the new canonical
   spelling.
-- A later release must remove the compatibility parser branch, deprecation
-  warning, and `deref` keyword reservation.
+- `deref` is no longer reserved and may be used anywhere an ordinary identifier
+  is valid.
 
 ## Alternatives Considered
 

@@ -106,57 +106,31 @@ func TestPostfixDerefRequiresAdjacentDotAndAt(t *testing.T) {
 	}
 }
 
-func TestLegacyDerefSyntaxRemainsParsedForMigration(t *testing.T) {
-	tests := []struct {
-		source string
-		want   string
-	}{
-		{source: "deref reference", want: "deref(reference)"},
-		{source: "deref reference.field", want: "deref(field(reference,field))"},
-		{source: "(deref reference).field", want: "field(deref(reference),field)"},
-		{source: "deref mut value", want: "deref(mut(value))"},
-		{source: "mut deref reference", want: "mut(deref(reference))"},
-		{source: "deref deref reference", want: "deref(deref(reference))"},
-		{source: "deref load()", want: "deref(call(load))"},
+func TestPrefixDerefSyntaxIsNotDereference(t *testing.T) {
+	result := Parse([]byte("let result = deref reference\n"), "test.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
 	}
-
-	for _, tt := range tests {
-		result := Parse([]byte("let result = "+tt.source+"\n"), "test.ard")
-		if len(result.Errors) > 0 {
-			t.Fatalf("parse %q: %v", tt.source, result.Errors)
-		}
-		declaration := result.Program.Statements[0].(*VariableDeclaration)
-		if got := derefExpressionShape(t, declaration.Value); got != tt.want {
-			t.Fatalf("shape for %q = %q, want %q", tt.source, got, tt.want)
-		}
-		dereference := findDeref(declaration.Value)
-		if dereference == nil || !dereference.LegacyPrefix {
-			t.Fatalf("%q did not retain legacy-prefix metadata: %#v", tt.source, dereference)
-		}
-		if tt.source == "deref reference" {
-			want := Location{Start: Point{Row: 1, Col: 14}, End: Point{Row: 1, Col: 18}}
-			if dereference.OperatorLocation != want {
-				t.Fatalf("legacy operator location = %#v, want %#v", dereference.OperatorLocation, want)
-			}
-		}
+	declaration := result.Program.Statements[0].(*VariableDeclaration)
+	identifier, ok := declaration.Value.(*Identifier)
+	if !ok || identifier.Name != "deref" {
+		t.Fatalf("prefix expression = %#v, want ordinary deref identifier", declaration.Value)
 	}
 }
 
-func TestDerefKeywordRemainsReservedDuringMigration(t *testing.T) {
-	result := Parse([]byte("let deref = 1\n"), "test.ard")
-	if len(result.Errors) == 0 {
-		t.Fatal("expected deref to remain reserved as a binding name")
-	}
-
-	for _, source := range []string{
-		"reader.deref()\n",
-		"Type::deref(value)\n",
-		"impl Value {\n  fn deref() Int { 1 }\n}\n",
-	} {
-		result := Parse([]byte(source), "test.ard")
-		if len(result.Errors) > 0 {
-			t.Fatalf("expected member-position deref in %q to parse: %v", source, result.Errors)
-		}
+func TestDerefIsAnOrdinaryIdentifier(t *testing.T) {
+	result := Parse([]byte(`
+let deref = 1
+fn deref(deref: Int) Int { deref }
+struct Value { deref: Int }
+impl Value {
+  fn deref(deref: Int) Int { self.deref + deref }
+}
+let value = Value{deref: deref}
+value.deref(deref)
+`), "test.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
 	}
 }
 
@@ -193,18 +167,5 @@ func derefExpressionShape(t *testing.T, expression Expression) string {
 	default:
 		t.Fatalf("unexpected expression %T", expression)
 		return ""
-	}
-}
-
-func findDeref(expression Expression) *Deref {
-	switch value := expression.(type) {
-	case *Deref:
-		return value
-	case *MutRef:
-		return findDeref(value.Operand)
-	case *InstanceProperty:
-		return findDeref(value.Target)
-	default:
-		return nil
 	}
 }

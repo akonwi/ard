@@ -118,7 +118,11 @@ let reference = mut user
 let snapshot: User = reference.@
 ```
 
-`.@` removes exactly one outer reference layer and evaluates its operand once. The deprecated prefix spelling `deref reference` remains accepted for one migration release, and `ard format` rewrites it to `reference.@`.
+`.@` removes exactly one outer reference layer and evaluates its operand once. It is the only dereference syntax; `deref` is an ordinary identifier.
+
+:::caution[Migration from prefix `deref`]
+Prefix `deref reference` is no longer accepted. Before upgrading, run `ard format` with an older Ard release that still supports the compatibility syntax, or rewrite each use as `reference.@`. The current formatter no longer parses or rewrites the prefix form.
+:::
 
 `mut Trait` shares the trait's native Go interface representation. Converting it directly to ordinary `Trait` preserves the same current dynamic object. Explicit `trait_reference.@` instead returns ordinary `Trait` with an independent shallow copy of the hidden dynamic concrete value.
 
