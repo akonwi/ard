@@ -34,6 +34,14 @@ func TestGoTargetScalarFromBareScalars(t *testing.T) {
 			want: "true",
 		},
 		{
+			name: "runtime narrowing to Byte truncates like Go",
+			input: `fn main() Bool {
+  let n: Int = 300
+  Byte::from(n) == 44
+}`,
+			want: "true",
+		},
+		{
 			name: "runtime Int narrows to Uint32",
 			input: `fn main() Bool {
   let n: Int = 4294967297

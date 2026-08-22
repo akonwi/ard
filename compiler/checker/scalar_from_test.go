@@ -23,6 +23,16 @@ func TestScalarFrom(t *testing.T) {
 			input: `let b: Uint8 = Uint8::from(200)`,
 		},
 		{
+			name:  "Byte::from types as Byte",
+			input: `let value: Byte = Byte::from(42)`,
+		},
+		{
+			name: "Byte::from converts a runtime Uint8",
+			input: `fn to_byte(value: Uint8) Byte {
+  Byte::from(value)
+}`,
+		},
+		{
 			name:  "overflowing constant is rejected like Go",
 			input: `let b = Uint8::from(300)`,
 			diagnostics: []checker.Diagnostic{

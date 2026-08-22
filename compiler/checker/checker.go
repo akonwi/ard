@@ -1612,6 +1612,8 @@ func scalarTypeByName(name string) Type {
 		return Uint
 	case "Uint8":
 		return Uint8
+	case "Byte":
+		return Byte
 	case "Uint16":
 		return Uint16
 	case "Uint32":
