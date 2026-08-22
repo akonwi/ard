@@ -834,6 +834,98 @@ fn render(value: mut Renderable) Str {
 	})
 }
 
+func TestConcreteTraitMethodLookupBeforeImplementation(t *testing.T) {
+	run(t, []test{
+		{
+			name: "struct method is available before trait implementation",
+			input: `trait View {
+  fn value() Int
+}
+struct Item { n: Int }
+fn read(item: Item) Int {
+  item.value()
+}
+impl View for Item {
+  fn value() Int { self.n }
+}
+`,
+		},
+		{
+			name: "enum method is available before trait implementation",
+			input: `trait View {
+  fn value() Int
+}
+enum Item { one }
+fn read(item: Item) Int {
+  item.value()
+}
+impl View for Item {
+  fn value() Int { 1 }
+}
+`,
+		},
+		{
+			name: "concrete lookup uses implementation receiver mutability",
+			input: `trait Reader {
+  fn mut read() Int
+}
+struct Value {}
+fn read(value: Value) Int {
+  value.read()
+}
+impl Reader for Value {
+  fn read() Int { 42 }
+}
+`,
+		},
+		{
+			name: "earlier trait method can call later sibling",
+			input: `trait Pair {
+  fn first() Int
+  fn second() Int
+}
+struct Value {}
+impl Pair for Value {
+  fn first() Int { self.second() }
+  fn second() Int { 42 }
+}
+`,
+		},
+		{
+			name: "generic struct method is available before trait implementation",
+			input: `trait View {
+  fn value() Int
+}
+struct Box<$T> { value: $T }
+fn read(box: Box<Int>) Int {
+  box.value()
+}
+impl View for Box {
+  fn value() Int { 42 }
+}
+`,
+		},
+	})
+}
+
+func TestTraitMethodSignaturePrepassDoesNotDuplicateDiagnostics(t *testing.T) {
+	run(t, []test{{
+		name: "unresolved return type is reported once",
+		input: `trait View {
+  fn value() Int
+}
+struct Item {}
+impl View for Item {
+  fn value() Missing { self }
+}
+`,
+		diagnostics: []checker.Diagnostic{
+			{Kind: checker.Error, Message: "Unrecognized type: Missing"},
+			{Kind: checker.Error, Message: "Trait method 'value' has return type of Int"},
+		},
+	}})
+}
+
 func TestTraitImplementationsPreserveSameNamedMethodsPerTrait(t *testing.T) {
 	implementationsByOrder := []string{
 		`impl Reader for Device {

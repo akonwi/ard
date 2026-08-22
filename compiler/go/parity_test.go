@@ -2022,6 +2022,31 @@ func TestGoTargetParityFallbackTraitMutableStorage(t *testing.T) {
 	})
 }
 
+func TestGoTargetParityConcreteTraitMethodLookupBeforeImplementation(t *testing.T) {
+	program := lowerParitySource(t, `
+		trait View {
+			fn value() Int
+		}
+
+		struct Item { value: Int }
+
+		fn read(item: Item) Int {
+			item.value()
+		}
+
+		impl View for Item {
+			fn value() Int { self.value }
+		}
+
+		fn main() Int {
+			read(Item{value: 42})
+		}
+	`)
+	if got := runGoTargetParityJSON(t, program); got != "42" {
+		t.Fatalf("got %s, want direct call to retain the later trait method body", got)
+	}
+}
+
 func TestGoTargetParityMutatingTraitContractAcceptsReadOnlyImplementation(t *testing.T) {
 	program := lowerParitySource(t, `
 		trait Reader {

@@ -6,6 +6,109 @@ type preparedInherentMethod struct {
 	Signature *FunctionDef
 }
 
+type preparedTraitMethod struct {
+	Signature   *FunctionDef
+	Diagnostics []Diagnostic
+}
+
+// prepareTraitImplSignatures makes direct concrete method lookup independent
+// of trait implementation order. Bodies remain in the ordinary statement pass,
+// which fills these same FunctionDef instances after calls may have captured
+// their signatures.
+func (c *Checker) prepareTraitImplSignatures() {
+	for _, statement := range c.input.Statements {
+		implementation, ok := statement.(*parse.TraitImplementation)
+		if !ok {
+			continue
+		}
+		trait := c.resolveTraitImplementationContract(implementation.Trait)
+		if trait == nil {
+			continue
+		}
+		targetSymbol, ok := c.scope.get(implementation.ForType.Name)
+		if !ok {
+			continue
+		}
+
+		var owner MethodOwner
+		var receiverGenerics []string
+		var addConcreteMethod func(*FunctionDef)
+		switch target := targetSymbol.Type.(type) {
+		case *StructDef:
+			// Specialized generic aliases do not carry an independent method
+			// namespace. Keep their existing in-order behavior rather than
+			// widening the canonical generic definition.
+			if target.Definition != nil {
+				continue
+			}
+			owner = StructMethodOwner(target)
+			receiverGenerics = genericParamsForType(target)
+			addConcreteMethod = func(method *FunctionDef) {
+				// Required Go method registration still belongs to the validated
+				// implementation pass; direct Ard lookup only needs this table.
+				c.program.AddStructMethod(owner, method.Name, method)
+			}
+		case *Enum:
+			if IsBuiltinError(trait) {
+				continue
+			}
+			owner = MethodOwner{ModulePath: target.ModulePath, TypeName: target.Name}
+			receiverGenerics = genericParamsForType(target)
+			if target.Methods == nil {
+				target.Methods = map[string]*FunctionDef{}
+			}
+			addConcreteMethod = func(method *FunctionDef) { target.Methods[method.Name] = method }
+		default:
+			continue
+		}
+
+		contractMethods := map[string]bool{}
+		for _, method := range trait.GetMethods() {
+			contractMethods[method.Name] = true
+		}
+		for i := range implementation.Methods {
+			method := &implementation.Methods[i]
+			if len(method.TypeParams) > 0 || !contractMethods[method.Name] {
+				continue
+			}
+			diagnosticStart := len(c.diagnostics)
+			c.pushMethodGenericAllowlist(receiverGenerics)
+			signature := c.resolvePreparedTraitMethodSignature(method)
+			c.popMethodGenericAllowlist()
+			diagnostics := append([]Diagnostic(nil), c.diagnostics[diagnosticStart:]...)
+			c.diagnostics = c.diagnostics[:diagnosticStart]
+			resolved := true
+			for _, diagnostic := range diagnostics {
+				resolved = resolved && diagnostic.Kind != Error
+			}
+			signature.Receiver = implementation.Receiver.Name
+			if _, isEnum := targetSymbol.Type.(*Enum); isEnum {
+				signature.Mutates = false
+			} else {
+				signature.Mutates = method.Mutates
+			}
+
+			c.preparedTraitMethods[method] = preparedTraitMethod{Signature: signature, Diagnostics: diagnostics}
+			if !resolved {
+				continue
+			}
+			c.program.AddTraitMethod(owner, trait, signature.Name, signature)
+			addConcreteMethod(signature)
+		}
+	}
+}
+
+func (c *Checker) resolvePreparedTraitMethodSignature(def *parse.FunctionDeclaration) *FunctionDef {
+	return &FunctionDef{
+		Name:          def.Name,
+		GenericParams: append([]string(nil), def.TypeParams...),
+		Parameters:    c.resolveParametersWithContext(def.Parameters, nil),
+		ReturnType:    c.resolveReturnTypeWithContext(def.ReturnType, nil),
+		Private:       def.Private,
+		IsTest:        def.IsTest,
+	}
+}
+
 func (c *Checker) prepareInherentImplSignatures() {
 	firstDeclarations := map[MethodOwner]map[string]SourceSpan{}
 	for _, statement := range c.input.Statements {

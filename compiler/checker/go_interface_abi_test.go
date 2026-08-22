@@ -283,10 +283,9 @@ trait Label {
   fn name() Str
 }
 struct Person {}
-` + impls + `
 let person = Person{}
 person.name()
-`
+` + impls
 		result := parse.Parse([]byte(source), "test.ard")
 		if len(result.Errors) > 0 {
 			t.Fatalf("parse error: %s", result.Errors[0].Message)
