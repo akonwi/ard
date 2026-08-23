@@ -2155,6 +2155,28 @@ func (d unresolvedGenericDiagnostic) build() Diagnostic {
 	return diagnostic
 }
 
+type maybeFieldGenericDiagnostic struct {
+	Field string
+	Type  Type
+	Span  SourceSpan
+}
+
+func (d maybeFieldGenericDiagnostic) build() Diagnostic {
+	displayed := "generic"
+	if d.Type != nil {
+		displayed = d.Type.String()
+	}
+	diagnostic := newLabeledDiagnostic(
+		Error,
+		fmt.Sprintf("Cannot access field `%s` through Maybe while its type is unresolved: %s", d.Field, displayed),
+		"Unresolved nullable field access",
+		fmt.Sprintf("Field `%s` has unresolved type `%s`. Ard needs to know whether it is nullable to determine the result type of this access.", d.Field, displayed),
+		DiagnosticLabel{Span: d.Span, Message: "field type must be concrete here"},
+	)
+	diagnostic.Code = DiagnosticCodeUnresolvedGeneric
+	return diagnostic
+}
+
 type unboundGenericTypeArgumentDiagnostic struct {
 	Name string
 	Span SourceSpan

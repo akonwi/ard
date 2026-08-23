@@ -151,6 +151,135 @@ func TestCompletionImportedStructMethods(t *testing.T) {
 	}
 }
 
+func TestCompletionMaybeFieldsInTryAndMatch(t *testing.T) {
+	complete := func(t *testing.T, marked string) []protocol.CompletionItem {
+		t.Helper()
+		cursor := strings.Index(marked, "|")
+		if cursor < 0 {
+			t.Fatal("completion source is missing cursor marker")
+		}
+		source := marked[:cursor] + marked[cursor+1:]
+		before := marked[:cursor]
+		line := strings.Count(before, "\n")
+		lineStart := strings.LastIndex(before, "\n") + 1
+		character := len(before) - lineStart
+		path := filepath.Join(t.TempDir(), "test.ard")
+		if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		srv := NewServer()
+		docURI := uri.File(path)
+		srv.cache.Open(docURI, "ard", 1, source)
+		return srv.completionFromSpans(context.Background(), docURI, source, protocol.Position{Line: uint32(line), Character: uint32(character)})
+	}
+	has := func(items []protocol.CompletionItem, label string) bool {
+		for _, item := range items {
+			if item.Label == label {
+				return true
+			}
+		}
+		return false
+	}
+
+	declarations := `struct Profile {
+  nickname: Str?,
+  age: Int,
+}
+
+struct User {
+  profile: Profile?,
+  primary: Profile,
+}
+
+impl Profile {
+  fn summarize() Str { "profile" }
+}
+`
+
+	t.Run("try suggests contained fields and Maybe methods", func(t *testing.T) {
+		items := complete(t, declarations+`
+fn display(user: User?) Str {
+  try user.| -> _ { "missing" }
+}
+`)
+		for _, label := range []string{"profile", "primary", "is_some"} {
+			if !has(items, label) {
+				t.Fatalf("completion %q missing: %#v", label, items)
+			}
+		}
+	})
+
+	t.Run("match suggests contained fields", func(t *testing.T) {
+		items := complete(t, declarations+`
+fn display(user: User?) Str {
+  match user.| {
+    value => "present",
+    _ => "missing",
+  }
+}
+`)
+		for _, label := range []string{"profile", "primary", "is_some"} {
+			if !has(items, label) {
+				t.Fatalf("completion %q missing: %#v", label, items)
+			}
+		}
+	})
+
+	t.Run("nested chain suggests the next contained fields", func(t *testing.T) {
+		items := complete(t, declarations+`
+fn display(user: User?) Str {
+  match user.profile.| {
+    value => "present",
+    _ => "missing",
+  }
+}
+`)
+		for _, label := range []string{"nickname", "age", "is_some"} {
+			if !has(items, label) {
+				t.Fatalf("completion %q missing: %#v", label, items)
+			}
+		}
+		if has(items, "summarize") {
+			t.Fatalf("unsupported contained method was suggested: %#v", items)
+		}
+	})
+
+	t.Run("specialized generic fields use concrete types", func(t *testing.T) {
+		items := complete(t, `struct Box<$T> {
+  value: $T,
+}
+
+fn display(box: Box<Str>?) Str {
+  match box.| {
+    value => value,
+    _ => "missing",
+  }
+}
+`)
+		item, ok := completionItemByLabel(items, "value")
+		if !ok {
+			t.Fatalf("specialized field missing: %#v", items)
+		}
+		if item.Detail != "Str" {
+			t.Fatalf("specialized field detail = %q, want Str", item.Detail)
+		}
+	})
+
+	t.Run("ordinary access does not suggest contextual fields", func(t *testing.T) {
+		items := complete(t, declarations+`
+fn invalid(user: User?) {
+  let value = user.|
+}
+`)
+		if has(items, "profile") || has(items, "primary") {
+			t.Fatalf("ordinary Maybe access suggested contextual fields: %#v", items)
+		}
+		if !has(items, "is_some") {
+			t.Fatalf("ordinary Maybe access lost native methods: %#v", items)
+		}
+	})
+}
+
 // TestCompletionStructWithTraitImpl guards trait-impl methods on structs.
 func TestCompletionStructWithTraitImpl(t *testing.T) {
 	dir := t.TempDir()

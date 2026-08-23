@@ -1561,6 +1561,51 @@ fn main() {
 	assertDefinitionStart(t, loc, textPath, 0, 0)
 }
 
+func TestDefinitionMaybeFieldChainInMatch(t *testing.T) {
+	source := `struct Profile {
+  nickname: Str?,
+}
+
+struct User {
+  profile: Profile?,
+}
+
+fn display(user: User?) Str {
+  match user.profile.nickname {
+    nickname => nickname,
+    _ => "missing",
+  }
+}
+`
+	filePath := filepath.Join(t.TempDir(), "test.ard")
+
+	t.Run("intermediate field", func(t *testing.T) {
+		loc := requireDefinition(t, source, filePath, 9, 14)
+		assertDefinitionStart(t, loc, filePath, 5, 2)
+	})
+	t.Run("projected field", func(t *testing.T) {
+		loc := requireDefinition(t, source, filePath, 9, 22)
+		assertDefinitionStart(t, loc, filePath, 1, 2)
+	})
+}
+
+func TestDefinitionDiagnosedGenericMaybeProjection(t *testing.T) {
+	source := `struct Box<$T> {
+  value: $T,
+}
+
+fn invalid(box: Box<$T>?) Bool {
+  match box.value {
+    value => true,
+    _ => false,
+  }
+}
+`
+	filePath := filepath.Join(t.TempDir(), "test.ard")
+	loc := requireDefinition(t, source, filePath, 5, 13)
+	assertDefinitionStart(t, loc, filePath, 1, 2)
+}
+
 func TestDefinitionQualifiedEnumVariantTypeOwner(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.0.0\"\n"), 0o644); err != nil {

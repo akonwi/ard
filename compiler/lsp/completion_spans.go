@@ -93,10 +93,32 @@ func (s *Server) completionFromSpans(ctx context.Context, docURI uri.URI, source
 	}
 
 	items := memberCompletionItems(receiverType, fa)
+	placeholderPoint := offsetToParsePoint(patched, cctx.sepEnd)
+	for _, rec := range fa.Spans.At(placeholderPoint) {
+		if rec.CompletionType != nil {
+			items = mergeCompletionItems(items, contextualMaybeFieldCompletionItems(rec.CompletionType))
+			break
+		}
+	}
 	if len(items) == 0 {
 		return nil
 	}
 	return withCompletionTextEdits(items, cctx, position)
+}
+
+func mergeCompletionItems(primary, additional []protocol.CompletionItem) []protocol.CompletionItem {
+	seen := make(map[string]bool, len(primary)+len(additional))
+	merged := make([]protocol.CompletionItem, 0, len(primary)+len(additional))
+	for _, group := range [][]protocol.CompletionItem{primary, additional} {
+		for _, item := range group {
+			if item.Label == "" || seen[item.Label] {
+				continue
+			}
+			seen[item.Label] = true
+			merged = append(merged, item)
+		}
+	}
+	return merged
 }
 
 func enumMatchPatternCompletionItems(fa *analysis.FileAnalysis, point parse.Point) []protocol.CompletionItem {
@@ -137,6 +159,31 @@ func enumMatchPatternCompletionItems(fa *analysis.FileAnalysis, point parse.Poin
 		return items
 	}
 	return nil
+}
+
+func contextualMaybeFieldCompletionItems(t checker.Type) []protocol.CompletionItem {
+	if reference, ok := t.(*checker.MutableRef); ok {
+		t = reference.Of()
+	}
+	owner, ok := t.(*checker.StructDef)
+	if !ok {
+		return nil
+	}
+	fields := checker.StructFields(owner)
+	names := make([]string, 0, len(fields))
+	for name := range fields {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	items := make([]protocol.CompletionItem, 0, len(names))
+	for _, name := range names {
+		items = append(items, protocol.CompletionItem{
+			Label:  name,
+			Kind:   protocol.CompletionItemKindField,
+			Detail: checkerTypeString(fields[name]),
+		})
+	}
+	return items
 }
 
 // memberCompletionItems enumerates fields and methods for a checked type.
