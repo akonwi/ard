@@ -963,7 +963,7 @@ func TestQualifiedStaticFailuresReuseStructuredDiagnostics(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "util.ard"), []byte("fn Thing() {}\nlet value = 1\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "util.ard"), []byte("fn Thing() {}\nlet value = 1\ntype Handler = fn() Str\nenum Command { run }\nlet current = Command::run\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	resolver, err := checker.NewModuleResolver(root)
@@ -975,7 +975,12 @@ func TestQualifiedStaticFailuresReuseStructuredDiagnostics(t *testing.T) {
 		code             checker.DiagnosticCode
 	}{
 		{"qualified non-struct", "util::Thing{}", checker.DiagnosticCodeNotAStruct},
-		{"nested non-enum member", "util::value::x", checker.DiagnosticCodeInvalidStaticMember},
+		{"nested value owner", "util::value::x", checker.DiagnosticCodeInvalidStaticMember},
+		{"enum value owner", "util::current::run", checker.DiagnosticCodeInvalidStaticMember},
+		{"enum variant owner", "util::Command::run::run", checker.DiagnosticCodeInvalidStaticMember},
+		{"local enum value owner", "enum Local { run }\nlet current = Local::run\ncurrent::run", checker.DiagnosticCodeInvalidStaticMember},
+		{"nested non-enum type owner", "util::Handler::x", checker.DiagnosticCodeInvalidStaticMember},
+		{"missing qualified enum variant", "util::Command::missing", checker.DiagnosticCodeUndefinedEnumVariant},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -1335,6 +1335,65 @@ func (c *Checker) findModuleByPath(path string) Module {
 	return nil
 }
 
+type staticOwner struct {
+	typ             Type
+	typeDeclaration bool
+}
+
+// resolveStaticOwner resolves the intermediate owner in a nested static path
+// such as types::Command::help. The owner is a namespace qualifier, not a
+// runtime expression, so module type declarations must not pass through
+// value-position checking.
+func (c *Checker) resolveStaticOwner(target *parse.StaticProperty) (staticOwner, bool) {
+	moduleName, moduleOK := target.Target.(*parse.Identifier)
+	member, memberOK := target.Property.(*parse.Identifier)
+	if !moduleOK || !memberOK {
+		checked := c.checkExpr(target)
+		if checked == nil {
+			return staticOwner{}, false
+		}
+		return staticOwner{typ: checked.Type()}, true
+	}
+
+	mod := c.resolveModule(moduleName.Name)
+	if mod == nil {
+		checked := c.checkExpr(target)
+		if checked == nil {
+			return staticOwner{}, false
+		}
+		return staticOwner{typ: checked.Type()}, true
+	}
+
+	sym := mod.Get(member.Name)
+	if sym.IsZero() {
+		c.addUnresolvedReference(undefinedQualifiedMember, fmt.Sprintf("%s::%s", moduleName.Name, member.Name), member.GetLocation())
+		return staticOwner{}, false
+	}
+
+	targetKind := TargetValue
+	if sym.typeDeclaration {
+		targetKind = TargetType
+	}
+	c.recordTarget(member, nil, SpanTarget{Kind: targetKind, Module: mod.Path(), Symbol: member.Name})
+	return staticOwner{typ: sym.Type, typeDeclaration: sym.typeDeclaration}, true
+}
+
+func (c *Checker) resolveEnumVariant(enum *Enum, property *parse.Identifier, missingLocation parse.Location) Expression {
+	for i := range enum.Values {
+		if enum.Values[i].Name == property.Name {
+			return &EnumVariant{
+				enum:         enum,
+				Variant:      i,
+				EnumType:     enum,
+				Discriminant: enum.Values[i].Value,
+			}
+		}
+	}
+
+	c.addUnresolvedReference(undefinedEnumVariant, fmt.Sprintf("%s::%s", enum.Name, property.Name), missingLocation)
+	return nil
+}
+
 func namedTypeRequiresTypeArguments(t Type) bool {
 	switch typ := t.(type) {
 	case *StructDef:
@@ -10096,6 +10155,13 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 					}
 				}
 
+				// Only declarations in the type namespace can own enum variants.
+				// An enum-valued binding is still a runtime value, not a namespace.
+				if !sym.typeDeclaration {
+					c.addUnresolvedReference(invalidStaticMember, fmt.Sprintf("%s::%s", sym.Name, s.Property), id.GetLocation())
+					return nil
+				}
+
 				// Check if it's an enum variant
 				enum, ok := sym.Type.(*Enum)
 				if !ok {
@@ -10103,54 +10169,17 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 					return nil
 				}
 
-				variant := -1
-				for i := range enum.Values {
-					if enum.Values[i].Name == s.Property.(*parse.Identifier).Name {
-						variant = i
-						break
-					}
-				}
-				if variant == -1 {
-					c.addUnresolvedReference(undefinedEnumVariant, fmt.Sprintf("%s::%s", sym.Name, s.Property.(*parse.Identifier).Name), id.GetLocation())
-					return nil
-				}
-
-				return &EnumVariant{
-					enum:         enum,
-					Variant:      variant,
-					EnumType:     enum,
-					Discriminant: enum.Values[variant].Value,
-				}
+				return c.resolveEnumVariant(enum, s.Property.(*parse.Identifier), id.GetLocation())
 			}
-			// Handle nested static properties like http::Method::Get
-			if _, ok := s.Target.(*parse.StaticProperty); ok {
-				// First resolve the nested static property (e.g., http::Method)
-				nestedSym := c.checkExpr(s.Target)
-				if nestedSym == nil {
+			// Handle nested static properties like types::Command::help. The
+			// intermediate path is a static owner, not a runtime value.
+			if target, ok := s.Target.(*parse.StaticProperty); ok {
+				owner, resolved := c.resolveStaticOwner(target)
+				if !resolved {
 					return nil
 				}
-
-				// Check if it's an enum type
-				if enum, ok := nestedSym.Type().(*Enum); ok {
-					// Find the variant
-					variant := -1
-					for i := range enum.Values {
-						if enum.Values[i].Name == s.Property.(*parse.Identifier).Name {
-							variant = i
-							break
-						}
-					}
-					if variant == -1 {
-						c.addUnresolvedReference(undefinedEnumVariant, fmt.Sprintf("%s::%s", enum.Name, s.Property.(*parse.Identifier).Name), s.Property.GetLocation())
-						return nil
-					}
-
-					return &EnumVariant{
-						enum:         enum,
-						Variant:      variant,
-						EnumType:     enum,
-						Discriminant: enum.Values[variant].Value,
-					}
+				if enum, ok := owner.typ.(*Enum); ok && owner.typeDeclaration {
+					return c.resolveEnumVariant(enum, s.Property.(*parse.Identifier), s.Property.GetLocation())
 				}
 
 				c.addUnresolvedReference(invalidStaticMember, fmt.Sprintf("%s::%s", s.Target, s.Property), s.Property.GetLocation())

@@ -118,6 +118,62 @@ fn invalid(value: counter::Counter) {
 	}
 }
 
+func TestQualifiedImportedEnumVariantsResolveThroughTypeOwners(t *testing.T) {
+	projectDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "types.ard"), []byte(`enum Command {
+  help,
+  run = 7,
+}
+type Alias = Command
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "barrel.ard"), []byte(`use demo/types
+
+type Reexport = types::Command
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(projectDir, "main.ard")
+	mainSource := `use demo/types
+use demo/barrel
+
+fn rank(command: types::Command) Int {
+  match command {
+    types::Command::help => 1,
+    types::Command::run => 2,
+  }
+}
+
+fn is_run(value: Int) Bool {
+  match value {
+    types::Command::run => true,
+    _ => false,
+  }
+}
+
+let direct = types::Command::help
+let alias = types::Alias::run
+let reexport = barrel::Reexport::help
+`
+	result := parse.Parse([]byte(mainSource), mainPath)
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	resolver, err := checker.NewModuleResolver(projectDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := checker.New(mainPath, result.Program, resolver)
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("unexpected diagnostics: %v", c.Diagnostics())
+	}
+}
+
 func TestImportedFunctionValueCannotBeUsedAsTypeAlias(t *testing.T) {
 	projectDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
