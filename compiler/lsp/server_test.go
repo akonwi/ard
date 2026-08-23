@@ -1561,6 +1561,28 @@ fn main() {
 	assertDefinitionStart(t, loc, textPath, 0, 0)
 }
 
+func TestDefinitionQualifiedEnumVariantTypeOwner(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.0.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	typesPath := filepath.Join(root, "types.ard")
+	if err := os.WriteFile(typesPath, []byte("enum Command { help, run }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	source := `use test_project/types
+
+let selected = types::Command::help
+`
+	filePath := filepath.Join(root, "main.ard")
+	if err := os.WriteFile(filePath, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	loc := requireDefinition(t, source, filePath, 2, 23)
+	assertDefinitionStart(t, loc, typesPath, 0, 0)
+}
+
 // TestDefinitionImportedInstanceMembers verifies go-to-definition for imported fields and methods.
 func TestDefinitionImportedInstanceMembers(t *testing.T) {
 	root := t.TempDir()
