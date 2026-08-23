@@ -9148,8 +9148,9 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 		}()
 
 		// Check the subject. Pattern matching is an observational read, so a
-		// reference subject resolves through its referent (ADR 0057).
-		subject := observeReference(c.checkExpr(s.Subject))
+		// reference subject resolves through its referent (ADR 0057). Like try,
+		// match permits null-propagating field chains through Ard Maybe values.
+		subject := observeReference(c.checkMaybeAccessorChain(s.Subject))
 		if subject == nil {
 			return nil
 		}
@@ -10268,8 +10269,8 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 				}
 			}
 			if expr == nil && !contextualOperand {
-				// Check if this is a property/method accessor chain that might need cascading Maybe handling.
-				expr = c.tryCheckAccessorChain(s.Expression)
+				// Field chains under try propagate an absent Maybe at any level.
+				expr = c.checkMaybeAccessorChain(s.Expression)
 			}
 			if expr == nil {
 				return nil
@@ -13385,185 +13386,182 @@ func (c *Checker) buildComparison(leftExpr parse.Expression, op parse.Operator, 
 	}
 }
 
-// tryCheckAccessorChain checks if the expression is a property/method accessor chain with Maybes
-// and handles cascading None propagation via OptionMatch expressions
-func (c *Checker) tryCheckAccessorChain(parseExpr parse.Expression) Expression {
-	// Detect if this is a property/method accessor chain
-	if !c.isAccessorChain(parseExpr) {
-		// Not an accessor chain, check normally
-		return c.checkExpr(parseExpr)
-	}
-
-	// Try to build the accessor chain with Maybe handling
-	return c.checkAccessorChainWithMaybes(parseExpr)
-}
-
-// isAccessorChain checks if an expression is a property or method accessor (possibly chained)
-func (c *Checker) isAccessorChain(parseExpr parse.Expression) bool {
-	switch parseExpr.(type) {
-	case *parse.InstanceProperty, *parse.InstanceMethod:
-		return true
-	default:
-		return false
-	}
-}
-
-// checkAccessorChainWithMaybes checks an accessor chain and wraps Maybe property accesses in OptionMatch
-func (c *Checker) checkAccessorChainWithMaybes(parseExpr parse.Expression) Expression {
-	switch p := parseExpr.(type) {
+// checkMaybeAccessorChain enables contextual null-propagating field access for
+// try operands and match subjects. Ordinary Maybe field access remains invalid.
+func (c *Checker) checkMaybeAccessorChain(parseExpr parse.Expression) Expression {
+	switch expr := parseExpr.(type) {
 	case *parse.InstanceProperty:
-		// First check the target
-		target := c.checkAccessorChainWithMaybes(p.Target)
-		if target == nil {
-			return nil
-		}
-
-		// Try to get the property type
-		innerType := target.Type()
-		var isMaybe bool
-		if maybeType, ok := innerType.(*Maybe); ok {
-			innerType = maybeType.of
-			isMaybe = true
-		}
-
-		propType := innerType.get(p.Property.Name)
-		if propType == nil {
-			c.addDiagnostic(undefinedMemberDiagnostic{
-				Kind:     undefinedField,
-				Receiver: fmt.Sprint(innerType),
-				Member:   p.Property.Name,
-				Span:     c.sourceSpan(p.Property.GetLocation()),
-			}.build())
-			return nil
-		}
-
-		prop := &InstanceProperty{
-			Subject:  target,
-			Property: p.Property.Name,
-			_type:    propType,
-			Kind:     StructSubject,
-		}
-
-		// If the target is Maybe, wrap in OptionMatch
-		if isMaybe {
-			return c.wrapAccessorInMatch(target, prop, innerType, propType)
-		}
-
-		return prop
-
+		return c.checkAccessorChainWithMaybes(expr)
 	case *parse.InstanceMethod:
-		// Similar logic for methods
-		target := c.checkAccessorChainWithMaybes(p.Target)
-		if target == nil {
-			return nil
-		}
-
-		// Non-Maybe receivers do not need accessor-chain rewriting. Delegate to
-		// the canonical method checker so every receiver shape follows the same
-		// method resolution and mutability rules.
-		maybeType, isMaybe := target.Type().(*Maybe)
-		if !isMaybe {
-			return c.checkExpr(parseExpr)
-		}
-		innerType := maybeType.of
-
-		var sig Type
-		if structDef, ok := innerType.(*StructDef); ok {
-			if method, ok := c.structMethod(structDef, p.Method.Name); ok {
-				sig = method
-			}
-		} else {
-			sig = innerType.get(p.Method.Name)
-		}
-		if sig == nil {
-			// This accessor-chain path only speculatively verifies that a method
-			// exists before falling back to normal expression checking below.
-			// Pointer-receiver mutability/addressability is enforced by the normal
-			// InstanceMethod checker, not here.
-			if foreign, ok := innerType.(*ForeignType); ok && !foreign.Pointer {
-				pointerForeign := *foreign
-				pointerForeign.Pointer = true
-				pointerForeign.Methods = nil
-				pointerForeign.MethodsLoaded = false
-				if pointerSig := pointerForeign.get(p.Method.Name); pointerSig != nil {
-					sig = pointerSig
-				}
-			}
-		}
-		if sig == nil {
-			c.addDiagnostic(undefinedMemberDiagnostic{
-				Kind:     undefinedMethod,
-				Receiver: fmt.Sprint(innerType),
-				Member:   p.Method.Name,
-				Span:     c.sourceSpan(p.Method.GetLocation()),
-			}.build())
-			return nil
-		}
-
-		_, ok := sig.(*FunctionDef)
-		if !ok {
-			c.addNonCallable(fmt.Sprintf("%s.%s", innerType, p.Method.Name), p.Method.GetLocation(), nil, nonCallableSuffix)
-			return nil
-		}
-
-		// Full method-call handling for a Maybe target is not implemented here.
-		// For simplicity, check normally; use property access for cascading.
-		return c.checkExpr(parseExpr)
-
+		return c.checkMethodInMaybeAccessorContext(expr)
 	default:
-		// Not an accessor, check normally
 		return c.checkExpr(parseExpr)
 	}
 }
 
-// wrapAccessorInMatch wraps a property access on a Maybe type in an OptionMatch expression
-func (c *Checker) wrapAccessorInMatch(subject Expression, prop *InstanceProperty, innerType Type, propType Type) Expression {
-	// Generate a pattern variable name
-	patternVar := "_maybe_prop"
-
-	// Create a symbol for the pattern variable
-	patternSym := Symbol{
-		Name:    patternVar,
-		Type:    innerType,
-		mutable: false,
+// checkMethodInMaybeAccessorContext preserves native Maybe method calls while
+// keeping contained-value method dispatch out of the field-projection feature.
+// It also reports a missing contained method against the contained type, as the
+// existing try-chain diagnostics do.
+func (c *Checker) checkMethodInMaybeAccessorContext(method *parse.InstanceMethod) Expression {
+	target := c.checkAccessorChainWithMaybes(method.Target)
+	if target == nil {
+		return nil
+	}
+	target = observeMaybeReference(target)
+	maybeType, isMaybe := target.Type().(*Maybe)
+	if !isMaybe || maybeType.get(method.Method.Name) != nil {
+		return c.checkExpr(method)
 	}
 
-	// Create an identifier for the pattern variable with the symbol
-	patternIdent := &Identifier{Name: patternVar}
-	patternIdent.sym = patternSym
+	innerType := maybeType.of
+	var signature Type
+	if structType, ok := derefMutableRef(innerType).(*StructDef); ok {
+		if found, ok := c.structMethod(structType, method.Method.Name); ok {
+			signature = found
+		}
+	} else {
+		signature = innerType.get(method.Method.Name)
+	}
+	if signature == nil {
+		c.addDiagnostic(undefinedMemberDiagnostic{
+			Kind:     undefinedMethod,
+			Receiver: fmt.Sprint(innerType),
+			Member:   method.Method.Name,
+			Span:     c.sourceSpan(method.Method.GetLocation()),
+		}.build())
+		return nil
+	}
+	if _, ok := signature.(*FunctionDef); !ok {
+		c.addNonCallable(fmt.Sprintf("%s.%s", innerType, method.Method.Name), method.Method.GetLocation(), nil, nonCallableSuffix)
+		return nil
+	}
 
-	// The Some block accesses the property on the unwrapped value
-	// We create a new InstanceProperty with the pattern variable as subject
-	propOnUnwrapped := &InstanceProperty{
+	// Calling a method on the contained value is intentionally unsupported.
+	// Canonical checking retains the normal Maybe-member diagnostic.
+	return c.checkExpr(method)
+}
+
+func observeMaybeReference(expr Expression) Expression {
+	if expr == nil {
+		return nil
+	}
+	if reference, ok := expr.Type().(*MutableRef); ok {
+		if _, isMaybe := derefType(reference.Of()).(*Maybe); isMaybe {
+			return observeReference(expr)
+		}
+	}
+	return expr
+}
+
+// checkAccessorChainWithMaybes checks a property chain from the inside out.
+// Non-Maybe segments use ordinary member checking; a Maybe segment projects an
+// Ard struct field and represents propagation explicitly as an OptionMatch.
+func (c *Checker) checkAccessorChainWithMaybes(parseExpr parse.Expression) Expression {
+	property, ok := parseExpr.(*parse.InstanceProperty)
+	if !ok {
+		return c.checkExpr(parseExpr)
+	}
+
+	target := c.checkAccessorChainWithMaybes(property.Target)
+	if target == nil {
+		return nil
+	}
+	target = observeMaybeReference(target)
+	maybeType, isMaybe := target.Type().(*Maybe)
+	if !isMaybe {
+		// Avoid checking ordinary Ard field receivers twice while walking a
+		// chain. Other receiver kinds retain the canonical property checker.
+		if structType, ok := derefMutableRef(target.Type()).(*StructDef); ok {
+			fieldType, found := StructField(structType, property.Property.Name)
+			if !found {
+				c.addDiagnostic(undefinedMemberDiagnostic{
+					Kind:     undefinedField,
+					Receiver: fmt.Sprint(target),
+					Member:   property.Property.Name,
+					Span:     c.sourceSpan(property.Property.GetLocation()),
+				}.build())
+				return nil
+			}
+			field := &InstanceProperty{Subject: target, Property: property.Property.Name, _type: fieldType, Kind: StructSubject}
+			c.recordMember(property.Property.GetLocation(), TargetField, target.Type(), property.Property.Name, field)
+			return field
+		}
+		return c.checkExpr(parseExpr)
+	}
+
+	innerType := maybeType.of
+	structType, isStruct := derefMutableRef(innerType).(*StructDef)
+	if !isStruct {
+		c.addDiagnostic(undefinedMemberDiagnostic{
+			Kind:     undefinedField,
+			Receiver: fmt.Sprint(innerType),
+			Member:   property.Property.Name,
+			Span:     c.sourceSpan(property.Property.GetLocation()),
+		}.build())
+		return nil
+	}
+	fieldType, found := StructField(structType, property.Property.Name)
+	if !found {
+		c.recordCompletionType(property.Property.GetLocation(), structType)
+		c.addDiagnostic(undefinedMemberDiagnostic{
+			Kind:     undefinedField,
+			Receiver: fmt.Sprint(innerType),
+			Member:   property.Property.Name,
+			Span:     c.sourceSpan(property.Property.GetLocation()),
+		}.build())
+		return nil
+	}
+	fieldType = derefType(fieldType)
+	if _, unresolved := fieldType.(*TypeVar); unresolved {
+		// Resolution reached a real field even though access cannot decide its
+		// optionality. Use the required-field shape only for error recovery so
+		// surrounding match/try checking does not add cascading diagnostics.
+		projection := c.wrapAccessorInMatch(target, innerType, property.Property.Name, fieldType)
+		c.recordMember(property.Property.GetLocation(), TargetField, structType, property.Property.Name, projection)
+		c.addDiagnostic(maybeFieldGenericDiagnostic{
+			Field: property.Property.Name,
+			Type:  fieldType,
+			Span:  c.sourceSpan(property.Property.GetLocation()),
+		}.build())
+		return projection
+	}
+
+	projection := c.wrapAccessorInMatch(target, innerType, property.Property.Name, fieldType)
+	c.recordMember(property.Property.GetLocation(), TargetField, structType, property.Property.Name, projection)
+	return projection
+}
+
+// wrapAccessorInMatch projects one field through a Maybe. A required field is
+// wrapped in Some; an already-optional field is returned directly, flattening
+// exactly the propagation layer. Both branches have the same result type, and
+// the none branch never re-evaluates the receiver.
+func (c *Checker) wrapAccessorInMatch(subject Expression, innerType Type, property string, fieldType Type) Expression {
+	patternVar := "_maybe_prop"
+	patternIdent := &Identifier{Name: patternVar}
+	patternIdent.sym = Symbol{Name: patternVar, Type: innerType, mutable: false}
+
+	field := &InstanceProperty{
 		Subject:  patternIdent,
-		Property: prop.Property,
-		_type:    propType,
+		Property: property,
+		_type:    fieldType,
 		Kind:     StructSubject,
 	}
-
-	// Create the Some block containing the property access
-	someBlock := &Block{
-		Stmts: []Statement{
-			{Expr: propOnUnwrapped},
-		},
+	resultType := fieldType
+	var some Expression = field
+	if _, optional := fieldType.(*Maybe); !optional {
+		resultType = MakeMaybe(fieldType)
+		some = c.synthesizeMaybeSome(field, resultType)
 	}
 
-	// The None block just returns the subject (which is None)
-	// The subject's type is Maybe<innerType>, so it will propagate as None of type propType
-	noneBlock := &Block{
-		Stmts: []Statement{
-			{Expr: subject},
-		},
-	}
-
-	// Create and return the OptionMatch
 	return &OptionMatch{
 		Subject: subject,
 		Some: &Match{
 			Pattern: patternIdent,
-			Body:    someBlock,
+			Body:    &Block{Stmts: []Statement{{Expr: some}}},
 		},
-		None:      noneBlock,
-		InnerType: innerType,
+		None:       &Block{Stmts: []Statement{{Expr: c.synthesizeMaybeNone(resultType)}}},
+		InnerType:  innerType,
+		ResultType: resultType,
 	}
 }

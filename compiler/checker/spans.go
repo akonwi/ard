@@ -21,9 +21,10 @@ type SpanIndex struct {
 // resolution recorded through both checkExpr and checkExprAs (or through
 // re-checks) collapses to one entry. Reference counts (ByKey) depend on this.
 type spanDedupKey struct {
-	loc  parse.Location
-	node Expression
-	key  any
+	loc        parse.Location
+	node       Expression
+	key        any
+	completion bool
 }
 
 // SpanRecord ties a source span to its checked node and an optional identity
@@ -44,6 +45,10 @@ type SpanRecord struct {
 	// Target names an entity defined in another module, for cross-file
 	// navigation. Nil for local references.
 	Target *SpanTarget
+	// CompletionType is a recovery-only receiver type for incomplete member
+	// access. It lets completion enumerate valid members even when the
+	// placeholder itself cannot resolve to a checked expression.
+	CompletionType Type
 }
 
 // TargetKind classifies a cross-module reference target.
@@ -113,11 +118,22 @@ func (c *Checker) recordMember(loc parse.Location, kind TargetKind, subjType Typ
 	})
 }
 
+func (c *Checker) recordCompletionType(loc parse.Location, typ Type) {
+	if c.spans == nil || typ == nil {
+		return
+	}
+	c.spans.add(SpanRecord{Loc: loc, CompletionType: typ})
+}
+
+func spanRecordDedupKey(rec SpanRecord) spanDedupKey {
+	return spanDedupKey{loc: rec.Loc, node: rec.Node, key: rec.Key, completion: rec.CompletionType != nil}
+}
+
 func (i *SpanIndex) add(rec SpanRecord) {
 	if !locValid(rec.Loc) {
 		return
 	}
-	dedup := spanDedupKey{loc: rec.Loc, node: rec.Node, key: rec.Key}
+	dedup := spanRecordDedupKey(rec)
 	if i.seen == nil {
 		i.seen = map[spanDedupKey]bool{}
 	}
@@ -448,7 +464,7 @@ func (c *Checker) spansTruncate(mark int) {
 	}
 	if mark < len(c.spans.records) {
 		for _, rec := range c.spans.records[mark:] {
-			delete(c.spans.seen, spanDedupKey{loc: rec.Loc, node: rec.Node, key: rec.Key})
+			delete(c.spans.seen, spanRecordDedupKey(rec))
 		}
 		c.spans.records = c.spans.records[:mark]
 	}

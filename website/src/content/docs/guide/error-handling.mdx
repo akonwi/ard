@@ -188,13 +188,16 @@ fn process() Str {
 }
 ```
 
-## Nested Maybes
+## Nested Maybe Field Chains
 
-`try` can be applied to a chained property access. If any Maybe in the chain is empty, the catch block runs:
+A field chain through an Ard struct wrapped in `Maybe` can be used as a `try`
+operand or a `match` subject. If any Maybe in the chain is empty, the field-chain
+result is empty.
 
 ```ard
 struct Profile {
   name: Str?,
+  age: Int,
 }
 
 struct UserWithProfile {
@@ -206,5 +209,20 @@ fn profile_name(user: UserWithProfile?) Str {
   let name = try user.profile.name -> _ { "missing profile name" }
   name
 }
+
+fn profile_age(user: UserWithProfile?) Int {
+  match user.profile.age {
+    age => age,
+    _ => -1,
+  }
+}
 ```
+
+Accessing a required field such as `age: Int` produces `Int?`. An already-nullable
+field such as `name: Str?` stays `Str?`, rather than becoming `Str??`. The
+receiver is evaluated once.
+
+This null-propagating access is contextual: it applies to field chains directly
+consumed by `try` or `match`. Ordinary field access still requires an unwrapped
+struct value; use `map`, `and_then`, or an explicit `match` elsewhere.
 
