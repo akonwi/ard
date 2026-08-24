@@ -514,6 +514,12 @@ func observeReference(expr Expression) Expression {
 	switch t := expr.Type().(type) {
 	case *MutableRef:
 		return &DerefExpr{Operand: expr, Observational: true, _type: t.Of()}
+	case *ForeignType:
+		if t.Pointer {
+			if value := t.ValueForm(); value != nil {
+				return &DerefExpr{Operand: expr, Observational: true, _type: value}
+			}
+		}
 	}
 	return expr
 }
@@ -6833,6 +6839,9 @@ func (c *Checker) createPrimitiveMethodNode(subject Expression, methodName strin
 	case Bool:
 		return c.createBoolMethod(subject, methodName)
 	}
+	if _, ok := subjectType.(*scalarType); ok {
+		return c.createScalarMethod(subject, methodName)
+	}
 
 	// Check for collection types
 	if _, isList := subjectType.(*List); isList {
@@ -7108,6 +7117,17 @@ func (c *Checker) createIntMethod(subject Expression, methodName string) Express
 		Subject: subject,
 		Kind:    kind,
 	}
+}
+
+func (c *Checker) createScalarMethod(subject Expression, methodName string) Expression {
+	var kind ScalarMethodKind
+	switch methodName {
+	case "to_str":
+		kind = ScalarToStr
+	default:
+		panic(fmt.Sprintf("Unknown scalar method: %s", methodName))
+	}
+	return &ScalarMethod{Subject: observeReference(subject), Kind: kind}
 }
 
 func (c *Checker) createFloatMethod(subject Expression, methodName string) Expression {
@@ -8132,9 +8152,10 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 				// A foreign named scalar with no Go method of this name falls back
 				// to its underlying primitive's methods (e.g. EventTitle.to_str()).
 				// Real Go methods on the named type still win above.
-				if prim := foreignScalarPrimitive(subj.Type()); prim != nil {
+				observedSubj := observeReference(subj)
+				if prim := foreignScalarPrimitive(observedSubj.Type()); prim != nil {
 					if primSig := prim.get(s.Method.Name); primSig != nil {
-						subj = &ForeignScalarConvert{Value: subj, Target: prim}
+						subj = &ForeignScalarConvert{Value: observedSubj, Target: prim}
 						sig = primSig
 					}
 				}

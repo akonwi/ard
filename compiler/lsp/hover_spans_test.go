@@ -103,6 +103,15 @@ fn main() {
 	})
 }
 
+func TestSpanHoverSizedScalarToStr(t *testing.T) {
+	source := `fn main() {
+  let value: Int64 = 42
+  value.to_str()
+}
+`
+	requireSpanHover(t, source, 2, 9, "fn Int64.to_str() Str")
+}
+
 func TestSpanHoverGenericBuiltinMethodSignaturesUseSurfaceTypeParameters(t *testing.T) {
 	tests := []struct {
 		name   string

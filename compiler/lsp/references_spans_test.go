@@ -754,6 +754,24 @@ func TestSurrogatePairColumns(t *testing.T) {
 
 // TestCompletionBuiltinReceivers guards dot-completion on builtin types —
 // the most common completion class (was silently lost once during cutover).
+func TestCompletionForeignScalarPrimitiveFallback(t *testing.T) {
+	source := `use go:time
+
+fn main() {
+  let duration: time::Duration = time::Second
+  duration.
+}
+`
+	srv, docURI := spanServer(t, source, "")
+	items := srv.completionFromSpans(context.Background(), docURI, source, protocol.Position{Line: 4, Character: 11})
+	for _, item := range items {
+		if item.Label == "to_str" && strings.Contains(item.Detail, "Str") {
+			return
+		}
+	}
+	t.Fatalf("time.Duration primitive fallback completion missing: %#v", items)
+}
+
 func TestCompletionBuiltinReceivers(t *testing.T) {
 	source := `fn main() {
   let s = "hello"
@@ -809,6 +827,14 @@ func TestCompletionBuiltinReceivers(t *testing.T) {
 		got := labels(items)
 		if detail, ok := got["or"]; !ok || !strings.Contains(detail, "Int") {
 			t.Fatalf("Maybe or missing or unspecialized: %#v", items)
+		}
+	})
+	t.Run("sized scalar", func(t *testing.T) {
+		src := strings.Replace(source, "  s.\n", "  let value: Int64 = 1\n  value.\n", 1)
+		srv.cache.Update(docURI, 5, src)
+		items := srv.completionFromSpans(context.Background(), docURI, src, protocol.Position{Line: 6, Character: 8})
+		if detail, ok := labels(items)["to_str"]; !ok || !strings.Contains(detail, "Str") {
+			t.Fatalf("Int64 to_str missing or has wrong signature: %#v", items)
 		}
 	})
 }

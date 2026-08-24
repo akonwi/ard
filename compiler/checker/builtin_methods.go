@@ -13,12 +13,13 @@ var (
 		StrStartsWith: "starts_with", StrEndsWith: "ends_with",
 		StrToStr: "to_str", StrTrim: "trim",
 	}
-	byteMethodNames  = map[ByteMethodKind]string{ByteToInt: "to_int", ByteToStr: "to_str"}
-	runeMethodNames  = map[RuneMethodKind]string{RuneToInt: "to_int", RuneToStr: "to_str"}
-	intMethodNames   = map[IntMethodKind]string{IntToStr: "to_str", IntToF64: "to_f64"}
-	floatMethodNames = map[FloatMethodKind]string{FloatToStr: "to_str", FloatToInt: "to_int"}
-	boolMethodNames  = map[BoolMethodKind]string{BoolToStr: "to_str"}
-	listMethodNames  = map[ListMethodKind]string{
+	byteMethodNames   = map[ByteMethodKind]string{ByteToInt: "to_int", ByteToStr: "to_str"}
+	runeMethodNames   = map[RuneMethodKind]string{RuneToInt: "to_int", RuneToStr: "to_str"}
+	intMethodNames    = map[IntMethodKind]string{IntToStr: "to_str", IntToF64: "to_f64"}
+	scalarMethodNames = map[ScalarMethodKind]string{ScalarToStr: "to_str"}
+	floatMethodNames  = map[FloatMethodKind]string{FloatToStr: "to_str", FloatToInt: "to_int"}
+	boolMethodNames   = map[BoolMethodKind]string{BoolToStr: "to_str"}
+	listMethodNames   = map[ListMethodKind]string{
 		ListAt: "at", ListSlice: "slice", ListIsEmpty: "is_empty", ListToList: "to_list",
 		ListPrepend: "prepend", ListPush: "push", ListSet: "set",
 		ListSize: "size", ListSort: "sort", ListSwap: "swap",
@@ -55,6 +56,8 @@ func BuiltinMethodInfo(node Expression) (receiver Type, name string, ok bool) {
 		receiver, name = Rune, runeMethodNames[m.Kind]
 	case *IntMethod:
 		receiver, name = Int, intMethodNames[m.Kind]
+	case *ScalarMethod:
+		receiver, name = m.Subject.Type(), scalarMethodNames[m.Kind]
 	case *FloatMethod:
 		receiver, name = Float64, floatMethodNames[m.Kind]
 	case *BoolMethod:
@@ -81,8 +84,21 @@ func BuiltinMethodDef(receiver Type, name string) *FunctionDef {
 	if receiver == nil || name == "" {
 		return nil
 	}
+	// Real methods on a named Go scalar take precedence over primitive
+	// fallback methods, matching instance-method resolution in the checker.
 	if def, ok := receiver.get(name).(*FunctionDef); ok {
 		return def
+	}
+	fallback := derefMutableRef(receiver)
+	if foreign, ok := fallback.(*ForeignType); ok && foreign.Pointer {
+		if value := foreign.ValueForm(); value != nil {
+			fallback = value
+		}
+	}
+	if primitive := foreignScalarPrimitive(fallback); primitive != nil {
+		if def, ok := primitive.get(name).(*FunctionDef); ok {
+			return def
+		}
 	}
 	return nil
 }
@@ -126,7 +142,21 @@ func BuiltinMemberNames(receiver Type) []string {
 			collect(name)
 		}
 	default:
-		switch receiver.(type) {
+		switch receiver := receiver.(type) {
+		case *scalarType:
+			for _, name := range scalarMethodNames {
+				collect(name)
+			}
+		case *ForeignType:
+			fallback := receiver
+			if receiver.Pointer {
+				if value := receiver.ValueForm(); value != nil {
+					fallback = value
+				}
+			}
+			if primitive := foreignScalarPrimitive(fallback); primitive != nil {
+				collect(BuiltinMemberNames(primitive)...)
+			}
 		case *List:
 			collect(listMemberNames...)
 		case *Slice:

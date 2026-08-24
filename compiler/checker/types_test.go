@@ -2,6 +2,23 @@ package checker
 
 import "testing"
 
+func TestSizedScalarBuiltinToStrSurface(t *testing.T) {
+	scalars := []Type{Int8, Int16, Int32, Int64, Uint, Uint8, Uint16, Uint32, Uint64, Uintptr, Float32}
+	for _, scalar := range scalars {
+		t.Run(scalar.String(), func(t *testing.T) {
+			names := BuiltinMemberNames(scalar)
+			if len(names) != 1 || names[0] != "to_str" {
+				t.Fatalf("BuiltinMemberNames(%s) = %v, want [to_str]", scalar, names)
+			}
+			node := &ScalarMethod{Subject: &TypedIntLiteral{Typed: scalar}, Kind: ScalarToStr}
+			receiver, name, ok := BuiltinMethodInfo(node)
+			if !ok || receiver != scalar || name != "to_str" {
+				t.Fatalf("BuiltinMethodInfo(%s) = (%v, %q, %v), want (%s, to_str, true)", scalar, receiver, name, ok, scalar)
+			}
+		})
+	}
+}
+
 func TestGenericBindingRejectsStructuralOccursCycle(t *testing.T) {
 	root := makeScope(nil)
 	scope := root.createGenericScope([]string{"T"})
