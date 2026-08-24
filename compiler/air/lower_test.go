@@ -548,6 +548,46 @@ func TestLowerTemplateString(t *testing.T) {
 		t.Fatalf("script result = %#v, want ExprToStr inside concat tree", script.Body.Result)
 	}
 }
+
+func TestLowerSizedScalarToStr(t *testing.T) {
+	scalars := []string{
+		"Int8", "Int16", "Int32", "Int64",
+		"Uint", "Uint8", "Uint16", "Uint32", "Uint64", "Uintptr",
+		"Float32",
+	}
+	var source strings.Builder
+	for _, scalar := range scalars {
+		name := "render_" + strings.ToLower(scalar)
+		source.WriteString("fn " + name + "(value: " + scalar + ") Str {\n  value.to_str()\n}\n")
+	}
+
+	program := lowerSource(t, source.String())
+	for _, scalar := range scalars {
+		name := "render_" + strings.ToLower(scalar)
+		render := findFunction(t, program, name)
+		if render.Body.Result == nil || render.Body.Result.Kind != ExprToStr {
+			t.Fatalf("%s result = %#v, want ExprToStr", name, render.Body.Result)
+		}
+	}
+}
+
+func TestLowerSizedScalarToStrObservesMutableReference(t *testing.T) {
+	program := lowerSource(t, `
+		fn render(value: mut Int64) Str {
+			value.to_str()
+		}
+	`)
+
+	render := findFunction(t, program, "render")
+	result := render.Body.Result
+	if result == nil || result.Kind != ExprToStr || result.Target == nil {
+		t.Fatalf("render result = %#v, want ExprToStr with target", result)
+	}
+	if result.Target.Kind != ExprDeref || !result.Target.Observational {
+		t.Fatalf("to_str target = %#v, want observational ExprDeref", result.Target)
+	}
+}
+
 func TestLowerWhileLoop(t *testing.T) {
 	program := lowerSource(t, `
 		mut count = 0

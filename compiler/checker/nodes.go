@@ -470,6 +470,26 @@ func (m *IntMethod) Type() Type {
 	}
 }
 
+type ScalarMethodKind uint8
+
+const (
+	ScalarToStr ScalarMethodKind = iota
+)
+
+type ScalarMethod struct {
+	Subject Expression
+	Kind    ScalarMethodKind
+}
+
+func (m *ScalarMethod) Type() Type {
+	switch m.Kind {
+	case ScalarToStr:
+		return Str
+	default:
+		return Void
+	}
+}
+
 type FloatMethodKind uint8
 
 const (

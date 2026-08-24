@@ -1739,6 +1739,15 @@ impl Board {
 	assertSignature(t, help, "fn mut [Str].set(index: Int, value: Str) Bool", 1)
 }
 
+func TestSignatureHelpSizedScalarToStr(t *testing.T) {
+	help, _ := requireSignatureHelpAtMarker(t, `fn main() {
+  let value: Int64 = 42
+  value.to_str(|)
+}
+`, "test.ard")
+	assertSignature(t, help, "fn Int64.to_str() Str", 0)
+}
+
 func TestSignatureHelpGenericBuiltinMethodsUsesSurfaceTypeParameters(t *testing.T) {
 	tests := []struct {
 		name   string
