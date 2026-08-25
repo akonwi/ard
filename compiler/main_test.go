@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/akonwi/ard/air"
 	"github.com/akonwi/ard/checker"
@@ -376,6 +377,110 @@ helper = { git = "https://github.com/example/helper.git", commit = "deadbeef" }
 			t.Fatalf("stderr missing useful error:\n%s", stderr)
 		}
 	})
+}
+
+func TestTestCommandReportsPipelineProfile(t *testing.T) {
+	projectDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"profiletest\"\nard = \">= 0.27.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	testPath := filepath.Join(projectDir, "profile_test.ard")
+	if err := os.WriteFile(testPath, []byte(`use ard/testing
+
+test fn passes() Void!Str {
+  testing::pass()
+}
+
+test fn fails() Void!Str {
+  testing::fail("nope")
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(pipelineProfileEnvVar, "1")
+
+	t.Run("success", func(t *testing.T) {
+		stdout, stderr, err := runCLIForTest(t, "test", projectDir, "--filter", "passes")
+		if err != nil {
+			t.Fatalf("test command failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+		}
+		if !strings.Contains(stdout, "1 passed; 0 failed; 0 panicked") {
+			t.Fatalf("stdout missing test summary:\n%s", stdout)
+		}
+		assertTestPipelineProfile(t, stderr)
+	})
+
+	t.Run("test failure", func(t *testing.T) {
+		stdout, stderr, err := runCLIForTest(t, "test", projectDir, "--filter", "fails")
+		if err == nil {
+			t.Fatal("test command succeeded; expected failure")
+		}
+		if !strings.Contains(stdout, "0 passed; 1 failed; 0 panicked") {
+			t.Fatalf("stdout missing test summary:\n%s", stdout)
+		}
+		if !strings.Contains(stderr, "error: tests failed") {
+			t.Fatalf("stderr missing test failure:\n%s", stderr)
+		}
+		assertTestPipelineProfile(t, stderr)
+	})
+}
+
+func assertTestPipelineProfile(t *testing.T, stderr string) {
+	t.Helper()
+	expectedStages := []string{
+		"test.discover_files",
+		"test.init_resolver",
+		"test.verify_dependencies",
+		"frontend.init_go_resolver",
+		"frontend.parse_discovered_files",
+		"frontend.collect_go_imports",
+		"frontend.load_go_packages",
+		"frontend.check_discovered_modules",
+		"air.lower_and_validate",
+		"air.revalidate",
+		"test.resolve_cases",
+		"go.prepare_workspace",
+		"go.validate_lower_render",
+		"go.write_sources",
+		"go.copy_ffi",
+		"go.write_runtime",
+		"go.write_module",
+		"go.render_write_test_runner",
+		"go.compile_link",
+		"test.execute",
+		"test.read_decode_results",
+		"test.report",
+	}
+	const header = "[ard pipeline profile: test go]"
+	start := strings.Index(stderr, header)
+	if start < 0 {
+		t.Fatalf("stderr missing profile header:\n%s", stderr)
+	}
+	lines := strings.Split(strings.TrimSpace(stderr[start:]), "\n")
+	if got, want := len(lines), len(expectedStages)+2; got != want {
+		t.Fatalf("profile line count = %d, want %d:\n%s", got, want, stderr[start:])
+	}
+	if lines[0] != header {
+		t.Fatalf("profile header = %q, want %q", lines[0], header)
+	}
+	if !strings.HasPrefix(lines[1], "total=") {
+		t.Fatalf("profile missing total duration: %q", lines[1])
+	}
+	if _, err := time.ParseDuration(strings.TrimPrefix(lines[1], "total=")); err != nil {
+		t.Fatalf("invalid total duration %q: %v", lines[1], err)
+	}
+	for i, expected := range expectedStages {
+		name, duration, ok := strings.Cut(lines[i+2], "=")
+		if !ok {
+			t.Fatalf("malformed profile stage line %q", lines[i+2])
+		}
+		if name != expected {
+			t.Fatalf("profile stage %d = %q, want %q\n%s", i, name, expected, stderr[start:])
+		}
+		if _, err := time.ParseDuration(duration); err != nil {
+			t.Fatalf("invalid duration for %s: %q: %v", name, duration, err)
+		}
+	}
 }
 
 func TestParseRunArgs(t *testing.T) {

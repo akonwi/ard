@@ -1,21 +1,157 @@
 package checker
 
 import (
+	"bytes"
 	"go/token"
 	"go/types"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 
 	"golang.org/x/tools/go/packages"
 )
 
-func TestGoPackagesResolverDoesNotRequestUnusedTypesInfo(t *testing.T) {
+func TestGoPackagesResolverLoadsExportDataWithoutUnusedTypeChecking(t *testing.T) {
 	resolver := NewGoPackagesResolver(t.TempDir(), nil)
 	mode := resolver.loadConfig().Mode
-	if mode&packages.NeedTypes == 0 {
-		t.Fatal("load mode does not request package type information")
+	if mode&packages.NeedExportFile == 0 {
+		t.Fatal("load mode does not request compiler export data")
+	}
+	if mode&packages.NeedTypes != 0 {
+		t.Fatal("load mode asks go/packages to duplicate export-data type loading")
 	}
 	if mode&packages.NeedTypesInfo != 0 {
 		t.Fatal("load mode requests unused expression type information")
+	}
+}
+
+func TestExternalGoPackagesDriverDetection(t *testing.T) {
+	t.Setenv("GOPACKAGESDRIVER", "/process/driver")
+	if !externalGoPackagesDriverConfigured(&packages.Config{}) {
+		t.Fatal("process GOPACKAGESDRIVER was ignored")
+	}
+	if externalGoPackagesDriverConfigured(&packages.Config{Env: append(os.Environ(), "GOPACKAGESDRIVER=off")}) {
+		t.Fatal("config GOPACKAGESDRIVER=off did not override process driver")
+	}
+
+	t.Setenv("GOPACKAGESDRIVER", "off")
+	if externalGoPackagesDriverConfigured(&packages.Config{}) {
+		t.Fatal("process GOPACKAGESDRIVER=off did not select direct go list")
+	}
+	configEnv := append(os.Environ(), "GOPACKAGESDRIVER=/config/driver")
+	if !externalGoPackagesDriverConfigured(&packages.Config{Env: configEnv}) {
+		t.Fatal("config GOPACKAGESDRIVER did not override process off")
+	}
+}
+
+func TestExportDataRootsReuseDependencyTypeIdentity(t *testing.T) {
+	loaded, err := loadGoListPackages(&packages.Config{Dir: t.TempDir()}, []string{"net/http", "context"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	byPath := map[string]*packages.Package{}
+	for _, pkg := range loaded {
+		byPath[pkg.PkgPath] = pkg
+	}
+	httpPkg := byPath["net/http"]
+	contextPkg := byPath["context"]
+	if httpPkg == nil || contextPkg == nil {
+		t.Fatalf("loaded packages = %v", byPath)
+	}
+	if errorsByPath := loadPackageExportData([]*packages.Package{httpPkg, contextPkg}); len(errorsByPath) > 0 {
+		t.Fatalf("load export data: %v", errorsByPath)
+	}
+	newRequest, ok := httpPkg.Types.Scope().Lookup("NewRequestWithContext").(*types.Func)
+	if !ok {
+		t.Fatal("net/http.NewRequestWithContext not found")
+	}
+	signature := newRequest.Type().(*types.Signature)
+	contextType := signature.Params().At(0).Type().(*types.Named)
+	if contextType.Obj().Pkg() != contextPkg.Types {
+		t.Fatal("explicit context root did not reuse net/http's imported context package")
+	}
+}
+
+func TestExportDataFallbackTriggersForMissingAndInvalidArchives(t *testing.T) {
+	missing := &packages.Package{PkgPath: "example.com/missing"}
+	errorsByPath := loadPackageExportData([]*packages.Package{missing})
+	if errorsByPath[missing.PkgPath] == nil {
+		t.Fatal("missing export data did not request source fallback")
+	}
+
+	invalidPath := filepath.Join(t.TempDir(), "invalid.a")
+	if err := os.WriteFile(invalidPath, []byte("not Go export data"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	invalid := &packages.Package{PkgPath: "example.com/invalid", ExportFile: invalidPath}
+	errorsByPath = loadPackageExportData([]*packages.Package{invalid})
+	if errorsByPath[invalid.PkgPath] == nil {
+		t.Fatal("invalid export data did not request source fallback")
+	}
+}
+
+func TestGoListCgoFilesPreserveLocalFFIBoundaryValidation(t *testing.T) {
+	root := t.TempDir()
+	outsideDir := filepath.Join(root, "internal")
+	resolver := &GoPackagesResolver{ProjectRoot: root, modulePath: "example.com/app"}
+	listed := goListPackage{Dir: outsideDir, CgoFiles: []string{"cgo.go"}}
+	pkg := &packages.Package{GoFiles: goListSourceFiles(listed)}
+
+	if err := resolver.validateLocalFFIBoundary("example.com/app/internal", pkg); err == nil {
+		t.Fatal("cgo-only project package outside ffi was accepted")
+	}
+}
+
+func TestWriteCachedGoModuleFileIsAtomicForConcurrentWriters(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "ard.mod")
+	content := []byte("module example.com/app\n\ngo 1.27\n")
+
+	const writers = 16
+	var wg sync.WaitGroup
+	errors := make(chan error, writers)
+	for range writers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errors <- writeCachedGoModuleFile(path, content)
+		}()
+	}
+	wg.Wait()
+	close(errors)
+	for err := range errors {
+		if err != nil {
+			t.Fatalf("concurrent cache write: %v", err)
+		}
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, content) {
+		t.Fatalf("cached content = %q, want %q", got, content)
+	}
+	entries, err := os.ReadDir(filepath.Dir(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), ".ard-go-mod-") {
+			t.Fatalf("temporary cache file was not cleaned up: %s", entry.Name())
+		}
+	}
+
+	replacement := []byte("module example.com/replaced\n\ngo 1.27\n")
+	if err := writeCachedGoModuleFile(path, replacement); err != nil {
+		t.Fatalf("replace cached content: %v", err)
+	}
+	got, err = os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, replacement) {
+		t.Fatalf("replaced content = %q, want %q", got, replacement)
 	}
 }
 

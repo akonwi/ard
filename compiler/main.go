@@ -1073,13 +1073,20 @@ func runTests(inputPath, filter string, failFast bool) bool {
 }
 
 func runGoTests(inputPath, filter string, failFast bool) bool {
-	files, err := discoverTestFiles(inputPath)
-	if err != nil {
+	profile := newPipelineProfile("test go")
+	defer profile.Print()
+
+	var files []string
+	if err := profile.Time("test.discover_files", func() error {
+		var discoverErr error
+		files, discoverErr = discoverTestFiles(inputPath)
+		return discoverErr
+	}); err != nil {
 		reportCLIError(os.Stderr, err)
 		return false
 	}
 
-	loadedModules, projectInfo, err := loadGoTestModules(inputPath, files, filter)
+	loadedModules, projectInfo, err := loadGoTestModules(profile, inputPath, files, filter)
 	if err != nil {
 		reportCLIError(os.Stderr, err)
 		return false
@@ -1099,111 +1106,165 @@ func runGoTests(inputPath, filter string, failFast bool) bool {
 		return true
 	}
 
-	program, err := air.LowerModulesWithTests(modules)
-	if err != nil {
+	var program *air.Program
+	if err := profile.Time("air.lower_and_validate", func() error {
+		var lowerErr error
+		program, lowerErr = air.LowerModulesWithTests(modules)
+		return lowerErr
+	}); err != nil {
 		reportCLIError(os.Stderr, err)
 		return false
 	}
-	if err := air.Validate(program); err != nil {
+	if err := profile.Time("air.revalidate", func() error {
+		return air.Validate(program)
+	}); err != nil {
 		reportCLIError(os.Stderr, err)
 		return false
 	}
-	goTests, err := goTestCasesForDiscovered(program, tests)
-	if err != nil {
+	var goTests []gotarget.TestCase
+	if err := profile.Time("test.resolve_cases", func() error {
+		var resolveErr error
+		goTests, resolveErr = goTestCasesForDiscovered(program, tests)
+		return resolveErr
+	}); err != nil {
 		reportCLIError(os.Stderr, err)
 		return false
 	}
-	goOutcomes, err := gotarget.RunTests(program, []string{"ard", "test", inputPath}, goTests, failFast, projectInfo)
+	var stageObserver gotarget.StageObserver
+	if profile != nil {
+		stageObserver = profile.Observe
+	}
+	goOutcomes, err := gotarget.RunTestsWithStageObserver(program, []string{"ard", "test", inputPath}, goTests, failFast, stageObserver, projectInfo)
 	if err != nil {
 		reportCLIError(os.Stderr, err)
 		return false
 	}
 
-	outcomes := make([]testOutcome, 0, len(goOutcomes))
-	byName := map[string]discoveredTest{}
-	for _, test := range tests {
-		byName[test.displayName()] = test
-	}
-	for _, goOutcome := range goOutcomes {
-		test, ok := byName[goOutcome.DisplayName]
-		if !ok {
-			test = discoveredTest{displayPath: strings.TrimSuffix(filepath.Clean(inputPath), filepath.Ext(inputPath)), name: goOutcome.Name}
+	testsPassed := true
+	if err := profile.Time("test.report", func() error {
+		outcomes := make([]testOutcome, 0, len(goOutcomes))
+		byName := map[string]discoveredTest{}
+		for _, test := range tests {
+			byName[test.displayName()] = test
 		}
-		outcome := testOutcome{test: test, message: goOutcome.Message}
-		switch goOutcome.Status {
-		case "pass":
-			outcome.status = testPass
-		case "fail":
-			outcome.status = testFail
-		default:
-			outcome.status = testPanic
+		for _, goOutcome := range goOutcomes {
+			test, ok := byName[goOutcome.DisplayName]
+			if !ok {
+				test = discoveredTest{displayPath: strings.TrimSuffix(filepath.Clean(inputPath), filepath.Ext(inputPath)), name: goOutcome.Name}
+			}
+			outcome := testOutcome{test: test, message: goOutcome.Message}
+			switch goOutcome.Status {
+			case "pass":
+				outcome.status = testPass
+			case "fail":
+				outcome.status = testFail
+			default:
+				outcome.status = testPanic
+			}
+			outcomes = append(outcomes, outcome)
+			reportTestOutcome(outcome)
+			if failFast && outcome.status != testPass {
+				reportTestSummary(outcomes)
+				reportCLIError(os.Stderr, fmt.Errorf("tests failed"))
+				testsPassed = false
+				return nil
+			}
 		}
-		outcomes = append(outcomes, outcome)
-		reportTestOutcome(outcome)
-		if failFast && outcome.status != testPass {
-			reportTestSummary(outcomes)
-			reportCLIError(os.Stderr, fmt.Errorf("tests failed"))
-			return false
-		}
-	}
 
-	reportTestSummary(outcomes)
-	for _, outcome := range outcomes {
-		if outcome.status != testPass {
-			reportCLIError(os.Stderr, fmt.Errorf("tests failed"))
-			return false
+		reportTestSummary(outcomes)
+		for _, outcome := range outcomes {
+			if outcome.status != testPass {
+				reportCLIError(os.Stderr, fmt.Errorf("tests failed"))
+				testsPassed = false
+				return nil
+			}
 		}
+		return nil
+	}); err != nil {
+		reportCLIError(os.Stderr, err)
+		return false
 	}
-	return true
+	return testsPassed
 }
 
-func loadGoTestModules(inputPath string, files []string, filter string) ([]loadedGoTestModule, *checker.ProjectInfo, error) {
+func loadGoTestModules(profile *pipelineProfile, inputPath string, files []string, filter string) ([]loadedGoTestModule, *checker.ProjectInfo, error) {
 	startDir := inputPath
 	if info, err := os.Stat(inputPath); err != nil || !info.IsDir() {
 		startDir = filepath.Dir(inputPath)
 	}
-	resolver, err := checker.NewModuleResolver(startDir)
-	if err != nil {
+	var resolver *checker.ModuleResolver
+	if err := profile.Time("test.init_resolver", func() error {
+		var resolverErr error
+		resolver, resolverErr = checker.NewModuleResolver(startDir)
+		return resolverErr
+	}); err != nil {
 		return nil, nil, err
 	}
-	if err := checker.VerifyDependencies(startDir); err != nil {
+	if err := profile.Time("test.verify_dependencies", func() error {
+		return checker.VerifyDependencies(startDir)
+	}); err != nil {
 		return nil, nil, err
 	}
 	projectInfo := resolver.GetProjectInfo()
-	goResolver := checker.NewGoPackagesResolver(projectInfo.RootPath, projectInfo.Go.BuildTags)
-	goResolver.DependencyModuleRoots = checker.DependencyGoModuleRoots(projectInfo)
+	var goResolver *checker.GoPackagesResolver
+	if err := profile.Time("frontend.init_go_resolver", func() error {
+		goResolver = checker.NewGoPackagesResolver(projectInfo.RootPath, projectInfo.Go.BuildTags)
+		goResolver.DependencyModuleRoots = checker.DependencyGoModuleRoots(projectInfo)
+		return nil
+	}); err != nil {
+		return nil, projectInfo, err
+	}
 	// Load every test module's Go imports in one go/packages session so all
 	// Go types share a single go/types universe (ADR 0044).
 	scanEntries := make([]checker.GoImportScanEntry, 0, len(files))
 	parsedFiles := make(map[string]*parse.Program, len(files))
-	for _, path := range files {
-		sourceCode, err := os.ReadFile(path)
-		if err != nil {
-			return nil, projectInfo, fmt.Errorf("error reading file %s - %v", path, err)
-		}
-		result := parse.Parse(sourceCode, path)
-		if len(result.Errors) > 0 {
-			if err := diagnostics.RenderParseErrors(os.Stderr, path, result.Errors); err != nil {
-				return nil, projectInfo, fmt.Errorf("render parse diagnostics: %w", err)
+	if err := profile.Time("frontend.parse_discovered_files", func() error {
+		for _, path := range files {
+			sourceCode, err := os.ReadFile(path)
+			if err != nil {
+				return fmt.Errorf("error reading file %s - %v", path, err)
 			}
-			return nil, projectInfo, diagnostics.AlreadyReported(fmt.Errorf("parse errors"))
+			result := parse.Parse(sourceCode, path)
+			if len(result.Errors) > 0 {
+				if err := diagnostics.RenderParseErrors(os.Stderr, path, result.Errors); err != nil {
+					return fmt.Errorf("render parse diagnostics: %w", err)
+				}
+				return diagnostics.AlreadyReported(fmt.Errorf("parse errors"))
+			}
+			parsedFiles[path] = result.Program
+			scanEntries = append(scanEntries, checker.GoImportScanEntry{Program: result.Program, ModulePath: goTestModulePath(projectInfo, path)})
 		}
-		parsedFiles[path] = result.Program
-		scanEntries = append(scanEntries, checker.GoImportScanEntry{Program: result.Program, ModulePath: goTestModulePath(projectInfo, path)})
+		return nil
+	}); err != nil {
+		return nil, projectInfo, err
 	}
-	if err := goResolver.Prime(checker.CollectGoImportPaths(resolver, scanEntries...)); err != nil {
+	var goImportPaths []string
+	if err := profile.Time("frontend.collect_go_imports", func() error {
+		goImportPaths = checker.CollectGoImportPaths(resolver, scanEntries...)
+		return nil
+	}); err != nil {
+		return nil, projectInfo, err
+	}
+	if err := profile.Time("frontend.load_go_packages", func() error {
+		return goResolver.Prime(goImportPaths)
+	}); err != nil {
 		return nil, projectInfo, fmt.Errorf("error loading Go packages: %w", err)
 	}
 	loaded := make([]loadedGoTestModule, 0, len(files))
-	for _, path := range files {
-		module, err := loadGoTestModule(path, parsedFiles[path], resolver, projectInfo, goResolver)
-		if err != nil {
-			return nil, projectInfo, err
+	if err := profile.Time("frontend.check_discovered_modules", func() error {
+		for _, path := range files {
+			module, err := loadGoTestModule(path, parsedFiles[path], resolver, projectInfo, goResolver)
+			if err != nil {
+				return err
+			}
+			loaded = append(loaded, loadedGoTestModule{
+				module: module,
+				tests:  collectTests(module, path, filter),
+			})
 		}
-		loaded = append(loaded, loadedGoTestModule{
-			module: module,
-			tests:  collectTests(module, path, filter),
-		})
+		return nil
+	}); err != nil {
+		return nil, projectInfo, err
 	}
 	return loaded, projectInfo, nil
 }
@@ -1500,8 +1561,15 @@ func (p *pipelineProfile) Time(name string, fn func() error) error {
 	}
 	started := time.Now()
 	err := fn()
-	p.stages = append(p.stages, pipelineProfileStage{name: name, dur: time.Since(started)})
+	p.Observe(name, time.Since(started), err)
 	return err
+}
+
+func (p *pipelineProfile) Observe(name string, duration time.Duration, _ error) {
+	if p == nil {
+		return
+	}
+	p.stages = append(p.stages, pipelineProfileStage{name: name, dur: duration})
 }
 
 func (p *pipelineProfile) Print() {

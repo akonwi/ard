@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/akonwi/ard/air"
@@ -38,6 +39,18 @@ type TestOutcome struct {
 	DisplayName string `json:"displayName"`
 	Status      string `json:"status"`
 	Message     string `json:"message,omitempty"`
+}
+
+type StageObserver func(name string, duration time.Duration, err error)
+
+func observeStage(observer StageObserver, name string, fn func() error) error {
+	if observer == nil {
+		return fn()
+	}
+	started := time.Now()
+	err := fn()
+	observer(name, time.Since(started), err)
+	return err
 }
 
 type artifactPurpose string
@@ -115,20 +128,32 @@ func BuildProgram(program *air.Program, outputPath string, projectInfo ...*check
 }
 
 func RunTests(program *air.Program, args []string, tests []TestCase, failFast bool, projectInfo ...*checker.ProjectInfo) ([]TestOutcome, error) {
+	return RunTestsWithStageObserver(program, args, tests, failFast, nil, projectInfo...)
+}
+
+func RunTestsWithStageObserver(program *air.Program, args []string, tests []TestCase, failFast bool, observer StageObserver, projectInfo ...*checker.ProjectInfo) ([]TestOutcome, error) {
 	info := optionalProjectInfo(projectInfo)
 	pathHint := artifactPathHint(info, inputPathFromCLIArgs(args))
-	workspaceDir, err := artifactWorkspace(pathHint, artifactPurposeTest)
-	if err != nil {
+	var workspaceDir string
+	if err := observeStage(observer, "go.prepare_workspace", func() error {
+		var workspaceErr error
+		workspaceDir, workspaceErr = artifactWorkspace(pathHint, artifactPurposeTest)
+		return workspaceErr
+	}); err != nil {
 		return nil, err
 	}
-	if err := writeProgram(workspaceDir, program, Options{PackageName: "main", ProjectInfo: info, SuppressMain: true, IncludeTests: true}); err != nil {
+	if err := writeProgramWithStageObserver(workspaceDir, program, Options{PackageName: "main", ProjectInfo: info, SuppressMain: true, IncludeTests: true}, observer); err != nil {
 		return nil, err
 	}
-	if err := os.WriteFile(filepath.Join(workspaceDir, "ard_tests.go"), []byte(renderTestRunner(program, tests, failFast, info)), 0o644); err != nil {
+	if err := observeStage(observer, "go.render_write_test_runner", func() error {
+		return os.WriteFile(filepath.Join(workspaceDir, "ard_tests.go"), []byte(renderTestRunner(program, tests, failFast, info)), 0o644)
+	}); err != nil {
 		return nil, err
 	}
 	binaryPath := filepath.Join(workspaceDir, "ard-tests")
-	if err := buildGeneratedProgram(workspaceDir, binaryPath, goBuildTags(info)...); err != nil {
+	if err := observeStage(observer, "go.compile_link", func() error {
+		return buildGeneratedProgram(workspaceDir, binaryPath, goBuildTags(info)...)
+	}); err != nil {
 		return nil, err
 	}
 	resultPath := filepath.Join(workspaceDir, "test-results.json")
@@ -137,15 +162,17 @@ func RunTests(program *air.Program, args []string, tests []TestCase, failFast bo
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
 	cmd.Env = append(os.Environ(), "ARD_TEST_RESULTS="+resultPath)
-	if err := cmd.Run(); err != nil {
-		return nil, err
-	}
-	data, err := os.ReadFile(resultPath)
-	if err != nil {
+	if err := observeStage(observer, "test.execute", cmd.Run); err != nil {
 		return nil, err
 	}
 	var outcomes []TestOutcome
-	if err := json.Unmarshal(data, &outcomes); err != nil {
+	if err := observeStage(observer, "test.read_decode_results", func() error {
+		data, err := os.ReadFile(resultPath)
+		if err != nil {
+			return err
+		}
+		return json.Unmarshal(data, &outcomes)
+	}); err != nil {
 		return nil, err
 	}
 	return outcomes, nil
@@ -354,33 +381,52 @@ func renderTestRunner(program *air.Program, tests []TestCase, failFast bool, pro
 }
 
 func writeProgram(dir string, program *air.Program, options Options) error {
-	sources, err := GenerateSources(program, options)
-	if err != nil {
+	return writeProgramWithStageObserver(dir, program, options, nil)
+}
+
+func writeProgramWithStageObserver(dir string, program *air.Program, options Options, observer StageObserver) error {
+	var sources map[string][]byte
+	if err := observeStage(observer, "go.validate_lower_render", func() error {
+		var generateErr error
+		sources, generateErr = GenerateSources(program, options)
+		return generateErr
+	}); err != nil {
 		return err
 	}
-	for name, source := range sources {
-		path := filepath.Join(dir, name)
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := observeStage(observer, "go.write_sources", func() error {
+		for name, source := range sources {
+			path := filepath.Join(dir, name)
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				return err
+			}
+			if err := os.WriteFile(path, source, 0o644); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	if err := observeStage(observer, "go.copy_ffi", func() error {
+		return copyProjectFFIDir(dir, options.ProjectInfo)
+	}); err != nil {
+		return err
+	}
+	if err := observeStage(observer, "go.write_runtime", func() error {
+		return writeGeneratedRuntimePackage(dir)
+	}); err != nil {
+		return err
+	}
+	if err := observeStage(observer, "go.write_module", func() error {
+		goMod, err := generatedGoMod(dir, program, options.ProjectInfo)
+		if err != nil {
 			return err
 		}
-		if err := os.WriteFile(path, source, 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(goMod), 0o644); err != nil {
 			return err
 		}
-	}
-	if err := copyProjectFFIDir(dir, options.ProjectInfo); err != nil {
-		return err
-	}
-	if err := writeGeneratedRuntimePackage(dir); err != nil {
-		return err
-	}
-	goMod, err := generatedGoMod(dir, program, options.ProjectInfo)
-	if err != nil {
-		return err
-	}
-	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(goMod), 0o644); err != nil {
-		return err
-	}
-	if err := mergeGoSum(dir, program, options.ProjectInfo); err != nil {
+		return mergeGoSum(dir, program, options.ProjectInfo)
+	}); err != nil {
 		return err
 	}
 	return nil
