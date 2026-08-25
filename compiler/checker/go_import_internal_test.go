@@ -6,6 +6,7 @@ import (
 	"go/types"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -53,6 +54,64 @@ func TestGoListArgsDoNotInjectBuildParallelism(t *testing.T) {
 		if name == "p" {
 			t.Fatalf("go list args override build parallelism: %v", args)
 		}
+	}
+}
+
+func TestOrderGoListRootsByDependency(t *testing.T) {
+	tests := []struct {
+		name       string
+		loaded     []string
+		imports    map[string][]string
+		errorPaths map[string]bool
+		want       []string
+	}{
+		{
+			name:    "chain",
+			loaded:  []string{"leaf", "middle", "root"},
+			imports: map[string][]string{"root": {"middle"}, "middle": {"leaf"}},
+			want:    []string{"root", "middle", "leaf"},
+		},
+		{
+			name:    "shared dependency",
+			loaded:  []string{"shared", "left", "right"},
+			imports: map[string][]string{"left": {"shared"}, "right": {"shared"}},
+			want:    []string{"left", "right", "shared"},
+		},
+		{
+			name:    "independent roots preserve input order",
+			loaded:  []string{"second", "first", "third"},
+			imports: map[string][]string{"second": {"outside"}, "first": {"first"}},
+			want:    []string{"second", "first", "third"},
+		},
+		{
+			name:       "cycle and errored root remain deterministic",
+			loaded:     []string{"cycle-b", "broken", "cycle-a"},
+			imports:    map[string][]string{"cycle-a": {"cycle-b"}, "cycle-b": {"cycle-a"}},
+			errorPaths: map[string]bool{"broken": true},
+			want:       []string{"broken", "cycle-b", "cycle-a"},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			loaded := make([]*packages.Package, 0, len(test.loaded))
+			for _, path := range test.loaded {
+				pkg := &packages.Package{PkgPath: path}
+				if test.errorPaths[path] {
+					pkg.Errors = []packages.Error{{Msg: "load failed", Kind: packages.ListError}}
+				}
+				loaded = append(loaded, pkg)
+			}
+
+			ordered := orderGoListRootsByDependency(loaded, test.imports)
+			got := make([]string, 0, len(ordered))
+			for _, pkg := range ordered {
+				got = append(got, pkg.PkgPath)
+			}
+			if !slices.Equal(got, test.want) {
+				t.Fatalf("ordered roots = %v, want %v", got, test.want)
+			}
+		})
 	}
 }
 
