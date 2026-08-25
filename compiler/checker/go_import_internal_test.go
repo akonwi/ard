@@ -46,6 +46,16 @@ func TestExternalGoPackagesDriverDetection(t *testing.T) {
 	}
 }
 
+func TestGoListArgsDoNotInjectBuildParallelism(t *testing.T) {
+	args := goListArgs(&packages.Config{}, []string{"fmt"})
+	for _, arg := range args {
+		name := strings.TrimLeft(strings.SplitN(arg, "=", 2)[0], "-")
+		if name == "p" {
+			t.Fatalf("go list args override build parallelism: %v", args)
+		}
+	}
+}
+
 func TestExportDataRootsReuseDependencyTypeIdentity(t *testing.T) {
 	loaded, err := loadGoListPackages(&packages.Config{Dir: t.TempDir()}, []string{"net/http", "context"})
 	if err != nil {

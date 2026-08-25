@@ -14,7 +14,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 
@@ -276,9 +275,16 @@ func environmentValue(env []string, name string) (string, bool) {
 	return value, found
 }
 
-func loadGoListPackages(cfg *packages.Config, paths []string) ([]*packages.Package, error) {
+func goListArgs(cfg *packages.Config, paths []string) []string {
 	fields := "ImportPath,Error,DepsErrors,Dir,GoFiles,CgoFiles,Imports,Export"
 	args := []string{"list", "-e", "-json=" + fields, "-compiled=false", "-test=false", "-export=true", "-deps=false", "-find=false", "-buildvcs=false", "-pgo=off"}
+	args = append(args, cfg.BuildFlags...)
+	args = append(args, "--")
+	return append(args, paths...)
+}
+
+func loadGoListPackages(cfg *packages.Config, paths []string) ([]*packages.Package, error) {
+	args := goListArgs(cfg, paths)
 	hostProcs := runtime.GOMAXPROCS(0)
 	effectiveEnv := cfg.Env
 	if effectiveEnv == nil {
@@ -286,15 +292,6 @@ func loadGoListPackages(cfg *packages.Config, paths []string) ([]*packages.Packa
 	}
 	_, explicitProcs := environmentValue(effectiveEnv, "GOMAXPROCS")
 	capRuntime := hostProcs > 4 && !explicitProcs
-	if capRuntime && !goFlagsSetBuildParallelism(effectiveEnv) {
-		// Keep cmd/go's action-level parallelism at the host default. GOMAXPROCS
-		// below caps scheduler overhead inside each process, while -p preserves
-		// cold-cache compilation throughput across independent packages.
-		args = append(args, "-p="+strconv.Itoa(hostProcs))
-	}
-	args = append(args, cfg.BuildFlags...)
-	args = append(args, "--")
-	args = append(args, paths...)
 	ctx := cfg.Context
 	if ctx == nil {
 		ctx = context.Background()
@@ -402,16 +399,6 @@ func orderGoListRootsByDependency(loaded []*packages.Package, importsByPath map[
 		}
 	}
 	return ordered
-}
-
-func goFlagsSetBuildParallelism(env []string) bool {
-	goFlags, _ := environmentValue(env, "GOFLAGS")
-	for _, flag := range strings.Fields(goFlags) {
-		if flag == "-p" || strings.HasPrefix(flag, "-p=") {
-			return true
-		}
-	}
-	return false
 }
 
 func goListSourceFiles(listed goListPackage) []string {
