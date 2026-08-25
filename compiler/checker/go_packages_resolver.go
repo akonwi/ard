@@ -121,6 +121,18 @@ func (r *GoPackagesResolver) Prime(paths []string) error {
 	}
 	defer cleanup()
 	loaded, err := loadGoPackages(cfg, pending)
+	if needsWritableModuleRetry(loaded, err) {
+		retryConfig, retryCleanup, available, retryErr := r.loadWritableConfigWithDependencies()
+		if retryErr != nil {
+			r.recordFailure(pending, retryErr)
+			return nil
+		}
+		if available {
+			defer retryCleanup()
+			cfg = retryConfig
+			loaded, err = loadGoPackages(cfg, pending)
+		}
+	}
 	if err != nil {
 		r.recordFailure(pending, err)
 		return nil
@@ -185,6 +197,27 @@ func (r *GoPackagesResolver) recordFailure(paths []string, err error) {
 	for _, path := range paths {
 		r.cache[path] = goPackageResolveResult{err: err}
 	}
+}
+
+func needsWritableModuleRetry(loaded []*packages.Package, loadErr error) bool {
+	if loadErr != nil && isReadonlyModuleCompletionError(loadErr.Error()) {
+		return true
+	}
+	for _, pkg := range loaded {
+		for _, pkgErr := range pkg.Errors {
+			if isReadonlyModuleCompletionError(pkgErr.Msg) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func isReadonlyModuleCompletionError(message string) bool {
+	return strings.Contains(message, "missing go.sum entry") ||
+		strings.Contains(message, "updates to go.mod needed") ||
+		strings.Contains(message, "updates to go.sum needed") ||
+		strings.Contains(message, "import lookup disabled by -mod=readonly")
 }
 
 type goListError struct {
@@ -450,9 +483,9 @@ func (r *GoPackagesResolver) loadConfigWithDependencies() (*packages.Config, fun
 	if overlay := r.dependencyReplaceOverlay(); overlay != nil {
 		goModPath := filepath.Join(r.ProjectRoot, "go.mod")
 		modData := overlay[goModPath]
-		sumData, err := os.ReadFile(filepath.Join(r.ProjectRoot, "go.sum"))
-		if err != nil && !os.IsNotExist(err) {
-			return cfg, func() {}, fmt.Errorf("read dependency Go checksums: %w", err)
+		sumData, err := r.projectGoSum()
+		if err != nil {
+			return cfg, func() {}, err
 		}
 		modPath, cleanup, err := prepareDependencyGoModfile(modData, sumData)
 		if err != nil {
@@ -510,6 +543,59 @@ func (r *GoPackagesResolver) loadConfigWithDependencies() (*packages.Config, fun
 	}
 	cfg.Env = append(cfg.Env, "GOWORK="+workPath)
 	return cfg, cleanup, nil
+}
+
+func (r *GoPackagesResolver) loadWritableConfigWithDependencies() (*packages.Config, func(), bool, error) {
+	cfg := r.loadConfig()
+	overlay := r.dependencyReplaceOverlay()
+	if overlay == nil {
+		return cfg, func() {}, false, nil
+	}
+	modData := overlay[filepath.Join(r.ProjectRoot, "go.mod")]
+	sumData, err := r.projectGoSum()
+	if err != nil {
+		return cfg, func() {}, false, err
+	}
+	modPath, cleanup, err := prepareWritableDependencyGoModfile(modData, sumData)
+	if err != nil {
+		return cfg, func() {}, false, err
+	}
+	cfg.BuildFlags = append(cfg.BuildFlags, "-modfile="+modPath, "-mod=mod")
+	return cfg, cleanup, true, nil
+}
+
+// projectGoSum seeds synthetic module files only with checksums trusted by the
+// consumer. A dependency's go.sum is not a trust root for the main module;
+// missing entries are verified and added only in the private writable retry.
+func (r *GoPackagesResolver) projectGoSum() ([]byte, error) {
+	data, err := os.ReadFile(filepath.Join(r.ProjectRoot, "go.sum"))
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read project Go checksums: %w", err)
+	}
+	return data, nil
+}
+
+func prepareWritableDependencyGoModfile(modData []byte, sumData []byte) (string, func(), error) {
+	workspaceDir, err := os.MkdirTemp("", "ard-go-mod-retry-")
+	if err != nil {
+		return "", func() {}, fmt.Errorf("create writable dependency Go module files: %w", err)
+	}
+	cleanup := func() { _ = os.RemoveAll(workspaceDir) }
+	modPath := filepath.Join(workspaceDir, "ard.mod")
+	if err := os.WriteFile(modPath, modData, 0o600); err != nil {
+		cleanup()
+		return "", func() {}, fmt.Errorf("write writable dependency Go module file: %w", err)
+	}
+	if len(sumData) > 0 {
+		if err := os.WriteFile(filepath.Join(workspaceDir, "ard.sum"), sumData, 0o600); err != nil {
+			cleanup()
+			return "", func() {}, fmt.Errorf("write writable dependency Go checksum file: %w", err)
+		}
+	}
+	return modPath, cleanup, nil
 }
 
 // dependencyReplaceOverlay synthesizes a go.mod overlay that redirects each

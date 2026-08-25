@@ -104,6 +104,85 @@ func TestGoListCgoFilesPreserveLocalFFIBoundaryValidation(t *testing.T) {
 	}
 }
 
+func TestReadonlyModuleCompletionErrorClassification(t *testing.T) {
+	tests := []struct {
+		name    string
+		message string
+		want    bool
+	}{
+		{name: "missing sum", message: "missing go.sum entry for module providing package example.com/dep", want: true},
+		{name: "mod update", message: "go: updates to go.mod needed; to update it: go mod tidy", want: true},
+		{name: "sum update", message: "updates to go.sum needed, disabled by -mod=readonly", want: true},
+		{name: "readonly lookup", message: "cannot find module providing package example.com/dep: import lookup disabled by -mod=readonly", want: true},
+		{name: "checksum mismatch", message: "SECURITY ERROR: checksum mismatch", want: false},
+		{name: "source error", message: "broken.go: expected declaration", want: false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := isReadonlyModuleCompletionError(test.message); got != test.want {
+				t.Fatalf("isReadonlyModuleCompletionError(%q) = %v, want %v", test.message, got, test.want)
+			}
+		})
+	}
+}
+
+func TestDependencyModfilesTrustOnlyProjectChecksums(t *testing.T) {
+	cacheRoot := t.TempDir()
+	t.Setenv("HOME", cacheRoot)
+	t.Setenv("XDG_CACHE_HOME", cacheRoot)
+	t.Setenv("LOCALAPPDATA", cacheRoot)
+	root := t.TempDir()
+	dependency := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/app\n\ngo 1.27\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rootSum := "example.com/root v1.0.0 h1:root\n"
+	if err := os.WriteFile(filepath.Join(root, "go.sum"), []byte(rootSum), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dependency, "go.mod"), []byte("module example.com/dep\n\ngo 1.27\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dependency, "go.sum"), []byte("example.com/untrusted v1.0.0 h1:untrusted\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	resolver := NewGoPackagesResolver(root, nil)
+	resolver.DependencyModuleRoots = map[string]string{"example.com/dep": dependency}
+	readonlyConfig, readonlyCleanup, err := resolver.loadConfigWithDependencies()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer readonlyCleanup()
+	writableConfig, writableCleanup, available, err := resolver.loadWritableConfigWithDependencies()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer writableCleanup()
+	if !available {
+		t.Fatal("writable dependency module retry is unavailable")
+	}
+
+	for name, cfg := range map[string]*packages.Config{"readonly": readonlyConfig, "writable": writableConfig} {
+		var modPath string
+		for _, flag := range cfg.BuildFlags {
+			if strings.HasPrefix(flag, "-modfile=") {
+				modPath = strings.TrimPrefix(flag, "-modfile=")
+			}
+		}
+		if modPath == "" {
+			t.Fatalf("%s dependency config has no -modfile", name)
+		}
+		got, err := os.ReadFile(strings.TrimSuffix(modPath, ".mod") + ".sum")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(got) != rootSum {
+			t.Fatalf("%s go.sum = %q, want only project checksums %q", name, got, rootSum)
+		}
+	}
+}
+
 func TestWriteCachedGoModuleFileIsAtomicForConcurrentWriters(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "ard.mod")
 	content := []byte("module example.com/app\n\ngo 1.27\n")

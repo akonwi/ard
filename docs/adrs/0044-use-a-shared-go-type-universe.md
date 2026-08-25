@@ -57,7 +57,11 @@ locked/path dependency graph while allowing Go's normal export cache to remain
 valid. The synthesized module inputs are cached by content solely to give the Go
 command a stable modfile path; package metadata itself is never persisted, so Go
 remains responsible for source, build-tag, toolchain, and dependency
-invalidation.
+invalidation. If the consumer's checksums are not yet complete for a replaced
+dependency, the resolver discards the readonly attempt and retries the entire
+package batch with private writable module files. Go may complete those temporary
+files through normal checksum verification, but neither project/dependency files
+nor the immutable shared cache are modified.
 
 `use go:` is currently the only mechanism that introduces a Go package path. That single-mechanism property is what makes the pre-scan a complete oracle; any future feature that introduces Go paths outside `use` statements must feed the pre-scan.
 
