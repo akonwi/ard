@@ -6,6 +6,30 @@ import (
 	"github.com/akonwi/ard/checker"
 )
 
+func validGoStructTagKey(key string) bool {
+	prefixed := false
+	for index, char := range key {
+		letter := char >= 'a' && char <= 'z' || char >= 'A' && char <= 'Z' || char == '_'
+		if index == 0 {
+			if char == '$' {
+				prefixed = true
+				continue
+			}
+			if !letter {
+				return false
+			}
+			continue
+		}
+		if prefixed && index == 1 && !letter {
+			return false
+		}
+		if !letter && (char < '0' || char > '9') {
+			return false
+		}
+	}
+	return key != "" && key != "$"
+}
+
 func Validate(program *Program) error {
 	if program == nil {
 		return fmt.Errorf("AIR program is nil")
@@ -100,6 +124,19 @@ func validateTypeInfo(program *Program, typ TypeInfo) error {
 			}
 			if !validTypeID(program, field.Type) {
 				return fmt.Errorf("type %s field %s has invalid type %d", typ.Name, field.Name, field.Type)
+			}
+			goTagKeys := make(map[string]bool, len(field.GoTags))
+			for _, tag := range field.GoTags {
+				if !validGoStructTagKey(tag.Key) {
+					return fmt.Errorf("type %s field %s has invalid Go struct tag key %q", typ.Name, field.Name, tag.Key)
+				}
+				if tag.Key == "json" {
+					return fmt.Errorf("type %s field %s has reserved Go struct tag key json", typ.Name, field.Name)
+				}
+				if goTagKeys[tag.Key] {
+					return fmt.Errorf("type %s field %s has duplicate Go struct tag key %q", typ.Name, field.Name, tag.Key)
+				}
+				goTagKeys[tag.Key] = true
 			}
 			if field.JSON.OmitNone && program.Types[field.Type-1].Kind != TypeMaybe {
 				return fmt.Errorf("type %s field %s omits none but is not Maybe", typ.Name, field.Name)

@@ -20,13 +20,72 @@ func (c *Checker) addAttributeDiagnostic(code DiagnosticCode, message, title str
 	c.addDiagnostic(diagnostic)
 }
 
-func (c *Checker) checkStructFieldAttributes(field parse.StructField, fieldType Type) (JSONFieldOptions, parse.Location, bool, bool) {
-	diagnosticCount := len(c.diagnostics)
+func attributeDisplayName(attribute parse.Attribute) string {
+	if attribute.Namespace != nil {
+		return "#" + attribute.Namespace.Name + ":" + attribute.Name.Name
+	}
+	return "#" + attribute.Name.Name
+}
+
+func (c *Checker) checkGoFieldTagAttribute(attribute parse.Attribute, seen map[string]parse.Location) (GoFieldTag, bool) {
+	name := attributeDisplayName(attribute)
+	key := attribute.Name.Name
+	if original, duplicate := seen[key]; duplicate {
+		c.addAttributeDiagnostic(
+			DiagnosticCodeDuplicateAttribute,
+			"Duplicate attribute: "+name,
+			"Duplicate attribute",
+			attribute.Name.GetLocation(),
+			DiagnosticLabel{Span: c.sourceSpan(original), Message: "first " + name + " attribute"},
+		)
+		return GoFieldTag{}, false
+	}
+	seen[key] = attribute.Name.GetLocation()
+	if key == "json" {
+		c.addAttributeDiagnostic(
+			DiagnosticCodeInvalidAttributeArgument,
+			"#go:json is reserved; use #json",
+			"Reserved Go struct tag",
+			attribute.Name.GetLocation(),
+		)
+		return GoFieldTag{}, false
+	}
+	if len(attribute.Arguments) != 1 || attribute.Arguments[0].Name != "" || attribute.Arguments[0].Value.Kind != parse.AttributeString {
+		c.addAttributeDiagnostic(
+			DiagnosticCodeInvalidAttributeArgument,
+			name+" requires exactly one positional string argument",
+			"Invalid Go struct tag",
+			attribute.GetLocation(),
+		)
+		return GoFieldTag{}, false
+	}
+	return GoFieldTag{Key: key, Value: attribute.Arguments[0].Value.Text}, true
+}
+
+func (c *Checker) checkStructFieldAttributes(field parse.StructField, fieldType Type) (JSONFieldOptions, parse.Location, bool, bool, []GoFieldTag) {
 	options := JSONFieldOptions{}
 	jsonNameLocation := field.Name.GetLocation()
 	seenJSON := false
+	validJSON := true
 	var jsonLocation parse.Location
+	seenGoTags := make(map[string]parse.Location)
+	goTags := make([]GoFieldTag, 0)
 	for _, attribute := range field.Attributes {
+		if attribute.Namespace != nil {
+			if attribute.Namespace.Name != "go" {
+				c.addAttributeDiagnostic(
+					DiagnosticCodeUnknownAttribute,
+					"Unknown attribute: "+attributeDisplayName(attribute),
+					"Unknown attribute",
+					attribute.Namespace.GetLocation(),
+				)
+				continue
+			}
+			if tag, valid := c.checkGoFieldTagAttribute(attribute, seenGoTags); valid {
+				goTags = append(goTags, tag)
+			}
+			continue
+		}
 		if attribute.Name.Name != "json" {
 			c.addAttributeDiagnostic(
 				DiagnosticCodeUnknownAttribute,
@@ -36,6 +95,8 @@ func (c *Checker) checkStructFieldAttributes(field parse.StructField, fieldType 
 			)
 			continue
 		}
+
+		jsonDiagnosticCount := len(c.diagnostics)
 		if seenJSON {
 			c.addAttributeDiagnostic(
 				DiagnosticCodeDuplicateAttribute,
@@ -44,6 +105,7 @@ func (c *Checker) checkStructFieldAttributes(field parse.StructField, fieldType 
 				attribute.Name.GetLocation(),
 				DiagnosticLabel{Span: c.sourceSpan(jsonLocation), Message: "first #json attribute"},
 			)
+			validJSON = false
 			continue
 		}
 		seenJSON = true
@@ -55,6 +117,7 @@ func (c *Checker) checkStructFieldAttributes(field parse.StructField, fieldType 
 				"Missing #json argument",
 				attribute.GetLocation(),
 			)
+			validJSON = false
 			continue
 		}
 
@@ -153,7 +216,12 @@ func (c *Checker) checkStructFieldAttributes(field parse.StructField, fieldType 
 				)
 			}
 		}
+		if len(c.diagnostics) != jsonDiagnosticCount {
+			validJSON = false
+		}
 	}
+
+	jsonDiagnosticCount := len(c.diagnostics)
 	if options.OmitNone && !IsMaybe(fieldType) {
 		c.addAttributeDiagnostic(
 			DiagnosticCodeInvalidAttributeArgument,
@@ -170,7 +238,10 @@ func (c *Checker) checkStructFieldAttributes(field parse.StructField, fieldType 
 			jsonLocation,
 		)
 	}
-	return options, jsonNameLocation, seenJSON, len(c.diagnostics) == diagnosticCount
+	if len(c.diagnostics) != jsonDiagnosticCount {
+		validJSON = false
+	}
+	return options, jsonNameLocation, seenJSON, validJSON, goTags
 }
 
 // JSONFieldNameRepresentable reports whether Go 1.27's JSON struct-tag

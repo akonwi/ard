@@ -61,6 +61,33 @@ fn home_dir() Str!Error {
 
 Project-local Go packages exposed to Ard should live under `ffi/`. Keep these packages small and use them to translate Go-specific shapes into Ard-facing APIs when direct imports are not enough.
 
+## Go Struct Tags on Ard Structs
+
+Reflection-based Go libraries often configure fields through struct tags. Attach an opaque tag to an Ard-owned struct field with `#go:<key>("<value>")`:
+
+```ard
+struct QMDConfig {
+  #go:yaml("global_context,omitempty")
+  global_context: Str,
+
+  #go:validate("required")
+  name: Str,
+}
+```
+
+The generated Go declaration composes these entries with Ard's automatic JSON tags:
+
+```go
+type QMDConfig struct {
+    GlobalContext string `json:"global_context" yaml:"global_context,omitempty"`
+    Name          string `json:"name" validate:"required"`
+}
+```
+
+The key uses Ard identifier syntax. The attribute accepts exactly one positional static string, and different keys may be stacked on one field. A key may appear only once. `#go:json` is reserved; use [`#json`](/guide/structs#json-field-metadata) to change JSON behavior.
+
+Tag values are deliberately opaque. Ard safely quotes and emits them but does not validate options such as YAML `flow`, validator `required`, or ORM directives. The consuming Go library owns those semantics and errors. These tags do not add encoding behavior for Ard runtime types; use a project FFI adapter when a library needs representation changes in addition to field metadata.
+
 ## Direct Go Types
 
 Exported Go named types can appear directly in Ard signatures and fields.

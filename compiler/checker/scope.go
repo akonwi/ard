@@ -977,6 +977,7 @@ func replaceGeneric(t Type, genericName string, concreteType Type) Type {
 			ModulePath:       t.ModulePath,
 			Fields:           newFields,
 			JSONFields:       t.JSONFields,
+			GoFieldTags:      t.GoFieldTags,
 			Self:             t.Self,
 			Traits:           t.Traits,
 			GenericParams:    append([]string(nil), t.GenericParams...),
@@ -1056,6 +1057,16 @@ func StructFieldJSON(def *StructDef, name string) (JSONFieldOptions, bool) {
 	}
 	options, ok := definition.JSONFields[name]
 	return options, ok
+}
+
+// StructFieldGoTags returns opaque Go struct tags from the canonical struct
+// declaration. Generic applications inherit their declaration's metadata.
+func StructFieldGoTags(def *StructDef, name string) []GoFieldTag {
+	definition := canonicalStructDefinition(def)
+	if definition == nil || definition.GoFieldTags == nil {
+		return nil
+	}
+	return definition.GoFieldTags[name]
 }
 
 func canonicalStructDefinition(def *StructDef) *StructDef {
@@ -1444,6 +1455,7 @@ func copyStructWithTypeVarMapSeen(structDef *StructDef, typeVarMap map[string]*T
 		ModulePath:       structDef.ModulePath,
 		Fields:           newFields,
 		JSONFields:       structDef.JSONFields,
+		GoFieldTags:      structDef.GoFieldTags,
 		Self:             structDef.Self,
 		Traits:           structDef.Traits,
 		GenericParams:    append([]string(nil), structDef.GenericParams...),

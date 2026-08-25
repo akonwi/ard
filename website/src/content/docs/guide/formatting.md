@@ -32,16 +32,17 @@ ard format --check <file-or-dir>
 
 ## Attributes
 
-Struct-field attributes use `#name(...)`, appear one per line immediately before their field, and wrap their arguments when needed:
+Struct-field attributes use `#name(...)` or namespaced `#namespace:name(...)`, appear one per line immediately before their field, and wrap their arguments when needed:
 
 ```ard
 struct User {
   #json(name: "displayName", omit: none)
+  #go:yaml("display_name,omitempty")
   display_name: Str?,
 }
 ```
 
-Argument-free marker attributes omit parentheses. Attributes are currently accepted only on struct fields.
+Argument-free marker attributes omit parentheses. Attributes are currently accepted only on Ard-owned struct fields.
 
 ## Struct Literals
 

@@ -1645,11 +1645,19 @@ type JSONFieldOptions struct {
 	Skip     bool
 }
 
+// GoFieldTag is opaque Go-backend metadata attached to an Ard-owned struct
+// field. Key and Value are kept separate so the backend can quote values safely.
+type GoFieldTag struct {
+	Key   string
+	Value string
+}
+
 type StructDef struct {
 	Name          string
 	ModulePath    string
 	Fields        map[string]Type
 	JSONFields    map[string]JSONFieldOptions
+	GoFieldTags   map[string][]GoFieldTag
 	Self          string
 	Traits        []*Trait
 	GenericParams []string

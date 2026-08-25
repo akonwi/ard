@@ -424,10 +424,11 @@ type StructField struct {
 }
 
 // Attribute is compile-time metadata attached to a struct field. Attribute
-// syntax is intentionally represented generically even though #json is the
-// only registered attribute today.
+// syntax is represented generically; namespaced attributes make target-specific
+// metadata explicit without assigning it target-neutral semantics.
 type Attribute struct {
 	Location
+	Namespace *Identifier
 	Name      Identifier
 	Arguments []AttributeArgument
 }

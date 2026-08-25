@@ -27,6 +27,23 @@ func TestFormatStructFieldAttributes(t *testing.T) {
 	}
 }
 
+func TestFormatNamespacedGoFieldTags(t *testing.T) {
+	input := `struct Config { #go:yaml( "global_context,omitempty" ) #go:validate("required") global_context:Str }`
+	want := `struct Config {
+  #go:yaml("global_context,omitempty")
+  #go:validate("required")
+  global_context: Str,
+}
+`
+	got, err := Format([]byte(input), "test.ard")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != want {
+		t.Fatalf("format mismatch:\ngot:\n%s\nwant:\n%s", got, want)
+	}
+}
+
 func TestFormatCommentBetweenAttributeAndField(t *testing.T) {
 	input := `struct User {
   #json(name: "displayName")

@@ -58,6 +58,8 @@
 (extern_binding_entry target: (extern_binding_target) @variable.builtin)
 (enum_variant name: (identifier) @constant)
 (attribute "#" @punctuation.special)
+(attribute_namespace_separator) @punctuation.delimiter
+(attribute namespace: (identifier) @attribute)
 (attribute name: (identifier) @attribute)
 (attribute_named_argument name: (identifier) @property)
 

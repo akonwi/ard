@@ -7000,6 +7000,9 @@ func lowerStructFieldInfo(def *checker.StructDef, name string, typeID TypeID, in
 			Skip:     options.Skip,
 		}
 	}
+	for _, tag := range checker.StructFieldGoTags(def, name) {
+		field.GoTags = append(field.GoTags, GoFieldTag{Key: tag.Key, Value: tag.Value})
+	}
 	return field
 }
 

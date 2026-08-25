@@ -8,6 +8,45 @@ import (
 	"github.com/akonwi/ard/parse"
 )
 
+func TestSerializeProgramPreservesGoFieldTags(t *testing.T) {
+	result := parse.Parse([]byte(`
+		struct Config {
+			#go:yaml("global_context,omitempty")
+			value: Str,
+		}
+	`), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	c := checker.New("main.ard", result.Program, nil)
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
+	}
+	program, err := air.Lower(c.Module())
+	if err != nil {
+		t.Fatalf("lower AIR: %v", err)
+	}
+	data, err := air.SerializeProgram(program)
+	if err != nil {
+		t.Fatalf("serialize AIR: %v", err)
+	}
+	decoded, err := air.DeserializeProgram(data)
+	if err != nil {
+		t.Fatalf("deserialize AIR: %v", err)
+	}
+	for _, typ := range decoded.Types {
+		if typ.Kind == air.TypeStruct && typ.Name == "Config" {
+			tags := typ.Fields[0].GoTags
+			if len(tags) != 1 || tags[0].Key != "yaml" || tags[0].Value != "global_context,omitempty" {
+				t.Fatalf("decoded Go field tags = %#v", tags)
+			}
+			return
+		}
+	}
+	t.Fatal("decoded Config type missing")
+}
+
 func TestSerializeProgram(t *testing.T) {
 	result := parse.Parse([]byte(`
 		fn main() Int {

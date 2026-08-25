@@ -350,6 +350,7 @@ func (c *Checker) populateStructDefinition(def *StructDef, decl *parse.StructDef
 	def.ModulePath = c.typeOwnerPath()
 	def.Fields = make(map[string]Type)
 	def.JSONFields = nil
+	def.GoFieldTags = nil
 	def.GenericParams = declaredGenericParams
 	def.DeclaredGenerics = len(decl.TypeParams) > 0
 	def.Private = decl.Private
@@ -377,12 +378,18 @@ func (c *Checker) populateStructDefinition(def *StructDef, decl *parse.StructDef
 		fieldLocations[field.Name.Name] = field.Name.GetLocation()
 		def.Fields[field.Name.Name] = fieldType
 		resolvedFields++
-		jsonOptions, jsonNameLocation, hasJSON, validJSON := c.checkStructFieldAttributes(field, fieldType)
+		jsonOptions, jsonNameLocation, hasJSON, validJSON, goTags := c.checkStructFieldAttributes(field, fieldType)
 		if hasJSON && validJSON {
 			if def.JSONFields == nil {
 				def.JSONFields = make(map[string]JSONFieldOptions)
 			}
 			def.JSONFields[field.Name.Name] = jsonOptions
+		}
+		if len(goTags) > 0 {
+			if def.GoFieldTags == nil {
+				def.GoFieldTags = make(map[string][]GoFieldTag)
+			}
+			def.GoFieldTags[field.Name.Name] = goTags
 		}
 		if !validJSON {
 			hasInvalidJSONMetadata = true

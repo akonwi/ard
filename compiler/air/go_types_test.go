@@ -9,6 +9,8 @@ func TestGenerateGoStructDeclarations(t *testing.T) {
 	program := lowerSource(t, `
 		struct User {
 			id: Int,
+			#json(name: "displayName")
+			#go:yaml("display_name")
 			name: Str,
 			email: Str?,
 			scores: [Int],
@@ -25,12 +27,12 @@ func TestGenerateGoStructDeclarations(t *testing.T) {
 	}
 
 	want := `type User struct {
-	Attrs  map[string]string
-	Email  ardrt.Maybe[string]
-	Id     int
-	Name   string
-	Scores []int
-	Status ardrt.Result[int, string]
+	Attrs  map[string]string         ` + "`json:\"attrs\"`" + `
+	Email  ardrt.Maybe[string]       ` + "`json:\"email\"`" + `
+	Id     int                       ` + "`json:\"id\"`" + `
+	Name   string                    ` + "`json:\"displayName\" yaml:\"display_name\"`" + `
+	Scores []int                     ` + "`json:\"scores\"`" + `
+	Status ardrt.Result[int, string] ` + "`json:\"status\"`" + `
 }
 `
 	if got := string(gotBytes); got != want {

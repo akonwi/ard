@@ -98,7 +98,23 @@ struct User {
 
 `name` and `omit` may be combined. `skip` cannot be combined with either. JSON names must be unique within a struct. Names must also be representable by Go 1.27 JSON struct tags: they cannot be empty, equal `"-"`, or contain commas, backslashes, quotes, apostrophes, or backticks. Other UTF-8 names, including spaces and Unicode, are supported.
 
-Attributes are currently supported only on struct fields, and `#json` is the only available attribute.
+Attributes are currently supported only on Ard-owned struct fields. In addition to semantic `#json` metadata, fields may carry [opaque Go struct tags](/advanced/go-interop#go-struct-tags-on-ard-structs) for direct interop.
+
+## Go Struct Tags
+
+Use `#go:<key>("<value>")` when a reflection-based Go library requires a struct tag:
+
+```ard
+struct Config {
+  #go:yaml("global_context,omitempty")
+  global_context: Str,
+
+  #go:validate("required")
+  name: Str,
+}
+```
+
+The value is passed to Go unchanged; Ard does not interpret library-specific options. Each key may appear once per field, and `#go:json` is reserved—use `#json` for JSON behavior. Different Go tags and `#json` may be combined on one field.
 
 ## Methods
 
