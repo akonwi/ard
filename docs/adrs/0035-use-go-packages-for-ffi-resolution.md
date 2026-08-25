@@ -8,6 +8,8 @@ Accepted
 
 Ard's direct Go interop currently resolves Go package metadata well enough for simple standard-library imports such as `use go:fmt`. The next FFI milestone is resolving packages the same way `go build` would for a real Ard project: third-party modules, local shim packages, `replace` directives, workspaces, and configured build tags.
 
+ADR 0068 supersedes the workspace portion of that original goal. User-provided Go workspaces are not part of Ard's supported project model; Go interop is scoped to the Ard project's standalone module.
+
 The old `go/importer`-style resolution is not sufficient for module-aware interop. It does not reliably model the user's Go module graph, local project packages, replace directives, or build constraints.
 
 ## Decision
@@ -146,4 +148,5 @@ Ard should only validate basic syntax for individual tag entries and reject malf
 
 - `docs/adrs/0031-go-backend-lowering-contract.md`
 - `docs/adrs/0034-reset-go-backend-and-ffi-boundary.md`
+- `docs/adrs/0068-do-not-support-user-go-workspaces.md`
 - `docs/language-philosophy.md`

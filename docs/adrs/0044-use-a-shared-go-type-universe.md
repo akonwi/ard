@@ -61,7 +61,9 @@ invalidation. If the consumer's checksums are not yet complete for a replaced
 dependency, the resolver discards the readonly attempt and retries the entire
 package batch with private writable module files. Go may complete those temporary
 files through normal checksum verification, but neither project/dependency files
-nor the immutable shared cache are modified.
+nor the immutable shared cache are modified. Per ADR 0068, this module-file path
+does not provide a compatibility branch for user-provided Go workspaces; ambient
+workspace behavior is outside Ard's supported project model.
 
 `use go:` is currently the only mechanism that introduces a Go package path. That single-mechanism property is what makes the pre-scan a complete oracle; any future feature that introduces Go paths outside `use` statements must feed the pre-scan.
 
@@ -104,6 +106,7 @@ Canonicalization ships first and remains correct; this decision supersedes it in
 - `docs/adrs/0035-use-go-packages-for-ffi-resolution.md`
 - `docs/adrs/0039-support-explicit-go-interface-interop.md`
 - `docs/adrs/0043-rebuild-lsp-on-snapshot-analysis.md`
+- `docs/adrs/0068-do-not-support-user-go-workspaces.md`
 - `compiler/checker/go_packages_resolver.go`
 - `compiler/checker/foreign_type.go`
 - Pull request #261 (cross-universe canonicalization)
