@@ -41,6 +41,52 @@ func TestStructFieldAttributes(t *testing.T) {
 	}
 }
 
+func TestNamespacedStructFieldAttribute(t *testing.T) {
+	result := Parse([]byte(`struct Config {
+  #go:yaml("global_context,omitempty")
+  #go:type("kind")
+  global_context: Str,
+}`), "test.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	attribute := result.Program.Statements[0].(*StructDefinition).Fields[0].Attributes[0]
+	if attribute.Namespace == nil || attribute.Namespace.Name != "go" {
+		t.Fatalf("attribute namespace = %#v, want go", attribute.Namespace)
+	}
+	if attribute.Name.Name != "yaml" {
+		t.Fatalf("attribute name = %q, want yaml", attribute.Name.Name)
+	}
+	if got := len(attribute.Arguments); got != 1 || attribute.Arguments[0].Value.Kind != AttributeString || attribute.Arguments[0].Value.Text != "global_context,omitempty" {
+		t.Fatalf("attribute arguments = %#v", attribute.Arguments)
+	}
+	keywordTag := result.Program.Statements[0].(*StructDefinition).Fields[0].Attributes[1]
+	if keywordTag.Namespace == nil || keywordTag.Namespace.Name != "go" || keywordTag.Name.Name != "type" {
+		t.Fatalf("keyword-named attribute = %#v", keywordTag)
+	}
+}
+
+func TestMalformedNamespacedAttributesPreserveFollowingFields(t *testing.T) {
+	for _, malformed := range []string{
+		`#go:("value")`,
+		`#go::yaml("value")`,
+		`#go:yaml:extra("value")`,
+		"#go:\n    yaml(\"value\")",
+		"#go:\n\n    yaml(\"value\")",
+		"#go:\n    // malformed continuation\n    yaml(\"value\")",
+	} {
+		source := "struct Config {\n  " + malformed + "\n  first: Str,\n  second: Int,\n}\n"
+		result := Parse([]byte(source), "test.ard")
+		if len(result.Errors) == 0 {
+			t.Fatalf("expected parse error for %q", malformed)
+		}
+		def := result.Program.Statements[0].(*StructDefinition)
+		if len(def.Fields) != 2 || def.Fields[0].Name.Name != "first" || def.Fields[1].Name.Name != "second" {
+			t.Fatalf("fields after %q = %#v", malformed, def.Fields)
+		}
+	}
+}
+
 func TestAttributeStaticValues(t *testing.T) {
 	result := Parse([]byte(`struct Value {
   #metadata("text", -2, true, symbol, [1, false])

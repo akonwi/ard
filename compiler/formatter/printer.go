@@ -391,7 +391,11 @@ func (p printer) renderStructDefinitionDoc(node *parse.StructDefinition) doc {
 }
 
 func (p printer) renderAttributeDoc(attribute parse.Attribute) doc {
-	prefix := "#" + attribute.Name.Name
+	prefix := "#"
+	if attribute.Namespace != nil {
+		prefix += attribute.Namespace.Name + ":"
+	}
+	prefix += attribute.Name.Name
 	if len(attribute.Arguments) == 0 {
 		return dText(prefix)
 	}

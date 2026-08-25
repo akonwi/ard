@@ -684,19 +684,8 @@ func isPredeclaredGoTypeName(name string) bool {
 	}
 }
 
-func jsonStructFieldTag(field air.FieldInfo) *ast.BasicLit {
-	if field.JSON.Skip {
-		return &ast.BasicLit{Kind: token.STRING, Value: "`json:\"-\"`"}
-	}
-	name := field.Name
-	if field.JSON.HasName {
-		name = field.JSON.Name
-	}
-	option := name
-	if field.JSON.OmitNone {
-		option += ",omitzero"
-	}
-	tag := "json:" + strconv.Quote(option)
+func goStructFieldTag(field air.FieldInfo) *ast.BasicLit {
+	tag := air.GoStructTagValue(field)
 	literal := "`" + tag + "`"
 	if strings.Contains(tag, "`") {
 		literal = strconv.Quote(tag)
@@ -743,7 +732,7 @@ func (l *lowerer) lowerTypeDecls(typ air.TypeInfo) ([]ast.Decl, error) {
 			fields = append(fields, &ast.Field{
 				Names: []*ast.Ident{l.ident(l.goFieldName(typ, field.Name))},
 				Type:  fieldType,
-				Tag:   jsonStructFieldTag(field),
+				Tag:   goStructFieldTag(field),
 			})
 		}
 		return []ast.Decl{&ast.GenDecl{Tok: token.TYPE, Specs: []ast.Spec{&ast.TypeSpec{Name: l.ident(l.typeName(typ)), TypeParams: l.goTypeParamList(typ), Type: &ast.StructType{Fields: &ast.FieldList{List: fields}}}}}}, nil

@@ -214,10 +214,17 @@ type TypeInfo struct {
 }
 
 type FieldInfo struct {
-	Name  string
-	Type  TypeID
-	Index int
-	JSON  JSONFieldInfo
+	Name   string
+	Type   TypeID
+	Index  int
+	JSON   JSONFieldInfo
+	GoTags []GoFieldTag
+}
+
+// GoFieldTag carries opaque, explicitly Go-targeted struct field metadata.
+type GoFieldTag struct {
+	Key   string
+	Value string
 }
 
 // JSONFieldInfo carries normalized, target-neutral JSON field semantics across

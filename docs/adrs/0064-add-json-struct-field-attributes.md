@@ -83,6 +83,8 @@ This decision does not add:
 
 General empty omission is deferred because `encoding/json` and `encoding/json/v2` assign different meanings to `omitempty`. A future feature must define stable Ard semantics rather than accidentally depending on which Go JSON API consumes the generated type.
 
+ADR 0067 subsequently adds arbitrary, explicitly Go-targeted struct tags through `#go:<key>("<value>")`. It does not change the semantic guarantees or reserved ownership of `#json`.
+
 ## Consequences
 
 - Ard structs can describe their intended JSON wire names and absence behavior without raw backend metadata.

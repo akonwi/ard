@@ -220,6 +220,7 @@ func derefTypeSeen(t Type, seen map[Type]bool) Type {
 			ModulePath:       typ.ModulePath,
 			Fields:           newFields,
 			JSONFields:       typ.JSONFields,
+			GoFieldTags:      typ.GoFieldTags,
 			Self:             typ.Self,
 			Traits:           typ.Traits,
 			GenericParams:    append([]string(nil), typ.GenericParams...),

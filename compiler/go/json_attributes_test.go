@@ -14,7 +14,7 @@ func TestSupportedJSONFieldNamesRoundTripThroughGoTags(t *testing.T) {
 	names := []string{"displayName", "with space", "snow☃", "emoji💡", "!#$%&()*+-./:;<=>?@[]^_{|}~ "}
 	for _, name := range names {
 		t.Run(strconv.Quote(name), func(t *testing.T) {
-			literal := jsonStructFieldTag(air.FieldInfo{Name: "field", JSON: air.JSONFieldInfo{Name: name, HasName: true}})
+			literal := goStructFieldTag(air.FieldInfo{Name: "field", JSON: air.JSONFieldInfo{Name: name, HasName: true}})
 			tag, err := strconv.Unquote(literal.Value)
 			if err != nil {
 				t.Fatalf("invalid generated Go tag literal %q: %v", literal.Value, err)

@@ -893,6 +893,26 @@ func (p *parser) enumDef(private bool) Statement {
 	return enum
 }
 
+func (p *parser) recoverMalformedAttributeName() {
+	p.synchronize()
+	if !p.match(new_line) {
+		return
+	}
+	// A namespaced attribute split after ':' may leave its intended call after
+	// blank or comment lines. Skip that continuation without consuming a valid
+	// field, whose identifier would instead be followed by ':'.
+	for {
+		p.skipNewlines()
+		if !p.match(comment) {
+			break
+		}
+		p.match(new_line)
+	}
+	if (p.peek().kind == identifier || p.isKeyword(p.peek().kind)) && p.peek2().kind == left_paren {
+		p.synchronize()
+	}
+}
+
 func (p *parser) parseAttribute() (Attribute, bool) {
 	start := p.peek()
 	if !p.match(hash) {
@@ -904,8 +924,28 @@ func (p *parser) parseAttribute() (Attribute, bool) {
 		return attribute, false
 	}
 	name := p.advance()
-	attribute.Name = Identifier{Name: name.text, Location: name.getLocation()}
+	parsedName := Identifier{Name: name.text, Location: name.getLocation()}
+	if p.match(colon) {
+		namespace := parsedName
+		attribute.Namespace = &namespace
+		if !p.check(identifier) && !p.isKeyword(p.peek().kind) {
+			p.addError(p.peek(), "Expected attribute name after ':'")
+			p.recoverMalformedAttributeName()
+			return attribute, false
+		}
+		name = p.advance()
+		if name.text == "" {
+			name.text = string(name.kind)
+		}
+		parsedName = Identifier{Name: name.text, Location: name.getLocation()}
+	}
+	attribute.Name = parsedName
 	attribute.Location.End = name.getLocation().End
+	if p.check(colon) || p.check(colon_colon) {
+		p.addError(p.peek(), "Attribute names support at most one namespace")
+		p.recoverMalformedAttributeName()
+		return attribute, false
+	}
 	if !p.match(left_paren) {
 		return attribute, true
 	}

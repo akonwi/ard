@@ -6,6 +6,8 @@ import (
 	"go/ast"
 	"go/format"
 	"go/token"
+	"sort"
+	"strconv"
 	"strings"
 	"unicode"
 )
@@ -55,12 +57,51 @@ func goStructDecl(program *Program, typ TypeInfo, runtimeQualifier string) (ast.
 		fields = append(fields, &ast.Field{
 			Names: []*ast.Ident{ast.NewIdent(goExportedName(field.Name))},
 			Type:  fieldType,
+			Tag:   goStructTagLiteral(field),
 		})
 	}
 	return &ast.GenDecl{Tok: token.TYPE, Specs: []ast.Spec{&ast.TypeSpec{
 		Name: ast.NewIdent(goExportedName(typ.Name)),
 		Type: &ast.StructType{Fields: &ast.FieldList{List: fields}},
 	}}}, nil
+}
+
+// GoStructTagValue returns the logical Go reflect.StructTag value for an AIR
+// field. The compiler-owned JSON entry is first and opaque custom entries are
+// sorted by key so source attribute order does not affect generated output.
+func GoStructTagValue(field FieldInfo) string {
+	jsonValue := field.Name
+	if field.JSON.Skip {
+		jsonValue = "-"
+	} else {
+		if field.JSON.HasName {
+			jsonValue = field.JSON.Name
+		}
+		if field.JSON.OmitNone {
+			jsonValue += ",omitzero"
+		}
+	}
+	parts := []string{"json:" + strconv.Quote(jsonValue)}
+	goTags := append([]GoFieldTag(nil), field.GoTags...)
+	sort.Slice(goTags, func(i, j int) bool {
+		if goTags[i].Key == goTags[j].Key {
+			return goTags[i].Value < goTags[j].Value
+		}
+		return goTags[i].Key < goTags[j].Key
+	})
+	for _, tag := range goTags {
+		parts = append(parts, tag.Key+":"+strconv.Quote(tag.Value))
+	}
+	return strings.Join(parts, " ")
+}
+
+func goStructTagLiteral(field FieldInfo) *ast.BasicLit {
+	tag := GoStructTagValue(field)
+	literal := "`" + tag + "`"
+	if strings.Contains(tag, "`") {
+		literal = strconv.Quote(tag)
+	}
+	return &ast.BasicLit{Kind: token.STRING, Value: literal}
 }
 
 func goTypeExpr(program *Program, typeID TypeID, runtimeQualifier string) (ast.Expr, error) {

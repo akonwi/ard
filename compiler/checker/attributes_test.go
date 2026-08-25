@@ -55,6 +55,106 @@ func TestJSONFieldAttributesAreChecked(t *testing.T) {
 	}
 }
 
+func TestGoFieldTagAttributesAreChecked(t *testing.T) {
+	c, def := checkAttributes(t, `struct Config<$T> {
+  #json(name: "value")
+  #go:yaml("global_context,omitempty")
+  #go:validate("required")
+  #go:type("kind")
+  value: $T,
+}`)
+	if diagnostics := c.Diagnostics(); len(diagnostics) != 0 {
+		t.Fatalf("diagnostics = %#v", diagnostics)
+	}
+	if def == nil {
+		t.Fatal("missing checked struct")
+	}
+	tags := checker.StructFieldGoTags(def, "value")
+	if len(tags) != 3 || tags[0].Key != "yaml" || tags[0].Value != "global_context,omitempty" || tags[1].Key != "validate" || tags[1].Value != "required" || tags[2].Key != "type" || tags[2].Value != "kind" {
+		t.Fatalf("Go field tags = %#v", tags)
+	}
+}
+
+func TestInvalidGoFieldTagAttributesAreDiagnosed(t *testing.T) {
+	tests := []struct {
+		name    string
+		attrs   string
+		code    checker.DiagnosticCode
+		message string
+	}{
+		{"unknown namespace", `#rust:serde("name")`, checker.DiagnosticCodeUnknownAttribute, "Unknown attribute: #rust:serde"},
+		{"missing argument", `#go:yaml`, checker.DiagnosticCodeInvalidAttributeArgument, "#go:yaml requires exactly one positional string argument"},
+		{"too many arguments", `#go:yaml("name", "other")`, checker.DiagnosticCodeInvalidAttributeArgument, "#go:yaml requires exactly one positional string argument"},
+		{"named argument", `#go:yaml(name: "value")`, checker.DiagnosticCodeInvalidAttributeArgument, "#go:yaml requires exactly one positional string argument"},
+		{"non-string argument", `#go:yaml(true)`, checker.DiagnosticCodeInvalidAttributeArgument, "#go:yaml requires exactly one positional string argument"},
+		{"reserved JSON tag", `#go:json("name")`, checker.DiagnosticCodeInvalidAttributeArgument, "#go:json is reserved; use #json"},
+		{"duplicate tag", "#go:yaml(\"one\")\n  #go:yaml(\"two\")", checker.DiagnosticCodeDuplicateAttribute, "Duplicate attribute: #go:yaml"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c, _ := checkAttributes(t, "struct Example {\n  "+tt.attrs+"\n  value: Str,\n}\n")
+			diagnostics := c.Diagnostics()
+			if len(diagnostics) != 1 {
+				t.Fatalf("diagnostics = %#v, want one", diagnostics)
+			}
+			diagnostic := requireDiagnosticCode(t, diagnostics, tt.code)
+			if diagnostic.Message != tt.message {
+				t.Fatalf("diagnostic = %#v", diagnostic)
+			}
+			if tt.name == "duplicate tag" && len(diagnostic.Secondary) != 1 {
+				t.Fatalf("duplicate diagnostic = %#v", diagnostic)
+			}
+		})
+	}
+}
+
+func TestInvalidGoFieldTagDoesNotSuppressValidJSONMetadata(t *testing.T) {
+	for _, attributes := range []string{
+		"#json(name: \"wire\")\n  #go:yaml(true)",
+		"#go:yaml(true)\n  #json(name: \"wire\")",
+	} {
+		c, def := checkAttributes(t, "struct Example {\n  "+attributes+"\n  value: Str,\n}\n")
+		if diagnostics := c.Diagnostics(); len(diagnostics) != 1 || diagnostics[0].Message != "#go:yaml requires exactly one positional string argument" {
+			t.Fatalf("diagnostics = %#v", diagnostics)
+		}
+		json, ok := checker.StructFieldJSON(def, "value")
+		if !ok || !json.HasName || json.Name != "wire" {
+			t.Fatalf("JSON metadata = %#v, found=%v", json, ok)
+		}
+	}
+}
+
+func TestInvalidJSONMetadataDoesNotSuppressValidGoFieldTag(t *testing.T) {
+	c, def := checkAttributes(t, `struct Example {
+  #go:yaml("wire")
+  #json(skip: false)
+  value: Str,
+}`)
+	if diagnostics := c.Diagnostics(); len(diagnostics) != 1 || diagnostics[0].Message != "#json(skip: false) has no effect" {
+		t.Fatalf("diagnostics = %#v", diagnostics)
+	}
+	tags := checker.StructFieldGoTags(def, "value")
+	if len(tags) != 1 || tags[0].Key != "yaml" || tags[0].Value != "wire" {
+		t.Fatalf("Go field tags = %#v", tags)
+	}
+}
+
+func TestInvalidGoFieldTagDoesNotSuppressAggregateJSONDiagnostics(t *testing.T) {
+	c, _ := checkAttributes(t, `struct Secret {
+  #json(skip: true)
+  #go:yaml(true)
+  value: Str,
+}`)
+	if diagnostics := c.Diagnostics(); len(diagnostics) != 2 {
+		t.Fatalf("diagnostics = %#v, want Go tag and all-skipped JSON errors", diagnostics)
+	}
+	requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeInvalidAttributeArgument)
+	messages := []string{c.Diagnostics()[0].Message, c.Diagnostics()[1].Message}
+	if !(strings.Contains(strings.Join(messages, "\n"), "#go:yaml requires") && strings.Contains(strings.Join(messages, "\n"), "#json cannot skip every field")) {
+		t.Fatalf("diagnostics = %#v", c.Diagnostics())
+	}
+}
+
 func TestInvalidJSONFieldAttributesAreDiagnosed(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -114,6 +214,7 @@ func TestInvalidJSONMetadataDoesNotCascadeIntoAggregateDiagnostics(t *testing.T)
 func TestJSONCannotSkipEveryField(t *testing.T) {
 	c, _ := checkAttributes(t, `struct Secret {
   #json(skip: true)
+  #go:yaml("value")
   value: Str,
 }`)
 	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeInvalidAttributeArgument)
