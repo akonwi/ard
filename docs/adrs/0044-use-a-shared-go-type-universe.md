@@ -33,13 +33,37 @@ Resolve all of a program's Go imports out of a single go/packages load session, 
 
 ### A1: Whole-program import pre-scan
 
-Before checking begins, collect every `use go:` path the program will need and issue one `packages.Load(cfg, path1, path2, ...)`:
+Before checking begins, collect every `use go:` path the program will need and issue one batched Go package metadata query for all roots:
 
 - parse the entry module (already done by the frontend);
 - walk the Ard import graph shallowly, parsing each reachable `.ard` file only for its `use` statements — no checking — including git-dependency modules the module resolver can already locate;
 - union all `go:` paths and prime the resolver with a single batch load.
 
 `GoPackageResolver.ResolveGoPackage(path)` keeps its interface and serves everything from the primed session. All `GoPackage` metadata and `ForeignType.GoType` references are then minted from one universe before any checker binding happens, which is the property the current per-path design cannot provide: today, module A's exported signatures can bake in universe-1 types before module B's imports trigger universe-2.
+
+The production implementation queries the modern Go toolchain once for each
+root package's compiler export file, then decodes every root through
+`gcexportdata.Read` with one shared imports map. This preserves the single
+`go/types` universe without asking `go/packages` to materialize syntax,
+expression type information, or dependency package fields Ard does not consume.
+External `GOPACKAGESDRIVER` configurations continue to use `packages.Load`, and
+missing or incompatible export data falls back to full source loading.
+
+Dependency-module replacements are supplied through a synthesized `-modfile`
+rather than `packages.Config.Overlay`. `go/packages` conservatively invalidates
+compiler export data for the entire graph whenever any overlay exists, even when
+the overlay only changes `go.mod`; using a read-only modfile preserves the exact
+locked/path dependency graph while allowing Go's normal export cache to remain
+valid. The synthesized module inputs are cached by content solely to give the Go
+command a stable modfile path; package metadata itself is never persisted, so Go
+remains responsible for source, build-tag, toolchain, and dependency
+invalidation. If the consumer's checksums are not yet complete for a replaced
+dependency, the resolver discards the readonly attempt and retries the entire
+package batch with private writable module files. Go may complete those temporary
+files through normal checksum verification, but neither project/dependency files
+nor the immutable shared cache are modified. Per ADR 0068, this module-file path
+does not provide a compatibility branch for user-provided Go workspaces; ambient
+workspace behavior is outside Ard's supported project model.
 
 `use go:` is currently the only mechanism that introduces a Go package path. That single-mechanism property is what makes the pre-scan a complete oracle; any future feature that introduces Go paths outside `use` statements must feed the pre-scan.
 
@@ -82,6 +106,7 @@ Canonicalization ships first and remains correct; this decision supersedes it in
 - `docs/adrs/0035-use-go-packages-for-ffi-resolution.md`
 - `docs/adrs/0039-support-explicit-go-interface-interop.md`
 - `docs/adrs/0043-rebuild-lsp-on-snapshot-analysis.md`
+- `docs/adrs/0068-do-not-support-user-go-workspaces.md`
 - `compiler/checker/go_packages_resolver.go`
 - `compiler/checker/foreign_type.go`
 - Pull request #261 (cross-universe canonicalization)

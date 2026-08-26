@@ -1,6 +1,7 @@
 package checker_test
 
 import (
+	gotypes "go/types"
 	"os"
 	"path/filepath"
 	"strings"
@@ -322,6 +323,57 @@ func TestGoPackagesResolverUsesBuildTags(t *testing.T) {
 	}
 }
 
+func TestGoPackagesResolverExportDataSharesCrossRootTypeIdentity(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/app\n\ngo 1.27\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	modelDir := filepath.Join(root, "ffi", "model")
+	producerDir := filepath.Join(root, "ffi", "producer")
+	if err := os.MkdirAll(modelDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(producerDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(modelDir, "model.go"), []byte("package model\n\ntype Item struct { Name string }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	producerSource := `package producer
+
+import "example.com/app/ffi/model"
+
+func Make() model.Item { return model.Item{} }
+`
+	if err := os.WriteFile(filepath.Join(producerDir, "producer.go"), []byte(producerSource), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	resolver := checker.NewGoPackagesResolver(root, nil)
+	if err := resolver.Prime([]string{"example.com/app/ffi/producer", "example.com/app/ffi/model"}); err != nil {
+		t.Fatalf("Prime: %v", err)
+	}
+	producer, err := resolver.ResolveGoPackage("example.com/app/ffi/producer")
+	if err != nil {
+		t.Fatalf("resolve producer: %v", err)
+	}
+	model, err := resolver.ResolveGoPackage("example.com/app/ffi/model")
+	if err != nil {
+		t.Fatalf("resolve model: %v", err)
+	}
+	returned, ok := producer.Functions["Make"].ReturnType.(*checker.ForeignType)
+	if !ok {
+		t.Fatalf("Make return = %T, want *checker.ForeignType", producer.Functions["Make"].ReturnType)
+	}
+	declared, ok := model.Types["Item"].(*checker.ForeignType)
+	if !ok {
+		t.Fatalf("model.Item = %T, want *checker.ForeignType", model.Types["Item"])
+	}
+	if !gotypes.Identical(returned.GoType, declared.GoType) {
+		t.Fatalf("cross-root Item types do not share one Go type universe: %v != %v", returned.GoType, declared.GoType)
+	}
+}
+
 func TestGoPackagesResolverPrimeSharesOneLoad(t *testing.T) {
 	resolver := checker.NewGoPackagesResolver(t.TempDir(), nil)
 	if err := resolver.Prime([]string{"fmt", "strings", "fmt", ""}); err != nil {
@@ -361,6 +413,43 @@ func TestGoPackagesResolverPrimedMissIsInternalError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "internal compiler bug") || !strings.Contains(err.Error(), "pre-scan") {
 		t.Fatalf("post-prime miss error = %q, want internal pre-scan bug report", err)
+	}
+}
+
+func TestGoPackagesResolverPreservesDependencyBuildErrors(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/app\n\ngo 1.27\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	apiDir := filepath.Join(root, "ffi", "api")
+	brokenDir := filepath.Join(root, "ffi", "broken")
+	if err := os.MkdirAll(apiDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(brokenDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	apiSource := "package api\n\nimport _ \"example.com/app/ffi/broken\"\n\nfunc Run() {}\n"
+	if err := os.WriteFile(filepath.Join(apiDir, "api.go"), []byte(apiSource), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(brokenDir, "broken.go"), []byte("package broken\n\nfunc Broken( {\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	resolver := checker.NewGoPackagesResolver(root, nil)
+	if err := resolver.Prime([]string{"example.com/app/ffi/api"}); err != nil {
+		t.Fatalf("Prime: %v", err)
+	}
+	_, err := resolver.ResolveGoPackage("example.com/app/ffi/api")
+	if err == nil {
+		t.Fatal("expected dependency build error")
+	}
+	if !strings.Contains(err.Error(), "broken.go") {
+		t.Fatalf("dependency diagnostic lost the source error: %v", err)
+	}
+	if strings.Contains(err.Error(), "package has no type information") {
+		t.Fatalf("dependency diagnostic fell back to generic missing type information: %v", err)
 	}
 }
 
