@@ -15,19 +15,21 @@ func TestLowerForeignCallRequiresResultShapeForAdaptedReturn(t *testing.T) {
 	}}
 	lowerer := &lowerer{program: program, runtimeHelpers: map[string]bool{}}
 	expr := air.Expr{
-		Kind:             air.ExprForeignCall,
-		Type:             3,
-		ForeignTarget:    "go",
-		ForeignNamespace: "example.com/service",
-		ForeignQualifier: "service",
-		ForeignSymbol:    "Load",
+		Kind: air.ExprForeignCall,
+		Type: 3,
+		Payload: &air.ForeignExprPayload{
+			Target:    "go",
+			Namespace: "example.com/service",
+			Qualifier: "service",
+			Symbol:    "Load",
+		},
 	}
 
 	if _, err := lowerer.lowerForeignCall(air.Function{}, expr); err == nil || !strings.Contains(err.Error(), "missing its result shape") {
 		t.Fatalf("lowerForeignCall error = %v, want missing result shape", err)
 	}
 
-	expr.ForeignResultShape = air.ForeignResultValueError
+	expr.ForeignPayload().ResultShape = air.ForeignResultValueError
 	if _, err := lowerer.lowerForeignCall(air.Function{}, expr); err != nil {
 		t.Fatalf("lowerForeignCall with explicit result shape: %v", err)
 	}

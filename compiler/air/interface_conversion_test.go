@@ -108,7 +108,7 @@ fn main() {
 				if program.Types[conversion.Type-1].Kind != TypeAny {
 					t.Fatalf("%s conversion type = %v, want Any", fn.Name, program.Types[conversion.Type-1].Kind)
 				}
-				return conversion.InterfaceMode
+				return conversion.InterfacePayload().Mode
 			}
 			for i := range fn.Body.Stmts {
 				conversion, ok := findConversion(fn.Body.Stmts[i].Expr)
@@ -121,7 +121,7 @@ fn main() {
 				if program.Types[conversion.Type-1].Kind != TypeAny {
 					t.Fatalf("%s conversion type = %v, want Any", fn.Name, program.Types[conversion.Type-1].Kind)
 				}
-				return conversion.InterfaceMode
+				return conversion.InterfacePayload().Mode
 			}
 		}
 		t.Fatalf("interface conversion in function %s not found", name)

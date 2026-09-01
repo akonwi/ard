@@ -912,58 +912,84 @@ func (n *localNamer) walkExpr(e air.Expr) {
 	for i := range e.Args {
 		n.walkExpr(e.Args[i])
 	}
-	for i := range e.Entries {
-		n.walkExpr(e.Entries[i].Key)
-		n.walkExpr(e.Entries[i].Value)
-	}
-	for i := range e.Fields {
-		n.walkExpr(e.Fields[i].Value)
-	}
 	if e.Target != nil {
 		n.walkExpr(*e.Target)
 	}
-	if e.Left != nil {
-		n.walkExpr(*e.Left)
-	}
-	if e.Right != nil {
-		n.walkExpr(*e.Right)
-	}
-	if e.Condition != nil {
-		n.walkExpr(*e.Condition)
-	}
-	n.walkBlock(e.Body)
-	n.walkBlock(e.Then)
-	n.walkBlock(e.Else)
-	n.walkBlock(e.None)
-	n.walkBlock(e.CatchAll)
-	n.walkBindingBlock(e.Kind == air.ExprMatchMaybe, e.SomeLocal, e.Some)
-	n.walkBindingBlock(e.Kind == air.ExprMatchResult, e.OkLocal, e.Ok)
-	n.walkBindingBlock(e.Kind == air.ExprMatchResult, e.ErrLocal, e.Err)
-	n.walkBindingBlock(e.HasCatch, e.CatchLocal, e.Catch)
-	for i := range e.EnumCases {
-		n.walkBlock(e.EnumCases[i].Body)
-	}
-	for i := range e.IntCases {
-		n.walkBlock(e.IntCases[i].Body)
-	}
-	for i := range e.StrCases {
-		n.walkBlock(e.StrCases[i].Body)
-	}
-	for i := range e.RangeCases {
-		n.walkBlock(e.RangeCases[i].Body)
-	}
-	for i := range e.UnionCases {
-		n.walkBindingBlock(true, e.UnionCases[i].Local, e.UnionCases[i].Body)
-	}
-	for i := range e.SelectCases {
-		arm := e.SelectCases[i]
-		if arm.Channel != nil {
-			n.walkExpr(*arm.Channel)
+	switch payload := e.Payload.(type) {
+	case *air.AggregateExprPayload:
+		for i := range payload.Entries {
+			n.walkExpr(payload.Entries[i].Key)
+			n.walkExpr(payload.Entries[i].Value)
 		}
-		if arm.Value != nil {
-			n.walkExpr(*arm.Value)
+		for i := range payload.Fields {
+			n.walkExpr(payload.Fields[i].Value)
 		}
-		n.walkBindingBlock(arm.HasBind, arm.BindLocal, arm.Body)
+	case *air.ForeignExprPayload:
+		for i := range payload.Fields {
+			n.walkExpr(payload.Fields[i].Value)
+		}
+	case *air.BinaryExprPayload:
+		if payload.Left != nil {
+			n.walkExpr(*payload.Left)
+		}
+		if payload.Right != nil {
+			n.walkExpr(*payload.Right)
+		}
+	case *air.BlockExprPayload:
+		n.walkBlock(payload.Body)
+	case *air.IfExprPayload:
+		if payload.Condition != nil {
+			n.walkExpr(*payload.Condition)
+		}
+		n.walkBlock(payload.Then)
+		n.walkBlock(payload.Else)
+	case *air.EnumMatchExprPayload:
+		for i := range payload.Cases {
+			n.walkBlock(payload.Cases[i].Body)
+		}
+		n.walkBlock(payload.CatchAll)
+	case *air.IntMatchExprPayload:
+		for i := range payload.Cases {
+			n.walkBlock(payload.Cases[i].Body)
+		}
+		for i := range payload.RangeCases {
+			n.walkBlock(payload.RangeCases[i].Body)
+		}
+		n.walkBlock(payload.CatchAll)
+	case *air.StrMatchExprPayload:
+		for i := range payload.Cases {
+			n.walkBlock(payload.Cases[i].Body)
+		}
+		n.walkBlock(payload.CatchAll)
+	case *air.UnionMatchExprPayload:
+		for i := range payload.Cases {
+			n.walkBindingBlock(true, payload.Cases[i].Local, payload.Cases[i].Body)
+		}
+		n.walkBlock(payload.CatchAll)
+	case *air.ForeignMatchExprPayload:
+		for i := range payload.Cases {
+			n.walkBindingBlock(payload.Cases[i].Bound, payload.Cases[i].Local, payload.Cases[i].Body)
+		}
+		n.walkBlock(payload.CatchAll)
+	case *air.MaybeMatchExprPayload:
+		n.walkBindingBlock(true, payload.SomeLocal, payload.Some)
+		n.walkBlock(payload.None)
+	case *air.ResultMatchExprPayload:
+		n.walkBindingBlock(true, payload.OkLocal, payload.Ok)
+		n.walkBindingBlock(true, payload.ErrLocal, payload.Err)
+	case *air.TryExprPayload:
+		n.walkBindingBlock(e.Kind == air.ExprTryResult, payload.CatchLocal, payload.Catch)
+	case *air.SelectExprPayload:
+		for i := range payload.Cases {
+			arm := payload.Cases[i]
+			if arm.Channel != nil {
+				n.walkExpr(*arm.Channel)
+			}
+			if arm.Value != nil {
+				n.walkExpr(*arm.Value)
+			}
+			n.walkBindingBlock(arm.HasBind, arm.BindLocal, arm.Body)
+		}
 	}
 }
 
@@ -1004,67 +1030,95 @@ func collectStmtRefCounts(s air.Stmt, into []int, delta int) {
 }
 
 func collectExprRefCounts(e air.Expr, into []int, delta int) {
-	if e.Kind == air.ExprLoadLocal {
-		adjustLocalRefCount(into, e.Local, delta)
+	if payload := e.LocalPayload(); e.Kind == air.ExprLoadLocal && payload != nil {
+		adjustLocalRefCount(into, payload.Local, delta)
 	}
-	for _, c := range e.CaptureLocals {
-		adjustLocalRefCount(into, c, delta)
+	if payload := e.CallPayload(); payload != nil {
+		for _, local := range payload.CaptureLocals {
+			adjustLocalRefCount(into, local, delta)
+		}
 	}
 	for i := range e.Args {
 		collectExprRefCounts(e.Args[i], into, delta)
 	}
-	for i := range e.Entries {
-		collectExprRefCounts(e.Entries[i].Key, into, delta)
-		collectExprRefCounts(e.Entries[i].Value, into, delta)
-	}
-	for i := range e.Fields {
-		collectExprRefCounts(e.Fields[i].Value, into, delta)
-	}
 	if e.Target != nil {
 		collectExprRefCounts(*e.Target, into, delta)
 	}
-	if e.Left != nil {
-		collectExprRefCounts(*e.Left, into, delta)
-	}
-	if e.Right != nil {
-		collectExprRefCounts(*e.Right, into, delta)
-	}
-	if e.Condition != nil {
-		collectExprRefCounts(*e.Condition, into, delta)
-	}
-	collectBlockRefCounts(e.Body, into, delta)
-	collectBlockRefCounts(e.Then, into, delta)
-	collectBlockRefCounts(e.Else, into, delta)
-	collectBlockRefCounts(e.None, into, delta)
-	collectBlockRefCounts(e.CatchAll, into, delta)
-	collectBlockRefCounts(e.Some, into, delta)
-	collectBlockRefCounts(e.Ok, into, delta)
-	collectBlockRefCounts(e.Err, into, delta)
-	collectBlockRefCounts(e.Catch, into, delta)
-	for i := range e.EnumCases {
-		collectBlockRefCounts(e.EnumCases[i].Body, into, delta)
-	}
-	for i := range e.IntCases {
-		collectBlockRefCounts(e.IntCases[i].Body, into, delta)
-	}
-	for i := range e.StrCases {
-		collectBlockRefCounts(e.StrCases[i].Body, into, delta)
-	}
-	for i := range e.RangeCases {
-		collectBlockRefCounts(e.RangeCases[i].Body, into, delta)
-	}
-	for i := range e.UnionCases {
-		collectBlockRefCounts(e.UnionCases[i].Body, into, delta)
-	}
-	for i := range e.SelectCases {
-		arm := e.SelectCases[i]
-		if arm.Channel != nil {
-			collectExprRefCounts(*arm.Channel, into, delta)
+	switch payload := e.Payload.(type) {
+	case *air.AggregateExprPayload:
+		for i := range payload.Entries {
+			collectExprRefCounts(payload.Entries[i].Key, into, delta)
+			collectExprRefCounts(payload.Entries[i].Value, into, delta)
 		}
-		if arm.Value != nil {
-			collectExprRefCounts(*arm.Value, into, delta)
+		for i := range payload.Fields {
+			collectExprRefCounts(payload.Fields[i].Value, into, delta)
 		}
-		collectBlockRefCounts(arm.Body, into, delta)
+	case *air.ForeignExprPayload:
+		for i := range payload.Fields {
+			collectExprRefCounts(payload.Fields[i].Value, into, delta)
+		}
+	case *air.BinaryExprPayload:
+		if payload.Left != nil {
+			collectExprRefCounts(*payload.Left, into, delta)
+		}
+		if payload.Right != nil {
+			collectExprRefCounts(*payload.Right, into, delta)
+		}
+	case *air.BlockExprPayload:
+		collectBlockRefCounts(payload.Body, into, delta)
+	case *air.IfExprPayload:
+		if payload.Condition != nil {
+			collectExprRefCounts(*payload.Condition, into, delta)
+		}
+		collectBlockRefCounts(payload.Then, into, delta)
+		collectBlockRefCounts(payload.Else, into, delta)
+	case *air.EnumMatchExprPayload:
+		for i := range payload.Cases {
+			collectBlockRefCounts(payload.Cases[i].Body, into, delta)
+		}
+		collectBlockRefCounts(payload.CatchAll, into, delta)
+	case *air.IntMatchExprPayload:
+		for i := range payload.Cases {
+			collectBlockRefCounts(payload.Cases[i].Body, into, delta)
+		}
+		for i := range payload.RangeCases {
+			collectBlockRefCounts(payload.RangeCases[i].Body, into, delta)
+		}
+		collectBlockRefCounts(payload.CatchAll, into, delta)
+	case *air.StrMatchExprPayload:
+		for i := range payload.Cases {
+			collectBlockRefCounts(payload.Cases[i].Body, into, delta)
+		}
+		collectBlockRefCounts(payload.CatchAll, into, delta)
+	case *air.UnionMatchExprPayload:
+		for i := range payload.Cases {
+			collectBlockRefCounts(payload.Cases[i].Body, into, delta)
+		}
+		collectBlockRefCounts(payload.CatchAll, into, delta)
+	case *air.ForeignMatchExprPayload:
+		for i := range payload.Cases {
+			collectBlockRefCounts(payload.Cases[i].Body, into, delta)
+		}
+		collectBlockRefCounts(payload.CatchAll, into, delta)
+	case *air.MaybeMatchExprPayload:
+		collectBlockRefCounts(payload.Some, into, delta)
+		collectBlockRefCounts(payload.None, into, delta)
+	case *air.ResultMatchExprPayload:
+		collectBlockRefCounts(payload.Ok, into, delta)
+		collectBlockRefCounts(payload.Err, into, delta)
+	case *air.TryExprPayload:
+		collectBlockRefCounts(payload.Catch, into, delta)
+	case *air.SelectExprPayload:
+		for i := range payload.Cases {
+			arm := payload.Cases[i]
+			if arm.Channel != nil {
+				collectExprRefCounts(*arm.Channel, into, delta)
+			}
+			if arm.Value != nil {
+				collectExprRefCounts(*arm.Value, into, delta)
+			}
+			collectBlockRefCounts(arm.Body, into, delta)
+		}
 	}
 }
 

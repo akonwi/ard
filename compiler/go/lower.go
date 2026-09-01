@@ -7,6 +7,7 @@ import (
 	"go/token"
 	"path"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -362,7 +363,9 @@ func functionRefsInBlock(block air.Block) []air.FunctionID {
 	walkBlockExprs(block, func(expr air.Expr) {
 		switch expr.Kind {
 		case air.ExprCall, air.ExprFunctionRef, air.ExprMakeClosure:
-			refs = append(refs, expr.Function)
+			if payload := expr.CallPayload(); payload != nil {
+				refs = append(refs, payload.Function)
+			}
 		}
 	})
 	return refs
@@ -1438,11 +1441,13 @@ func (l *lowerer) comparableTypeParams(signature air.Signature, locals []air.Loc
 		walkBlockExprs(*body, func(expr air.Expr) {
 			walk(expr.Type, false)
 			if expr.Kind == air.ExprEq || expr.Kind == air.ExprNotEq {
-				if expr.Left != nil {
-					walk(expr.Left.Type, true)
-				}
-				if expr.Right != nil {
-					walk(expr.Right.Type, true)
+				if payload := expr.BinaryPayload(); payload != nil {
+					if payload.Left != nil {
+						walk(payload.Left.Type, true)
+					}
+					if payload.Right != nil {
+						walk(payload.Right.Type, true)
+					}
 				}
 			}
 		})
@@ -1472,10 +1477,11 @@ func (l *lowerer) collectFunctionComparableTypeParams() map[air.FunctionID]map[s
 				if expr.Kind != air.ExprCall && expr.Kind != air.ExprFunctionRef && expr.Kind != air.ExprMakeClosure {
 					return
 				}
-				if !validFunctionID(l.program, expr.Function) {
+				payload := expr.CallPayload()
+				if payload == nil || !validFunctionID(l.program, payload.Function) {
 					return
 				}
-				callee := l.program.Functions[expr.Function]
+				callee := l.program.Functions[payload.Function]
 				calleeComparable := result[callee.ID]
 				if expr.Kind == air.ExprMakeClosure {
 					// Lifted closures inherit the enclosing generic parameter names and
@@ -1490,10 +1496,10 @@ func (l *lowerer) collectFunctionComparableTypeParams() map[air.FunctionID]map[s
 				}
 				comparableArgs := []air.TypeID{}
 				for i, typeParam := range callee.TypeParams {
-					if !calleeComparable[typeParam] || i >= len(expr.TypeArgs) {
+					if !calleeComparable[typeParam] || i >= len(payload.TypeArgs) {
 						continue
 					}
-					comparableArgs = append(comparableArgs, expr.TypeArgs[i])
+					comparableArgs = append(comparableArgs, payload.TypeArgs[i])
 				}
 				mapped := l.comparableTypeParams(air.Signature{}, nil, nil, comparableArgs)
 				for typeParam := range mapped {
@@ -1968,7 +1974,8 @@ func (l *lowerer) packABICallResult(exprType, returnType air.TypeID, stmts []ast
 
 func concreteCallParams(expr air.Expr, target air.Function) []air.Param {
 	params := target.Signature.Params
-	if len(expr.TypeArgs) == 0 {
+	payload := expr.CallPayload()
+	if payload == nil || len(payload.TypeArgs) == 0 {
 		return params
 	}
 	params = append([]air.Param(nil), params...)
@@ -1981,15 +1988,16 @@ func concreteCallParams(expr air.Expr, target air.Function) []air.Param {
 }
 
 func (l *lowerer) lowerRawCall(fn air.Function, expr air.Expr) (loweredExpr, error) {
-	if expr.Kind != air.ExprCall || !validFunctionID(l.program, expr.Function) {
+	payload := expr.CallPayload()
+	if expr.Kind != air.ExprCall || payload == nil || !validFunctionID(l.program, payload.Function) {
 		return loweredExpr{}, fmt.Errorf("not a valid call")
 	}
-	target := l.program.Functions[expr.Function]
+	target := l.program.Functions[payload.Function]
 	args, stmts, writeback, err := l.lowerCallArgs(fn, expr.Args, concreteCallParams(expr, target))
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	call := l.functionCallExpr(target, args, expr.TypeArgs)
+	call := l.functionCallExpr(target, args, payload.TypeArgs)
 	if len(writeback) > 0 {
 		return loweredExpr{}, fmt.Errorf("raw ABI call with writeback args is not supported")
 	}
@@ -2035,7 +2043,8 @@ func (l *lowerer) lowerStmt(fn air.Function, stmt air.Stmt) ([]ast.Stmt, error) 
 		if err != nil {
 			return nil, err
 		}
-		if stmt.Value.Kind == air.ExprForeignCall && stmt.Value.ForeignPointer && !l.localIsReference(fn, stmt.Local) {
+		foreignPayload := stmt.Value.ForeignPayload()
+		if stmt.Value.Kind == air.ExprForeignCall && foreignPayload != nil && foreignPayload.Pointer && !l.localIsReference(fn, stmt.Local) {
 			// A value-typed binding of a pointer-returning Go call snapshots the
 			// referenced storage instead of aliasing it.
 			value.expr = &ast.StarExpr{X: value.expr}
@@ -2358,16 +2367,29 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 	case air.ExprConstVoid:
 		return loweredExpr{expr: l.voidValueExpr()}, nil
 	case air.ExprConstInt:
-		return l.lowerNumericConstant(expr.Type, token.INT, expr.Int)
+		if payload := expr.TextPayload(); payload != nil {
+			return l.lowerNumericConstant(expr.Type, token.INT, payload.Value)
+		}
+		return loweredExpr{}, fmt.Errorf("int constant is missing its payload")
 	case air.ExprConstFloat:
-		return l.lowerNumericConstant(expr.Type, token.FLOAT, expr.Float)
+		if payload := expr.TextPayload(); payload != nil {
+			return l.lowerNumericConstant(expr.Type, token.FLOAT, payload.Value)
+		}
+		return loweredExpr{}, fmt.Errorf("float constant is missing its payload")
 	case air.ExprConstBool:
-		if expr.Bool {
+		payload := expr.BoolPayload()
+		if payload == nil {
+			return loweredExpr{}, fmt.Errorf("bool constant is missing its payload")
+		}
+		if payload.Value {
 			return loweredExpr{expr: l.ident("true")}, nil
 		}
 		return loweredExpr{expr: l.ident("false")}, nil
 	case air.ExprConstStr:
-		return loweredExpr{expr: &ast.BasicLit{Kind: token.STRING, Value: fmt.Sprintf("%q", expr.Str)}}, nil
+		if payload := expr.TextPayload(); payload != nil {
+			return loweredExpr{expr: &ast.BasicLit{Kind: token.STRING, Value: fmt.Sprintf("%q", payload.Value)}}, nil
+		}
+		return loweredExpr{}, fmt.Errorf("string constant is missing its payload")
 	case air.ExprPanic:
 		if expr.Target == nil {
 			return loweredExpr{}, fmt.Errorf("panic missing target")
@@ -2384,17 +2406,22 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		}
 		return loweredExpr{stmts: stmts, expr: zero}, nil
 	case air.ExprLoadLocal:
-		return loweredExpr{expr: l.localValueExpr(fn, expr.Local)}, nil
+		if payload := expr.LocalPayload(); payload != nil {
+			return loweredExpr{expr: l.localValueExpr(fn, payload.Local)}, nil
+		}
+		return loweredExpr{}, fmt.Errorf("local load is missing its payload")
 	case air.ExprLoadGlobal:
-		if expr.Global < 0 || int(expr.Global) >= len(l.program.Globals) {
-			return loweredExpr{}, fmt.Errorf("unknown global %d", expr.Global)
+		payload := expr.GlobalPayload()
+		if payload == nil || payload.Global < 0 || int(payload.Global) >= len(l.program.Globals) {
+			return loweredExpr{}, fmt.Errorf("global load has invalid payload")
 		}
-		return loweredExpr{expr: l.globalExpr(l.program.Globals[expr.Global])}, nil
+		return loweredExpr{expr: l.globalExpr(l.program.Globals[payload.Global])}, nil
 	case air.ExprFunctionRef:
-		if !validFunctionID(l.program, expr.Function) {
-			return loweredExpr{}, fmt.Errorf("unknown function %d", expr.Function)
+		payload := expr.CallPayload()
+		if payload == nil || !validFunctionID(l.program, payload.Function) {
+			return loweredExpr{}, fmt.Errorf("function reference has invalid payload")
 		}
-		value, err := l.functionReferenceExpr(l.program.Functions[expr.Function], expr.TypeArgs)
+		value, err := l.functionReferenceExpr(l.program.Functions[payload.Function], payload.TypeArgs)
 		if err != nil {
 			return loweredExpr{}, err
 		}
@@ -2435,7 +2462,11 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 			}
 			return loweredExpr{stmts: target.stmts, expr: &ast.CallExpr{Fun: traitType, Args: []ast.Expr{target.expr}}}, nil
 		}
-		if l.implRequiresPointerReceiver(expr.Impl) {
+		payload := expr.TraitPayload()
+		if payload == nil {
+			return loweredExpr{}, fmt.Errorf("trait upcast is missing its payload")
+		}
+		if l.implRequiresPointerReceiver(payload.Impl) {
 			place, setup, ok, err := l.mutableTraitUpcastPlace(fn, *expr.Target)
 			if err != nil {
 				return loweredExpr{}, err
@@ -2998,14 +3029,18 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 	case air.ExprMapValueAt:
 		return l.lowerMapValueAt(fn, expr)
 	case air.ExprEnumVariant:
+		payload := expr.EnumPayload()
+		if payload == nil {
+			return loweredExpr{}, fmt.Errorf("enum variant is missing its payload")
+		}
 		if !validTypeID(l.program, expr.Type) {
 			return loweredExpr{}, fmt.Errorf("invalid enum type id %d", expr.Type)
 		}
 		typ := l.program.Types[expr.Type-1]
-		if typ.Kind != air.TypeEnum || expr.Variant < 0 || expr.Variant >= len(typ.Variants) {
-			return loweredExpr{}, fmt.Errorf("invalid enum variant %d for type %s", expr.Variant, typ.Name)
+		if typ.Kind != air.TypeEnum || payload.Variant < 0 || payload.Variant >= len(typ.Variants) {
+			return loweredExpr{}, fmt.Errorf("invalid enum variant %d for type %s", payload.Variant, typ.Name)
 		}
-		return loweredExpr{expr: l.enumVariantExpr(typ, typ.Variants[expr.Variant])}, nil
+		return loweredExpr{expr: l.enumVariantExpr(typ, typ.Variants[payload.Variant])}, nil
 	case air.ExprMakeStruct:
 		if !validTypeID(l.program, expr.Type) {
 			return loweredExpr{}, fmt.Errorf("invalid struct type id %d", expr.Type)
@@ -3014,9 +3049,13 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		if typ.Kind != air.TypeStruct {
 			return loweredExpr{}, fmt.Errorf("make struct with non-struct type %s", typ.Name)
 		}
+		payload := expr.AggregatePayload()
+		if payload == nil {
+			return loweredExpr{}, fmt.Errorf("struct value is missing its payload")
+		}
 		stmts := []ast.Stmt{}
-		elts := make([]ast.Expr, 0, len(expr.Fields))
-		for _, field := range expr.Fields {
+		elts := make([]ast.Expr, 0, len(payload.Fields))
+		for _, field := range payload.Fields {
 			fieldInfo, hasFieldInfo := structFieldByName(typ, field.Name)
 			var value loweredExpr
 			var err error
@@ -3041,6 +3080,10 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		if expr.Target == nil {
 			return loweredExpr{}, fmt.Errorf("get field missing target")
 		}
+		payload := expr.FieldPayload()
+		if payload == nil {
+			return loweredExpr{}, fmt.Errorf("get field is missing its payload")
+		}
 		target, err := l.lowerExpr(fn, *expr.Target)
 		if err != nil {
 			return loweredExpr{}, err
@@ -3060,10 +3103,10 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 				return loweredExpr{}, fmt.Errorf("invalid maybe elem type id %d", targetType.Elem)
 			}
 			elemType := l.program.Types[targetType.Elem-1]
-			if elemType.Kind != air.TypeStruct || expr.Field < 0 || expr.Field >= len(elemType.Fields) {
-				return loweredExpr{}, fmt.Errorf("invalid field index %d", expr.Field)
+			if elemType.Kind != air.TypeStruct || payload.Field < 0 || payload.Field >= len(elemType.Fields) {
+				return loweredExpr{}, fmt.Errorf("invalid field index %d", payload.Field)
 			}
-			field := elemType.Fields[expr.Field]
+			field := elemType.Fields[payload.Field]
 			targetTemp := l.nextTemp()
 			targetDecls, err := l.declareTemp(expr.Target.Type, targetTemp)
 			if err != nil {
@@ -3099,10 +3142,10 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 			})
 			return loweredExpr{stmts: stmts, expr: resultExpr}, nil
 		}
-		if targetType.Kind != air.TypeStruct || expr.Field < 0 || expr.Field >= len(targetType.Fields) {
-			return loweredExpr{}, fmt.Errorf("invalid field index %d", expr.Field)
+		if targetType.Kind != air.TypeStruct || payload.Field < 0 || payload.Field >= len(targetType.Fields) {
+			return loweredExpr{}, fmt.Errorf("invalid field index %d", payload.Field)
 		}
-		field := targetType.Fields[expr.Field]
+		field := targetType.Fields[payload.Field]
 		fieldExpr := &ast.SelectorExpr{X: target.expr, Sel: l.ident(l.goFieldName(targetType, field.Name))}
 		return loweredExpr{stmts: target.stmts, expr: fieldExpr}, nil
 	case air.ExprBlock:
@@ -3132,27 +3175,32 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 	case air.ExprUnsafeIsNil:
 		return l.lowerUnsafeIsNil(fn, expr)
 	case air.ExprCall:
-		if !validFunctionID(l.program, expr.Function) {
-			return loweredExpr{}, fmt.Errorf("invalid function id %d", expr.Function)
+		payload := expr.CallPayload()
+		if payload == nil || !validFunctionID(l.program, payload.Function) {
+			return loweredExpr{}, fmt.Errorf("call has invalid function payload")
 		}
-		target := l.program.Functions[expr.Function]
+		target := l.program.Functions[payload.Function]
 		args, stmts, writeback, err := l.lowerCallArgs(fn, expr.Args, concreteCallParams(expr, target))
 		if err != nil {
 			return loweredExpr{}, err
 		}
-		call := l.functionCallExpr(target, args, expr.TypeArgs)
+		call := l.functionCallExpr(target, args, payload.TypeArgs)
 		if l.abiReturnShapeAvailable(target.Signature.Return) && len(writeback) == 0 {
 			return l.packABICallResult(expr.Type, target.Signature.Return, stmts, call)
 		}
 		return l.finishCallWithWriteback(expr.Type, stmts, call, writeback)
 	case air.ExprEq, air.ExprNotEq:
-		leftTypeID := expr.Left.Type
-		rightTypeID := expr.Right.Type
-		left, err := l.lowerExpr(fn, *expr.Left)
+		payload := expr.BinaryPayload()
+		if payload == nil || payload.Left == nil || payload.Right == nil {
+			return loweredExpr{}, fmt.Errorf("comparison is missing an operand payload")
+		}
+		leftTypeID := payload.Left.Type
+		rightTypeID := payload.Right.Type
+		left, err := l.lowerExpr(fn, *payload.Left)
 		if err != nil {
 			return loweredExpr{}, err
 		}
-		right, err := l.lowerExpr(fn, *expr.Right)
+		right, err := l.lowerExpr(fn, *payload.Right)
 		if err != nil {
 			return loweredExpr{}, err
 		}
@@ -3166,11 +3214,15 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		}
 		return loweredExpr{stmts: append(left.stmts, right.stmts...), expr: equality}, nil
 	case air.ExprAnd, air.ExprOr:
-		left, err := l.lowerExpr(fn, *expr.Left)
+		payload := expr.BinaryPayload()
+		if payload == nil || payload.Left == nil || payload.Right == nil {
+			return loweredExpr{}, fmt.Errorf("logical expression is missing an operand payload")
+		}
+		left, err := l.lowerExpr(fn, *payload.Left)
 		if err != nil {
 			return loweredExpr{}, err
 		}
-		right, err := l.lowerExpr(fn, *expr.Right)
+		right, err := l.lowerExpr(fn, *payload.Right)
 		if err != nil {
 			return loweredExpr{}, err
 		}
@@ -3196,13 +3248,17 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 	case air.ExprIntAdd, air.ExprIntSub, air.ExprIntMul, air.ExprIntDiv, air.ExprIntMod,
 		air.ExprFloatAdd, air.ExprFloatSub, air.ExprFloatMul, air.ExprFloatDiv,
 		air.ExprLt, air.ExprLte, air.ExprGt, air.ExprGte, air.ExprStrConcat:
-		leftTypeID := expr.Left.Type
-		rightTypeID := expr.Right.Type
-		left, err := l.lowerExpr(fn, *expr.Left)
+		payload := expr.BinaryPayload()
+		if payload == nil || payload.Left == nil || payload.Right == nil {
+			return loweredExpr{}, fmt.Errorf("binary expression is missing an operand payload")
+		}
+		leftTypeID := payload.Left.Type
+		rightTypeID := payload.Right.Type
+		left, err := l.lowerExpr(fn, *payload.Left)
 		if err != nil {
 			return loweredExpr{}, err
 		}
-		right, err := l.lowerExpr(fn, *expr.Right)
+		right, err := l.lowerExpr(fn, *payload.Right)
 		if err != nil {
 			return loweredExpr{}, err
 		}
@@ -3231,8 +3287,12 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 }
 
 func (l *lowerer) lowerBlockExpr(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	payload := expr.BlockPayload()
+	if payload == nil {
+		return loweredExpr{}, fmt.Errorf("block expression is missing its payload")
+	}
 	if l.isVoidType(expr.Type) {
-		body, err := l.lowerValueBlock(fn, expr.Body, expr.Type, nil)
+		body, err := l.lowerValueBlock(fn, payload.Body, expr.Type, nil)
 		if err != nil {
 			return loweredExpr{}, err
 		}
@@ -3243,7 +3303,7 @@ func (l *lowerer) lowerBlockExpr(fn air.Function, expr air.Expr) (loweredExpr, e
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	body, err := l.lowerValueBlock(fn, expr.Body, expr.Type, l.ident(temp))
+	body, err := l.lowerValueBlock(fn, payload.Body, expr.Type, l.ident(temp))
 	if err != nil {
 		return loweredExpr{}, err
 	}
@@ -3251,6 +3311,10 @@ func (l *lowerer) lowerBlockExpr(fn air.Function, expr air.Expr) (loweredExpr, e
 }
 
 func (l *lowerer) lowerUnsafeBlockExpr(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	payload := expr.BlockPayload()
+	if payload == nil {
+		return loweredExpr{}, fmt.Errorf("unsafe block expression is missing its payload")
+	}
 	resultInfo, ok := l.typeInfo(expr.Type)
 	if !ok || resultInfo.Kind != air.TypeResult {
 		return loweredExpr{}, fmt.Errorf("unsafe block lowered with non-Result type %d", expr.Type)
@@ -3288,7 +3352,7 @@ func (l *lowerer) lowerUnsafeBlockExpr(fn air.Function, expr air.Expr) (loweredE
 	defer func() { l.forceValueResultReturns = prevForceValueResultReturns }()
 	var valueExpr ast.Expr
 	if l.isVoidType(resultInfo.Value) {
-		loweredBody, err := l.lowerValueBlock(helperFn, expr.Body, resultInfo.Value, nil)
+		loweredBody, err := l.lowerValueBlock(helperFn, payload.Body, resultInfo.Value, nil)
 		if err != nil {
 			return loweredExpr{}, err
 		}
@@ -3301,7 +3365,7 @@ func (l *lowerer) lowerUnsafeBlockExpr(fn air.Function, expr air.Expr) (loweredE
 			return loweredExpr{}, err
 		}
 		body = append(body, decls...)
-		loweredBody, err := l.lowerValueBlock(helperFn, expr.Body, resultInfo.Value, l.ident(valueName))
+		loweredBody, err := l.lowerValueBlock(helperFn, payload.Body, resultInfo.Value, l.ident(valueName))
 		if err != nil {
 			return loweredExpr{}, err
 		}
@@ -3320,10 +3384,11 @@ func (l *lowerer) lowerUnsafeBlockExpr(fn air.Function, expr air.Expr) (loweredE
 }
 
 func (l *lowerer) lowerIfExpr(fn air.Function, expr air.Expr) (loweredExpr, error) {
-	if expr.Condition == nil {
-		return loweredExpr{}, fmt.Errorf("if expression missing condition")
+	payload := expr.IfPayload()
+	if payload == nil || payload.Condition == nil {
+		return loweredExpr{}, fmt.Errorf("if expression missing condition payload")
 	}
-	condition, err := l.lowerExpr(fn, *expr.Condition)
+	condition, err := l.lowerExpr(fn, *payload.Condition)
 	if err != nil {
 		return loweredExpr{}, err
 	}
@@ -3340,11 +3405,11 @@ func (l *lowerer) lowerIfExpr(fn air.Function, expr air.Expr) (loweredExpr, erro
 		target = l.ident(temp)
 		resultExpr = l.ident(temp)
 	}
-	thenBody, err := l.lowerValueBlock(fn, expr.Then, expr.Type, target)
+	thenBody, err := l.lowerValueBlock(fn, payload.Then, expr.Type, target)
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	elseBody, err := l.lowerValueBlock(fn, expr.Else, expr.Type, target)
+	elseBody, err := l.lowerValueBlock(fn, payload.Else, expr.Type, target)
 	if err != nil {
 		return loweredExpr{}, err
 	}
@@ -3429,31 +3494,15 @@ func (l *lowerer) shouldPropagateMaybeNone(expr air.Expr) bool {
 	if expr.Target == nil || expr.Type == expr.Target.Type {
 		return false
 	}
-	if len(expr.None.Stmts) != 0 || expr.None.Result == nil {
+	payload := expr.MaybeMatchPayload()
+	if payload == nil || len(payload.None.Stmts) != 0 || payload.None.Result == nil {
 		return false
 	}
-	return sameAIRExpr(*expr.None.Result, *expr.Target)
+	return sameAIRExpr(*payload.None.Result, *expr.Target)
 }
 
 func sameAIRExpr(a air.Expr, b air.Expr) bool {
-	if a.Kind != b.Kind || a.Type != b.Type || a.Field != b.Field || a.Local != b.Local || a.Function != b.Function {
-		return false
-	}
-	if a.Int != b.Int || a.Float != b.Float || a.Bool != b.Bool || a.Str != b.Str {
-		return false
-	}
-	if (a.Target == nil) != (b.Target == nil) || len(a.Args) != len(b.Args) {
-		return false
-	}
-	if a.Target != nil && !sameAIRExpr(*a.Target, *b.Target) {
-		return false
-	}
-	for i := range a.Args {
-		if !sameAIRExpr(a.Args[i], b.Args[i]) {
-			return false
-		}
-	}
-	return true
+	return reflect.DeepEqual(a, b)
 }
 
 func (l *lowerer) declareTemp(typeID air.TypeID, name string) ([]ast.Stmt, error) {
@@ -3478,10 +3527,14 @@ func (l *lowerer) nextTemp() string {
 }
 
 func (l *lowerer) lowerForeignStructInstance(fn air.Function, expr air.Expr) (loweredExpr, error) {
-	if expr.ForeignTarget != "go" {
-		return loweredExpr{}, fmt.Errorf("unsupported foreign struct target %q", expr.ForeignTarget)
+	payload := expr.ForeignPayload()
+	if payload == nil {
+		return loweredExpr{}, fmt.Errorf("foreign struct is missing its payload")
 	}
-	if expr.ForeignNamespace == "" || expr.ForeignSymbol == "" {
+	if payload.Target != "go" {
+		return loweredExpr{}, fmt.Errorf("unsupported foreign struct target %q", payload.Target)
+	}
+	if payload.Namespace == "" || payload.Symbol == "" {
 		return loweredExpr{}, fmt.Errorf("invalid foreign struct literal")
 	}
 	typ, err := l.goType(expr.Type)
@@ -3489,10 +3542,10 @@ func (l *lowerer) lowerForeignStructInstance(fn air.Function, expr air.Expr) (lo
 		return loweredExpr{}, err
 	}
 	var stmts []ast.Stmt
-	elts := make([]ast.Expr, 0, len(expr.Fields))
-	fields := make([]*air.StructFieldValue, len(expr.Fields))
-	for i := range expr.Fields {
-		fields[i] = &expr.Fields[i]
+	elts := make([]ast.Expr, 0, len(payload.Fields))
+	fields := make([]*air.StructFieldValue, len(payload.Fields))
+	for i := range payload.Fields {
+		fields[i] = &payload.Fields[i]
 	}
 	sort.Slice(fields, func(i, j int) bool { return fields[i].Name < fields[j].Name })
 	for _, field := range fields {
@@ -3507,31 +3560,36 @@ func (l *lowerer) lowerForeignStructInstance(fn air.Function, expr air.Expr) (lo
 }
 
 func (l *lowerer) lowerForeignFieldAccess(fn air.Function, expr air.Expr) (loweredExpr, error) {
-	if expr.ForeignTarget != "go" {
-		return loweredExpr{}, fmt.Errorf("unsupported foreign field target %q", expr.ForeignTarget)
+	payload := expr.ForeignPayload()
+	if payload == nil {
+		return loweredExpr{}, fmt.Errorf("foreign field access is missing its payload")
 	}
-	if expr.Target == nil || expr.ForeignSymbol == "" {
+	if payload.Target != "go" {
+		return loweredExpr{}, fmt.Errorf("unsupported foreign field target %q", payload.Target)
+	}
+	if expr.Target == nil || payload.Symbol == "" {
 		return loweredExpr{}, fmt.Errorf("invalid foreign field access")
 	}
 	target, err := l.lowerExpr(fn, *expr.Target)
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	return loweredExpr{stmts: target.stmts, expr: &ast.SelectorExpr{X: target.expr, Sel: l.ident(expr.ForeignSymbol)}}, nil
+	return loweredExpr{stmts: target.stmts, expr: &ast.SelectorExpr{X: target.expr, Sel: l.ident(payload.Symbol)}}, nil
 }
 
 func (l *lowerer) lowerUnsafeCast(fn air.Function, expr air.Expr) (loweredExpr, error) {
 	if expr.Target == nil {
 		return loweredExpr{}, fmt.Errorf("unsafe::cast missing target")
 	}
-	if len(expr.TypeArgs) != 1 {
-		return loweredExpr{}, fmt.Errorf("unsafe::cast expects one target type, got %d", len(expr.TypeArgs))
+	payload := expr.UnsafeCastPayload()
+	if payload == nil {
+		return loweredExpr{}, fmt.Errorf("unsafe::cast is missing its payload")
 	}
 	maybeType, err := l.goType(expr.Type)
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	targetType, err := l.goType(expr.TypeArgs[0])
+	targetType, err := l.goType(payload.TargetType)
 	if err != nil {
 		return loweredExpr{}, err
 	}
@@ -3540,13 +3598,13 @@ func (l *lowerer) lowerUnsafeCast(fn air.Function, expr air.Expr) (loweredExpr, 
 		return loweredExpr{}, err
 	}
 	resultElemType := targetType
-	if expr.ForeignPointer {
+	if payload.Pointer {
 		resultElemType = &ast.StarExpr{X: targetType}
 	}
 
 	valueName := l.nextTemp()
 	cases := []*ast.CaseClause{}
-	if !expr.ForeignPointer {
+	if !payload.Pointer {
 		cases = append(cases, &ast.CaseClause{
 			List: []ast.Expr{targetType},
 			Body: []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{&ast.CallExpr{Fun: &ast.IndexExpr{X: l.runtimeQualified("Some"), Index: resultElemType}, Args: []ast.Expr{l.ident(valueName)}}}}},
@@ -3554,7 +3612,7 @@ func (l *lowerer) lowerUnsafeCast(fn air.Function, expr air.Expr) (loweredExpr, 
 	}
 	pointerType := &ast.StarExpr{X: targetType}
 	pointerBody := []ast.Stmt{
-		&ast.IfStmt{Cond: &ast.BinaryExpr{X: l.ident(valueName), Op: token.NEQ, Y: l.ident("nil")}, Body: &ast.BlockStmt{List: []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{&ast.CallExpr{Fun: &ast.IndexExpr{X: l.runtimeQualified("Some"), Index: resultElemType}, Args: []ast.Expr{anyCastSomeArg(l.ident(valueName), expr.ForeignPointer)}}}}}}},
+		&ast.IfStmt{Cond: &ast.BinaryExpr{X: l.ident(valueName), Op: token.NEQ, Y: l.ident("nil")}, Body: &ast.BlockStmt{List: []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{&ast.CallExpr{Fun: &ast.IndexExpr{X: l.runtimeQualified("Some"), Index: resultElemType}, Args: []ast.Expr{anyCastSomeArg(l.ident(valueName), payload.Pointer)}}}}}}},
 	}
 	cases = append(cases, &ast.CaseClause{List: []ast.Expr{pointerType}, Body: pointerBody})
 	body := []ast.Stmt{
@@ -3594,20 +3652,24 @@ func typeSwitchClausesToStmts(cases []*ast.CaseClause) []ast.Stmt {
 }
 
 func (l *lowerer) lowerForeignValue(fn air.Function, expr air.Expr) (loweredExpr, error) {
-	if expr.ForeignTarget != "go" {
-		return loweredExpr{}, fmt.Errorf("unsupported foreign value target %q", expr.ForeignTarget)
+	payload := expr.ForeignPayload()
+	if payload == nil {
+		return loweredExpr{}, fmt.Errorf("foreign value is missing its payload")
 	}
-	if expr.ForeignNamespace == "" || expr.ForeignSymbol == "" {
-		return loweredExpr{}, fmt.Errorf("invalid go foreign value %q::%q", expr.ForeignNamespace, expr.ForeignSymbol)
+	if payload.Target != "go" {
+		return loweredExpr{}, fmt.Errorf("unsupported foreign value target %q", payload.Target)
 	}
-	qualifier := expr.ForeignQualifier
+	if payload.Namespace == "" || payload.Symbol == "" {
+		return loweredExpr{}, fmt.Errorf("invalid go foreign value %q::%q", payload.Namespace, payload.Symbol)
+	}
+	qualifier := payload.Qualifier
 	if qualifier == "" {
-		qualifier = expr.ForeignNamespace
+		qualifier = payload.Namespace
 		if slash := strings.LastIndex(qualifier, "/"); slash >= 0 {
 			qualifier = qualifier[slash+1:]
 		}
 	}
-	value := loweredExpr{expr: l.qualified(qualifier, expr.ForeignNamespace, expr.ForeignSymbol)}
+	value := loweredExpr{expr: l.qualified(qualifier, payload.Namespace, payload.Symbol)}
 	if validTypeID(l.program, expr.Type) && l.program.Types[expr.Type-1].Kind == air.TypeFunction {
 		return l.lowerForeignCallableValue(fn, expr, value)
 	}
@@ -3618,11 +3680,15 @@ func (l *lowerer) lowerInterfaceConversion(fn air.Function, expr air.Expr) (lowe
 	if expr.Target == nil {
 		return loweredExpr{}, fmt.Errorf("interface conversion missing target")
 	}
+	payload := expr.InterfacePayload()
+	if payload == nil {
+		return loweredExpr{}, fmt.Errorf("interface conversion is missing its payload")
+	}
 	target, err := l.lowerExpr(fn, *expr.Target)
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	switch expr.InterfaceMode {
+	switch payload.Mode {
 	case air.InterfaceValue:
 	case air.InterfaceReference:
 
@@ -3637,7 +3703,7 @@ func (l *lowerer) lowerInterfaceConversion(fn air.Function, expr air.Expr) (lowe
 		})
 		target.expr = &ast.UnaryExpr{Op: token.AND, X: l.ident(tmp)}
 	default:
-		return loweredExpr{}, fmt.Errorf("unsupported interface conversion mode %d", expr.InterfaceMode)
+		return loweredExpr{}, fmt.Errorf("unsupported interface conversion mode %d", payload.Mode)
 	}
 	if validTypeID(l.program, expr.Type) && l.program.Types[expr.Type-1].Kind == air.TypeAny {
 		if l.isVoidType(expr.Target.Type) || isVoidExpr(target.expr) {
@@ -3675,19 +3741,24 @@ func (l *lowerer) materializeCallOperand(stmts []ast.Stmt, value ast.Expr) ([]as
 }
 
 func (l *lowerer) lowerForeignCall(fn air.Function, expr air.Expr) (loweredExpr, error) {
-	if expr.ForeignTarget != "go" {
-		return loweredExpr{}, fmt.Errorf("unsupported foreign call target %q", expr.ForeignTarget)
+	payload := expr.ForeignPayload()
+	if payload == nil {
+		return loweredExpr{}, fmt.Errorf("foreign call is missing its payload")
 	}
-	if expr.ForeignNamespace == "" || expr.ForeignSymbol == "" {
-		return loweredExpr{}, fmt.Errorf("invalid go foreign call %q::%q", expr.ForeignNamespace, expr.ForeignSymbol)
+	if payload.Target != "go" {
+		return loweredExpr{}, fmt.Errorf("unsupported foreign call target %q", payload.Target)
 	}
+	if payload.Namespace == "" || payload.Symbol == "" {
+		return loweredExpr{}, fmt.Errorf("invalid go foreign call %q::%q", payload.Namespace, payload.Symbol)
+	}
+	spread := payload.Spread != nil
 
 	args := make([]ast.Expr, 0, len(expr.Args))
 	var stmts []ast.Stmt
 	for i := range expr.Args {
 		var arg loweredExpr
 		var err error
-		if expr.TailSpread && i == len(expr.Args)-1 {
+		if spread && i == len(expr.Args)-1 {
 			arg, err = l.lowerSpreadArgument(fn, expr.Args[i])
 		} else {
 			arg, err = l.lowerExpr(fn, expr.Args[i])
@@ -3697,18 +3768,18 @@ func (l *lowerer) lowerForeignCall(fn air.Function, expr air.Expr) (loweredExpr,
 		}
 		stmts = append(stmts, arg.stmts...)
 		argExpr := arg.expr
-		if !expr.TailSpread || i != len(expr.Args)-1 {
-			mode := expr.ForeignArgABI[i]
+		if !spread || i != len(expr.Args)-1 {
+			mode := payload.ArgABI[i]
 			argExpr = l.foreignABIValueArg(expr.Args[i], argExpr, mode)
 		}
-		if expr.TailSpread {
+		if spread {
 			stmts, argExpr = l.materializeCallOperand(stmts, argExpr)
 		}
 		args = append(args, argExpr)
 	}
-	importPath := expr.ForeignNamespace
-	functionName := expr.ForeignSymbol
-	pkgName := expr.ForeignQualifier
+	importPath := payload.Namespace
+	functionName := payload.Symbol
+	pkgName := payload.Qualifier
 	if pkgName == "" {
 		pkgName = importPath
 		if slash := strings.LastIndex(pkgName, "/"); slash >= 0 {
@@ -3716,31 +3787,31 @@ func (l *lowerer) lowerForeignCall(fn air.Function, expr air.Expr) (loweredExpr,
 		}
 	}
 	fun := l.qualified(pkgName, importPath, functionName)
-	if len(expr.TypeArgs) > 0 {
-		fun = l.indexWithTypeArgs(fun, expr.TypeArgs)
+	if len(payload.TypeArgs) > 0 {
+		fun = l.indexWithTypeArgs(fun, payload.TypeArgs)
 	}
 	call := &ast.CallExpr{Fun: fun, Args: args}
-	if expr.TailSpread {
+	if spread {
 		call.Ellipsis = token.Pos(1)
 	}
 	if validTypeID(l.program, expr.Type) {
 		info := l.program.Types[expr.Type-1]
 		switch info.Kind {
 		case air.TypeResult:
-			if expr.ForeignResultShape == air.ForeignResultUnknown {
+			if payload.ResultShape == air.ForeignResultUnknown {
 				return loweredExpr{}, fmt.Errorf("Go foreign call %s.%s is missing its result shape", importPath, functionName)
 			}
-			switch expr.ForeignResultShape {
+			switch payload.ResultShape {
 			case air.ForeignResultValueError:
 				return l.lowerGoValueErrorResultCall(expr, stmts, call, info)
 			case air.ForeignResultErrorOnly:
 				return l.lowerGoErrorOnlyResultCall(expr, stmts, call)
 			}
 		case air.TypeMaybe:
-			if expr.ForeignResultShape == air.ForeignResultUnknown {
+			if payload.ResultShape == air.ForeignResultUnknown {
 				return loweredExpr{}, fmt.Errorf("Go foreign call %s.%s is missing its result shape", importPath, functionName)
 			}
-			if expr.ForeignResultShape == air.ForeignResultValueBool {
+			if payload.ResultShape == air.ForeignResultValueBool {
 				return l.lowerGoValueBoolMaybeCall(expr, stmts, call)
 			}
 		}
@@ -3814,6 +3885,10 @@ func (l *lowerer) lowerGoErrorOnlyResultCall(expr air.Expr, stmts []ast.Stmt, ca
 }
 
 func (l *lowerer) lowerForeignCallableValue(_ air.Function, expr air.Expr, callee loweredExpr) (loweredExpr, error) {
+	payload := expr.ForeignPayload()
+	if payload == nil {
+		return loweredExpr{}, fmt.Errorf("foreign callable is missing its payload")
+	}
 	if !validTypeID(l.program, expr.Type) {
 		return callee, nil
 	}
@@ -3821,11 +3896,11 @@ func (l *lowerer) lowerForeignCallableValue(_ air.Function, expr air.Expr, calle
 	if fnInfo.Kind != air.TypeFunction {
 		return callee, nil
 	}
-	if len(expr.ForeignArgABI) != len(fnInfo.Params) {
-		return loweredExpr{}, fmt.Errorf("foreign callable %s has %d ABI modes for %d parameters", expr.ForeignSymbol, len(expr.ForeignArgABI), len(fnInfo.Params))
+	if len(payload.ArgABI) != len(fnInfo.Params) {
+		return loweredExpr{}, fmt.Errorf("foreign callable %s has %d ABI modes for %d parameters", payload.Symbol, len(payload.ArgABI), len(fnInfo.Params))
 	}
 	needsArgAdaptation := false
-	for _, mode := range expr.ForeignArgABI {
+	for _, mode := range payload.ArgABI {
 		if mode != air.ABIParamExact {
 			needsArgAdaptation = true
 			break
@@ -3835,8 +3910,8 @@ func (l *lowerer) lowerForeignCallableValue(_ air.Function, expr air.Expr, calle
 	if validTypeID(l.program, fnInfo.Return) {
 		returnInfo = l.program.Types[fnInfo.Return-1]
 	}
-	discardsEmptyResult := returnInfo.Kind == air.TypeResult && l.isVoidType(returnInfo.Value) && expr.ForeignResultShape == air.ForeignResultValueError
-	discardsEmptyMaybe := returnInfo.Kind == air.TypeMaybe && l.isVoidType(returnInfo.Elem) && expr.ForeignResultShape == air.ForeignResultValueBool
+	discardsEmptyResult := returnInfo.Kind == air.TypeResult && l.isVoidType(returnInfo.Value) && payload.ResultShape == air.ForeignResultValueError
+	discardsEmptyMaybe := returnInfo.Kind == air.TypeMaybe && l.isVoidType(returnInfo.Elem) && payload.ResultShape == air.ForeignResultValueBool
 	// Ard Result/Maybe returns normally use their idiomatic Go ABI in function
 	// type position. Empty success values are the exception: Go returns
 	// (struct{}, error/bool), while the Ard callable ABI omits struct{}.
@@ -3859,10 +3934,10 @@ func (l *lowerer) lowerForeignCallableValue(_ air.Function, expr air.Expr, calle
 		argExpr := ast.Expr(l.ident(name))
 		if fnInfo.Variadic && i == len(fnInfo.Params)-1 {
 			typ = &ast.Ellipsis{Elt: typ}
-			if expr.ForeignArgABI[i] == air.ABIParamDescriptorValue {
+			if payload.ArgABI[i] == air.ABIParamDescriptorValue {
 				paramInfo := l.program.Types[paramType-1]
 				if paramInfo.Kind != air.TypeReference {
-					return loweredExpr{}, fmt.Errorf("variadic foreign callable %s descriptor element is not a reference", expr.ForeignSymbol)
+					return loweredExpr{}, fmt.Errorf("variadic foreign callable %s descriptor element is not a reference", payload.Symbol)
 				}
 				elemType, err := l.goType(paramInfo.Elem)
 				if err != nil {
@@ -3876,7 +3951,7 @@ func (l *lowerer) lowerForeignCallableValue(_ air.Function, expr air.Expr, calle
 					Key: l.ident(indexName), Value: l.ident(itemName), Tok: token.DEFINE, X: l.ident(name),
 					Body: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{
 						Lhs: []ast.Expr{&ast.IndexExpr{X: l.ident(projectedName), Index: l.ident(indexName)}}, Tok: token.ASSIGN,
-						Rhs: []ast.Expr{l.foreignABIValueArg(air.Expr{Type: paramType}, l.ident(itemName), expr.ForeignArgABI[i])},
+						Rhs: []ast.Expr{l.foreignABIValueArg(air.Expr{Type: paramType}, l.ident(itemName), payload.ArgABI[i])},
 					}}},
 				}
 				bodyPrefix = append(bodyPrefix,
@@ -3890,11 +3965,11 @@ func (l *lowerer) lowerForeignCallableValue(_ air.Function, expr air.Expr, calle
 					},
 				)
 				argExpr = l.ident(projectedName)
-			} else if expr.ForeignArgABI[i] != air.ABIParamExact {
-				return loweredExpr{}, fmt.Errorf("variadic foreign callable %s has unsupported element ABI mode %d", expr.ForeignSymbol, expr.ForeignArgABI[i])
+			} else if payload.ArgABI[i] != air.ABIParamExact {
+				return loweredExpr{}, fmt.Errorf("variadic foreign callable %s has unsupported element ABI mode %d", payload.Symbol, payload.ArgABI[i])
 			}
 		} else {
-			argExpr = l.foreignABIValueArg(air.Expr{Type: paramType}, argExpr, expr.ForeignArgABI[i])
+			argExpr = l.foreignABIValueArg(air.Expr{Type: paramType}, argExpr, payload.ArgABI[i])
 		}
 		params[i] = &ast.Field{Names: []*ast.Ident{l.ident(name)}, Type: typ}
 		args[i] = argExpr
@@ -3928,17 +4003,21 @@ func (l *lowerer) lowerForeignCallableValue(_ air.Function, expr air.Expr, calle
 }
 
 func (l *lowerer) lowerForeignMethodValue(fn air.Function, expr air.Expr) (loweredExpr, error) {
-	if expr.ForeignTarget != "go" {
-		return loweredExpr{}, fmt.Errorf("unsupported foreign method target %q", expr.ForeignTarget)
+	payload := expr.ForeignPayload()
+	if payload == nil {
+		return loweredExpr{}, fmt.Errorf("foreign method value is missing its payload")
 	}
-	if expr.Target == nil || expr.ForeignSymbol == "" {
-		return loweredExpr{}, fmt.Errorf("invalid go foreign method value %q", expr.ForeignSymbol)
+	if payload.Target != "go" {
+		return loweredExpr{}, fmt.Errorf("unsupported foreign method target %q", payload.Target)
+	}
+	if expr.Target == nil || payload.Symbol == "" {
+		return loweredExpr{}, fmt.Errorf("invalid go foreign method value %q", payload.Symbol)
 	}
 	target, err := l.lowerExpr(fn, *expr.Target)
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	selector := &ast.SelectorExpr{X: target.expr, Sel: l.ident(expr.ForeignSymbol)}
+	selector := &ast.SelectorExpr{X: target.expr, Sel: l.ident(payload.Symbol)}
 	return l.lowerForeignCallableValue(fn, expr, loweredExpr{stmts: target.stmts, expr: selector})
 }
 
@@ -3947,26 +4026,31 @@ func (l *lowerer) resultErrorReturnIfStmt(resultType ast.Expr, errName ast.Expr)
 }
 
 func (l *lowerer) lowerForeignMethodCall(fn air.Function, expr air.Expr) (loweredExpr, error) {
-	if expr.ForeignTarget != "go" {
-		return loweredExpr{}, fmt.Errorf("unsupported foreign method target %q", expr.ForeignTarget)
+	payload := expr.ForeignPayload()
+	if payload == nil {
+		return loweredExpr{}, fmt.Errorf("foreign method call is missing its payload")
 	}
-	if expr.Target == nil || expr.ForeignSymbol == "" {
-		return loweredExpr{}, fmt.Errorf("invalid go foreign method call %q", expr.ForeignSymbol)
+	if payload.Target != "go" {
+		return loweredExpr{}, fmt.Errorf("unsupported foreign method target %q", payload.Target)
+	}
+	if expr.Target == nil || payload.Symbol == "" {
+		return loweredExpr{}, fmt.Errorf("invalid go foreign method call %q", payload.Symbol)
 	}
 	target, err := l.lowerExpr(fn, *expr.Target)
 	if err != nil {
 		return loweredExpr{}, err
 	}
+	spread := payload.Spread != nil
 	args := make([]ast.Expr, 0, len(expr.Args))
 	stmts := append([]ast.Stmt{}, target.stmts...)
 	receiverExpr := target.expr
-	if expr.TailSpread {
+	if spread {
 		stmts, receiverExpr = l.materializeCallOperand(stmts, receiverExpr)
 	}
 	for i := range expr.Args {
 		var arg loweredExpr
 		var err error
-		if expr.TailSpread && i == len(expr.Args)-1 {
+		if spread && i == len(expr.Args)-1 {
 			arg, err = l.lowerSpreadArgument(fn, expr.Args[i])
 		} else {
 			arg, err = l.lowerExpr(fn, expr.Args[i])
@@ -3976,25 +4060,25 @@ func (l *lowerer) lowerForeignMethodCall(fn air.Function, expr air.Expr) (lowere
 		}
 		stmts = append(stmts, arg.stmts...)
 		argExpr := arg.expr
-		if !expr.TailSpread || i != len(expr.Args)-1 {
-			mode := expr.ForeignArgABI[i]
+		if !spread || i != len(expr.Args)-1 {
+			mode := payload.ArgABI[i]
 			argExpr = l.foreignABIValueArg(expr.Args[i], argExpr, mode)
 		}
-		if expr.TailSpread {
+		if spread {
 			stmts, argExpr = l.materializeCallOperand(stmts, argExpr)
 		}
 		args = append(args, argExpr)
 	}
-	call := &ast.CallExpr{Fun: &ast.SelectorExpr{X: receiverExpr, Sel: l.ident(expr.ForeignSymbol)}, Args: args}
-	if expr.TailSpread {
+	call := &ast.CallExpr{Fun: &ast.SelectorExpr{X: receiverExpr, Sel: l.ident(payload.Symbol)}, Args: args}
+	if spread {
 		call.Ellipsis = token.Pos(1)
 	}
 	if validTypeID(l.program, expr.Type) {
 		if info := l.program.Types[expr.Type-1]; info.Kind == air.TypeResult {
-			if expr.ForeignResultShape == air.ForeignResultUnknown {
-				return loweredExpr{}, fmt.Errorf("Go foreign method call %s.%s is missing its result shape", expr.ForeignReceiver, expr.ForeignSymbol)
+			if payload.ResultShape == air.ForeignResultUnknown {
+				return loweredExpr{}, fmt.Errorf("Go foreign method call %s.%s is missing its result shape", payload.Receiver, payload.Symbol)
 			}
-			switch expr.ForeignResultShape {
+			switch payload.ResultShape {
 			case air.ForeignResultValueError:
 				return l.lowerGoValueErrorResultCall(expr, stmts, call, info)
 			case air.ForeignResultErrorOnly:
@@ -4002,10 +4086,10 @@ func (l *lowerer) lowerForeignMethodCall(fn air.Function, expr air.Expr) (lowere
 			}
 		}
 		if info := l.program.Types[expr.Type-1]; info.Kind == air.TypeMaybe {
-			if expr.ForeignResultShape == air.ForeignResultUnknown {
-				return loweredExpr{}, fmt.Errorf("Go foreign method call %s.%s is missing its result shape", expr.ForeignReceiver, expr.ForeignSymbol)
+			if payload.ResultShape == air.ForeignResultUnknown {
+				return loweredExpr{}, fmt.Errorf("Go foreign method call %s.%s is missing its result shape", payload.Receiver, payload.Symbol)
 			}
-			if expr.ForeignResultShape == air.ForeignResultValueBool {
+			if payload.ResultShape == air.ForeignResultValueBool {
 				return l.lowerGoValueBoolMaybeCall(expr, stmts, call)
 			}
 		}
@@ -4831,7 +4915,11 @@ func addressOfPlace(place ast.Expr) ast.Expr {
 func (l *lowerer) mutableTraitUpcastPlace(fn air.Function, arg air.Expr) (ast.Expr, []ast.Stmt, bool, error) {
 	switch arg.Kind {
 	case air.ExprLoadLocal:
-		return l.localAssignExpr(fn, arg.Local), nil, true, nil
+		payload := arg.LocalPayload()
+		if payload == nil {
+			return nil, nil, false, nil
+		}
+		return l.localAssignExpr(fn, payload.Local), nil, true, nil
 	case air.ExprGetField:
 		if arg.Target == nil || !validTypeID(l.program, arg.Target.Type) {
 			return nil, nil, false, nil
@@ -4844,10 +4932,11 @@ func (l *lowerer) mutableTraitUpcastPlace(fn air.Function, arg air.Expr) (ast.Ex
 		if targetType.Kind == air.TypeReference && validTypeID(l.program, targetType.Elem) {
 			targetType = l.program.Types[targetType.Elem-1]
 		}
-		if targetType.Kind != air.TypeStruct || arg.Field < 0 || arg.Field >= len(targetType.Fields) {
+		payload := arg.FieldPayload()
+		if payload == nil || targetType.Kind != air.TypeStruct || payload.Field < 0 || payload.Field >= len(targetType.Fields) {
 			return nil, nil, false, nil
 		}
-		field := targetType.Fields[arg.Field]
+		field := targetType.Fields[payload.Field]
 		fieldTarget := ast.Expr(&ast.SelectorExpr{X: targetPlace, Sel: l.ident(l.goFieldName(targetType, field.Name))})
 		if l.isReferenceType(field.Type) {
 			fieldTarget = &ast.StarExpr{X: fieldTarget}
@@ -4865,6 +4954,10 @@ func (l *lowerer) lowerMutRef(fn air.Function, expr air.Expr) (loweredExpr, erro
 	if expr.Target == nil {
 		return loweredExpr{}, fmt.Errorf("mut ref missing operand")
 	}
+	payload := expr.ReferencePayload()
+	if payload == nil {
+		return loweredExpr{}, fmt.Errorf("mut ref is missing its payload")
+	}
 	target, err := l.lowerExpr(fn, *expr.Target)
 	if err != nil {
 		return loweredExpr{}, err
@@ -4875,7 +4968,7 @@ func (l *lowerer) lowerMutRef(fn air.Function, expr air.Expr) (loweredExpr, erro
 			return target, nil
 		}
 	}
-	switch expr.ReferenceMode {
+	switch payload.Mode {
 	case air.ExistingReference:
 		return target, nil
 	case air.AddressablePlace:
@@ -4891,7 +4984,7 @@ func (l *lowerer) lowerMutRef(fn air.Function, expr air.Expr) (loweredExpr, erro
 		stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{l.ident(tmp)}, Tok: token.DEFINE, Rhs: []ast.Expr{target.expr}})
 		return loweredExpr{stmts: stmts, expr: &ast.UnaryExpr{Op: token.AND, X: l.ident(tmp)}}, nil
 	default:
-		return loweredExpr{}, fmt.Errorf("mut ref has invalid mode %d", expr.ReferenceMode)
+		return loweredExpr{}, fmt.Errorf("mut ref has invalid mode %d", payload.Mode)
 	}
 }
 
@@ -5125,6 +5218,10 @@ func (l *lowerer) lowerUnionWrap(fn air.Function, expr air.Expr) (loweredExpr, e
 	if expr.Target == nil {
 		return loweredExpr{}, fmt.Errorf("union wrap missing target")
 	}
+	payload := expr.TagPayload()
+	if payload == nil {
+		return loweredExpr{}, fmt.Errorf("union wrap is missing its payload")
+	}
 	if !validTypeID(l.program, expr.Type) {
 		return loweredExpr{}, fmt.Errorf("invalid union type id %d", expr.Type)
 	}
@@ -5135,14 +5232,14 @@ func (l *lowerer) lowerUnionWrap(fn air.Function, expr air.Expr) (loweredExpr, e
 	fieldName := ""
 	memberType := air.NoType
 	for _, member := range unionType.Members {
-		if member.Tag == expr.Tag {
+		if member.Tag == payload.Tag {
 			fieldName = unionMemberFieldName(unionType, member)
 			memberType = member.Type
 			break
 		}
 	}
 	if fieldName == "" {
-		return loweredExpr{}, fmt.Errorf("invalid union tag %d for %s", expr.Tag, unionType.Name)
+		return loweredExpr{}, fmt.Errorf("invalid union tag %d for %s", payload.Tag, unionType.Name)
 	}
 	var target loweredExpr
 	var err error
@@ -5160,7 +5257,7 @@ func (l *lowerer) lowerUnionWrap(fn air.Function, expr air.Expr) (loweredExpr, e
 		fieldValue = target.expr
 	}
 	return loweredExpr{stmts: target.stmts, expr: &ast.CompositeLit{Type: l.compositeTypeExpr(unionType), Elts: []ast.Expr{
-		&ast.KeyValueExpr{Key: l.ident(unionTagFieldName(unionType)), Value: &ast.BasicLit{Kind: token.INT, Value: fmt.Sprintf("%d", expr.Tag)}},
+		&ast.KeyValueExpr{Key: l.ident(unionTagFieldName(unionType)), Value: &ast.BasicLit{Kind: token.INT, Value: fmt.Sprintf("%d", payload.Tag)}},
 		&ast.KeyValueExpr{Key: l.ident(fieldName), Value: fieldValue},
 	}}}, nil
 }
@@ -5168,6 +5265,10 @@ func (l *lowerer) lowerUnionWrap(fn air.Function, expr air.Expr) (loweredExpr, e
 func (l *lowerer) lowerMatchUnion(fn air.Function, expr air.Expr) (loweredExpr, error) {
 	if expr.Target == nil {
 		return loweredExpr{}, fmt.Errorf("union match missing target")
+	}
+	payload := expr.UnionMatchPayload()
+	if payload == nil {
+		return loweredExpr{}, fmt.Errorf("union match is missing its payload")
 	}
 	target, err := l.lowerExpr(fn, *expr.Target)
 	if err != nil {
@@ -5190,8 +5291,8 @@ func (l *lowerer) lowerMatchUnion(fn air.Function, expr air.Expr) (loweredExpr, 
 		assignTarget = l.ident(temp)
 		resultExpr = l.ident(temp)
 	}
-	cases := make([]ast.Stmt, 0, len(expr.UnionCases)+1)
-	for _, unionCase := range expr.UnionCases {
+	cases := make([]ast.Stmt, 0, len(payload.Cases)+1)
+	for _, unionCase := range payload.Cases {
 		fieldName := ""
 		for _, member := range unionType.Members {
 			if member.Tag == unionCase.Tag {
@@ -5212,8 +5313,8 @@ func (l *lowerer) lowerMatchUnion(fn air.Function, expr air.Expr) (loweredExpr, 
 		body = append([]ast.Stmt{bind, &ast.AssignStmt{Lhs: []ast.Expr{l.ident("_")}, Tok: token.ASSIGN, Rhs: []ast.Expr{l.ident(localName)}}}, body...)
 		cases = append(cases, &ast.CaseClause{List: []ast.Expr{&ast.BasicLit{Kind: token.INT, Value: fmt.Sprintf("%d", unionCase.Tag)}}, Body: body})
 	}
-	if len(expr.CatchAll.Stmts) > 0 || expr.CatchAll.Result != nil {
-		body, err := l.lowerValueBlock(fn, expr.CatchAll, expr.Type, assignTarget)
+	if len(payload.CatchAll.Stmts) > 0 || payload.CatchAll.Result != nil {
+		body, err := l.lowerValueBlock(fn, payload.CatchAll, expr.Type, assignTarget)
 		if err != nil {
 			return loweredExpr{}, err
 		}
@@ -5226,6 +5327,10 @@ func (l *lowerer) lowerMatchUnion(fn air.Function, expr air.Expr) (loweredExpr, 
 // lowerMatchForeignType lowers a dynamic foreign type test (ADR 0042) to a Go
 // type switch over the subject's dynamic type.
 func (l *lowerer) lowerMatchForeignType(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	payload := expr.ForeignMatchPayload()
+	if payload == nil {
+		return loweredExpr{}, fmt.Errorf("foreign type match is missing its payload")
+	}
 	if expr.Target == nil {
 		return loweredExpr{}, fmt.Errorf("foreign type match missing target")
 	}
@@ -5247,8 +5352,8 @@ func (l *lowerer) lowerMatchForeignType(fn air.Function, expr air.Expr) (lowered
 		resultExpr = l.ident(temp)
 	}
 	switchLocal := l.nextTemp()
-	cases := make([]ast.Stmt, 0, len(expr.ForeignCases)+1)
-	for _, foreignCase := range expr.ForeignCases {
+	cases := make([]ast.Stmt, 0, len(payload.Cases)+1)
+	for _, foreignCase := range payload.Cases {
 		caseType, err := l.goType(foreignCase.Type)
 		if err != nil {
 			return loweredExpr{}, err
@@ -5266,13 +5371,13 @@ func (l *lowerer) lowerMatchForeignType(fn air.Function, expr air.Expr) (lowered
 		}
 		cases = append(cases, &ast.CaseClause{List: []ast.Expr{caseType}, Body: body})
 	}
-	catchAll, err := l.lowerValueBlock(fn, expr.CatchAll, expr.Type, assignTarget)
+	catchAll, err := l.lowerValueBlock(fn, payload.CatchAll, expr.Type, assignTarget)
 	if err != nil {
 		return loweredExpr{}, err
 	}
 	cases = append(cases, &ast.CaseClause{Body: catchAll})
 	anyBound := false
-	for _, foreignCase := range expr.ForeignCases {
+	for _, foreignCase := range payload.Cases {
 		if foreignCase.Bound {
 			anyBound = true
 			break
@@ -5289,6 +5394,10 @@ func (l *lowerer) lowerMatchForeignType(fn air.Function, expr air.Expr) (lowered
 }
 
 func (l *lowerer) lowerMatchInt(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	payload := expr.IntMatchPayload()
+	if payload == nil {
+		return loweredExpr{}, fmt.Errorf("int match is missing its payload")
+	}
 	if expr.Target == nil {
 		return loweredExpr{}, fmt.Errorf("int match missing target")
 	}
@@ -5310,15 +5419,15 @@ func (l *lowerer) lowerMatchInt(fn air.Function, expr air.Expr) (loweredExpr, er
 		assignTarget = l.ident(temp)
 		resultExpr = l.ident(temp)
 	}
-	cases := make([]ast.Stmt, 0, len(expr.IntCases)+len(expr.RangeCases)+1)
-	for _, intCase := range expr.IntCases {
+	cases := make([]ast.Stmt, 0, len(payload.Cases)+len(payload.RangeCases)+1)
+	for _, intCase := range payload.Cases {
 		body, err := l.lowerValueBlock(fn, intCase.Body, resultTypeID, assignTarget)
 		if err != nil {
 			return loweredExpr{}, err
 		}
 		cases = append(cases, &ast.CaseClause{List: []ast.Expr{&ast.BinaryExpr{X: target.expr, Op: token.EQL, Y: &ast.BasicLit{Kind: token.INT, Value: fmt.Sprintf("%d", intCase.Value)}}}, Body: body})
 	}
-	for _, rangeCase := range expr.RangeCases {
+	for _, rangeCase := range payload.RangeCases {
 		body, err := l.lowerValueBlock(fn, rangeCase.Body, resultTypeID, assignTarget)
 		if err != nil {
 			return loweredExpr{}, err
@@ -5326,8 +5435,8 @@ func (l *lowerer) lowerMatchInt(fn air.Function, expr air.Expr) (loweredExpr, er
 		cond := &ast.BinaryExpr{X: &ast.BinaryExpr{X: target.expr, Op: token.GEQ, Y: &ast.BasicLit{Kind: token.INT, Value: fmt.Sprintf("%d", rangeCase.Start)}}, Op: token.LAND, Y: &ast.BinaryExpr{X: target.expr, Op: token.LEQ, Y: &ast.BasicLit{Kind: token.INT, Value: fmt.Sprintf("%d", rangeCase.End)}}}
 		cases = append(cases, &ast.CaseClause{List: []ast.Expr{cond}, Body: body})
 	}
-	if len(expr.CatchAll.Stmts) > 0 || expr.CatchAll.Result != nil {
-		body, err := l.lowerValueBlock(fn, expr.CatchAll, resultTypeID, assignTarget)
+	if len(payload.CatchAll.Stmts) > 0 || payload.CatchAll.Result != nil {
+		body, err := l.lowerValueBlock(fn, payload.CatchAll, resultTypeID, assignTarget)
 		if err != nil {
 			return loweredExpr{}, err
 		}
@@ -5338,6 +5447,10 @@ func (l *lowerer) lowerMatchInt(fn air.Function, expr air.Expr) (loweredExpr, er
 }
 
 func (l *lowerer) lowerMatchStr(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	payload := expr.StrMatchPayload()
+	if payload == nil {
+		return loweredExpr{}, fmt.Errorf("str match is missing its payload")
+	}
 	if expr.Target == nil {
 		return loweredExpr{}, fmt.Errorf("str match missing target")
 	}
@@ -5359,15 +5472,15 @@ func (l *lowerer) lowerMatchStr(fn air.Function, expr air.Expr) (loweredExpr, er
 		assignTarget = l.ident(temp)
 		resultExpr = l.ident(temp)
 	}
-	cases := make([]ast.Stmt, 0, len(expr.StrCases)+1)
-	for _, strCase := range expr.StrCases {
+	cases := make([]ast.Stmt, 0, len(payload.Cases)+1)
+	for _, strCase := range payload.Cases {
 		body, err := l.lowerValueBlock(fn, strCase.Body, resultTypeID, assignTarget)
 		if err != nil {
 			return loweredExpr{}, err
 		}
 		cases = append(cases, &ast.CaseClause{List: []ast.Expr{&ast.BasicLit{Kind: token.STRING, Value: strconv.Quote(strCase.Value)}}, Body: body})
 	}
-	body, err := l.lowerValueBlock(fn, expr.CatchAll, resultTypeID, assignTarget)
+	body, err := l.lowerValueBlock(fn, payload.CatchAll, resultTypeID, assignTarget)
 	if err != nil {
 		return loweredExpr{}, err
 	}
@@ -5377,6 +5490,10 @@ func (l *lowerer) lowerMatchStr(fn air.Function, expr air.Expr) (loweredExpr, er
 }
 
 func (l *lowerer) lowerMatchEnum(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	payload := expr.EnumMatchPayload()
+	if payload == nil {
+		return loweredExpr{}, fmt.Errorf("enum match is missing its payload")
+	}
 	if expr.Target == nil {
 		return loweredExpr{}, fmt.Errorf("enum match missing target")
 	}
@@ -5397,8 +5514,8 @@ func (l *lowerer) lowerMatchEnum(fn air.Function, expr air.Expr) (loweredExpr, e
 		assignTarget = l.ident(temp)
 		resultExpr = l.ident(temp)
 	}
-	cases := make([]ast.Stmt, 0, len(expr.EnumCases)+1)
-	for _, enumCase := range expr.EnumCases {
+	cases := make([]ast.Stmt, 0, len(payload.Cases)+1)
+	for _, enumCase := range payload.Cases {
 		body, err := l.lowerValueBlock(fn, enumCase.Body, expr.Type, assignTarget)
 		if err != nil {
 			return loweredExpr{}, err
@@ -5408,8 +5525,8 @@ func (l *lowerer) lowerMatchEnum(fn air.Function, expr air.Expr) (loweredExpr, e
 			Body: body,
 		})
 	}
-	if len(expr.CatchAll.Stmts) > 0 || expr.CatchAll.Result != nil {
-		body, err := l.lowerValueBlock(fn, expr.CatchAll, expr.Type, assignTarget)
+	if len(payload.CatchAll.Stmts) > 0 || payload.CatchAll.Result != nil {
+		body, err := l.lowerValueBlock(fn, payload.CatchAll, expr.Type, assignTarget)
 		if err != nil {
 			return loweredExpr{}, err
 		}
@@ -5452,7 +5569,8 @@ func (l *lowerer) lowerMaybeExpect(fn air.Function, expr air.Expr) (loweredExpr,
 		return loweredExpr{stmts: stmts, expr: l.ident("nil")}, nil
 	}
 	temp := l.nextTemp()
-	decls, err := l.declareReferenceAwareTemp(expr.Type, temp, expr.Bool)
+	returnsReference := expr.MaybeCallPayload() != nil && expr.MaybeCallPayload().ReturnsReference
+	decls, err := l.declareReferenceAwareTemp(expr.Type, temp, returnsReference)
 	if err != nil {
 		return loweredExpr{}, err
 	}
@@ -5506,7 +5624,8 @@ func (l *lowerer) lowerMaybeOr(fn air.Function, expr air.Expr) (loweredExpr, err
 	}
 	targetExpr := l.ident(targetTemp)
 	resultTemp := l.nextTemp()
-	resultDecls, err := l.declareReferenceAwareTemp(expr.Type, resultTemp, expr.Bool)
+	returnsReference := expr.MaybeCallPayload() != nil && expr.MaybeCallPayload().ReturnsReference
+	resultDecls, err := l.declareReferenceAwareTemp(expr.Type, resultTemp, returnsReference)
 	if err != nil {
 		return loweredExpr{}, err
 	}
@@ -5594,7 +5713,11 @@ func (l *lowerer) lowerMaybeSet(fn air.Function, expr air.Expr) (loweredExpr, er
 	var target ast.Expr
 	var targetStmts []ast.Stmt
 	if expr.Target.Kind == air.ExprLoadLocal {
-		target = l.localValueExpr(fn, expr.Target.Local)
+		targetPayload := expr.Target.LocalPayload()
+		if targetPayload == nil {
+			return loweredExpr{}, fmt.Errorf("Maybe mutation local target is missing its payload")
+		}
+		target = l.localValueExpr(fn, targetPayload.Local)
 	} else {
 		loweredTarget, err := l.lowerExpr(fn, *expr.Target)
 		if err != nil {
@@ -5639,7 +5762,11 @@ func (l *lowerer) lowerMaybeClear(fn air.Function, expr air.Expr) (loweredExpr, 
 	var target ast.Expr
 	var targetStmts []ast.Stmt
 	if expr.Target.Kind == air.ExprLoadLocal {
-		target = l.localValueExpr(fn, expr.Target.Local)
+		targetPayload := expr.Target.LocalPayload()
+		if targetPayload == nil {
+			return loweredExpr{}, fmt.Errorf("Maybe mutation local target is missing its payload")
+		}
+		target = l.localValueExpr(fn, targetPayload.Local)
 	} else {
 		loweredTarget, err := l.lowerExpr(fn, *expr.Target)
 		if err != nil {
@@ -5973,6 +6100,10 @@ func (l *lowerer) lowerResultAndThen(fn air.Function, expr air.Expr) (loweredExp
 }
 
 func (l *lowerer) lowerMatchResult(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	payload := expr.ResultMatchPayload()
+	if payload == nil {
+		return loweredExpr{}, fmt.Errorf("result match is missing its payload")
+	}
 	if expr.Target == nil {
 		return loweredExpr{}, fmt.Errorf("result match missing target")
 	}
@@ -6001,18 +6132,18 @@ func (l *lowerer) lowerMatchResult(fn air.Function, expr air.Expr) (loweredExpr,
 		assignTarget = l.ident(temp)
 		resultExpr = l.ident(temp)
 	}
-	okName := l.localName(fn, expr.OkLocal)
-	errName := l.localName(fn, expr.ErrLocal)
-	l.declaredLocals[expr.OkLocal] = true
-	l.declaredLocals[expr.ErrLocal] = true
+	okName := l.localName(fn, payload.OkLocal)
+	errName := l.localName(fn, payload.ErrLocal)
+	l.declaredLocals[payload.OkLocal] = true
+	l.declaredLocals[payload.ErrLocal] = true
 	okBind := &ast.AssignStmt{Lhs: []ast.Expr{l.ident(okName)}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.SelectorExpr{X: targetExpr, Sel: l.ident("Value")}}}
 	errBind := &ast.AssignStmt{Lhs: []ast.Expr{l.ident(errName)}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.SelectorExpr{X: targetExpr, Sel: l.ident("Err")}}}
-	okBody, err := l.lowerValueBlock(fn, expr.Ok, expr.Type, assignTarget)
+	okBody, err := l.lowerValueBlock(fn, payload.Ok, expr.Type, assignTarget)
 	if err != nil {
 		return loweredExpr{}, err
 	}
 	okBody = append([]ast.Stmt{okBind, &ast.AssignStmt{Lhs: []ast.Expr{l.ident("_")}, Tok: token.ASSIGN, Rhs: []ast.Expr{l.ident(okName)}}}, okBody...)
-	errBody, err := l.lowerValueBlock(fn, expr.Err, expr.Type, assignTarget)
+	errBody, err := l.lowerValueBlock(fn, payload.Err, expr.Type, assignTarget)
 	if err != nil {
 		return loweredExpr{}, err
 	}
@@ -6073,6 +6204,7 @@ func (l *lowerer) lowerResultExpect(fn air.Function, expr air.Expr) (loweredExpr
 }
 
 func (l *lowerer) lowerTryResult(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	catchPayload := expr.TryPayload()
 	if expr.Target == nil {
 		return loweredExpr{}, fmt.Errorf("try result missing target")
 	}
@@ -6103,14 +6235,14 @@ func (l *lowerer) lowerTryResult(fn air.Function, expr air.Expr) (loweredExpr, e
 	okBody := []ast.Stmt{}
 	if assignTarget != nil {
 		okBody = append(okBody, &ast.AssignStmt{Lhs: []ast.Expr{assignTarget}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.SelectorExpr{X: targetExpr, Sel: l.ident("Value")}}})
-		if expr.HasCatch {
+		if catchPayload != nil {
 			okBody = append(okBody, &ast.AssignStmt{Lhs: []ast.Expr{l.ident("_")}, Tok: token.ASSIGN, Rhs: []ast.Expr{assignTarget}})
 		}
 	} else {
 		okBody = append(okBody, &ast.AssignStmt{Lhs: []ast.Expr{l.ident("_")}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.SelectorExpr{X: targetExpr, Sel: l.ident("Value")}}})
 	}
 	var elseBody []ast.Stmt
-	if expr.HasCatch {
+	if catchPayload != nil {
 		var catchDecls []ast.Stmt
 		var catchTarget ast.Expr
 		if !l.isVoidType(fn.Signature.Return) {
@@ -6122,10 +6254,10 @@ func (l *lowerer) lowerTryResult(fn air.Function, expr air.Expr) (loweredExpr, e
 			}
 			catchTarget = l.ident(catchTargetName)
 		}
-		errName := l.localName(fn, expr.CatchLocal)
-		l.declaredLocals[expr.CatchLocal] = true
+		errName := l.localName(fn, catchPayload.CatchLocal)
+		l.declaredLocals[catchPayload.CatchLocal] = true
 		errBind := &ast.AssignStmt{Lhs: []ast.Expr{l.ident(errName)}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.SelectorExpr{X: targetExpr, Sel: l.ident("Err")}}}
-		catchBody, err := l.lowerValueBlock(fn, expr.Catch, fn.Signature.Return, catchTarget)
+		catchBody, err := l.lowerValueBlock(fn, catchPayload.Catch, fn.Signature.Return, catchTarget)
 		if err != nil {
 			return loweredExpr{}, err
 		}
@@ -6180,6 +6312,7 @@ func (l *lowerer) lowerTryResult(fn air.Function, expr air.Expr) (loweredExpr, e
 }
 
 func (l *lowerer) lowerTryMaybe(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	catchPayload := expr.TryPayload()
 	if expr.Target == nil {
 		return loweredExpr{}, fmt.Errorf("try maybe missing target")
 	}
@@ -6212,14 +6345,14 @@ func (l *lowerer) lowerTryMaybe(fn air.Function, expr air.Expr) (loweredExpr, er
 	someBody := []ast.Stmt{}
 	if assignTarget != nil {
 		someBody = append(someBody, &ast.AssignStmt{Lhs: []ast.Expr{assignTarget}, Tok: token.ASSIGN, Rhs: []ast.Expr{l.maybeValueExpr(targetExpr)}})
-		if expr.HasCatch {
+		if catchPayload != nil {
 			someBody = append(someBody, &ast.AssignStmt{Lhs: []ast.Expr{l.ident("_")}, Tok: token.ASSIGN, Rhs: []ast.Expr{assignTarget}})
 		}
 	} else {
 		someBody = append(someBody, &ast.AssignStmt{Lhs: []ast.Expr{l.ident("_")}, Tok: token.ASSIGN, Rhs: []ast.Expr{l.maybeValueExpr(targetExpr)}})
 	}
 	var noneBody []ast.Stmt
-	if expr.HasCatch {
+	if catchPayload != nil {
 		var catchDecls []ast.Stmt
 		var catchTarget ast.Expr
 		if !l.isVoidType(fn.Signature.Return) {
@@ -6231,7 +6364,7 @@ func (l *lowerer) lowerTryMaybe(fn air.Function, expr air.Expr) (loweredExpr, er
 			}
 			catchTarget = l.ident(catchTargetName)
 		}
-		catchBody, err := l.lowerValueBlock(fn, expr.Catch, fn.Signature.Return, catchTarget)
+		catchBody, err := l.lowerValueBlock(fn, catchPayload.Catch, fn.Signature.Return, catchTarget)
 		if err != nil {
 			return loweredExpr{}, err
 		}
@@ -6286,6 +6419,10 @@ func (l *lowerer) lowerMatchMaybe(fn air.Function, expr air.Expr) (loweredExpr, 
 	if expr.Target == nil {
 		return loweredExpr{}, fmt.Errorf("maybe match missing target")
 	}
+	payload := expr.MaybeMatchPayload()
+	if payload == nil {
+		return loweredExpr{}, fmt.Errorf("maybe match is missing its payload")
+	}
 	target, err := l.lowerExpr(fn, *expr.Target)
 	if err != nil {
 		return loweredExpr{}, err
@@ -6312,10 +6449,10 @@ func (l *lowerer) lowerMatchMaybe(fn air.Function, expr air.Expr) (loweredExpr, 
 		assignTarget = l.ident(temp)
 		resultExpr = l.ident(temp)
 	}
-	someName := l.localName(fn, expr.SomeLocal)
-	l.declaredLocals[expr.SomeLocal] = true
+	someName := l.localName(fn, payload.SomeLocal)
+	l.declaredLocals[payload.SomeLocal] = true
 	someDecl := &ast.AssignStmt{Lhs: []ast.Expr{l.ident(someName)}, Tok: token.DEFINE, Rhs: []ast.Expr{l.maybeValueExpr(targetExpr)}}
-	someBody, err := l.lowerValueBlock(fn, expr.Some, expr.Type, assignTarget)
+	someBody, err := l.lowerValueBlock(fn, payload.Some, expr.Type, assignTarget)
 	if err != nil {
 		return loweredExpr{}, err
 	}
@@ -6324,7 +6461,7 @@ func (l *lowerer) lowerMatchMaybe(fn air.Function, expr air.Expr) (loweredExpr, 
 	if l.shouldPropagateMaybeNone(expr) {
 		noneBody = nil
 	} else {
-		noneBody, err = l.lowerValueBlock(fn, expr.None, expr.Type, assignTarget)
+		noneBody, err = l.lowerValueBlock(fn, payload.None, expr.Type, assignTarget)
 		if err != nil {
 			return loweredExpr{}, err
 		}
@@ -6372,11 +6509,12 @@ func (l *lowerer) lowerMakeList(fn air.Function, expr air.Expr) (loweredExpr, er
 }
 
 func (l *lowerer) lowerMakeClosure(fn air.Function, expr air.Expr) (loweredExpr, error) {
-	if !validFunctionID(l.program, expr.Function) {
-		return loweredExpr{}, fmt.Errorf("invalid closure function %d", expr.Function)
+	payload := expr.CallPayload()
+	if payload == nil || !validFunctionID(l.program, payload.Function) {
+		return loweredExpr{}, fmt.Errorf("closure has invalid function payload")
 	}
-	closureFn := l.program.Functions[expr.Function]
-	if l.inlineClosures[expr.Function] {
+	closureFn := l.program.Functions[payload.Function]
+	if l.inlineClosures[payload.Function] {
 		return l.lowerInlineClosure(fn, expr, closureFn)
 	}
 	closureType, err := l.goType(expr.Type)
@@ -6384,7 +6522,7 @@ func (l *lowerer) lowerMakeClosure(fn air.Function, expr air.Expr) (loweredExpr,
 		return loweredExpr{}, err
 	}
 	funcType, _ := closureType.(*ast.FuncType)
-	callArgs := make([]ast.Expr, 0, len(expr.CaptureLocals)+len(closureFn.Signature.Params))
+	callArgs := make([]ast.Expr, 0, len(payload.CaptureLocals)+len(closureFn.Signature.Params))
 	captureNames, stmts, err := l.lowerClosureCaptureSnapshots(fn, expr, closureFn)
 	if err != nil {
 		return loweredExpr{}, err
@@ -6425,12 +6563,16 @@ func (l *lowerer) lowerMakeClosure(fn air.Function, expr air.Expr) (loweredExpr,
 }
 
 func (l *lowerer) lowerClosureCaptureSnapshots(parent air.Function, expr air.Expr, closureFn air.Function) ([]string, []ast.Stmt, error) {
-	if len(expr.CaptureLocals) != len(closureFn.Captures) {
-		return nil, nil, fmt.Errorf("closure %s has %d capture locals, want %d", closureFn.Name, len(expr.CaptureLocals), len(closureFn.Captures))
+	payload := expr.CallPayload()
+	if payload == nil {
+		return nil, nil, fmt.Errorf("closure %s is missing its payload", closureFn.Name)
 	}
-	names := make([]string, len(expr.CaptureLocals))
-	stmts := make([]ast.Stmt, 0, len(expr.CaptureLocals))
-	for i, local := range expr.CaptureLocals {
+	if len(payload.CaptureLocals) != len(closureFn.Captures) {
+		return nil, nil, fmt.Errorf("closure %s has %d capture locals, want %d", closureFn.Name, len(payload.CaptureLocals), len(closureFn.Captures))
+	}
+	names := make([]string, len(payload.CaptureLocals))
+	stmts := make([]ast.Stmt, 0, len(payload.CaptureLocals))
+	for i, local := range payload.CaptureLocals {
 		capture := closureFn.Captures[i]
 		captured := l.localValueExpr(parent, local)
 		if capture.Mode == air.CaptureSlot {
@@ -6531,6 +6673,11 @@ func (l *lowerer) lowerCallClosure(fn air.Function, expr air.Expr) (loweredExpr,
 	if expr.Target == nil {
 		return loweredExpr{}, fmt.Errorf("call closure missing target")
 	}
+	payload := expr.CallPayload()
+	if payload == nil {
+		return loweredExpr{}, fmt.Errorf("closure call is missing its payload")
+	}
+	spreadCall := payload.Spread != nil
 	target, err := l.lowerExpr(fn, *expr.Target)
 	if err != nil {
 		return loweredExpr{}, err
@@ -6572,7 +6719,7 @@ func (l *lowerer) lowerCallClosure(fn air.Function, expr air.Expr) (loweredExpr,
 	callParams := params
 	calleeStmts := append([]ast.Stmt{}, target.stmts...)
 	calleeExpr := target.expr
-	if expr.TailSpread {
+	if spreadCall {
 		callArgs = expr.Args[:len(expr.Args)-1]
 		callParams = params[:len(params)-1]
 		calleeStmts, calleeExpr = l.materializeCallOperand(calleeStmts, calleeExpr)
@@ -6580,7 +6727,7 @@ func (l *lowerer) lowerCallClosure(fn air.Function, expr air.Expr) (loweredExpr,
 	var args []ast.Expr
 	var stmts []ast.Stmt
 	var writeback []ast.Stmt
-	if expr.TailSpread {
+	if spreadCall {
 		args, stmts, writeback, err = l.lowerCallArgsMaterialized(fn, callArgs, callParams)
 	} else {
 		args, stmts, writeback, err = l.lowerCallArgs(fn, callArgs, callParams)
@@ -6588,7 +6735,7 @@ func (l *lowerer) lowerCallClosure(fn air.Function, expr air.Expr) (loweredExpr,
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	if expr.TailSpread {
+	if spreadCall {
 		spread, err := l.lowerSpreadArgument(fn, expr.Args[len(expr.Args)-1])
 		if err != nil {
 			return loweredExpr{}, err
@@ -6600,7 +6747,7 @@ func (l *lowerer) lowerCallClosure(fn air.Function, expr air.Expr) (loweredExpr,
 	}
 	stmts = append(calleeStmts, stmts...)
 	call := &ast.CallExpr{Fun: calleeExpr, Args: args}
-	if expr.TailSpread {
+	if spreadCall {
 		call.Ellipsis = token.Pos(1)
 	}
 	if hasFunctionType && l.abiReturnShapeAvailable(targetInfo.Return) && len(writeback) == 0 {
@@ -6629,7 +6776,10 @@ func (l *lowerer) lowerCheckedSlice(fn air.Function, expr air.Expr, capToLength 
 	})
 
 	boundTemps := make([]string, 2)
-	argOrder := expr.ArgOrder
+	argOrder := []int(nil)
+	if payload := expr.CallPayload(); payload != nil {
+		argOrder = payload.ArgOrder
+	}
 	if len(argOrder) == 0 {
 		argOrder = []int{0, 1}
 	}
@@ -6874,12 +7024,17 @@ func (l *lowerer) lowerListPrepend(fn air.Function, expr air.Expr) (loweredExpr,
 	}
 	var target ast.Expr
 	if expr.Target.Kind == air.ExprLoadLocal {
-		target = l.localValueExpr(fn, expr.Target.Local)
-	} else {
-		if expr.Target.Global < 0 || int(expr.Target.Global) >= len(l.program.Globals) {
-			return loweredExpr{}, fmt.Errorf("list prepend references invalid global %d", expr.Target.Global)
+		targetPayload := expr.Target.LocalPayload()
+		if targetPayload == nil {
+			return loweredExpr{}, fmt.Errorf("Maybe mutation local target is missing its payload")
 		}
-		target = l.globalExpr(l.program.Globals[expr.Target.Global])
+		target = l.localValueExpr(fn, targetPayload.Local)
+	} else {
+		globalPayload := expr.Target.GlobalPayload()
+		if globalPayload == nil || globalPayload.Global < 0 || int(globalPayload.Global) >= len(l.program.Globals) {
+			return loweredExpr{}, fmt.Errorf("list prepend references an invalid global")
+		}
+		target = l.globalExpr(l.program.Globals[globalPayload.Global])
 	}
 	target = l.valueThroughReference(expr.Target.Type, target)
 	valueExpr := value.expr
@@ -6950,7 +7105,11 @@ func (l *lowerer) lowerListPush(fn air.Function, expr air.Expr) (loweredExpr, er
 	var target ast.Expr
 	var targetStmts []ast.Stmt
 	if expr.Target.Kind == air.ExprLoadLocal {
-		target = l.localValueExpr(fn, expr.Target.Local)
+		targetPayload := expr.Target.LocalPayload()
+		if targetPayload == nil {
+			return loweredExpr{}, fmt.Errorf("Maybe mutation local target is missing its payload")
+		}
+		target = l.localValueExpr(fn, targetPayload.Local)
 	} else {
 		loweredTarget, err := l.lowerExpr(fn, *expr.Target)
 		if err != nil {
@@ -6979,14 +7138,18 @@ func (l *lowerer) lowerListPush(fn air.Function, expr air.Expr) (loweredExpr, er
 }
 
 func (l *lowerer) lowerMakeMap(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	payload := expr.AggregatePayload()
+	if payload == nil {
+		return loweredExpr{}, fmt.Errorf("map value is missing its payload")
+	}
 	keyType, valueType := l.mapKeyValueTypes(expr.Type)
 	typ, err := l.goType(expr.Type)
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	elts := make([]ast.Expr, 0, len(expr.Entries))
+	elts := make([]ast.Expr, 0, len(payload.Entries))
 	stmts := []ast.Stmt{}
-	for _, entry := range expr.Entries {
+	for _, entry := range payload.Entries {
 		var key loweredExpr
 		if keyType != air.NoType {
 			key, err = l.lowerExprWithExpectedType(fn, entry.Key, keyType)
@@ -7167,6 +7330,10 @@ func (l *lowerer) lowerChannelNarrow(fn air.Function, expr air.Expr) (loweredExp
 // operands are hoisted before the select so they are evaluated once; recv arms
 // with a binding build the element Maybe from the comma-ok receive.
 func (l *lowerer) lowerSelect(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	payload := expr.SelectPayload()
+	if payload == nil {
+		return loweredExpr{}, fmt.Errorf("select is missing its payload")
+	}
 	var preStmts []ast.Stmt
 	var resultExpr ast.Expr = l.ident("nil")
 	var assignTarget ast.Expr
@@ -7182,7 +7349,7 @@ func (l *lowerer) lowerSelect(fn air.Function, expr air.Expr) (loweredExpr, erro
 	}
 
 	clauses := []ast.Stmt{}
-	for _, arm := range expr.SelectCases {
+	for _, arm := range payload.Cases {
 		clause := &ast.CommClause{}
 		switch arm.Kind {
 		case air.SelectArmDefault:
@@ -7206,7 +7373,8 @@ func (l *lowerer) lowerSelect(fn air.Function, expr air.Expr) (loweredExpr, erro
 			}
 			preStmts = append(preStmts, ch.stmts...)
 			preStmts = append(preStmts, val.stmts...)
-			clause.Comm = &ast.SendStmt{Chan: ch.expr, Value: val.expr}
+			channelExpr := l.valueThroughReference(arm.Channel.Type, ch.expr)
+			clause.Comm = &ast.SendStmt{Chan: channelExpr, Value: val.expr}
 			body, err := l.lowerValueBlock(fn, arm.Body, expr.Type, assignTarget)
 			if err != nil {
 				return loweredExpr{}, err
@@ -7222,7 +7390,8 @@ func (l *lowerer) lowerSelect(fn air.Function, expr air.Expr) (loweredExpr, erro
 				return loweredExpr{}, err
 			}
 			preStmts = append(preStmts, ch.stmts...)
-			recv := ast.Expr(&ast.UnaryExpr{Op: token.ARROW, X: ch.expr})
+			channelExpr := l.valueThroughReference(arm.Channel.Type, ch.expr)
+			recv := ast.Expr(&ast.UnaryExpr{Op: token.ARROW, X: channelExpr})
 			if arm.HasBind {
 				valueTemp := l.nextTemp()
 				okTemp := l.nextTemp()
@@ -7488,7 +7657,8 @@ func mustTypeExpr(l *lowerer, typeID air.TypeID) ast.Expr {
 }
 
 func (l *lowerer) lowerTraitReferenceProjection(fn air.Function, expr air.Expr) (loweredExpr, error) {
-	if expr.Target == nil || !l.isReferenceType(expr.Type) || !validImplID(l.program, expr.Impl) {
+	payload := expr.TraitPayload()
+	if expr.Target == nil || payload == nil || !l.isReferenceType(expr.Type) || !validImplID(l.program, payload.Impl) {
 		return loweredExpr{}, fmt.Errorf("invalid mutable trait reference projection")
 	}
 	reference := l.program.Types[expr.Type-1]
@@ -7514,18 +7684,22 @@ func (l *lowerer) lowerTraitCall(fn air.Function, expr air.Expr) (loweredExpr, e
 	if expr.Target == nil {
 		return loweredExpr{}, fmt.Errorf("trait call missing target")
 	}
+	payload := expr.TraitPayload()
+	if payload == nil {
+		return loweredExpr{}, fmt.Errorf("trait call is missing its payload")
+	}
 	target, err := l.lowerExpr(fn, *expr.Target)
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	if expr.Trait < 0 || int(expr.Trait) >= len(l.program.Traits) {
-		return loweredExpr{}, fmt.Errorf("invalid trait id %d", expr.Trait)
+	if payload.Trait < 0 || int(payload.Trait) >= len(l.program.Traits) {
+		return loweredExpr{}, fmt.Errorf("invalid trait id %d", payload.Trait)
 	}
-	trait := l.program.Traits[expr.Trait]
-	if expr.Method < 0 || expr.Method >= len(trait.Methods) {
-		return loweredExpr{}, fmt.Errorf("invalid trait method %d for %s", expr.Method, trait.Name)
+	trait := l.program.Traits[payload.Trait]
+	if payload.Method < 0 || payload.Method >= len(trait.Methods) {
+		return loweredExpr{}, fmt.Errorf("invalid trait method %d for %s", payload.Method, trait.Name)
 	}
-	method := trait.Methods[expr.Method]
+	method := trait.Methods[payload.Method]
 	targetIsTraitObject := validTypeID(l.program, expr.Target.Type) && l.program.Types[expr.Target.Type-1].Kind == air.TypeTraitObject
 	if l.isReferenceType(expr.Target.Type) {
 		targetIsTraitObject = l.isTraitObjectType(l.program.Types[expr.Target.Type-1].Elem)
@@ -7540,15 +7714,19 @@ func (l *lowerer) lowerTraitCall(fn air.Function, expr air.Expr) (loweredExpr, e
 }
 
 func (l *lowerer) lowerNativeTraitInterfaceCall(fn air.Function, target loweredExpr, expr air.Expr) (loweredExpr, error) {
-	if expr.Trait < 0 || int(expr.Trait) >= len(l.program.Traits) {
-		return loweredExpr{}, fmt.Errorf("invalid trait id %d", expr.Trait)
+	payload := expr.TraitPayload()
+	if payload == nil {
+		return loweredExpr{}, fmt.Errorf("native trait call is missing its payload")
 	}
-	trait := l.program.Traits[expr.Trait]
-	if expr.Method < 0 || expr.Method >= len(trait.Methods) {
-		return loweredExpr{}, fmt.Errorf("invalid trait method %d for %s", expr.Method, trait.Name)
+	if payload.Trait < 0 || int(payload.Trait) >= len(l.program.Traits) {
+		return loweredExpr{}, fmt.Errorf("invalid trait id %d", payload.Trait)
 	}
-	method := trait.Methods[expr.Method]
-	methodName := traitDispatchMethodName(trait.ID, expr.Method)
+	trait := l.program.Traits[payload.Trait]
+	if payload.Method < 0 || payload.Method >= len(trait.Methods) {
+		return loweredExpr{}, fmt.Errorf("invalid trait method %d for %s", payload.Method, trait.Name)
+	}
+	method := trait.Methods[payload.Method]
+	methodName := traitDispatchMethodName(trait.ID, payload.Method)
 	if l.usesNativeTraitInterface(l.traitObjectTypeID(trait.ID)) {
 		var ok bool
 		methodName, ok = goMethodName(method.Name)
@@ -7575,18 +7753,23 @@ func (l *lowerer) exprIsMutableReference(fn air.Function, expr air.Expr) bool {
 	}
 	switch expr.Kind {
 	case air.ExprLoadLocal:
-		return l.localIsPointerParam(fn, expr.Local)
+		payload := expr.LocalPayload()
+		return payload != nil && l.localIsPointerParam(fn, payload.Local)
 	default:
 		return false
 	}
 }
 
 func (l *lowerer) isBuiltinToStringTraitCall(expr air.Expr, typeID air.TypeID) bool {
-	if expr.Trait < 0 || int(expr.Trait) >= len(l.program.Traits) || expr.Method < 0 {
+	payload := expr.TraitPayload()
+	if payload == nil {
 		return false
 	}
-	trait := l.program.Traits[expr.Trait]
-	if expr.Method >= len(trait.Methods) || trait.Name != "ToString" || trait.Methods[expr.Method].Name != "to_str" {
+	if payload.Trait < 0 || int(payload.Trait) >= len(l.program.Traits) || payload.Method < 0 {
+		return false
+	}
+	trait := l.program.Traits[payload.Trait]
+	if payload.Method >= len(trait.Methods) || trait.Name != "ToString" || trait.Methods[payload.Method].Name != "to_str" {
 		return false
 	}
 	if !validTypeID(l.program, typeID) {
@@ -7869,11 +8052,15 @@ func (l *lowerer) collectInlineClosureFunctions() map[air.FunctionID]bool {
 	directRefs := map[air.FunctionID]bool{}
 	for _, fn := range l.program.Functions {
 		walkBlockExprs(fn.Body, func(expr air.Expr) {
+			payload := expr.CallPayload()
+			if payload == nil {
+				return
+			}
 			switch expr.Kind {
 			case air.ExprMakeClosure:
-				uses[expr.Function]++
+				uses[payload.Function]++
 			case air.ExprCall, air.ExprFunctionRef:
-				directRefs[expr.Function] = true
+				directRefs[payload.Function] = true
 			}
 		})
 	}
@@ -7899,7 +8086,8 @@ func functionDirectlyReferences(block air.Block, function air.FunctionID) bool {
 		}
 		switch expr.Kind {
 		case air.ExprCall, air.ExprFunctionRef:
-			found = expr.Function == function
+			payload := expr.CallPayload()
+			found = payload != nil && payload.Function == function
 		}
 	})
 	return found
@@ -7931,58 +8119,84 @@ func walkExpr(expr air.Expr, visit func(air.Expr)) {
 	for i := range expr.Args {
 		walkExpr(expr.Args[i], visit)
 	}
-	for i := range expr.Entries {
-		walkExpr(expr.Entries[i].Key, visit)
-		walkExpr(expr.Entries[i].Value, visit)
-	}
-	for i := range expr.Fields {
-		walkExpr(expr.Fields[i].Value, visit)
-	}
 	if expr.Target != nil {
 		walkExpr(*expr.Target, visit)
 	}
-	if expr.Left != nil {
-		walkExpr(*expr.Left, visit)
-	}
-	if expr.Right != nil {
-		walkExpr(*expr.Right, visit)
-	}
-	if expr.Condition != nil {
-		walkExpr(*expr.Condition, visit)
-	}
-	walkBlockExprs(expr.Body, visit)
-	walkBlockExprs(expr.Then, visit)
-	walkBlockExprs(expr.Else, visit)
-	walkBlockExprs(expr.CatchAll, visit)
-	walkBlockExprs(expr.Some, visit)
-	walkBlockExprs(expr.None, visit)
-	walkBlockExprs(expr.Ok, visit)
-	walkBlockExprs(expr.Err, visit)
-	walkBlockExprs(expr.Catch, visit)
-	for i := range expr.EnumCases {
-		walkBlockExprs(expr.EnumCases[i].Body, visit)
-	}
-	for i := range expr.IntCases {
-		walkBlockExprs(expr.IntCases[i].Body, visit)
-	}
-	for i := range expr.StrCases {
-		walkBlockExprs(expr.StrCases[i].Body, visit)
-	}
-	for i := range expr.RangeCases {
-		walkBlockExprs(expr.RangeCases[i].Body, visit)
-	}
-	for i := range expr.UnionCases {
-		walkBlockExprs(expr.UnionCases[i].Body, visit)
-	}
-	for i := range expr.SelectCases {
-		arm := expr.SelectCases[i]
-		if arm.Channel != nil {
-			walkExpr(*arm.Channel, visit)
+	switch payload := expr.Payload.(type) {
+	case *air.AggregateExprPayload:
+		for i := range payload.Entries {
+			walkExpr(payload.Entries[i].Key, visit)
+			walkExpr(payload.Entries[i].Value, visit)
 		}
-		if arm.Value != nil {
-			walkExpr(*arm.Value, visit)
+		for i := range payload.Fields {
+			walkExpr(payload.Fields[i].Value, visit)
 		}
-		walkBlockExprs(arm.Body, visit)
+	case *air.ForeignExprPayload:
+		for i := range payload.Fields {
+			walkExpr(payload.Fields[i].Value, visit)
+		}
+	case *air.BinaryExprPayload:
+		if payload.Left != nil {
+			walkExpr(*payload.Left, visit)
+		}
+		if payload.Right != nil {
+			walkExpr(*payload.Right, visit)
+		}
+	case *air.BlockExprPayload:
+		walkBlockExprs(payload.Body, visit)
+	case *air.IfExprPayload:
+		if payload.Condition != nil {
+			walkExpr(*payload.Condition, visit)
+		}
+		walkBlockExprs(payload.Then, visit)
+		walkBlockExprs(payload.Else, visit)
+	case *air.EnumMatchExprPayload:
+		for i := range payload.Cases {
+			walkBlockExprs(payload.Cases[i].Body, visit)
+		}
+		walkBlockExprs(payload.CatchAll, visit)
+	case *air.IntMatchExprPayload:
+		for i := range payload.Cases {
+			walkBlockExprs(payload.Cases[i].Body, visit)
+		}
+		for i := range payload.RangeCases {
+			walkBlockExprs(payload.RangeCases[i].Body, visit)
+		}
+		walkBlockExprs(payload.CatchAll, visit)
+	case *air.StrMatchExprPayload:
+		for i := range payload.Cases {
+			walkBlockExprs(payload.Cases[i].Body, visit)
+		}
+		walkBlockExprs(payload.CatchAll, visit)
+	case *air.UnionMatchExprPayload:
+		for i := range payload.Cases {
+			walkBlockExprs(payload.Cases[i].Body, visit)
+		}
+		walkBlockExprs(payload.CatchAll, visit)
+	case *air.ForeignMatchExprPayload:
+		for i := range payload.Cases {
+			walkBlockExprs(payload.Cases[i].Body, visit)
+		}
+		walkBlockExprs(payload.CatchAll, visit)
+	case *air.MaybeMatchExprPayload:
+		walkBlockExprs(payload.Some, visit)
+		walkBlockExprs(payload.None, visit)
+	case *air.ResultMatchExprPayload:
+		walkBlockExprs(payload.Ok, visit)
+		walkBlockExprs(payload.Err, visit)
+	case *air.TryExprPayload:
+		walkBlockExprs(payload.Catch, visit)
+	case *air.SelectExprPayload:
+		for i := range payload.Cases {
+			arm := payload.Cases[i]
+			if arm.Channel != nil {
+				walkExpr(*arm.Channel, visit)
+			}
+			if arm.Value != nil {
+				walkExpr(*arm.Value, visit)
+			}
+			walkBlockExprs(arm.Body, visit)
+		}
 	}
 }
 

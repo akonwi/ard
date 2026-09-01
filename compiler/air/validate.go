@@ -516,10 +516,8 @@ func spreadCallableType(program *Program, typeID TypeID) (TypeInfo, error) {
 }
 
 func validateTailSpread(program *Program, expr Expr) error {
-	if !expr.TailSpread {
-		if expr.SpreadElement != NoType || expr.SpreadCallable != NoType {
-			return fmt.Errorf("non-spread expression has spread type metadata")
-		}
+	spread := spreadExprPayload(&expr)
+	if spread == nil {
 		return nil
 	}
 	switch expr.Kind {
@@ -530,20 +528,20 @@ func validateTailSpread(program *Program, expr Expr) error {
 	if len(expr.Args) == 0 {
 		return fmt.Errorf("variadic spread call has no arguments")
 	}
-	if !validTypeID(program, expr.SpreadElement) {
-		return fmt.Errorf("variadic spread has invalid element type %d", expr.SpreadElement)
+	if !validTypeID(program, spread.Element) {
+		return fmt.Errorf("variadic spread has invalid element type %d", spread.Element)
 	}
-	if spreadTypeContainsParam(program, expr.SpreadElement, map[TypeID]bool{}) {
-		return fmt.Errorf("variadic spread element type %d is not concrete", expr.SpreadElement)
+	if spreadTypeContainsParam(program, spread.Element, map[TypeID]bool{}) {
+		return fmt.Errorf("variadic spread element type %d is not concrete", spread.Element)
 	}
-	if descriptorReferenceSpreadElement(program, expr.SpreadElement) {
-		return fmt.Errorf("variadic spread element type %d has ambiguous descriptor ABI", expr.SpreadElement)
+	if descriptorReferenceSpreadElement(program, spread.Element) {
+		return fmt.Errorf("variadic spread element type %d has ambiguous descriptor ABI", spread.Element)
 	}
-	callable, err := spreadCallableType(program, expr.SpreadCallable)
+	callable, err := spreadCallableType(program, spread.Callable)
 	if err != nil {
 		return err
 	}
-	if !callable.Variadic || len(callable.Params) == 0 || len(expr.Args) != len(callable.Params) || callable.Params[len(callable.Params)-1] != expr.SpreadElement {
+	if !callable.Variadic || len(callable.Params) == 0 || len(expr.Args) != len(callable.Params) || callable.Params[len(callable.Params)-1] != spread.Element {
 		return fmt.Errorf("variadic spread call does not match its callable type")
 	}
 	if expr.Kind == ExprCallClosure {
@@ -578,16 +576,150 @@ func validateTailSpread(program *Program, expr Expr) error {
 	if container.Kind != TypeList && container.Kind != TypeSlice && !(container.Kind == TypeForeignType && container.Elem != NoType) {
 		return fmt.Errorf("variadic spread referent has non-slice type kind %d", container.Kind)
 	}
-	if container.Elem != expr.SpreadElement {
-		return fmt.Errorf("variadic spread container element type %d does not match %d", container.Elem, expr.SpreadElement)
+	if container.Elem != spread.Element {
+		return fmt.Errorf("variadic spread container element type %d does not match %d", container.Elem, spread.Element)
 	}
-	if len(expr.ForeignArgABI) > 0 && expr.ForeignArgABI[len(expr.ForeignArgABI)-1] != ABIParamExact {
+	if foreign := exprPayloadAs[*ForeignExprPayload](&expr); foreign != nil && len(foreign.ArgABI) > 0 && foreign.ArgABI[len(foreign.ArgABI)-1] != ABIParamExact {
 		return fmt.Errorf("variadic spread requires exact foreign element ABI")
 	}
 	return nil
 }
 
+func validateExprPayload(expr Expr) error {
+	if expr.Kind > ExprTryMaybe {
+		return fmt.Errorf("invalid expression kind %d", expr.Kind)
+	}
+	if expr.Payload != nil && exprPayloadIsTypedNil(expr.Payload) {
+		return fmt.Errorf("expression kind %d has a typed-nil payload %T", expr.Kind, expr.Payload)
+	}
+	compatible := false
+	switch expr.Payload.(type) {
+	case nil:
+		compatible = true
+	case *TextExprPayload:
+		compatible = expr.Kind == ExprConstInt || expr.Kind == ExprConstFloat || expr.Kind == ExprConstStr
+	case *BoolExprPayload:
+		compatible = expr.Kind == ExprConstBool
+	case *EnumExprPayload:
+		compatible = expr.Kind == ExprEnumVariant
+	case *LocalExprPayload:
+		compatible = expr.Kind == ExprLoadLocal
+	case *GlobalExprPayload:
+		compatible = expr.Kind == ExprLoadGlobal
+	case *CallExprPayload:
+		compatible = callExprPayloadAllowed(expr.Kind)
+	case *ForeignExprPayload:
+		compatible = expr.Kind == ExprForeignCall || expr.Kind == ExprForeignMethodCall || expr.Kind == ExprForeignMethodValue || expr.Kind == ExprForeignFieldAccess || expr.Kind == ExprForeignStructInstance || expr.Kind == ExprForeignValue
+	case *InterfaceExprPayload:
+		compatible = expr.Kind == ExprInterfaceConversion
+	case *ReferenceExprPayload:
+		compatible = expr.Kind == ExprMutRef || expr.Kind == ExprDeref
+	case *FieldExprPayload:
+		compatible = expr.Kind == ExprGetField
+	case *TagExprPayload:
+		compatible = expr.Kind == ExprUnionWrap
+	case *TraitExprPayload:
+		compatible = expr.Kind == ExprTraitRefProject || expr.Kind == ExprTraitUpcast || expr.Kind == ExprCallTrait
+	case *AggregateExprPayload:
+		compatible = expr.Kind == ExprMakeMap || expr.Kind == ExprMakeStruct
+	case *BinaryExprPayload:
+		compatible = binaryExprPayloadAllowed(expr.Kind)
+	case *BlockExprPayload:
+		compatible = expr.Kind == ExprBlock || expr.Kind == ExprUnsafeBlock
+	case *IfExprPayload:
+		compatible = expr.Kind == ExprIf
+	case *EnumMatchExprPayload:
+		compatible = expr.Kind == ExprMatchEnum
+	case *IntMatchExprPayload:
+		compatible = expr.Kind == ExprMatchInt
+	case *StrMatchExprPayload:
+		compatible = expr.Kind == ExprMatchStr
+	case *UnionMatchExprPayload:
+		compatible = expr.Kind == ExprMatchUnion
+	case *ForeignMatchExprPayload:
+		compatible = expr.Kind == ExprMatchForeignType
+	case *MaybeMatchExprPayload:
+		compatible = expr.Kind == ExprMatchMaybe
+	case *ResultMatchExprPayload:
+		compatible = expr.Kind == ExprMatchResult
+	case *TryExprPayload:
+		compatible = expr.Kind == ExprTryResult || expr.Kind == ExprTryMaybe
+	case *SelectExprPayload:
+		compatible = expr.Kind == ExprSelect
+	case *MaybeCallExprPayload:
+		compatible = maybeCallExprPayloadAllowed(expr.Kind)
+	case *UnsafeCastExprPayload:
+		compatible = expr.Kind == ExprUnsafeCast
+	}
+	if !compatible {
+		return fmt.Errorf("expression kind %d has incompatible payload %T", expr.Kind, expr.Payload)
+	}
+	if exprPayloadRequired(expr.Kind) && expr.Payload == nil {
+		return fmt.Errorf("expression kind %d is missing its payload", expr.Kind)
+	}
+	return nil
+}
+
+func binaryExprPayloadAllowed(kind ExprKind) bool {
+	switch kind {
+	case ExprIntAdd, ExprIntSub, ExprIntMul, ExprIntDiv, ExprIntMod,
+		ExprFloatAdd, ExprFloatSub, ExprFloatMul, ExprFloatDiv, ExprStrConcat,
+		ExprEq, ExprNotEq, ExprLt, ExprLte, ExprGt, ExprGte, ExprAnd, ExprOr:
+		return true
+	default:
+		return false
+	}
+}
+
+func callExprPayloadAllowed(kind ExprKind) bool {
+	switch kind {
+	case ExprFunctionRef, ExprCall, ExprMakeClosure, ExprCallClosure,
+		ExprListAtChecked, ExprListSlice, ExprListIsEmpty, ExprListToList,
+		ExprListPrepend, ExprListPush, ExprListSet, ExprListSize, ExprListSort, ExprListSwap,
+		ExprStrAt, ExprStrSlice, ExprStrBytes, ExprStrRunes, ExprStrSize, ExprStrIsEmpty,
+		ExprStrContains, ExprStrReplace, ExprStrReplaceAll, ExprStrStartsWith, ExprStrEndsWith,
+		ExprToStr, ExprStrTrim:
+		return true
+	default:
+		return false
+	}
+}
+
+func maybeCallExprPayloadAllowed(kind ExprKind) bool {
+	switch kind {
+	case ExprMaybeExpect, ExprMaybeIsNone, ExprMaybeIsSome, ExprMaybeOr,
+		ExprMaybeMap, ExprMaybeAndThen, ExprMaybeSet, ExprMaybeClear:
+		return true
+	default:
+		return false
+	}
+}
+
+func exprPayloadRequired(kind ExprKind) bool {
+	if binaryExprPayloadAllowed(kind) || maybeCallExprPayloadAllowed(kind) {
+		return true
+	}
+	switch kind {
+	case ExprConstInt, ExprConstFloat, ExprConstBool, ExprConstStr,
+		ExprLoadLocal, ExprLoadGlobal, ExprFunctionRef, ExprCall,
+		ExprForeignCall, ExprForeignMethodCall, ExprForeignMethodValue,
+		ExprForeignFieldAccess, ExprForeignStructInstance, ExprForeignValue,
+		ExprInterfaceConversion, ExprUnsafeCast, ExprMutRef, ExprDeref,
+		ExprTraitRefProject, ExprMatchForeignType, ExprMakeClosure, ExprCallClosure,
+		ExprUnionWrap, ExprMatchUnion, ExprTraitUpcast, ExprCallTrait,
+		ExprMakeMap, ExprSelect, ExprMakeStruct, ExprGetField,
+		ExprBlock, ExprUnsafeBlock, ExprIf, ExprEnumVariant,
+		ExprMatchEnum, ExprMatchInt, ExprMatchStr, ExprMatchMaybe, ExprMatchResult:
+		return true
+	default:
+		return false
+	}
+}
+
 func validateExpr(program *Program, fn Function, expr Expr) error {
+	if err := validateExprPayload(expr); err != nil {
+		return err
+	}
 	if !validTypeID(program, expr.Type) {
 		return fmt.Errorf("expression has invalid type %d", expr.Type)
 	}
@@ -595,16 +727,24 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 		return err
 	}
 	if expr.Kind == ExprLoadLocal {
-		if expr.Local < 0 || int(expr.Local) >= len(fn.Locals) {
-			return fmt.Errorf("expression loads invalid local %d", expr.Local)
+		payload := exprPayloadAs[*LocalExprPayload](&expr)
+		if payload == nil {
+			return fmt.Errorf("local load is missing its payload")
 		}
-		if expr.Type != fn.Locals[expr.Local].Type {
-			return fmt.Errorf("local load type %d does not match local %s type %d", expr.Type, fn.Locals[expr.Local].Name, fn.Locals[expr.Local].Type)
+		if payload.Local < 0 || int(payload.Local) >= len(fn.Locals) {
+			return fmt.Errorf("expression loads invalid local %d", payload.Local)
+		}
+		if expr.Type != fn.Locals[payload.Local].Type {
+			return fmt.Errorf("local load type %d does not match local %s type %d", expr.Type, fn.Locals[payload.Local].Name, fn.Locals[payload.Local].Type)
 		}
 	}
 	if expr.Kind == ExprMutRef {
-		if expr.ReferenceMode < ExistingReference || expr.ReferenceMode > FreshValue {
-			return fmt.Errorf("mutable reference expression has invalid mode %d", expr.ReferenceMode)
+		payload := exprPayloadAs[*ReferenceExprPayload](&expr)
+		if payload == nil {
+			return fmt.Errorf("mutable reference expression is missing its payload")
+		}
+		if payload.Mode < ExistingReference || payload.Mode > FreshValue {
+			return fmt.Errorf("mutable reference expression has invalid mode %d", payload.Mode)
 		}
 		if expr.Target == nil {
 			return fmt.Errorf("mutable reference expression has no target")
@@ -627,6 +767,10 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 		}
 	}
 	if expr.Kind == ExprTraitRefProject && expr.Target != nil {
+		payload := exprPayloadAs[*TraitExprPayload](&expr)
+		if payload == nil {
+			return fmt.Errorf("trait reference projection is missing its payload")
+		}
 		destination, err := typeInfo(program, expr.Type)
 		if err != nil {
 			return err
@@ -642,19 +786,23 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 		if err != nil {
 			return err
 		}
-		if traitType.Kind != TypeTraitObject || traitType.Trait != expr.Trait {
-			return fmt.Errorf("trait reference projection destination does not match trait %d", expr.Trait)
+		if traitType.Kind != TypeTraitObject || traitType.Trait != payload.Trait {
+			return fmt.Errorf("trait reference projection destination does not match trait %d", payload.Trait)
 		}
-		if !validImplID(program, expr.Impl) {
-			return fmt.Errorf("trait reference projection has invalid impl id %d", expr.Impl)
+		if !validImplID(program, payload.Impl) {
+			return fmt.Errorf("trait reference projection has invalid impl id %d", payload.Impl)
 		}
-		impl := program.Impls[expr.Impl]
-		if impl.Trait != expr.Trait || !implMatchesType(program, impl.ForType, source.Elem) {
-			return fmt.Errorf("trait reference projection impl %d does not match source referent", expr.Impl)
+		impl := program.Impls[payload.Impl]
+		if impl.Trait != payload.Trait || !implMatchesType(program, impl.ForType, source.Elem) {
+			return fmt.Errorf("trait reference projection impl %d does not match source referent", payload.Impl)
 		}
 	}
 	isForeignCall := expr.Kind == ExprForeignCall || expr.Kind == ExprForeignMethodCall || expr.Kind == ExprForeignMethodValue || expr.Kind == ExprForeignValue
 	if isForeignCall {
+		payload := exprPayloadAs[*ForeignExprPayload](&expr)
+		if payload == nil {
+			return fmt.Errorf("foreign expression is missing its payload")
+		}
 		argCount := len(expr.Args)
 		argTypes := make([]TypeID, argCount)
 		for i := range expr.Args {
@@ -666,10 +814,10 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 				argTypes = functionType.Params
 			}
 		}
-		if len(expr.ForeignArgABI) != argCount {
-			return fmt.Errorf("foreign expression has %d ABI parameter modes for %d args", len(expr.ForeignArgABI), argCount)
+		if len(payload.ArgABI) != argCount {
+			return fmt.Errorf("foreign expression has %d ABI parameter modes for %d args", len(payload.ArgABI), argCount)
 		}
-		for i, mode := range expr.ForeignArgABI {
+		for i, mode := range payload.ArgABI {
 			if mode > ABIParamDescriptorValue {
 				return fmt.Errorf("foreign expression has invalid arg mode %d", mode)
 			}
@@ -677,15 +825,17 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 				return fmt.Errorf("foreign expression arg %d: %w", i, err)
 			}
 		}
-	} else if len(expr.ForeignArgABI) > 0 {
-		return fmt.Errorf("non-foreign expression has ABI parameter modes")
 	}
 	if expr.Kind == ExprLoadGlobal {
-		if !validGlobalID(program, expr.Global) {
-			return fmt.Errorf("expression loads invalid global %d", expr.Global)
+		payload := exprPayloadAs[*GlobalExprPayload](&expr)
+		if payload == nil {
+			return fmt.Errorf("global load is missing its payload")
 		}
-		if expr.Type != program.Globals[expr.Global].Type {
-			return fmt.Errorf("global load type %d does not match global %s type %d", expr.Type, program.Globals[expr.Global].Name, program.Globals[expr.Global].Type)
+		if !validGlobalID(program, payload.Global) {
+			return fmt.Errorf("expression loads invalid global %d", payload.Global)
+		}
+		if expr.Type != program.Globals[payload.Global].Type {
+			return fmt.Errorf("global load type %d does not match global %s type %d", expr.Type, program.Globals[payload.Global].Name, program.Globals[payload.Global].Type)
 		}
 	}
 	if expr.Kind == ExprMakeMaybeSome || expr.Kind == ExprMakeMaybeNone {
@@ -724,11 +874,14 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 			return fmt.Errorf("Result constructor value type %d does not match variant type %d", expr.Target.Type, expected)
 		}
 	}
-	if expr.Kind == ExprFunctionRef && !validFunctionID(program, expr.Function) {
-		return fmt.Errorf("expression references invalid function %d", expr.Function)
-	}
-	if expr.Kind == ExprCall && !validFunctionID(program, expr.Function) {
-		return fmt.Errorf("expression calls invalid function %d", expr.Function)
+	if expr.Kind == ExprFunctionRef || expr.Kind == ExprCall || expr.Kind == ExprMakeClosure {
+		payload := exprPayloadAs[*CallExprPayload](&expr)
+		if payload == nil {
+			return fmt.Errorf("function expression kind %d is missing its payload", expr.Kind)
+		}
+		if !validFunctionID(program, payload.Function) {
+			return fmt.Errorf("function expression kind %d has invalid function %d", expr.Kind, payload.Function)
+		}
 	}
 	if expr.Kind == ExprCallClosure {
 		if expr.Target == nil {
@@ -752,15 +905,13 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 			return fmt.Errorf("closure call has %d arguments for function with %d parameters (variadic=%t)", len(expr.Args), len(callable.Params), callable.Variadic)
 		}
 	}
-	if expr.Kind == ExprMakeClosure && !validFunctionID(program, expr.Function) {
-		return fmt.Errorf("expression creates invalid closure function %d", expr.Function)
-	}
-	if expr.Kind == ExprMakeClosure && validFunctionID(program, expr.Function) {
-		closureFn := program.Functions[expr.Function]
-		if len(expr.CaptureLocals) != len(closureFn.Captures) {
-			return fmt.Errorf("closure %s expects %d captures, got %d", closureFn.Name, len(closureFn.Captures), len(expr.CaptureLocals))
+	if expr.Kind == ExprMakeClosure {
+		payload := exprPayloadAs[*CallExprPayload](&expr)
+		closureFn := program.Functions[payload.Function]
+		if len(payload.CaptureLocals) != len(closureFn.Captures) {
+			return fmt.Errorf("closure %s expects %d captures, got %d", closureFn.Name, len(closureFn.Captures), len(payload.CaptureLocals))
 		}
-		for i, local := range expr.CaptureLocals {
+		for i, local := range payload.CaptureLocals {
 			if local < 0 || int(local) >= len(fn.Locals) {
 				return fmt.Errorf("expression captures invalid local %d", local)
 			}
@@ -780,9 +931,13 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 		if unionType.Kind != TypeUnion {
 			return fmt.Errorf("union wrap target type has kind %d", unionType.Kind)
 		}
-		member, ok := unionMemberByTag(unionType, expr.Tag)
+		payload := exprPayloadAs[*TagExprPayload](&expr)
+		if payload == nil {
+			return fmt.Errorf("union wrap is missing its payload")
+		}
+		member, ok := unionMemberByTag(unionType, payload.Tag)
 		if !ok {
-			return fmt.Errorf("union wrap has invalid tag %d for %s", expr.Tag, unionType.Name)
+			return fmt.Errorf("union wrap has invalid tag %d for %s", payload.Tag, unionType.Name)
 		}
 		if member.Type != expr.Target.Type {
 			return fmt.Errorf("union wrap member %s expects type %d, got %d", member.Name, member.Type, expr.Target.Type)
@@ -798,8 +953,9 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 		if expr.Target == nil {
 			return fmt.Errorf("unsafe::cast expression missing target")
 		}
-		if len(expr.TypeArgs) != 1 {
-			return fmt.Errorf("unsafe::cast expression expects one target type, got %d", len(expr.TypeArgs))
+		payload := exprPayloadAs[*UnsafeCastExprPayload](&expr)
+		if payload == nil || !validTypeID(program, payload.TargetType) {
+			return fmt.Errorf("unsafe::cast expression has invalid target payload")
 		}
 	}
 	if expr.Kind == ExprUnsafeIsNil && expr.Target == nil {
@@ -812,6 +968,10 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 		if expr.Target == nil {
 			return fmt.Errorf("trait upcast missing target")
 		}
+		payload := exprPayloadAs[*TraitExprPayload](&expr)
+		if payload == nil {
+			return fmt.Errorf("trait upcast is missing its payload")
+		}
 		traitType, err := typeInfo(program, expr.Type)
 		if err != nil {
 			return err
@@ -819,31 +979,33 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 		if traitType.Kind != TypeTraitObject {
 			return fmt.Errorf("trait upcast target type has kind %d", traitType.Kind)
 		}
-		if traitType.Trait != expr.Trait {
-			return fmt.Errorf("trait upcast expression trait %d does not match type trait %d", expr.Trait, traitType.Trait)
+		if traitType.Trait != payload.Trait {
+			return fmt.Errorf("trait upcast expression trait %d does not match type trait %d", payload.Trait, traitType.Trait)
 		}
 		targetImplType := expr.Target.Type
 		erasedMutableTrait := false
 		if targetType, err := typeInfo(program, expr.Target.Type); err == nil && targetType.Kind == TypeReference {
 			targetImplType = targetType.Elem
-			erasedMutableTrait = targetImplType == expr.Type && expr.Impl < 0
+			erasedMutableTrait = targetImplType == expr.Type && payload.Impl < 0
 		}
 		if !erasedMutableTrait {
-			if !validImplID(program, expr.Impl) {
-				return fmt.Errorf("trait upcast has invalid impl id %d", expr.Impl)
+			if !validImplID(program, payload.Impl) {
+				return fmt.Errorf("trait upcast has invalid impl id %d", payload.Impl)
 			}
-			impl := program.Impls[expr.Impl]
-			if impl.Trait != expr.Trait {
-				return fmt.Errorf("trait upcast impl %d has trait %d, want %d", expr.Impl, impl.Trait, expr.Trait)
+			impl := program.Impls[payload.Impl]
+			if impl.Trait != payload.Trait {
+				return fmt.Errorf("trait upcast impl %d has trait %d, want %d", payload.Impl, impl.Trait, payload.Trait)
 			}
 			if !implMatchesType(program, impl.ForType, targetImplType) {
-				return fmt.Errorf("trait upcast impl %d is for type %d, got target type %d", expr.Impl, impl.ForType, targetImplType)
+				return fmt.Errorf("trait upcast impl %d is for type %d, got target type %d", payload.Impl, impl.ForType, targetImplType)
 			}
 		}
 	}
-	for _, local := range expr.CaptureLocals {
-		if local < 0 || int(local) >= len(fn.Locals) {
-			return fmt.Errorf("expression captures invalid local %d", local)
+	if payload := exprPayloadAs[*CallExprPayload](&expr); payload != nil {
+		for _, local := range payload.CaptureLocals {
+			if local < 0 || int(local) >= len(fn.Locals) {
+				return fmt.Errorf("expression captures invalid local %d", local)
+			}
 		}
 	}
 	if expr.Target != nil {
@@ -851,23 +1013,23 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 			return err
 		}
 	}
-	if expr.Left != nil {
-		if err := validateExpr(program, fn, *expr.Left); err != nil {
+	if payload := exprPayloadAs[*BinaryExprPayload](&expr); payload != nil {
+		if payload.Left == nil || payload.Right == nil {
+			return fmt.Errorf("binary expression kind %d is missing an operand", expr.Kind)
+		}
+		if err := validateExpr(program, fn, *payload.Left); err != nil {
 			return err
 		}
-	}
-	if expr.Right != nil {
-		if err := validateExpr(program, fn, *expr.Right); err != nil {
-			return err
-		}
-	}
-	if expr.Condition != nil {
-		if err := validateExpr(program, fn, *expr.Condition); err != nil {
+		if err := validateExpr(program, fn, *payload.Right); err != nil {
 			return err
 		}
 	}
 	if expr.Kind == ExprBlock {
-		if err := validateBlock(program, fn, expr.Body); err != nil {
+		payload := exprPayloadAs[*BlockExprPayload](&expr)
+		if payload == nil {
+			return fmt.Errorf("block expression is missing its payload")
+		}
+		if err := validateBlock(program, fn, payload.Body); err != nil {
 			return err
 		}
 	}
@@ -879,27 +1041,42 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 		if typeInfo.Kind != TypeResult {
 			return fmt.Errorf("unsafe block has type kind %d", typeInfo.Kind)
 		}
+		payload := exprPayloadAs[*BlockExprPayload](&expr)
+		if payload == nil {
+			return fmt.Errorf("unsafe block expression is missing its payload")
+		}
 		helperFn := fn
 		helperFn.Signature.Return = expr.Type
-		if err := validateBlock(program, helperFn, expr.Body); err != nil {
+		if err := validateBlock(program, helperFn, payload.Body); err != nil {
 			return err
 		}
 	}
 	if expr.Kind == ExprIf {
-		if err := validateBlock(program, fn, expr.Then); err != nil {
+		payload := exprPayloadAs[*IfExprPayload](&expr)
+		if payload == nil || payload.Condition == nil {
+			return fmt.Errorf("if expression is missing its payload")
+		}
+		if err := validateExpr(program, fn, *payload.Condition); err != nil {
 			return err
 		}
-		if err := validateBlock(program, fn, expr.Else); err != nil {
+		if err := validateBlock(program, fn, payload.Then); err != nil {
+			return err
+		}
+		if err := validateBlock(program, fn, payload.Else); err != nil {
 			return err
 		}
 	}
 	if expr.Kind == ExprMatchEnum {
-		for _, matchCase := range expr.EnumCases {
+		payload := exprPayloadAs[*EnumMatchExprPayload](&expr)
+		if payload == nil {
+			return fmt.Errorf("enum match is missing its payload")
+		}
+		for _, matchCase := range payload.Cases {
 			if err := validateBlock(program, fn, matchCase.Body); err != nil {
 				return err
 			}
 		}
-		if err := validateBlock(program, fn, expr.CatchAll); err != nil {
+		if err := validateBlock(program, fn, payload.CatchAll); err != nil {
 			return err
 		}
 	}
@@ -914,12 +1091,16 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 		if targetType.Kind != TypeStr {
 			return fmt.Errorf("str match target has type kind %d", targetType.Kind)
 		}
-		for _, matchCase := range expr.StrCases {
+		payload := exprPayloadAs[*StrMatchExprPayload](&expr)
+		if payload == nil {
+			return fmt.Errorf("str match is missing its payload")
+		}
+		for _, matchCase := range payload.Cases {
 			if err := validateBlock(program, fn, matchCase.Body); err != nil {
 				return err
 			}
 		}
-		if err := validateBlock(program, fn, expr.CatchAll); err != nil {
+		if err := validateBlock(program, fn, payload.CatchAll); err != nil {
 			return err
 		}
 	}
@@ -934,12 +1115,16 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 		if targetType.Kind != TypeInt && targetType.Kind != TypeByte && targetType.Kind != TypeRune {
 			return fmt.Errorf("int match target has type kind %d", targetType.Kind)
 		}
-		for _, matchCase := range expr.IntCases {
+		payload := exprPayloadAs[*IntMatchExprPayload](&expr)
+		if payload == nil {
+			return fmt.Errorf("int match is missing its payload")
+		}
+		for _, matchCase := range payload.Cases {
 			if err := validateBlock(program, fn, matchCase.Body); err != nil {
 				return err
 			}
 		}
-		for _, matchCase := range expr.RangeCases {
+		for _, matchCase := range payload.RangeCases {
 			if matchCase.Start > matchCase.End {
 				return fmt.Errorf("int match range start %d is greater than end %d", matchCase.Start, matchCase.End)
 			}
@@ -947,7 +1132,7 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 				return err
 			}
 		}
-		if err := validateBlock(program, fn, expr.CatchAll); err != nil {
+		if err := validateBlock(program, fn, payload.CatchAll); err != nil {
 			return err
 		}
 	}
@@ -962,7 +1147,11 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 		if unionType.Kind != TypeUnion {
 			return fmt.Errorf("union match target has type kind %d", unionType.Kind)
 		}
-		for _, matchCase := range expr.UnionCases {
+		payload := exprPayloadAs[*UnionMatchExprPayload](&expr)
+		if payload == nil {
+			return fmt.Errorf("union match is missing its payload")
+		}
+		for _, matchCase := range payload.Cases {
 			member, ok := unionMemberByTag(unionType, matchCase.Tag)
 			if !ok {
 				return fmt.Errorf("union match has invalid tag %d for %s", matchCase.Tag, unionType.Name)
@@ -977,13 +1166,45 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 				return err
 			}
 		}
-		if err := validateBlock(program, fn, expr.CatchAll); err != nil {
+		if err := validateBlock(program, fn, payload.CatchAll); err != nil {
+			return err
+		}
+	}
+	if expr.Kind == ExprMatchForeignType {
+		if expr.Target == nil {
+			return fmt.Errorf("foreign type match missing target")
+		}
+		payload := exprPayloadAs[*ForeignMatchExprPayload](&expr)
+		if payload == nil {
+			return fmt.Errorf("foreign type match is missing its payload")
+		}
+		for _, matchCase := range payload.Cases {
+			if !validTypeID(program, matchCase.Type) {
+				return fmt.Errorf("foreign type match has invalid case type %d", matchCase.Type)
+			}
+			if matchCase.Bound {
+				if matchCase.Local < 0 || int(matchCase.Local) >= len(fn.Locals) {
+					return fmt.Errorf("foreign type match binds invalid local %d", matchCase.Local)
+				}
+				if fn.Locals[matchCase.Local].Type != matchCase.Type {
+					return fmt.Errorf("foreign type match local type %d does not match case type %d", fn.Locals[matchCase.Local].Type, matchCase.Type)
+				}
+			}
+			if err := validateBlock(program, fn, matchCase.Body); err != nil {
+				return err
+			}
+		}
+		if err := validateBlock(program, fn, payload.CatchAll); err != nil {
 			return err
 		}
 	}
 	if expr.Kind == ExprCallTrait {
 		if expr.Target == nil {
 			return fmt.Errorf("trait call missing target")
+		}
+		payload := exprPayloadAs[*TraitExprPayload](&expr)
+		if payload == nil {
+			return fmt.Errorf("trait call is missing its payload")
 		}
 		targetType, err := referentTypeInfo(program, expr.Target.Type)
 		if err != nil {
@@ -992,17 +1213,17 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 		if targetType.Kind != TypeTraitObject {
 			return fmt.Errorf("trait call target has type kind %d", targetType.Kind)
 		}
-		if targetType.Trait != expr.Trait {
-			return fmt.Errorf("trait call expression trait %d does not match target type trait %d", expr.Trait, targetType.Trait)
+		if targetType.Trait != payload.Trait {
+			return fmt.Errorf("trait call expression trait %d does not match target type trait %d", payload.Trait, targetType.Trait)
 		}
-		if !validTraitID(program, expr.Trait) {
-			return fmt.Errorf("trait call has invalid trait id %d", expr.Trait)
+		if !validTraitID(program, payload.Trait) {
+			return fmt.Errorf("trait call has invalid trait id %d", payload.Trait)
 		}
-		trait := program.Traits[expr.Trait]
-		if expr.Method < 0 || expr.Method >= len(trait.Methods) {
-			return fmt.Errorf("trait call has invalid method index %d for trait %s", expr.Method, trait.Name)
+		trait := program.Traits[payload.Trait]
+		if payload.Method < 0 || payload.Method >= len(trait.Methods) {
+			return fmt.Errorf("trait call has invalid method index %d for trait %s", payload.Method, trait.Name)
 		}
-		method := trait.Methods[expr.Method]
+		method := trait.Methods[payload.Method]
 		if method.Mutates {
 			target, err := typeInfo(program, expr.Target.Type)
 			if err != nil {
@@ -1027,23 +1248,87 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 		if maybeType.Kind != TypeMaybe {
 			return fmt.Errorf("Maybe match target has type kind %d", maybeType.Kind)
 		}
-		if expr.SomeLocal < 0 || int(expr.SomeLocal) >= len(fn.Locals) {
-			return fmt.Errorf("Maybe match binds invalid local %d", expr.SomeLocal)
+		payload := exprPayloadAs[*MaybeMatchExprPayload](&expr)
+		if payload == nil {
+			return fmt.Errorf("Maybe match is missing its payload")
 		}
-		if fn.Locals[expr.SomeLocal].Type != maybeType.Elem {
-			return fmt.Errorf("Maybe match local type %d does not match element type %d", fn.Locals[expr.SomeLocal].Type, maybeType.Elem)
+		if payload.SomeLocal < 0 || int(payload.SomeLocal) >= len(fn.Locals) {
+			return fmt.Errorf("Maybe match binds invalid local %d", payload.SomeLocal)
 		}
-		if err := validateBlock(program, fn, expr.Some); err != nil {
+		if fn.Locals[payload.SomeLocal].Type != maybeType.Elem {
+			return fmt.Errorf("Maybe match local type %d does not match element type %d", fn.Locals[payload.SomeLocal].Type, maybeType.Elem)
+		}
+		if err := validateBlock(program, fn, payload.Some); err != nil {
 			return err
 		}
-		if err := validateBlock(program, fn, expr.None); err != nil {
+		if err := validateBlock(program, fn, payload.None); err != nil {
 			return err
 		}
 	}
 	if expr.Kind == ExprSelect {
-		for _, arm := range expr.SelectCases {
-			if arm.HasBind && (arm.BindLocal < 0 || int(arm.BindLocal) >= len(fn.Locals)) {
-				return fmt.Errorf("select recv arm binds invalid local %d", arm.BindLocal)
+		payload := exprPayloadAs[*SelectExprPayload](&expr)
+		if payload == nil {
+			return fmt.Errorf("select expression is missing its payload")
+		}
+		hasDefault := false
+		for _, arm := range payload.Cases {
+			switch arm.Kind {
+			case SelectArmDefault:
+				if hasDefault {
+					return fmt.Errorf("select expression has multiple default arms")
+				}
+				hasDefault = true
+				if arm.Channel != nil || arm.Value != nil || arm.HasBind {
+					return fmt.Errorf("select default arm carries channel, value, or binding metadata")
+				}
+			case SelectArmRecv:
+				if arm.Channel == nil || arm.Value != nil {
+					return fmt.Errorf("select receive arm must carry only a channel operand")
+				}
+				if err := validateExpr(program, fn, *arm.Channel); err != nil {
+					return err
+				}
+				channelType, err := selectChannelType(program, arm.Channel.Type)
+				if err != nil {
+					return err
+				}
+				if channelType.Kind != TypeChannel && channelType.Kind != TypeReceiver {
+					return fmt.Errorf("select receive arm has non-receivable channel kind %d", channelType.Kind)
+				}
+				if arm.HasBind {
+					if arm.BindLocal < 0 || int(arm.BindLocal) >= len(fn.Locals) {
+						return fmt.Errorf("select receive arm binds invalid local %d", arm.BindLocal)
+					}
+					bindingType, err := typeInfo(program, fn.Locals[arm.BindLocal].Type)
+					if err != nil {
+						return err
+					}
+					if bindingType.Kind != TypeMaybe || bindingType.Elem != channelType.Elem {
+						return fmt.Errorf("select receive binding type %d does not match channel element type %d", fn.Locals[arm.BindLocal].Type, channelType.Elem)
+					}
+				}
+			case SelectArmSend:
+				if arm.Channel == nil || arm.Value == nil || arm.HasBind {
+					return fmt.Errorf("select send arm requires channel and value operands without a binding")
+				}
+				if err := validateExpr(program, fn, *arm.Channel); err != nil {
+					return err
+				}
+				if err := validateExpr(program, fn, *arm.Value); err != nil {
+					return err
+				}
+				channelType, err := selectChannelType(program, arm.Channel.Type)
+				if err != nil {
+					return err
+				}
+				if channelType.Kind != TypeChannel && channelType.Kind != TypeSender {
+					return fmt.Errorf("select send arm has non-sendable channel kind %d", channelType.Kind)
+				}
+				if !typesAssignable(program, channelType.Elem, arm.Value.Type) {
+					return fmt.Errorf("select send value type %d does not match channel element type %d", arm.Value.Type, channelType.Elem)
+				}
+			default:
+				return fmt.Errorf("select expression has invalid arm kind %d", arm.Kind)
 			}
 			if err := validateBlock(program, fn, arm.Body); err != nil {
 				return err
@@ -1061,26 +1346,31 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 		if resultType.Kind != TypeResult {
 			return fmt.Errorf("Result match target has type kind %d", resultType.Kind)
 		}
-		if expr.OkLocal < 0 || int(expr.OkLocal) >= len(fn.Locals) {
-			return fmt.Errorf("Result match binds invalid ok local %d", expr.OkLocal)
+		payload := exprPayloadAs[*ResultMatchExprPayload](&expr)
+		if payload == nil {
+			return fmt.Errorf("Result match is missing its payload")
 		}
-		if expr.ErrLocal < 0 || int(expr.ErrLocal) >= len(fn.Locals) {
-			return fmt.Errorf("Result match binds invalid err local %d", expr.ErrLocal)
+		if payload.OkLocal < 0 || int(payload.OkLocal) >= len(fn.Locals) {
+			return fmt.Errorf("Result match binds invalid ok local %d", payload.OkLocal)
 		}
-		if fn.Locals[expr.OkLocal].Type != resultType.Value {
-			return fmt.Errorf("Result ok match local type %d does not match value type %d", fn.Locals[expr.OkLocal].Type, resultType.Value)
+		if payload.ErrLocal < 0 || int(payload.ErrLocal) >= len(fn.Locals) {
+			return fmt.Errorf("Result match binds invalid err local %d", payload.ErrLocal)
 		}
-		if fn.Locals[expr.ErrLocal].Type != resultType.Error {
-			return fmt.Errorf("Result err match local type %d does not match error type %d", fn.Locals[expr.ErrLocal].Type, resultType.Error)
+		if fn.Locals[payload.OkLocal].Type != resultType.Value {
+			return fmt.Errorf("Result ok match local type %d does not match value type %d", fn.Locals[payload.OkLocal].Type, resultType.Value)
 		}
-		if err := validateBlock(program, fn, expr.Ok); err != nil {
+		if fn.Locals[payload.ErrLocal].Type != resultType.Error {
+			return fmt.Errorf("Result err match local type %d does not match error type %d", fn.Locals[payload.ErrLocal].Type, resultType.Error)
+		}
+		if err := validateBlock(program, fn, payload.Ok); err != nil {
 			return err
 		}
-		if err := validateBlock(program, fn, expr.Err); err != nil {
+		if err := validateBlock(program, fn, payload.Err); err != nil {
 			return err
 		}
 	}
 	if expr.Kind == ExprTryResult || expr.Kind == ExprTryMaybe {
+		catchPayload := exprPayloadAs[*TryExprPayload](&expr)
 		if expr.Target == nil {
 			return fmt.Errorf("try expression missing target")
 		}
@@ -1101,7 +1391,7 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 		if !typesAssignable(program, resultType, expr.Type) {
 			return fmt.Errorf("try result type %d does not match target value type %d", expr.Type, resultType)
 		}
-		if !expr.HasCatch {
+		if catchPayload == nil {
 			returnType, err := typeInfo(program, fn.Signature.Return)
 			if err != nil {
 				return err
@@ -1113,14 +1403,14 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 				return fmt.Errorf("Maybe try without catch in non-Maybe function %s", fn.Name)
 			}
 		}
-		if expr.HasCatch {
-			if expr.Kind == ExprTryResult && (expr.CatchLocal < 0 || int(expr.CatchLocal) >= len(fn.Locals)) {
-				return fmt.Errorf("Result try catch binds invalid local %d", expr.CatchLocal)
+		if catchPayload != nil {
+			if expr.Kind == ExprTryResult && (catchPayload.CatchLocal < 0 || int(catchPayload.CatchLocal) >= len(fn.Locals)) {
+				return fmt.Errorf("Result try catch binds invalid local %d", catchPayload.CatchLocal)
 			}
-			if expr.Kind == ExprTryResult && fn.Locals[expr.CatchLocal].Type != targetType.Error {
-				return fmt.Errorf("Result try catch local type %d does not match error type %d", fn.Locals[expr.CatchLocal].Type, targetType.Error)
+			if expr.Kind == ExprTryResult && fn.Locals[catchPayload.CatchLocal].Type != targetType.Error {
+				return fmt.Errorf("Result try catch local type %d does not match error type %d", fn.Locals[catchPayload.CatchLocal].Type, targetType.Error)
 			}
-			if err := validateBlock(program, fn, expr.Catch); err != nil {
+			if err := validateBlock(program, fn, catchPayload.Catch); err != nil {
 				return err
 			}
 		}
@@ -1130,20 +1420,40 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 			return err
 		}
 	}
-	for _, entry := range expr.Entries {
-		if err := validateExpr(program, fn, entry.Key); err != nil {
-			return err
+	if payload := exprPayloadAs[*AggregateExprPayload](&expr); payload != nil {
+		for _, entry := range payload.Entries {
+			if err := validateExpr(program, fn, entry.Key); err != nil {
+				return err
+			}
+			if err := validateExpr(program, fn, entry.Value); err != nil {
+				return err
+			}
 		}
-		if err := validateExpr(program, fn, entry.Value); err != nil {
-			return err
+		for _, field := range payload.Fields {
+			if err := validateExpr(program, fn, field.Value); err != nil {
+				return err
+			}
 		}
 	}
-	for _, field := range expr.Fields {
-		if err := validateExpr(program, fn, field.Value); err != nil {
-			return err
+	if payload := exprPayloadAs[*ForeignExprPayload](&expr); payload != nil {
+		for _, field := range payload.Fields {
+			if err := validateExpr(program, fn, field.Value); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
+}
+
+func selectChannelType(program *Program, typeID TypeID) (TypeInfo, error) {
+	channelType, err := typeInfo(program, typeID)
+	if err != nil {
+		return TypeInfo{}, err
+	}
+	if channelType.Kind == TypeReference {
+		return typeInfo(program, channelType.Elem)
+	}
+	return channelType, nil
 }
 
 func validTypeID(program *Program, id TypeID) bool {

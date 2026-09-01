@@ -1,6 +1,7 @@
 package air_test
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/akonwi/ard/air"
@@ -45,6 +46,57 @@ func TestSerializeProgramPreservesGoFieldTags(t *testing.T) {
 		}
 	}
 	t.Fatal("decoded Config type missing")
+}
+
+func TestSerializeProgramPreservesEveryExprPayloadType(t *testing.T) {
+	payloads := []air.ExprPayload{
+		&air.TextExprPayload{},
+		&air.BoolExprPayload{},
+		&air.EnumExprPayload{},
+		&air.LocalExprPayload{},
+		&air.GlobalExprPayload{},
+		&air.CallExprPayload{Spread: &air.SpreadExprPayload{}},
+		&air.ForeignExprPayload{Spread: &air.SpreadExprPayload{}},
+		&air.InterfaceExprPayload{},
+		&air.ReferenceExprPayload{},
+		&air.FieldExprPayload{},
+		&air.TagExprPayload{},
+		&air.TraitExprPayload{},
+		&air.AggregateExprPayload{},
+		&air.BinaryExprPayload{},
+		&air.BlockExprPayload{},
+		&air.IfExprPayload{},
+		&air.EnumMatchExprPayload{},
+		&air.IntMatchExprPayload{},
+		&air.StrMatchExprPayload{},
+		&air.UnionMatchExprPayload{},
+		&air.ForeignMatchExprPayload{},
+		&air.MaybeMatchExprPayload{},
+		&air.ResultMatchExprPayload{},
+		&air.TryExprPayload{},
+		&air.SelectExprPayload{},
+		&air.MaybeCallExprPayload{},
+		&air.UnsafeCastExprPayload{},
+	}
+	program := &air.Program{Functions: []air.Function{{Body: air.Block{Stmts: make([]air.Stmt, len(payloads))}}}}
+	for i, payload := range payloads {
+		program.Functions[0].Body.Stmts[i] = air.Stmt{Kind: air.StmtExpr, Expr: &air.Expr{Payload: payload}}
+	}
+
+	data, err := air.SerializeProgram(program)
+	if err != nil {
+		t.Fatalf("serialize AIR payloads: %v", err)
+	}
+	decoded, err := air.DeserializeProgram(data)
+	if err != nil {
+		t.Fatalf("deserialize AIR payloads: %v", err)
+	}
+	for i, want := range payloads {
+		got := decoded.Functions[0].Body.Stmts[i].Expr.Payload
+		if reflect.TypeOf(got) != reflect.TypeOf(want) {
+			t.Fatalf("payload %d type = %T, want %T", i, got, want)
+		}
+	}
 }
 
 func TestSerializeProgram(t *testing.T) {

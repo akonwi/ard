@@ -115,8 +115,8 @@ func TestADR0057LowersExplicitReferenceCreationModes(t *testing.T) {
 	if addressable.Kind != ExprMutRef || existing.Kind != ExprMutRef || fresh.Kind != ExprMutRef {
 		t.Fatalf("reference creation kinds = %v/%v/%v, want ExprMutRef", addressable.Kind, existing.Kind, fresh.Kind)
 	}
-	if addressable.ReferenceMode != AddressablePlace || existing.ReferenceMode != ExistingReference || fresh.ReferenceMode != FreshValue {
-		t.Fatalf("reference modes = %v/%v/%v", addressable.ReferenceMode, existing.ReferenceMode, fresh.ReferenceMode)
+	if addressable.ReferencePayload().Mode != AddressablePlace || existing.ReferencePayload().Mode != ExistingReference || fresh.ReferencePayload().Mode != FreshValue {
+		t.Fatalf("reference modes = %v/%v/%v", addressable.ReferencePayload().Mode, existing.ReferencePayload().Mode, fresh.ReferencePayload().Mode)
 	}
 	for name, expression := range map[string]*Expr{"addressable": addressable, "existing": existing, "fresh": fresh} {
 		if typeKind(t, program, expression.Type) != TypeReference {
@@ -145,7 +145,7 @@ func TestADR0057LowersDedicatedDereferenceExpression(t *testing.T) {
 		t.Fatalf("main statements = %#v", mainFn.Body.Stmts)
 	}
 	dereference := mainFn.Body.Stmts[2].Value
-	if dereference.Kind != ExprDeref || dereference.Observational {
+	if dereference.Kind != ExprDeref || dereference.ReferencePayload().Observational {
 		t.Fatalf("explicit deref = %#v, want non-observational ExprDeref", dereference)
 	}
 	if dereference.Target == nil || typeKind(t, program, dereference.Target.Type) != TypeReference {
@@ -303,7 +303,7 @@ func TestADR0057LowersConcreteToTraitReferenceProjection(t *testing.T) {
 	if len(project.Body.Stmts) < 1 || project.Body.Stmts[0].Value == nil {
 		t.Fatalf("project body = %#v", project.Body)
 	}
-	fieldProjection := project.Body.Stmts[0].Value.Fields[0].Value
+	fieldProjection := project.Body.Stmts[0].Value.AggregatePayload().Fields[0].Value
 	if fieldProjection.Kind != ExprTraitRefProject {
 		t.Fatalf("field projection = %#v, want ExprTraitRefProject", fieldProjection)
 	}
@@ -322,8 +322,8 @@ func TestADR0057LowersConcreteToTraitReferenceProjection(t *testing.T) {
 	if targetType.Kind != TypeReference || typeKind(t, program, targetType.Elem) != TypeStruct {
 		t.Fatalf("projection target type = %#v, want mut Box", targetType)
 	}
-	if int(result.Impl) < 0 || int(result.Impl) >= len(program.Impls) {
-		t.Fatalf("projection impl = %d, impls = %d", result.Impl, len(program.Impls))
+	if int(result.TraitPayload().Impl) < 0 || int(result.TraitPayload().Impl) >= len(program.Impls) {
+		t.Fatalf("projection impl = %d, impls = %d", result.TraitPayload().Impl, len(program.Impls))
 	}
 	read := findFunction(t, program, "read")
 	if read.Body.Result == nil || read.Body.Result.Kind != ExprCallTrait || read.Body.Result.Target == nil || typeKind(t, program, read.Body.Result.Target.Type) != TypeReference {
@@ -376,7 +376,7 @@ func TestADR0057MaybeMatchReferenceLocalMetadataAgreesWithType(t *testing.T) {
 	if read.Body.Result == nil || read.Body.Result.Kind != ExprMatchMaybe {
 		t.Fatalf("read body = %#v", read.Body)
 	}
-	local := read.Locals[read.Body.Result.SomeLocal]
+	local := read.Locals[read.Body.Result.MaybeMatchPayload().SomeLocal]
 	if typeKind(t, program, local.Type) != TypeReference || !local.Reference {
 		t.Fatalf("some local = %#v, want reference type and live-storage metadata", local)
 	}
@@ -415,7 +415,7 @@ func TestADR0057MutatingMethodReceiverIsReferenceTyped(t *testing.T) {
 		t.Fatalf("update body = %#v", update.Body)
 	}
 	interiorReceiver := update.Body.Result.Args[0]
-	if interiorReceiver.Kind != ExprMutRef || interiorReceiver.ReferenceMode != AddressablePlace || interiorReceiver.Target == nil || interiorReceiver.Target.Kind != ExprGetField {
+	if interiorReceiver.Kind != ExprMutRef || interiorReceiver.ReferencePayload().Mode != AddressablePlace || interiorReceiver.Target == nil || interiorReceiver.Target.Kind != ExprGetField {
 		t.Fatalf("interior receiver = %#v, want AddressablePlace field reference", interiorReceiver)
 	}
 	observe := findFunction(t, program, "observe")
@@ -426,7 +426,7 @@ func TestADR0057MutatingMethodReceiverIsReferenceTyped(t *testing.T) {
 		t.Fatalf("observe body = %#v", observe.Body)
 	}
 	observedReceiver := observe.Body.Result.Args[0]
-	if observedReceiver.Kind != ExprDeref || !observedReceiver.Observational || observedReceiver.Target == nil || typeKind(t, program, observedReceiver.Target.Type) != TypeReference {
+	if observedReceiver.Kind != ExprDeref || !observedReceiver.ReferencePayload().Observational || observedReceiver.Target == nil || typeKind(t, program, observedReceiver.Target.Type) != TypeReference {
 		t.Fatalf("observed receiver = %#v, want observational dereference", observedReceiver)
 	}
 }
@@ -446,10 +446,11 @@ func TestADR0057DistinguishesObservationalAndExplicitDereference(t *testing.T) {
 	}
 	implicit := observe.Body.Stmts[0].Value
 	explicit := observe.Body.Stmts[1].Value
-	if implicit == nil || implicit.Left == nil || implicit.Left.Kind != ExprDeref || !implicit.Left.Observational {
+	implicitLeft := implicit.BinaryPayload().Left
+	if implicit == nil || implicitLeft == nil || implicitLeft.Kind != ExprDeref || !implicitLeft.ReferencePayload().Observational {
 		t.Fatalf("implicit observation = %#v", implicit)
 	}
-	if explicit == nil || explicit.Kind != ExprDeref || explicit.Observational {
+	if explicit == nil || explicit.Kind != ExprDeref || explicit.ReferencePayload().Observational {
 		t.Fatalf("explicit dereference = %#v", explicit)
 	}
 }
@@ -461,7 +462,7 @@ func containsAIRExprKindDeep(expr *Expr, kind ExprKind) bool {
 	if expr.Kind == kind {
 		return true
 	}
-	if containsAIRExprKindDeep(expr.Target, kind) || containsAIRExprKindDeep(expr.Left, kind) || containsAIRExprKindDeep(expr.Right, kind) || containsAIRExprKindDeep(expr.Condition, kind) {
+	if containsAIRExprKindDeep(expr.Target, kind) {
 		return true
 	}
 	for i := range expr.Args {
@@ -469,14 +470,21 @@ func containsAIRExprKindDeep(expr *Expr, kind ExprKind) bool {
 			return true
 		}
 	}
-	for i := range expr.Entries {
-		if containsAIRExprKindDeep(&expr.Entries[i].Key, kind) || containsAIRExprKindDeep(&expr.Entries[i].Value, kind) {
+	switch payload := expr.Payload.(type) {
+	case *BinaryExprPayload:
+		if containsAIRExprKindDeep(payload.Left, kind) || containsAIRExprKindDeep(payload.Right, kind) {
 			return true
 		}
-	}
-	for i := range expr.Fields {
-		if containsAIRExprKindDeep(&expr.Fields[i].Value, kind) {
-			return true
+	case *AggregateExprPayload:
+		for i := range payload.Entries {
+			if containsAIRExprKindDeep(&payload.Entries[i].Key, kind) || containsAIRExprKindDeep(&payload.Entries[i].Value, kind) {
+				return true
+			}
+		}
+		for i := range payload.Fields {
+			if containsAIRExprKindDeep(&payload.Fields[i].Value, kind) {
+				return true
+			}
 		}
 	}
 	return false

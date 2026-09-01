@@ -46,7 +46,10 @@ func LowerModulesWithOptions(modules []checker.Module, options LowerOptions) (*P
 	if err := Validate(&l.program); err != nil {
 		return nil, err
 	}
-	return &l.program, nil
+	// Detach the result from the lowerer allocation so lowering-only caches and
+	// checker graph references can be collected while the backend uses the AIR.
+	program := l.program
+	return &program, nil
 }
 
 type lowerer struct {
@@ -65,6 +68,7 @@ type lowerer struct {
 	traitMethodsByOwner      map[checker.TraitMethodOwner]map[string]*checker.FunctionDef
 	requiredGoMethodsByOwner map[checker.MethodOwner]map[string]*checker.FunctionDef
 	inherentMethodsByOwner   map[checker.MethodOwner]map[string]*checker.FunctionDef
+	unresolvedTypeVarByType  map[checker.Type]bool
 
 	loweringModules          map[string]bool
 	loweredModules           map[string]bool
@@ -111,7 +115,8 @@ func newLowerer(options LowerOptions, rootCount int) *lowerer {
 		functions:    map[string]FunctionID{},
 		globals:      map[string]GlobalID{},
 
-		cacheMethodLookups: rootCount == 1,
+		cacheMethodLookups:      rootCount == 1,
+		unresolvedTypeVarByType: map[checker.Type]bool{},
 
 		loweringModules:          map[string]bool{},
 		loweredModules:           map[string]bool{},
@@ -141,6 +146,27 @@ func newLowerer(options LowerOptions, rootCount int) *lowerer {
 	l.mustIntern(checker.Str)
 	l.mustIntern(checker.Any)
 	return l
+}
+
+func (l *lowerer) typeHasUnresolvedTypeVar(t checker.Type) bool {
+	if unresolved, ok := l.unresolvedTypeVarByType[t]; ok {
+		return unresolved
+	}
+	unresolved := typeHasUnresolvedTypeVar(t)
+	l.unresolvedTypeVarByType[t] = unresolved
+	return unresolved
+}
+
+func (l *lowerer) functionHasUnresolvedTypeVar(def *checker.FunctionDef) bool {
+	if def == nil {
+		return false
+	}
+	for _, param := range def.GenericParams {
+		if _, ok := def.GenericBindings[param]; !ok {
+			return true
+		}
+	}
+	return l.typeHasUnresolvedTypeVar(def)
 }
 
 func (l *lowerer) mustIntern(t checker.Type) TypeID {
@@ -301,7 +327,7 @@ func (l *lowerer) lowerModule(module checker.Module) error {
 				}
 				continue
 			}
-			if typeHasUnresolvedTypeVar(node) {
+			if l.typeHasUnresolvedTypeVar(node) {
 				continue
 			}
 			typeID, err := l.internType(node)
@@ -316,7 +342,7 @@ func (l *lowerer) lowerModule(module checker.Module) error {
 			}
 			mod.Types = appendUniqueType(mod.Types, typeID)
 		case *checker.Union:
-			if typeHasUnresolvedTypeVar(node) {
+			if l.typeHasUnresolvedTypeVar(node) {
 				continue
 			}
 			typeID, err := l.internType(node)
@@ -335,11 +361,11 @@ func (l *lowerer) lowerModule(module checker.Module) error {
 
 		switch expr := stmt.Expr.(type) {
 		case *checker.FunctionDef:
-			if functionHasUnresolvedTypeVar(expr) || (!l.includeTests && expr.IsTest) {
+			if l.functionHasUnresolvedTypeVar(expr) || (!l.includeTests && expr.IsTest) {
 				// Register generic function definitions (with their $T parameters
 				// intact) so call sites can recover the generic shape even for
 				// private functions not exposed in the module's public symbols.
-				if functionHasUnresolvedTypeVar(expr) {
+				if l.functionHasUnresolvedTypeVar(expr) {
 					l.genericFunctionOriginals[functionKey(modID, expr.Name)] = expr
 				}
 				continue
@@ -385,7 +411,7 @@ func (l *lowerer) lowerModule(module checker.Module) error {
 	for i := range prog.Statements {
 		stmt := prog.Statements[i]
 		if def, ok := stmt.Expr.(*checker.FunctionDef); ok {
-			if functionHasUnresolvedTypeVar(def) || (!l.includeTests && def.IsTest) {
+			if l.functionHasUnresolvedTypeVar(def) || (!l.includeTests && def.IsTest) {
 				continue
 			}
 			if err := l.lowerFunction(modID, def); err != nil {
@@ -489,7 +515,7 @@ func (l *lowerer) lowerGlobalByID(id GlobalID, def *checker.VariableDef) error {
 }
 
 func (l *lowerer) declareFunction(module ModuleID, def *checker.FunctionDef) (FunctionID, error) {
-	if functionHasUnresolvedTypeVar(def) {
+	if l.functionHasUnresolvedTypeVar(def) {
 		return NoFunction, fmt.Errorf("cannot declare unspecialized generic function %s", def.Name)
 	}
 	key := functionKey(module, def.Name)
@@ -532,7 +558,7 @@ func (l *lowerer) declareFunction(module ModuleID, def *checker.FunctionDef) (Fu
 }
 
 func (l *lowerer) declareFunctionSpecialization(module ModuleID, def *checker.FunctionDef) (FunctionID, error) {
-	if functionHasUnresolvedTypeVar(def) {
+	if l.functionHasUnresolvedTypeVar(def) {
 		return NoFunction, fmt.Errorf("cannot declare unspecialized generic function %s", def.Name)
 	}
 	signature, err := l.signatureForFunction(def.Parameters, def.ReturnType)
@@ -689,7 +715,7 @@ func (fl *functionLowerer) declareAndLowerFunctionCall(module ModuleID, def *che
 	if len(def.GenericBindings) > 0 {
 		return fl.l.declareGenericFunctionDef(module, def)
 	}
-	if functionHasUnresolvedTypeVar(def) && len(def.GenericBindings) == 0 {
+	if fl.l.functionHasUnresolvedTypeVar(def) && len(def.GenericBindings) == 0 {
 		return NoFunction, fmt.Errorf("cannot declare unspecialized generic function %s", def.Name)
 	}
 	signature, err := fl.signatureForCall(call)
@@ -1021,7 +1047,7 @@ func (fl *functionLowerer) internContextualCheckerType(t checker.Type) (TypeID, 
 	if err == nil {
 		return fl.contextualType(typeID)
 	}
-	if !typeHasUnresolvedTypeVar(t) {
+	if !fl.l.typeHasUnresolvedTypeVar(t) {
 		return NoType, err
 	}
 	return fl.internWeakContextType(t)
@@ -1063,7 +1089,7 @@ func (fl *functionLowerer) internWeakContextPart(t checker.Type) (TypeID, error)
 	if err == nil {
 		return typeID, nil
 	}
-	if !typeHasUnresolvedTypeVar(t) {
+	if !fl.l.typeHasUnresolvedTypeVar(t) {
 		return NoType, err
 	}
 	return fl.l.internType(checker.Void)
@@ -1769,7 +1795,7 @@ func (l *lowerer) declareInherentImplMethodsForStruct(module ModuleID, def *chec
 		}
 	}
 	for _, method := range sortedMethodDefinitions(l.requiredGoMethods(def)) {
-		if method == nil || traitMethodDefs[method] || functionHasUnresolvedTypeVar(method) {
+		if method == nil || traitMethodDefs[method] || l.functionHasUnresolvedTypeVar(method) {
 			continue
 		}
 		id, err := l.declareInstanceMethodFunction(module, ownerInfo.Name, ownerType, method, nil, NoType)
@@ -1781,7 +1807,7 @@ func (l *lowerer) declareInherentImplMethodsForStruct(module ModuleID, def *chec
 		}
 	}
 	for _, method := range sortedMethodDefinitions(l.inherentMethods(def)) {
-		if method == nil || functionHasUnresolvedTypeVar(method) {
+		if method == nil || l.functionHasUnresolvedTypeVar(method) {
 			continue
 		}
 		id, err := l.declareInstanceMethodFunction(module, ownerInfo.Name, ownerType, method, nil, NoType)
@@ -1936,7 +1962,7 @@ func (l *lowerer) declareBuiltinToStringMethod(module ModuleID, ownerInfo TypeIn
 		Body: Block{Result: &Expr{
 			Kind:   ExprToStr,
 			Type:   strType,
-			Target: &Expr{Kind: ExprLoadLocal, Type: ownerInfo.ID, Local: 0},
+			Target: &Expr{Kind: ExprLoadLocal, Type: ownerInfo.ID, Payload: &LocalExprPayload{Local: 0}},
 		}},
 	})
 	l.program.Modules[module].Functions = appendUniqueFunction(l.program.Modules[module].Functions, id)
@@ -2021,7 +2047,7 @@ func (l *lowerer) declareInstanceMethodFunction(module ModuleID, ownerName strin
 	params = append(params, Param{Name: receiver, Type: receiverType})
 	for i, param := range def.Parameters {
 		paramType := param.Type
-		if typeHasUnresolvedTypeVar(paramType) && i < len(args) {
+		if l.typeHasUnresolvedTypeVar(paramType) && i < len(args) {
 			paramType = args[i].Type()
 		}
 		typeID, err := l.internType(paramType)
@@ -2076,7 +2102,7 @@ func (fl *functionLowerer) declareInstanceMethodFunction(module ModuleID, ownerN
 	params = append(params, Param{Name: receiver, Type: receiverType})
 	for i, param := range def.Parameters {
 		paramType := param.Type
-		if typeHasUnresolvedTypeVar(paramType) && i < len(args) {
+		if fl.l.typeHasUnresolvedTypeVar(paramType) && i < len(args) {
 			paramType = args[i].Type()
 		}
 		typeID, err := fl.internType(paramType)
@@ -3497,29 +3523,29 @@ func (fl *functionLowerer) inferValueType(expr *Expr) TypeID {
 			}
 		}
 	case ExprBlock:
-		return fl.inferValueType(expr.Body.Result)
+		return fl.inferValueType(exprPayloadAs[*BlockExprPayload](expr).Body.Result)
 	case ExprIf:
-		return fl.mergeValueTypes(fl.inferValueType(expr.Then.Result), fl.inferValueType(expr.Else.Result))
+		return fl.mergeValueTypes(fl.inferValueType(exprPayloadAs[*IfExprPayload](expr).Then.Result), fl.inferValueType(exprPayloadAs[*IfExprPayload](expr).Else.Result))
 	case ExprMatchInt:
-		return fl.inferValueTypeFromCases(expr.IntCases, expr.RangeCases, expr.CatchAll)
+		return fl.inferValueTypeFromCases(exprPayloadAs[*IntMatchExprPayload](expr).Cases, exprPayloadAs[*IntMatchExprPayload](expr).RangeCases, exprPayloadAs[*IntMatchExprPayload](expr).CatchAll)
 	case ExprMatchStr:
-		return fl.inferValueTypeFromStrCases(expr.StrCases, expr.CatchAll)
+		return fl.inferValueTypeFromStrCases(exprPayloadAs[*StrMatchExprPayload](expr).Cases, exprPayloadAs[*StrMatchExprPayload](expr).CatchAll)
 	case ExprMatchMaybe:
-		return fl.mergeValueTypes(fl.inferValueType(expr.Some.Result), fl.inferValueType(expr.None.Result))
+		return fl.mergeValueTypes(fl.inferValueType(exprPayloadAs[*MaybeMatchExprPayload](expr).Some.Result), fl.inferValueType(exprPayloadAs[*MaybeMatchExprPayload](expr).None.Result))
 	case ExprMatchResult:
-		return fl.mergeValueTypes(fl.inferValueType(expr.Ok.Result), fl.inferValueType(expr.Err.Result))
+		return fl.mergeValueTypes(fl.inferValueType(exprPayloadAs[*ResultMatchExprPayload](expr).Ok.Result), fl.inferValueType(exprPayloadAs[*ResultMatchExprPayload](expr).Err.Result))
 	case ExprMatchEnum:
 		value := NoType
-		for _, c := range expr.EnumCases {
+		for _, c := range exprPayloadAs[*EnumMatchExprPayload](expr).Cases {
 			value = fl.mergeValueTypes(value, fl.inferValueType(c.Body.Result))
 		}
-		return fl.mergeValueTypes(value, fl.inferValueType(expr.CatchAll.Result))
+		return fl.mergeValueTypes(value, fl.inferValueType(exprPayloadAs[*EnumMatchExprPayload](expr).CatchAll.Result))
 	case ExprMatchUnion:
 		value := NoType
-		for _, c := range expr.UnionCases {
+		for _, c := range exprPayloadAs[*UnionMatchExprPayload](expr).Cases {
 			value = fl.mergeValueTypes(value, fl.inferValueType(c.Body.Result))
 		}
-		return fl.mergeValueTypes(value, fl.inferValueType(expr.CatchAll.Result))
+		return fl.mergeValueTypes(value, fl.inferValueType(exprPayloadAs[*UnionMatchExprPayload](expr).CatchAll.Result))
 	}
 	return NoType
 }
@@ -3537,29 +3563,29 @@ func (fl *functionLowerer) inferMaybeType(expr *Expr) TypeID {
 			return fl.internMaybeType(expr.Target.Type)
 		}
 	case ExprBlock:
-		return fl.inferMaybeType(expr.Body.Result)
+		return fl.inferMaybeType(exprPayloadAs[*BlockExprPayload](expr).Body.Result)
 	case ExprIf:
-		return fl.mergeValueTypes(fl.inferMaybeType(expr.Then.Result), fl.inferMaybeType(expr.Else.Result))
+		return fl.mergeValueTypes(fl.inferMaybeType(exprPayloadAs[*IfExprPayload](expr).Then.Result), fl.inferMaybeType(exprPayloadAs[*IfExprPayload](expr).Else.Result))
 	case ExprMatchInt:
-		return fl.inferMaybeTypeFromCases(expr.IntCases, expr.RangeCases, expr.CatchAll)
+		return fl.inferMaybeTypeFromCases(exprPayloadAs[*IntMatchExprPayload](expr).Cases, exprPayloadAs[*IntMatchExprPayload](expr).RangeCases, exprPayloadAs[*IntMatchExprPayload](expr).CatchAll)
 	case ExprMatchStr:
-		return fl.inferMaybeTypeFromStrCases(expr.StrCases, expr.CatchAll)
+		return fl.inferMaybeTypeFromStrCases(exprPayloadAs[*StrMatchExprPayload](expr).Cases, exprPayloadAs[*StrMatchExprPayload](expr).CatchAll)
 	case ExprMatchMaybe:
-		return fl.mergeValueTypes(fl.inferMaybeType(expr.Some.Result), fl.inferMaybeType(expr.None.Result))
+		return fl.mergeValueTypes(fl.inferMaybeType(exprPayloadAs[*MaybeMatchExprPayload](expr).Some.Result), fl.inferMaybeType(exprPayloadAs[*MaybeMatchExprPayload](expr).None.Result))
 	case ExprMatchResult:
-		return fl.mergeValueTypes(fl.inferMaybeType(expr.Ok.Result), fl.inferMaybeType(expr.Err.Result))
+		return fl.mergeValueTypes(fl.inferMaybeType(exprPayloadAs[*ResultMatchExprPayload](expr).Ok.Result), fl.inferMaybeType(exprPayloadAs[*ResultMatchExprPayload](expr).Err.Result))
 	case ExprMatchEnum:
 		value := NoType
-		for _, c := range expr.EnumCases {
+		for _, c := range exprPayloadAs[*EnumMatchExprPayload](expr).Cases {
 			value = fl.mergeValueTypes(value, fl.inferMaybeType(c.Body.Result))
 		}
-		return fl.mergeValueTypes(value, fl.inferMaybeType(expr.CatchAll.Result))
+		return fl.mergeValueTypes(value, fl.inferMaybeType(exprPayloadAs[*EnumMatchExprPayload](expr).CatchAll.Result))
 	case ExprMatchUnion:
 		value := NoType
-		for _, c := range expr.UnionCases {
+		for _, c := range exprPayloadAs[*UnionMatchExprPayload](expr).Cases {
 			value = fl.mergeValueTypes(value, fl.inferMaybeType(c.Body.Result))
 		}
-		return fl.mergeValueTypes(value, fl.inferMaybeType(expr.CatchAll.Result))
+		return fl.mergeValueTypes(value, fl.inferMaybeType(exprPayloadAs[*UnionMatchExprPayload](expr).CatchAll.Result))
 	}
 	return NoType
 }
@@ -3597,38 +3623,38 @@ func (fl *functionLowerer) inferResultParts(expr *Expr) (TypeID, TypeID) {
 			return NoType, expr.Target.Type
 		}
 	case ExprBlock:
-		return fl.inferResultParts(expr.Body.Result)
+		return fl.inferResultParts(exprPayloadAs[*BlockExprPayload](expr).Body.Result)
 	case ExprIf:
-		leftValue, leftErr := fl.inferResultParts(expr.Then.Result)
-		rightValue, rightErr := fl.inferResultParts(expr.Else.Result)
+		leftValue, leftErr := fl.inferResultParts(exprPayloadAs[*IfExprPayload](expr).Then.Result)
+		rightValue, rightErr := fl.inferResultParts(exprPayloadAs[*IfExprPayload](expr).Else.Result)
 		return fl.mergeResultParts(leftValue, leftErr, rightValue, rightErr)
 	case ExprMatchInt:
-		return fl.inferResultPartsFromCases(expr.IntCases, expr.RangeCases, expr.CatchAll)
+		return fl.inferResultPartsFromCases(exprPayloadAs[*IntMatchExprPayload](expr).Cases, exprPayloadAs[*IntMatchExprPayload](expr).RangeCases, exprPayloadAs[*IntMatchExprPayload](expr).CatchAll)
 	case ExprMatchStr:
-		return fl.inferResultPartsFromStrCases(expr.StrCases, expr.CatchAll)
+		return fl.inferResultPartsFromStrCases(exprPayloadAs[*StrMatchExprPayload](expr).Cases, exprPayloadAs[*StrMatchExprPayload](expr).CatchAll)
 	case ExprMatchMaybe:
-		leftValue, leftErr := fl.inferResultParts(expr.Some.Result)
-		rightValue, rightErr := fl.inferResultParts(expr.None.Result)
+		leftValue, leftErr := fl.inferResultParts(exprPayloadAs[*MaybeMatchExprPayload](expr).Some.Result)
+		rightValue, rightErr := fl.inferResultParts(exprPayloadAs[*MaybeMatchExprPayload](expr).None.Result)
 		return fl.mergeResultParts(leftValue, leftErr, rightValue, rightErr)
 	case ExprMatchResult:
-		leftValue, leftErr := fl.inferResultParts(expr.Ok.Result)
-		rightValue, rightErr := fl.inferResultParts(expr.Err.Result)
+		leftValue, leftErr := fl.inferResultParts(exprPayloadAs[*ResultMatchExprPayload](expr).Ok.Result)
+		rightValue, rightErr := fl.inferResultParts(exprPayloadAs[*ResultMatchExprPayload](expr).Err.Result)
 		return fl.mergeResultParts(leftValue, leftErr, rightValue, rightErr)
 	case ExprMatchEnum:
 		valueType, errType := NoType, NoType
-		for _, c := range expr.EnumCases {
+		for _, c := range exprPayloadAs[*EnumMatchExprPayload](expr).Cases {
 			rightValue, rightErr := fl.inferResultParts(c.Body.Result)
 			valueType, errType = fl.mergeResultParts(valueType, errType, rightValue, rightErr)
 		}
-		rightValue, rightErr := fl.inferResultParts(expr.CatchAll.Result)
+		rightValue, rightErr := fl.inferResultParts(exprPayloadAs[*EnumMatchExprPayload](expr).CatchAll.Result)
 		return fl.mergeResultParts(valueType, errType, rightValue, rightErr)
 	case ExprMatchUnion:
 		valueType, errType := NoType, NoType
-		for _, c := range expr.UnionCases {
+		for _, c := range exprPayloadAs[*UnionMatchExprPayload](expr).Cases {
 			rightValue, rightErr := fl.inferResultParts(c.Body.Result)
 			valueType, errType = fl.mergeResultParts(valueType, errType, rightValue, rightErr)
 		}
-		rightValue, rightErr := fl.inferResultParts(expr.CatchAll.Result)
+		rightValue, rightErr := fl.inferResultParts(exprPayloadAs[*UnionMatchExprPayload](expr).CatchAll.Result)
 		return fl.mergeResultParts(valueType, errType, rightValue, rightErr)
 	}
 	return NoType, NoType
@@ -3831,7 +3857,7 @@ func (fl *functionLowerer) lowerAnyWrapIfNeeded(expr checker.Expression, expecte
 	}
 	actual, err := fl.internType(expr.Type())
 	if err != nil {
-		if typeHasUnresolvedTypeVar(expr.Type()) {
+		if fl.l.typeHasUnresolvedTypeVar(expr.Type()) {
 			return nil, false, nil
 		}
 		return nil, false, err
@@ -3868,7 +3894,7 @@ func (fl *functionLowerer) lowerUnionWrapIfNeeded(expr checker.Expression, expec
 			if err != nil {
 				return nil, true, err
 			}
-			return &Expr{Kind: ExprUnionWrap, Type: expected, Target: value, Tag: member.Tag}, true, nil
+			return &Expr{Kind: ExprUnionWrap, Type: expected, Target: value, Payload: &TagExprPayload{Tag: member.Tag}}, true, nil
 		}
 	}
 	return nil, false, nil
@@ -3880,7 +3906,11 @@ func referencePlaceRootLocal(expr *Expr) (LocalID, bool) {
 	}
 	switch expr.Kind {
 	case ExprLoadLocal:
-		return expr.Local, true
+		payload := exprPayloadAs[*LocalExprPayload](expr)
+		if payload == nil {
+			return 0, false
+		}
+		return payload.Local, true
 	case ExprGetField, ExprForeignFieldAccess:
 		return referencePlaceRootLocal(expr.Target)
 	default:
@@ -3941,7 +3971,7 @@ func (fl *functionLowerer) lowerReferenceTraitProjection(typeID TypeID, projecti
 	if err != nil {
 		return nil, err
 	}
-	return &Expr{Kind: ExprTraitRefProject, Type: typeID, Target: value, Impl: impl, Trait: traitInfo.Trait}, nil
+	return &Expr{Kind: ExprTraitRefProject, Type: typeID, Target: value, Payload: &TraitExprPayload{Impl: impl, Trait: traitInfo.Trait}}, nil
 }
 
 func (fl *functionLowerer) lowerTraitUpcastIfNeeded(expr checker.Expression, expected TypeID) (*Expr, bool, error) {
@@ -3965,7 +3995,7 @@ func (fl *functionLowerer) lowerTraitUpcastIfNeeded(expr checker.Expression, exp
 			if err != nil {
 				return nil, true, err
 			}
-			return &Expr{Kind: ExprTraitUpcast, Type: expected, Target: value, Impl: -1, Trait: expectedInfo.Trait}, true, nil
+			return &Expr{Kind: ExprTraitUpcast, Type: expected, Target: value, Payload: &TraitExprPayload{Impl: -1, Trait: expectedInfo.Trait}}, true, nil
 		}
 	}
 	if err := fl.l.ensureModuleImportTraitImplsDeclared(fl.fn.Module); err != nil {
@@ -3991,7 +4021,7 @@ func (fl *functionLowerer) lowerTraitUpcastIfNeeded(expr checker.Expression, exp
 	if err != nil {
 		return nil, true, err
 	}
-	return &Expr{Kind: ExprTraitUpcast, Type: expected, Target: value, Impl: impl, Trait: expectedInfo.Trait}, true, nil
+	return &Expr{Kind: ExprTraitUpcast, Type: expected, Target: value, Payload: &TraitExprPayload{Impl: impl, Trait: expectedInfo.Trait}}, true, nil
 }
 
 func (fl *functionLowerer) lowerStmt(stmt checker.Statement) (*Stmt, error) {
@@ -4165,7 +4195,7 @@ func (fl *functionLowerer) lowerForIntRange(loop *checker.ForIntRange) ([]Stmt, 
 	if loop.Index != "" {
 		indexCounter = fl.defineLocal(loop.Index+"$range", intType, true)
 		index = fl.defineLocal(loop.Index, intType, false)
-		stmts = append(stmts, Stmt{Kind: StmtLet, Local: indexCounter, Name: loop.Index + "$range", Type: intType, Mutable: true, Value: &Expr{Kind: ExprConstInt, Type: intType, Int: "0"}})
+		stmts = append(stmts, Stmt{Kind: StmtLet, Local: indexCounter, Name: loop.Index + "$range", Type: intType, Mutable: true, Value: &Expr{Kind: ExprConstInt, Type: intType, Payload: &TextExprPayload{Value: "0"}}})
 	}
 
 	body, err := fl.lowerNonProducingBlock(loop.Body.Stmts)
@@ -4192,19 +4222,19 @@ func (fl *functionLowerer) lowerForIntRange(loop *checker.ForIntRange) ([]Stmt, 
 	body.Stmts = append(body.Stmts, Stmt{
 		Kind:  StmtAssign,
 		Local: counter,
-		Value: &Expr{Kind: ExprIntAdd, Type: intType, Left: loadLocal(intType, counter), Right: &Expr{Kind: ExprConstInt, Type: intType, Int: "1"}},
+		Value: &Expr{Kind: ExprIntAdd, Type: intType, Payload: &BinaryExprPayload{Left: loadLocal(intType, counter), Right: &Expr{Kind: ExprConstInt, Type: intType, Payload: &TextExprPayload{Value: "1"}}}},
 	})
 	if loop.Index != "" {
 		body.Stmts = append(body.Stmts, Stmt{
 			Kind:  StmtAssign,
 			Local: indexCounter,
-			Value: &Expr{Kind: ExprIntAdd, Type: intType, Left: loadLocal(intType, indexCounter), Right: &Expr{Kind: ExprConstInt, Type: intType, Int: "1"}},
+			Value: &Expr{Kind: ExprIntAdd, Type: intType, Payload: &BinaryExprPayload{Left: loadLocal(intType, indexCounter), Right: &Expr{Kind: ExprConstInt, Type: intType, Payload: &TextExprPayload{Value: "1"}}}},
 		})
 	}
 
 	stmts = append(stmts, Stmt{
 		Kind:      StmtWhile,
-		Condition: &Expr{Kind: ExprLte, Type: boolType, Left: loadLocal(intType, counter), Right: loadLocal(intType, endLocal)},
+		Condition: &Expr{Kind: ExprLte, Type: boolType, Payload: &BinaryExprPayload{Left: loadLocal(intType, counter), Right: loadLocal(intType, endLocal)}},
 		Body:      body,
 	})
 	return stmts, nil
@@ -4250,7 +4280,7 @@ func (fl *functionLowerer) lowerForInStr(loop *checker.ForInStr) ([]Stmt, error)
 
 	stmts := []Stmt{
 		{Kind: StmtLet, Local: runesLocal, Name: loop.Cursor + "$runes", Type: runeListType, Value: &Expr{Kind: ExprStrRunes, Type: runeListType, Target: str}},
-		{Kind: StmtLet, Local: index, Name: indexName, Type: intType, Mutable: true, Value: &Expr{Kind: ExprConstInt, Type: intType, Int: "0"}},
+		{Kind: StmtLet, Local: index, Name: indexName, Type: intType, Mutable: true, Value: &Expr{Kind: ExprConstInt, Type: intType, Payload: &TextExprPayload{Value: "0"}}},
 	}
 
 	body, err := fl.lowerNonProducingBlock(loop.Body.Stmts)
@@ -4277,12 +4307,12 @@ func (fl *functionLowerer) lowerForInStr(loop *checker.ForInStr) ([]Stmt, error)
 	body.Stmts = append(body.Stmts, Stmt{
 		Kind:  StmtAssign,
 		Local: index,
-		Value: &Expr{Kind: ExprIntAdd, Type: intType, Left: loadLocal(intType, index), Right: &Expr{Kind: ExprConstInt, Type: intType, Int: "1"}},
+		Value: &Expr{Kind: ExprIntAdd, Type: intType, Payload: &BinaryExprPayload{Left: loadLocal(intType, index), Right: &Expr{Kind: ExprConstInt, Type: intType, Payload: &TextExprPayload{Value: "1"}}}},
 	})
 
 	stmts = append(stmts, Stmt{
 		Kind:      StmtWhile,
-		Condition: &Expr{Kind: ExprLt, Type: boolType, Left: loadLocal(intType, index), Right: &Expr{Kind: ExprListSize, Type: intType, Target: loadLocal(runeListType, runesLocal)}},
+		Condition: &Expr{Kind: ExprLt, Type: boolType, Payload: &BinaryExprPayload{Left: loadLocal(intType, index), Right: &Expr{Kind: ExprListSize, Type: intType, Target: loadLocal(runeListType, runesLocal)}}},
 		Body:      body,
 	})
 	return stmts, nil
@@ -4320,7 +4350,7 @@ func (fl *functionLowerer) lowerForInList(loop *checker.ForInList) ([]Stmt, erro
 
 	stmts := []Stmt{
 		{Kind: StmtLet, Local: listLocal, Name: loop.Cursor + "$list", Type: list.Type, Value: list},
-		{Kind: StmtLet, Local: index, Name: indexName, Type: intType, Mutable: true, Value: &Expr{Kind: ExprConstInt, Type: intType, Int: "0"}},
+		{Kind: StmtLet, Local: index, Name: indexName, Type: intType, Mutable: true, Value: &Expr{Kind: ExprConstInt, Type: intType, Payload: &TextExprPayload{Value: "0"}}},
 	}
 
 	body, err := fl.lowerNonProducingBlock(loop.Body.Stmts)
@@ -4347,12 +4377,12 @@ func (fl *functionLowerer) lowerForInList(loop *checker.ForInList) ([]Stmt, erro
 	body.Stmts = append(body.Stmts, Stmt{
 		Kind:  StmtAssign,
 		Local: index,
-		Value: &Expr{Kind: ExprIntAdd, Type: intType, Left: loadLocal(intType, index), Right: &Expr{Kind: ExprConstInt, Type: intType, Int: "1"}},
+		Value: &Expr{Kind: ExprIntAdd, Type: intType, Payload: &BinaryExprPayload{Left: loadLocal(intType, index), Right: &Expr{Kind: ExprConstInt, Type: intType, Payload: &TextExprPayload{Value: "1"}}}},
 	})
 
 	stmts = append(stmts, Stmt{
 		Kind:      StmtWhile,
-		Condition: &Expr{Kind: ExprLt, Type: boolType, Left: loadLocal(intType, index), Right: &Expr{Kind: ExprListSize, Type: intType, Target: loadLocal(list.Type, listLocal)}},
+		Condition: &Expr{Kind: ExprLt, Type: boolType, Payload: &BinaryExprPayload{Left: loadLocal(intType, index), Right: &Expr{Kind: ExprListSize, Type: intType, Target: loadLocal(list.Type, listLocal)}}},
 		Body:      body,
 	})
 	return stmts, nil
@@ -4426,7 +4456,7 @@ func (fl *functionLowerer) lowerFunctionTypeCall(name string, args []checker.Exp
 		spreadElement = typeInfo.Params[len(typeInfo.Params)-1]
 		spreadCallable = functionTypeID
 	}
-	return &Expr{Kind: ExprCallClosure, Type: typeInfo.Return, Target: target, Args: loweredArgs, TailSpread: tailSpread, SpreadElement: spreadElement, SpreadCallable: spreadCallable}, nil
+	return &Expr{Kind: ExprCallClosure, Type: typeInfo.Return, Target: target, Args: loweredArgs, Payload: &CallExprPayload{Spread: newSpreadExprPayload(tailSpread, spreadElement, spreadCallable)}}, nil
 }
 
 // functionTypeIDForCallable resolves a callee type to its function type: a
@@ -4486,7 +4516,8 @@ func (fl *functionLowerer) lowerChannelCall(typeID TypeID, e *checker.ModuleFunc
 // lowerSelect lowers a checker Select into an ExprSelect with native channel
 // arms (ADR 0032).
 func (fl *functionLowerer) lowerSelect(typeID TypeID, sel *checker.Select) (*Expr, error) {
-	result := &Expr{Kind: ExprSelect, Type: typeID}
+	selectPayload := &SelectExprPayload{}
+	result := &Expr{Kind: ExprSelect, Type: typeID, Payload: selectPayload}
 	for _, arm := range sel.Arms {
 		switch arm.Kind {
 		case checker.SelectArmDefault:
@@ -4494,7 +4525,7 @@ func (fl *functionLowerer) lowerSelect(typeID TypeID, sel *checker.Select) (*Exp
 			if err != nil {
 				return nil, err
 			}
-			result.SelectCases = append(result.SelectCases, SelectMatchCase{Kind: SelectArmDefault, Body: body})
+			selectPayload.Cases = append(selectPayload.Cases, SelectMatchCase{Kind: SelectArmDefault, Body: body})
 
 		case checker.SelectArmRecv:
 			channel, err := fl.lowerExpr(arm.Channel)
@@ -4529,7 +4560,7 @@ func (fl *functionLowerer) lowerSelect(typeID TypeID, sel *checker.Select) (*Exp
 				}
 				armCase.Body = body
 			}
-			result.SelectCases = append(result.SelectCases, armCase)
+			selectPayload.Cases = append(selectPayload.Cases, armCase)
 
 		case checker.SelectArmSend:
 			channel, err := fl.lowerExpr(arm.Channel)
@@ -4544,7 +4575,7 @@ func (fl *functionLowerer) lowerSelect(typeID TypeID, sel *checker.Select) (*Exp
 			if err != nil {
 				return nil, err
 			}
-			result.SelectCases = append(result.SelectCases, SelectMatchCase{Kind: SelectArmSend, Channel: channel, Value: value, Body: body})
+			selectPayload.Cases = append(selectPayload.Cases, SelectMatchCase{Kind: SelectArmSend, Channel: channel, Value: value, Body: body})
 		}
 	}
 	return result, nil
@@ -4567,11 +4598,11 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		}
 		if !ok {
 			if global, ok := fl.l.lookupGlobalInModule(fl.fn.Module, e.Name); ok {
-				return &Expr{Kind: ExprLoadGlobal, Type: fl.l.program.Globals[global].Type, Global: global}, nil
+				return &Expr{Kind: ExprLoadGlobal, Type: fl.l.program.Globals[global].Type, Payload: &GlobalExprPayload{Global: global}}, nil
 			}
 			return nil, fmt.Errorf("unknown local %s", e.Name)
 		}
-		return &Expr{Kind: ExprLoadLocal, Type: fl.fn.Locals[local].Type, Local: local}, nil
+		return &Expr{Kind: ExprLoadLocal, Type: fl.fn.Locals[local].Type, Payload: &LocalExprPayload{Local: local}}, nil
 	}
 	if e, ok := expr.(*checker.Variable); ok {
 		local, ok, err := fl.resolveLocal(e.Name())
@@ -4580,7 +4611,7 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		}
 		if !ok {
 			if global, ok := fl.l.lookupGlobalInModule(fl.fn.Module, e.Name()); ok {
-				return &Expr{Kind: ExprLoadGlobal, Type: fl.l.program.Globals[global].Type, Global: global}, nil
+				return &Expr{Kind: ExprLoadGlobal, Type: fl.l.program.Globals[global].Type, Payload: &GlobalExprPayload{Global: global}}, nil
 			}
 			if def, ok := e.Type().(*checker.FunctionDef); ok {
 				functionType, err := fl.internType(e.Type())
@@ -4591,11 +4622,11 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 				if err != nil {
 					return nil, err
 				}
-				return &Expr{Kind: ExprFunctionRef, Type: functionType, Function: id}, nil
+				return &Expr{Kind: ExprFunctionRef, Type: functionType, Payload: &CallExprPayload{Function: id}}, nil
 			}
 			return nil, fmt.Errorf("unknown local %s", e.Name())
 		}
-		return &Expr{Kind: ExprLoadLocal, Type: fl.fn.Locals[local].Type, Local: local}, nil
+		return &Expr{Kind: ExprLoadLocal, Type: fl.fn.Locals[local].Type, Payload: &LocalExprPayload{Local: local}}, nil
 	}
 	if e, ok := expr.(*checker.FunctionCall); ok {
 		local, ok, err := fl.resolveLocal(e.Name)
@@ -4603,13 +4634,13 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 			return nil, err
 		}
 		if ok && fl.localKind(local) == TypeFunction {
-			target := &Expr{Kind: ExprLoadLocal, Type: fl.fn.Locals[local].Type, Local: local}
+			target := &Expr{Kind: ExprLoadLocal, Type: fl.fn.Locals[local].Type, Payload: &LocalExprPayload{Local: local}}
 			return fl.lowerFunctionTypeCall(e.Name, e.Args, target, e.TailSpread)
 		}
 		if global, ok := fl.l.lookupGlobalInModule(fl.fn.Module, e.Name); ok {
 			globalType := fl.l.program.Globals[global].Type
 			if typeInfo, ok := fl.l.typeInfo(globalType); ok && typeInfo.Kind == TypeFunction {
-				target := &Expr{Kind: ExprLoadGlobal, Type: globalType, Global: global}
+				target := &Expr{Kind: ExprLoadGlobal, Type: globalType, Payload: &GlobalExprPayload{Global: global}}
 				return fl.lowerFunctionTypeCall(e.Name, e.Args, target, e.TailSpread)
 			}
 		}
@@ -4625,19 +4656,19 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 	case *checker.VoidLiteral:
 		return &Expr{Kind: ExprConstVoid, Type: typeID}, nil
 	case *checker.IntLiteral:
-		return &Expr{Kind: ExprConstInt, Type: typeID, Int: strconv.Itoa(e.Value)}, nil
+		return &Expr{Kind: ExprConstInt, Type: typeID, Payload: &TextExprPayload{Value: strconv.Itoa(e.Value)}}, nil
 	case *checker.TypedIntLiteral:
-		return &Expr{Kind: ExprConstInt, Type: typeID, Int: e.String()}, nil
+		return &Expr{Kind: ExprConstInt, Type: typeID, Payload: &TextExprPayload{Value: e.String()}}, nil
 	case *checker.FloatLiteral:
-		return &Expr{Kind: ExprConstFloat, Type: typeID, Float: e.String()}, nil
+		return &Expr{Kind: ExprConstFloat, Type: typeID, Payload: &TextExprPayload{Value: e.String()}}, nil
 	case *checker.TypedFloatLiteral:
-		return &Expr{Kind: ExprConstFloat, Type: typeID, Float: e.String()}, nil
+		return &Expr{Kind: ExprConstFloat, Type: typeID, Payload: &TextExprPayload{Value: e.String()}}, nil
 	case *checker.BoolLiteral:
-		return &Expr{Kind: ExprConstBool, Type: typeID, Bool: e.Value}, nil
+		return &Expr{Kind: ExprConstBool, Type: typeID, Payload: &BoolExprPayload{Value: e.Value}}, nil
 	case *checker.StrLiteral:
-		return &Expr{Kind: ExprConstStr, Type: typeID, Str: e.Value}, nil
+		return &Expr{Kind: ExprConstStr, Type: typeID, Payload: &TextExprPayload{Value: e.Value}}, nil
 	case *checker.RuneLiteral:
-		return &Expr{Kind: ExprConstInt, Type: typeID, Int: strconv.Itoa(int(e.Value))}, nil
+		return &Expr{Kind: ExprConstInt, Type: typeID, Payload: &TextExprPayload{Value: strconv.Itoa(int(e.Value))}}, nil
 	case *checker.Panic:
 		message, err := fl.lowerExprWithExpected(e.Message, fl.l.mustIntern(checker.Str))
 		if err != nil {
@@ -4657,14 +4688,14 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 	case *checker.FunctionCall:
 		if local, ok := fl.locals[e.Name]; ok {
 			if _, callable := fl.functionTypeIDForCallable(fl.fn.Locals[local].Type); callable {
-				target := &Expr{Kind: ExprLoadLocal, Type: fl.fn.Locals[local].Type, Local: local}
+				target := &Expr{Kind: ExprLoadLocal, Type: fl.fn.Locals[local].Type, Payload: &LocalExprPayload{Local: local}}
 				return fl.lowerFunctionTypeCall(e.Name, e.Args, target, e.TailSpread)
 			}
 		}
 		if global, ok := fl.l.lookupGlobalInModule(fl.fn.Module, e.Name); ok {
 			globalType := fl.l.program.Globals[global].Type
 			if typeInfo, ok := fl.l.typeInfo(globalType); ok && typeInfo.Kind == TypeFunction {
-				target := &Expr{Kind: ExprLoadGlobal, Type: globalType, Global: global}
+				target := &Expr{Kind: ExprLoadGlobal, Type: globalType, Payload: &GlobalExprPayload{Global: global}}
 				return fl.lowerFunctionTypeCall(e.Name, e.Args, target, e.TailSpread)
 			}
 		}
@@ -4688,7 +4719,7 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 					return nil, err
 				}
 				if hasLocal && fl.localKind(local) == TypeFunction {
-					target := &Expr{Kind: ExprLoadLocal, Type: fl.fn.Locals[local].Type, Local: local}
+					target := &Expr{Kind: ExprLoadLocal, Type: fl.fn.Locals[local].Type, Payload: &LocalExprPayload{Local: local}}
 					args, err := fl.lowerArgsForFunctionType(e.Args, target.Type, e.TailSpread)
 					if err != nil {
 						return nil, err
@@ -4705,7 +4736,7 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 							spreadCallable = target.Type
 						}
 					}
-					return &Expr{Kind: ExprCallClosure, Type: returnType, Target: target, Args: args, TailSpread: e.TailSpread, SpreadElement: spreadElement, SpreadCallable: spreadCallable}, nil
+					return &Expr{Kind: ExprCallClosure, Type: returnType, Target: target, Args: args, Payload: &CallExprPayload{Spread: newSpreadExprPayload(e.TailSpread, spreadElement, spreadCallable)}}, nil
 				}
 				return nil, fmt.Errorf("unknown function call target %s", def.Name)
 			}
@@ -4713,7 +4744,7 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 			if err != nil {
 				return nil, err
 			}
-			return &Expr{Kind: ExprCall, Type: fl.l.program.Functions[id].Signature.Return, Function: id, Args: args}, nil
+			return &Expr{Kind: ExprCall, Type: fl.l.program.Functions[id].Signature.Return, Args: args, Payload: &CallExprPayload{Function: id}}, nil
 		}
 		return nil, fmt.Errorf("unsupported unresolved function call %s", e.Name)
 	case *checker.ForeignValue:
@@ -4721,7 +4752,7 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		if functionDef, ok := e.Type().(*checker.FunctionDef); ok {
 			argABI = lowerABIParamModes(functionDef.Parameters, len(functionDef.Parameters))
 		}
-		return &Expr{Kind: ExprForeignValue, Type: typeID, ForeignTarget: e.Target, ForeignNamespace: e.Namespace, ForeignQualifier: e.Qualifier, ForeignSymbol: e.Symbol, ForeignResultShape: lowerForeignResultShape(e.ForeignResultShape), ForeignArgABI: argABI}, nil
+		return &Expr{Kind: ExprForeignValue, Type: typeID, Payload: &ForeignExprPayload{Target: e.Target, Namespace: e.Namespace, Qualifier: e.Qualifier, Symbol: e.Symbol, ResultShape: lowerForeignResultShape(e.ForeignResultShape), ArgABI: argABI}}, nil
 	case *checker.InterfaceConversion:
 		value, err := fl.lowerExpr(e.Value)
 		if err != nil {
@@ -4737,7 +4768,7 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		default:
 			return nil, fmt.Errorf("unsupported checker interface conversion mode %d", e.Mode)
 		}
-		return &Expr{Kind: ExprInterfaceConversion, Type: typeID, Target: value, InterfaceMode: mode}, nil
+		return &Expr{Kind: ExprInterfaceConversion, Type: typeID, Target: value, Payload: &InterfaceExprPayload{Mode: mode}}, nil
 	case *checker.DiscardingFunctionCoercion:
 		value, err := fl.lowerExpr(e.Value)
 		if err != nil {
@@ -4758,7 +4789,7 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 			}
 			fields = append(fields, StructFieldValue{Name: name, Value: *value})
 		}
-		return &Expr{Kind: ExprForeignStructInstance, Type: typeID, ForeignTarget: e.Target, ForeignNamespace: e.Namespace, ForeignQualifier: e.Qualifier, ForeignSymbol: e.Name, Fields: fields}, nil
+		return &Expr{Kind: ExprForeignStructInstance, Type: typeID, Payload: &ForeignExprPayload{Target: e.Target, Namespace: e.Namespace, Qualifier: e.Qualifier, Symbol: e.Name, Fields: fields}}, nil
 	case *checker.ForeignScalarConvert:
 		if !checker.ValidForeignScalarConversion(e.Value.Type(), e.Target) {
 			return nil, fmt.Errorf("unsupported foreign scalar conversion: %s -> %s", e.Value.Type().String(), e.Target.String())
@@ -4780,7 +4811,7 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		if err != nil {
 			return nil, err
 		}
-		return &Expr{Kind: ExprForeignFieldAccess, Type: typeID, Target: target, ForeignTarget: e.Target, ForeignSymbol: e.Symbol}, nil
+		return &Expr{Kind: ExprForeignFieldAccess, Type: typeID, Target: target, Payload: &ForeignExprPayload{Target: e.Target, Symbol: e.Symbol}}, nil
 	case *checker.ForeignMethodValue:
 		target, err := fl.lowerExpr(e.Subject)
 		if err != nil {
@@ -4790,7 +4821,7 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		if methodDef, ok := e.Type().(*checker.FunctionDef); ok {
 			argABI = lowerABIParamModes(methodDef.Parameters, len(methodDef.Parameters))
 		}
-		return &Expr{Kind: ExprForeignMethodValue, Type: typeID, Target: target, ForeignTarget: e.Target, ForeignNamespace: e.Namespace, ForeignQualifier: e.Qualifier, ForeignReceiver: e.Receiver, ForeignPointer: e.Pointer, ForeignSymbol: e.Symbol, ForeignResultShape: lowerForeignResultShape(e.ForeignResultShape), ForeignArgABI: argABI}, nil
+		return &Expr{Kind: ExprForeignMethodValue, Type: typeID, Target: target, Payload: &ForeignExprPayload{Target: e.Target, Namespace: e.Namespace, Qualifier: e.Qualifier, Receiver: e.Receiver, Pointer: e.Pointer, Symbol: e.Symbol, ResultShape: lowerForeignResultShape(e.ForeignResultShape), ArgABI: argABI}}, nil
 	case *checker.ForeignMethodCall:
 		target, err := fl.lowerExpr(e.Subject)
 		if err != nil {
@@ -4829,7 +4860,7 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		if err != nil {
 			return nil, err
 		}
-		return &Expr{Kind: ExprForeignMethodCall, Type: typeID, Target: target, ForeignTarget: e.Target, ForeignNamespace: e.Namespace, ForeignQualifier: e.Qualifier, ForeignReceiver: e.Receiver, ForeignPointer: e.Pointer, ForeignSymbol: e.Symbol, ForeignResultShape: lowerForeignResultShape(e.ForeignResultShape), ForeignArgABI: argABI, Args: args, TailSpread: e.Call.TailSpread, SpreadElement: spreadElement, SpreadCallable: spreadCallable}, nil
+		return &Expr{Kind: ExprForeignMethodCall, Type: typeID, Target: target, Args: args, Payload: &ForeignExprPayload{Target: e.Target, Namespace: e.Namespace, Qualifier: e.Qualifier, Receiver: e.Receiver, Pointer: e.Pointer, Symbol: e.Symbol, ResultShape: lowerForeignResultShape(e.ForeignResultShape), ArgABI: argABI, Spread: newSpreadExprPayload(e.Call.TailSpread, spreadElement, spreadCallable)}}, nil
 	case *checker.UnsafeCast:
 		value, err := fl.lowerExprWithExpected(e.Value, fl.l.mustIntern(checker.Any))
 		if err != nil {
@@ -4856,7 +4887,7 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		if err != nil {
 			return nil, err
 		}
-		return &Expr{Kind: ExprUnsafeCast, Type: typeID, Target: value, TypeArgs: []TypeID{targetTypeID}, ForeignPointer: mutable}, nil
+		return &Expr{Kind: ExprUnsafeCast, Type: typeID, Target: value, Payload: &UnsafeCastExprPayload{TargetType: targetTypeID, Pointer: mutable}}, nil
 	case *checker.UnsafeIsNil:
 		value, err := fl.lowerExprWithExpected(e.Value, fl.l.mustIntern(checker.Any))
 		if err != nil {
@@ -4877,13 +4908,13 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 				fl.markCaptureSlot(root)
 			}
 		}
-		return &Expr{Kind: ExprMutRef, Type: typeID, Target: operand, ReferenceMode: mode}, nil
+		return &Expr{Kind: ExprMutRef, Type: typeID, Target: operand, Payload: &ReferenceExprPayload{Mode: mode}}, nil
 	case *checker.DerefExpr:
 		operand, err := fl.lowerExpr(e.Operand)
 		if err != nil {
 			return nil, err
 		}
-		return &Expr{Kind: ExprDeref, Type: typeID, Target: operand, Observational: e.Observational}, nil
+		return &Expr{Kind: ExprDeref, Type: typeID, Target: operand, Payload: &ReferenceExprPayload{Observational: e.Observational}}, nil
 	case *checker.ReferenceTraitProjection:
 		return fl.lowerReferenceTraitProjection(typeID, e)
 	case *checker.ForeignFunctionCall:
@@ -4925,7 +4956,7 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		if err != nil {
 			return nil, err
 		}
-		return &Expr{Kind: ExprForeignCall, Type: typeID, ForeignTarget: e.Target, ForeignNamespace: e.Namespace, ForeignQualifier: e.Qualifier, ForeignSymbol: e.Symbol, TypeArgs: typeArgs, ForeignPointer: e.PointerResult, ForeignResultShape: lowerForeignResultShape(e.ForeignResultShape), ForeignArgABI: argABI, Args: args, TailSpread: e.Call.TailSpread, SpreadElement: spreadElement, SpreadCallable: spreadCallable}, nil
+		return &Expr{Kind: ExprForeignCall, Type: typeID, Args: args, Payload: &ForeignExprPayload{Target: e.Target, Namespace: e.Namespace, Qualifier: e.Qualifier, Symbol: e.Symbol, TypeArgs: typeArgs, Pointer: e.PointerResult, ResultShape: lowerForeignResultShape(e.ForeignResultShape), ArgABI: argABI, Spread: newSpreadExprPayload(e.Call.TailSpread, spreadElement, spreadCallable)}}, nil
 	case *checker.ModuleFunctionCall:
 		if kind, ok := resultConstructorKind(e); ok {
 			return fl.lowerResultConstructor(kind, typeID, e)
@@ -4965,7 +4996,7 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		if global, ok := fl.l.lookupGlobalInModule(moduleID, e.Call.Name); ok {
 			globalType := fl.l.program.Globals[global].Type
 			if _, callable := fl.functionTypeIDForCallable(globalType); callable {
-				target := &Expr{Kind: ExprLoadGlobal, Type: globalType, Global: global}
+				target := &Expr{Kind: ExprLoadGlobal, Type: globalType, Payload: &GlobalExprPayload{Global: global}}
 				return fl.lowerFunctionTypeCall(e.Call.Name, e.Call.Args, target, e.Call.TailSpread)
 			}
 		}
@@ -4983,7 +5014,7 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 			if err != nil {
 				return nil, err
 			}
-			return &Expr{Kind: ExprCall, Type: fl.l.program.Functions[id].Signature.Return, Function: id, Args: args}, nil
+			return &Expr{Kind: ExprCall, Type: fl.l.program.Functions[id].Signature.Return, Args: args, Payload: &CallExprPayload{Function: id}}, nil
 		}
 		return nil, fmt.Errorf("unsupported module function call %s::%s", e.Module, e.Call.Name)
 	case *checker.ModuleSymbol:
@@ -5052,7 +5083,7 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 	case *checker.MapMethod:
 		return fl.lowerMapMethod(typeID, e)
 	case *checker.EnumVariant:
-		return &Expr{Kind: ExprEnumVariant, Type: typeID, Variant: int(e.Variant), Discriminant: e.Discriminant}, nil
+		return &Expr{Kind: ExprEnumVariant, Type: typeID, Payload: &EnumExprPayload{Variant: int(e.Variant), Discriminant: e.Discriminant}}, nil
 	case *checker.BoolMatch:
 		return fl.lowerBoolMatch(typeID, e)
 	case *checker.IntMatch:
@@ -5138,7 +5169,7 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		if err != nil {
 			return nil, err
 		}
-		return &Expr{Kind: ExprBlock, Type: typeID, Body: body}, nil
+		return &Expr{Kind: ExprBlock, Type: typeID, Payload: &BlockExprPayload{Body: body}}, nil
 	case *checker.UnsafeBlock:
 		resultType := typeID
 		resultInfo, ok := fl.l.typeInfo(resultType)
@@ -5160,7 +5191,7 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		if err != nil {
 			return nil, err
 		}
-		return &Expr{Kind: ExprUnsafeBlock, Type: resultType, Body: body}, nil
+		return &Expr{Kind: ExprUnsafeBlock, Type: resultType, Payload: &BlockExprPayload{Body: body}}, nil
 	case *checker.If:
 		return fl.lowerIf(typeID, e)
 	case *checker.ConditionalMatch:
@@ -5184,7 +5215,7 @@ func (fl *functionLowerer) lowerConditionalCases(typeID TypeID, cases []checker.
 				return nil, err
 			}
 		}
-		return &Expr{Kind: ExprBlock, Type: typeID, Body: body}, nil
+		return &Expr{Kind: ExprBlock, Type: typeID, Payload: &BlockExprPayload{Body: body}}, nil
 	}
 
 	condition, err := fl.lowerExpr(cases[0].Condition)
@@ -5200,11 +5231,13 @@ func (fl *functionLowerer) lowerConditionalCases(typeID TypeID, cases []checker.
 		return nil, err
 	}
 	return &Expr{
-		Kind:      ExprIf,
-		Type:      typeID,
-		Condition: condition,
-		Then:      thenBlock,
-		Else:      Block{Result: elseExpr},
+		Kind: ExprIf,
+		Type: typeID,
+		Payload: &IfExprPayload{
+			Condition: condition,
+			Then:      thenBlock,
+			Else:      Block{Result: elseExpr},
+		},
 	}, nil
 }
 
@@ -5248,7 +5281,7 @@ func (fl *functionLowerer) lowerIfBranches(typeID TypeID, branches []checker.IfB
 			return nil, err
 		}
 	}
-	return &Expr{Kind: ExprIf, Type: typeID, Condition: condition, Then: thenBlock, Else: airElse}, nil
+	return &Expr{Kind: ExprIf, Type: typeID, Payload: &IfExprPayload{Condition: condition, Then: thenBlock, Else: airElse}}, nil
 }
 
 func (fl *functionLowerer) lowerResultConstructor(kind ExprKind, typeID TypeID, call *checker.ModuleFunctionCall) (*Expr, error) {
@@ -5338,7 +5371,7 @@ func (fl *functionLowerer) lowerBoolMatch(typeID TypeID, match *checker.BoolMatc
 	if err != nil {
 		return nil, err
 	}
-	return &Expr{Kind: ExprIf, Type: typeID, Condition: condition, Then: trueBlock, Else: falseBlock}, nil
+	return &Expr{Kind: ExprIf, Type: typeID, Payload: &IfExprPayload{Condition: condition, Then: trueBlock, Else: falseBlock}}, nil
 }
 
 func (fl *functionLowerer) lowerListLiteral(typeID TypeID, list *checker.ListLiteral, elem TypeID) (*Expr, error) {
@@ -5387,7 +5420,7 @@ func (fl *functionLowerer) lowerMapLiteral(typeID TypeID, m *checker.MapLiteral,
 		}
 		entries[i] = MapEntry{Key: *key, Value: *value}
 	}
-	return &Expr{Kind: ExprMakeMap, Type: typeID, Entries: entries}, nil
+	return &Expr{Kind: ExprMakeMap, Type: typeID, Payload: &AggregateExprPayload{Entries: entries}}, nil
 }
 
 func (fl *functionLowerer) lowerEnumMatch(typeID TypeID, match *checker.EnumMatch) (*Expr, error) {
@@ -5427,13 +5460,7 @@ func (fl *functionLowerer) lowerEnumMatch(typeID TypeID, match *checker.EnumMatc
 		}
 	}
 
-	return &Expr{
-		Kind:      ExprMatchEnum,
-		Type:      typeID,
-		Target:    subject,
-		EnumCases: cases,
-		CatchAll:  catchAll,
-	}, nil
+	return &Expr{Kind: ExprMatchEnum, Type: typeID, Target: subject, Payload: &EnumMatchExprPayload{Cases: cases, CatchAll: catchAll}}, nil
 }
 
 func (fl *functionLowerer) lowerIntMatch(typeID TypeID, match *checker.IntMatch) (*Expr, error) {
@@ -5495,14 +5522,7 @@ func (fl *functionLowerer) lowerIntMatch(typeID TypeID, match *checker.IntMatch)
 		}
 	}
 
-	return &Expr{
-		Kind:       ExprMatchInt,
-		Type:       typeID,
-		Target:     subject,
-		IntCases:   intCases,
-		RangeCases: rangeCases,
-		CatchAll:   catchAll,
-	}, nil
+	return &Expr{Kind: ExprMatchInt, Type: typeID, Target: subject, Payload: &IntMatchExprPayload{Cases: intCases, RangeCases: rangeCases, CatchAll: catchAll}}, nil
 }
 
 func (fl *functionLowerer) lowerStrMatch(typeID TypeID, match *checker.StrMatch) (*Expr, error) {
@@ -5541,7 +5561,7 @@ func (fl *functionLowerer) lowerStrMatch(typeID TypeID, match *checker.StrMatch)
 		}
 	}
 
-	return &Expr{Kind: ExprMatchStr, Type: typeID, Target: subject, StrCases: strCases, CatchAll: catchAll}, nil
+	return &Expr{Kind: ExprMatchStr, Type: typeID, Target: subject, Payload: &StrMatchExprPayload{Cases: strCases, CatchAll: catchAll}}, nil
 }
 
 func (fl *functionLowerer) lowerUnionMatch(typeID TypeID, match *checker.UnionMatch) (*Expr, error) {
@@ -5575,13 +5595,7 @@ func (fl *functionLowerer) lowerUnionMatch(typeID TypeID, match *checker.UnionMa
 		}
 	}
 
-	return &Expr{
-		Kind:       ExprMatchUnion,
-		Type:       typeID,
-		Target:     subject,
-		UnionCases: cases,
-		CatchAll:   catchAll,
-	}, nil
+	return &Expr{Kind: ExprMatchUnion, Type: typeID, Target: subject, Payload: &UnionMatchExprPayload{Cases: cases, CatchAll: catchAll}}, nil
 }
 
 func (fl *functionLowerer) lowerForeignTypeMatch(typeID TypeID, match *checker.ForeignTypeMatch) (*Expr, error) {
@@ -5618,7 +5632,7 @@ func (fl *functionLowerer) lowerForeignTypeMatch(typeID TypeID, match *checker.F
 	if err != nil {
 		return nil, err
 	}
-	return &Expr{Kind: ExprMatchForeignType, Type: typeID, Target: subject, ForeignCases: cases, CatchAll: catchAll}, nil
+	return &Expr{Kind: ExprMatchForeignType, Type: typeID, Target: subject, Payload: &ForeignMatchExprPayload{Cases: cases, CatchAll: catchAll}}, nil
 }
 
 func (fl *functionLowerer) lowerOptionMatch(typeID TypeID, match *checker.OptionMatch) (*Expr, error) {
@@ -5657,14 +5671,7 @@ func (fl *functionLowerer) lowerOptionMatch(typeID TypeID, match *checker.Option
 		return nil, err
 	}
 
-	return &Expr{
-		Kind:      ExprMatchMaybe,
-		Type:      typeID,
-		Target:    subject,
-		SomeLocal: someLocal,
-		Some:      someBlock,
-		None:      noneBlock,
-	}, nil
+	return &Expr{Kind: ExprMatchMaybe, Type: typeID, Target: subject, Payload: &MaybeMatchExprPayload{SomeLocal: someLocal, Some: someBlock, None: noneBlock}}, nil
 }
 
 func (fl *functionLowerer) lowerMaybeMethod(typeID TypeID, method *checker.MaybeMethod) (*Expr, error) {
@@ -5704,7 +5711,7 @@ func (fl *functionLowerer) lowerMaybeMethod(typeID TypeID, method *checker.Maybe
 	default:
 		return nil, fmt.Errorf("unsupported AIR Maybe method %d", method.Kind)
 	}
-	return &Expr{Kind: kind, Type: typeID, Target: target, Args: args, Bool: returnsReference && (method.Kind == checker.MaybeExpect || method.Kind == checker.MaybeOr)}, nil
+	return &Expr{Kind: kind, Type: typeID, Target: target, Args: args, Payload: &MaybeCallExprPayload{ReturnsReference: returnsReference && (method.Kind == checker.MaybeExpect || method.Kind == checker.MaybeOr)}}, nil
 }
 
 func (fl *functionLowerer) lowerStrMethod(typeID TypeID, method *checker.StrMethod) (*Expr, error) {
@@ -5770,7 +5777,7 @@ func (fl *functionLowerer) lowerStrMethod(typeID TypeID, method *checker.StrMeth
 	if err != nil {
 		return nil, err
 	}
-	return &Expr{Kind: kind, Type: typeID, Target: target, Args: args, ArgOrder: append([]int(nil), method.ArgOrder...)}, nil
+	return &Expr{Kind: kind, Type: typeID, Target: target, Args: args, Payload: &CallExprPayload{ArgOrder: append([]int(nil), method.ArgOrder...)}}, nil
 }
 
 func (fl *functionLowerer) lowerListMethod(typeID TypeID, method *checker.ListMethod) (*Expr, error) {
@@ -5843,7 +5850,7 @@ func (fl *functionLowerer) lowerListMethod(typeID TypeID, method *checker.ListMe
 	if err != nil {
 		return nil, err
 	}
-	return &Expr{Kind: kind, Type: typeID, Target: target, Args: args, ArgOrder: append([]int(nil), method.ArgOrder...)}, nil
+	return &Expr{Kind: kind, Type: typeID, Target: target, Args: args, Payload: &CallExprPayload{ArgOrder: append([]int(nil), method.ArgOrder...)}}, nil
 }
 
 func (fl *functionLowerer) lowerMapMethod(typeID TypeID, method *checker.MapMethod) (*Expr, error) {
@@ -5911,15 +5918,7 @@ func (fl *functionLowerer) lowerResultMatch(typeID TypeID, match *checker.Result
 		return nil, err
 	}
 
-	return &Expr{
-		Kind:     ExprMatchResult,
-		Type:     typeID,
-		Target:   subject,
-		OkLocal:  okLocal,
-		ErrLocal: errLocal,
-		Ok:       okBlock,
-		Err:      errBlock,
-	}, nil
+	return &Expr{Kind: ExprMatchResult, Type: typeID, Target: subject, Payload: &ResultMatchExprPayload{OkLocal: okLocal, ErrLocal: errLocal, Ok: okBlock, Err: errBlock}}, nil
 }
 
 func (fl *functionLowerer) lowerResultMethod(typeID TypeID, method *checker.ResultMethod) (*Expr, error) {
@@ -5968,10 +5967,10 @@ func (fl *functionLowerer) resultMethodSubjectType(method *checker.ResultMethod)
 	valueType := subjectType.Val()
 	errType := subjectType.Err()
 	if returnType, ok := method.ReturnType.(*checker.Result); ok {
-		if typeHasUnresolvedTypeVar(valueType) {
+		if fl.l.typeHasUnresolvedTypeVar(valueType) {
 			valueType = returnType.Val()
 		}
-		if typeHasUnresolvedTypeVar(errType) {
+		if fl.l.typeHasUnresolvedTypeVar(errType) {
 			errType = returnType.Err()
 		}
 	}
@@ -5992,17 +5991,13 @@ func (fl *functionLowerer) lowerTryOp(typeID TypeID, op *checker.TryOp) (*Expr, 
 	if op.Kind == checker.TryMaybe {
 		kind = ExprTryMaybe
 	}
-	expr := &Expr{
-		Kind:       kind,
-		Type:       typeID,
-		Target:     target,
-		CatchLocal: -1,
-	}
+	expr := &Expr{Kind: kind, Type: typeID, Target: target}
 	if op.CatchBlock == nil {
 		return expr, nil
 	}
 
-	expr.HasCatch = true
+	catchPayload := &TryExprPayload{CatchLocal: -1}
+	expr.Payload = catchPayload
 	if op.Kind == checker.TryResult {
 		errType, err := fl.internType(op.ErrType)
 		if err != nil {
@@ -6012,8 +6007,8 @@ func (fl *functionLowerer) lowerTryOp(typeID TypeID, op *checker.TryOp) (*Expr, 
 		if err != nil {
 			return nil, err
 		}
-		expr.CatchLocal = catchLocal
-		expr.Catch = catchBlock
+		catchPayload.CatchLocal = catchLocal
+		catchPayload.Catch = catchBlock
 		return expr, nil
 	}
 
@@ -6021,7 +6016,7 @@ func (fl *functionLowerer) lowerTryOp(typeID TypeID, op *checker.TryOp) (*Expr, 
 	if err != nil {
 		return nil, err
 	}
-	expr.Catch = catchBlock
+	catchPayload.Catch = catchBlock
 	return expr, nil
 }
 
@@ -6148,7 +6143,7 @@ func (fl *functionLowerer) lowerBinary(kind ExprKind, typeID TypeID, leftExpr, r
 	if err != nil {
 		return nil, err
 	}
-	return &Expr{Kind: kind, Type: typeID, Left: left, Right: right}, nil
+	return &Expr{Kind: kind, Type: typeID, Payload: &BinaryExprPayload{Left: left, Right: right}}, nil
 }
 
 func (fl *functionLowerer) lowerUnary(kind ExprKind, typeID TypeID, valueExpr checker.Expression) (*Expr, error) {
@@ -6161,7 +6156,7 @@ func (fl *functionLowerer) lowerUnary(kind ExprKind, typeID TypeID, valueExpr ch
 
 func (fl *functionLowerer) lowerTemplateStr(typeID TypeID, template *checker.TemplateStr) (*Expr, error) {
 	if len(template.Chunks) == 0 {
-		return &Expr{Kind: ExprConstStr, Type: typeID}, nil
+		return &Expr{Kind: ExprConstStr, Type: typeID, Payload: &TextExprPayload{Value: ""}}, nil
 	}
 
 	current, err := fl.lowerExprWithExpected(template.Chunks[0], typeID)
@@ -6173,13 +6168,13 @@ func (fl *functionLowerer) lowerTemplateStr(typeID TypeID, template *checker.Tem
 		if err != nil {
 			return nil, err
 		}
-		current = &Expr{Kind: ExprStrConcat, Type: typeID, Left: current, Right: next}
+		current = &Expr{Kind: ExprStrConcat, Type: typeID, Payload: &BinaryExprPayload{Left: current, Right: next}}
 	}
 	return current, nil
 }
 
 func loadLocal(typeID TypeID, local LocalID) *Expr {
-	return &Expr{Kind: ExprLoadLocal, Type: typeID, Local: local}
+	return &Expr{Kind: ExprLoadLocal, Type: typeID, Payload: &LocalExprPayload{Local: local}}
 }
 
 func (fl *functionLowerer) lowerStructInstance(typeID TypeID, inst *checker.StructInstance) (*Expr, error) {
@@ -6199,7 +6194,7 @@ func (fl *functionLowerer) lowerStructInstance(typeID TypeID, inst *checker.Stru
 		}
 		fields = append(fields, StructFieldValue{Index: field.Index, Name: field.Name, Value: *value})
 	}
-	return &Expr{Kind: ExprMakeStruct, Type: typeID, Fields: fields}, nil
+	return &Expr{Kind: ExprMakeStruct, Type: typeID, Payload: &AggregateExprPayload{Fields: fields}}, nil
 }
 
 func (fl *functionLowerer) lowerInstanceProperty(typeID TypeID, prop *checker.InstanceProperty) (*Expr, error) {
@@ -6216,7 +6211,7 @@ func (fl *functionLowerer) lowerInstanceProperty(typeID TypeID, prop *checker.In
 			if !validTypeID(&fl.l.program, typeID) {
 				typeID = field.Type
 			}
-			return &Expr{Kind: ExprGetField, Type: typeID, Target: target, Field: field.Index}, nil
+			return &Expr{Kind: ExprGetField, Type: typeID, Target: target, Payload: &FieldExprPayload{Field: field.Index}}, nil
 		}
 	}
 	return nil, fmt.Errorf("field %s not found on %s", prop.Property, targetInfo.Name)
@@ -6319,14 +6314,14 @@ func (fl *functionLowerer) lowerClosure(typeID TypeID, def *checker.FunctionDef)
 		}
 	}
 
-	return &Expr{Kind: ExprMakeClosure, Type: typeID, Function: id, CaptureLocals: child.captureLocals}, nil
+	return &Expr{Kind: ExprMakeClosure, Type: typeID, Payload: &CallExprPayload{Function: id, CaptureLocals: child.captureLocals}}, nil
 }
 
 func (fl *functionLowerer) lowerModuleSymbol(typeID TypeID, symbol *checker.ModuleSymbol) (*Expr, error) {
 	if global, ok, err := fl.l.resolveModuleGlobal(symbol.Module, symbol.Symbol.Name); err != nil {
 		return nil, err
 	} else if ok {
-		return &Expr{Kind: ExprLoadGlobal, Type: fl.l.program.Globals[global].Type, Global: global}, nil
+		return &Expr{Kind: ExprLoadGlobal, Type: fl.l.program.Globals[global].Type, Payload: &GlobalExprPayload{Global: global}}, nil
 	}
 
 	if err := fl.l.ensureModuleGlobalsDeclared(symbol.Module); err != nil {
@@ -6342,7 +6337,7 @@ func (fl *functionLowerer) lowerModuleSymbol(typeID TypeID, symbol *checker.Modu
 		if err != nil {
 			return nil, err
 		}
-		return &Expr{Kind: ExprFunctionRef, Type: typeID, Function: id}, nil
+		return &Expr{Kind: ExprFunctionRef, Type: typeID, Payload: &CallExprPayload{Function: id}}, nil
 	}
 
 	return nil, fmt.Errorf("unsupported AIR module symbol %s::%s of type %s", symbol.Module, symbol.Symbol.Name, symbol.Type().String())
@@ -6365,7 +6360,7 @@ func (fl *functionLowerer) lowerInstanceMethod(typeID TypeID, method *checker.In
 		if err != nil {
 			return nil, err
 		}
-		target = &Expr{Kind: ExprMutRef, Type: referenceType, Target: target, ReferenceMode: mode}
+		target = &Expr{Kind: ExprMutRef, Type: referenceType, Target: target, Payload: &ReferenceExprPayload{Mode: mode}}
 	}
 	typeInfo, ok := fl.l.referentTypeInfo(target.Type)
 	if !ok {
@@ -6387,14 +6382,7 @@ func (fl *functionLowerer) lowerInstanceMethod(typeID TypeID, method *checker.In
 			if err != nil {
 				return nil, err
 			}
-			return &Expr{
-				Kind:   ExprCallTrait,
-				Type:   typeID,
-				Target: target,
-				Trait:  typeInfo.Trait,
-				Method: i,
-				Args:   args,
-			}, nil
+			return &Expr{Kind: ExprCallTrait, Type: typeID, Target: target, Args: args, Payload: &TraitExprPayload{Trait: typeInfo.Trait, Method: i}}, nil
 		}
 		return nil, fmt.Errorf("trait %s has no method %s", trait.Name, method.Method.Name)
 	}
@@ -6440,7 +6428,7 @@ func (fl *functionLowerer) lowerUserInstanceMethod(typeID TypeID, target *Expr, 
 			// A value-receiver method observes through a reference rather than
 			// passing the handle to a value-shaped receiver parameter. Preserve
 			// that implicit read as an explicit AIR dereference (ADR 0057).
-			target = &Expr{Kind: ExprDeref, Type: reference.Elem, Target: target, Observational: true}
+			target = &Expr{Kind: ExprDeref, Type: reference.Elem, Target: target, Payload: &ReferenceExprPayload{Observational: true}}
 		}
 	}
 	if method.DispatchTrait != nil {
@@ -6509,7 +6497,7 @@ func (fl *functionLowerer) lowerStaticTraitMethod(typeID TypeID, target *Expr, m
 			if genericMatch {
 				typeArgs = append([]TypeID(nil), implTargetInfo.GenericArgs...)
 			}
-			return &Expr{Kind: ExprCall, Type: typeID, Function: id, Args: args, TypeArgs: typeArgs}, true, nil
+			return &Expr{Kind: ExprCall, Type: typeID, Args: args, Payload: &CallExprPayload{Function: id, TypeArgs: typeArgs}}, true, nil
 		}
 	}
 	return nil, false, nil
@@ -6552,7 +6540,7 @@ func (fl *functionLowerer) lowerUserDefinedInstanceMethod(typeID TypeID, target 
 			return nil, err
 		}
 		args = append(args, loweredArgs...)
-		return &Expr{Kind: ExprCall, Type: typeID, Function: id, Args: args, TypeArgs: typeArgs}, nil
+		return &Expr{Kind: ExprCall, Type: typeID, Args: args, Payload: &CallExprPayload{Function: id, TypeArgs: typeArgs}}, nil
 	}
 	id, err := fl.declareInstanceMethodFunction(module, typeInfo.Name, typeInfo.ID, def, method.Method.Args, typeID)
 	if err != nil {
@@ -6569,7 +6557,7 @@ func (fl *functionLowerer) lowerUserDefinedInstanceMethod(typeID TypeID, target 
 		return nil, err
 	}
 	args = append(args, loweredArgs...)
-	return &Expr{Kind: ExprCall, Type: typeID, Function: id, Args: args}, nil
+	return &Expr{Kind: ExprCall, Type: typeID, Args: args, Payload: &CallExprPayload{Function: id}}, nil
 }
 
 func (fl *functionLowerer) defineLocal(name string, typeID TypeID, mutable bool) LocalID {
@@ -6773,7 +6761,7 @@ func (l *lowerer) ensureModuleTypesDeclared(modulePath string) error {
 				}
 				continue
 			}
-			if typeHasUnresolvedTypeVar(node) {
+			if l.typeHasUnresolvedTypeVar(node) {
 				continue
 			}
 			typeID, err := l.internType(node)
@@ -6788,7 +6776,7 @@ func (l *lowerer) ensureModuleTypesDeclared(modulePath string) error {
 			}
 			l.program.Modules[modID].Types = appendUniqueType(l.program.Modules[modID].Types, typeID)
 		case *checker.Union:
-			if typeHasUnresolvedTypeVar(node) {
+			if l.typeHasUnresolvedTypeVar(node) {
 				continue
 			}
 			typeID, err := l.internType(node)
@@ -7274,7 +7262,7 @@ func (fl *functionLowerer) buildResolvedCallExpr(id FunctionID, def *checker.Fun
 	if err != nil {
 		return nil, err
 	}
-	return &Expr{Kind: ExprCall, Type: signature.Return, Function: id, Args: args, TypeArgs: typeArgs, TailSpread: call.TailSpread, SpreadElement: spreadElement, SpreadCallable: spreadCallable}, nil
+	return &Expr{Kind: ExprCall, Type: signature.Return, Args: args, Payload: &CallExprPayload{Function: id, TypeArgs: typeArgs, Spread: newSpreadExprPayload(call.TailSpread, spreadElement, spreadCallable)}}, nil
 }
 
 func (l *lowerer) genericBindingsKeyWithInterner(def *checker.FunctionDef, intern func(checker.Type) (TypeID, error)) (string, map[string]TypeID, error) {
