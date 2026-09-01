@@ -1617,8 +1617,147 @@ func TestLowerGenericStructMethodBodyUsesReceiverBindings(t *testing.T) {
 		t.Fatalf("get return kind = %v, want TypeParam", typeKind(t, program, get.Signature.Return))
 	}
 }
+
+func TestLowererCachesCrossModuleMethodLookupsByOwner(t *testing.T) {
+	owner := checker.MethodOwner{ModulePath: "dependency", TypeName: "Widget"}
+	trait := &checker.Trait{Name: "Printable", ModulePath: "dependency"}
+	traitOwner := checker.TraitMethodOwner{
+		MethodOwner:     owner,
+		TraitModulePath: trait.ModulePath,
+		TraitName:       trait.Name,
+	}
+	structMethod := &checker.FunctionDef{Name: "render"}
+	traitMethod := &checker.FunctionDef{Name: "print"}
+	required := &checker.FunctionDef{Name: "string", RequiredGoMethodName: "String"}
+	inherent := &checker.FunctionDef{Name: "label"}
+	dependency := &countingMethodModule{
+		path: "dependency",
+		program: &checker.Program{
+			StructMethods: map[checker.MethodOwner]map[string]*checker.FunctionDef{
+				owner: {"render": structMethod},
+			},
+			TraitMethods: map[checker.TraitMethodOwner]map[string]*checker.FunctionDef{
+				traitOwner: {"print": traitMethod},
+			},
+			RequiredGoMethods: map[checker.MethodOwner]map[string]*checker.FunctionDef{
+				owner: {"String": required},
+			},
+			InherentMethods: map[checker.MethodOwner]map[string]*checker.FunctionDef{
+				owner: {"label": inherent},
+			},
+		},
+	}
+	root := &countingMethodModule{
+		path:    "root",
+		program: &checker.Program{Imports: map[string]checker.Module{"dependency": dependency}},
+	}
+	lowerer := newLowerer(LowerOptions{}, 1)
+	lowerer.moduleByName[root.path] = root
+	def := &checker.StructDef{Name: owner.TypeName, ModulePath: owner.ModulePath}
+
+	for i := 0; i < 2; i++ {
+		if got := lowerer.requiredGoMethods(def); got["String"] != required {
+			t.Fatalf("required lookup %d = %#v, want String method", i, got)
+		}
+	}
+	if root.programCalls != 1 || dependency.programCalls != 1 {
+		t.Fatalf("required lookup traversed modules more than once: root=%d dependency=%d", root.programCalls, dependency.programCalls)
+	}
+
+	for i := 0; i < 2; i++ {
+		if got := lowerer.inherentMethods(def); got["label"] != inherent {
+			t.Fatalf("inherent lookup %d = %#v, want label method", i, got)
+		}
+	}
+	if root.programCalls != 2 || dependency.programCalls != 2 {
+		t.Fatalf("inherent lookup traversed modules more than once: root=%d dependency=%d", root.programCalls, dependency.programCalls)
+	}
+
+	for i := 0; i < 2; i++ {
+		if got := lowerer.structMethods(def); got["render"] != structMethod {
+			t.Fatalf("struct lookup %d = %#v, want render method", i, got)
+		}
+	}
+	if root.programCalls != 3 || dependency.programCalls != 3 {
+		t.Fatalf("struct lookup traversed modules more than once: root=%d dependency=%d", root.programCalls, dependency.programCalls)
+	}
+
+	for i := 0; i < 2; i++ {
+		if got := lowerer.traitMethods(def, trait); got["print"] != traitMethod {
+			t.Fatalf("trait lookup %d = %#v, want print method", i, got)
+		}
+	}
+	if root.programCalls != 4 || dependency.programCalls != 4 {
+		t.Fatalf("trait lookup traversed modules more than once: root=%d dependency=%d", root.programCalls, dependency.programCalls)
+	}
+}
+
+func TestLowererCachesMissingCrossModuleMethods(t *testing.T) {
+	dependency := &countingMethodModule{path: "dependency", program: &checker.Program{}}
+	root := &countingMethodModule{
+		path:    "root",
+		program: &checker.Program{Imports: map[string]checker.Module{"dependency": dependency}},
+	}
+	lowerer := newLowerer(LowerOptions{}, 1)
+	lowerer.moduleByName[root.path] = root
+	def := &checker.StructDef{Name: "Missing", ModulePath: "dependency"}
+
+	for i := 0; i < 2; i++ {
+		if got := lowerer.requiredGoMethods(def); got != nil {
+			t.Fatalf("required lookup %d = %#v, want nil", i, got)
+		}
+	}
+	if root.programCalls != 1 || dependency.programCalls != 1 {
+		t.Fatalf("missing lookup traversed modules more than once: root=%d dependency=%d", root.programCalls, dependency.programCalls)
+	}
+}
+
+func TestLowererDisablesMethodLookupCachingForMultipleRoots(t *testing.T) {
+	owner := checker.MethodOwner{ModulePath: "dependency", TypeName: "Widget"}
+	required := &checker.FunctionDef{Name: "string", RequiredGoMethodName: "String"}
+	dependency := &countingMethodModule{
+		path: "dependency",
+		program: &checker.Program{RequiredGoMethods: map[checker.MethodOwner]map[string]*checker.FunctionDef{
+			owner: {"String": required},
+		}},
+	}
+	root := &countingMethodModule{
+		path:    "root",
+		program: &checker.Program{Imports: map[string]checker.Module{"dependency": dependency}},
+	}
+	lowerer := newLowerer(LowerOptions{}, 2)
+	lowerer.moduleByName[root.path] = root
+	def := &checker.StructDef{Name: owner.TypeName, ModulePath: owner.ModulePath}
+
+	for i := 0; i < 2; i++ {
+		if got := lowerer.requiredGoMethods(def); got["String"] != required {
+			t.Fatalf("required lookup %d = %#v, want String method", i, got)
+		}
+	}
+	if root.programCalls != 2 || dependency.programCalls != 2 {
+		t.Fatalf("uncached lookup did not retraverse modules: root=%d dependency=%d", root.programCalls, dependency.programCalls)
+	}
+}
+
+type countingMethodModule struct {
+	path         string
+	program      *checker.Program
+	programCalls int
+}
+
+func (m *countingMethodModule) Path() string { return m.path }
+
+func (m *countingMethodModule) Get(string) checker.Symbol { return checker.Symbol{} }
+
+func (m *countingMethodModule) Program() *checker.Program {
+	m.programCalls++
+	return m.program
+}
+
+func (m *countingMethodModule) Symbols() map[string]checker.Symbol { return nil }
+
 func TestReferenceSyntheticIdentityUsesReferentTypeID(t *testing.T) {
-	lowerer := newLowerer(LowerOptions{})
+	lowerer := newLowerer(LowerOptions{}, 0)
 	left := TypeID(len(lowerer.program.Types) + 1)
 	lowerer.program.Types = append(lowerer.program.Types, TypeInfo{ID: left, Kind: TypeStruct, Name: "Item", ModulePath: "left"})
 	right := TypeID(len(lowerer.program.Types) + 1)

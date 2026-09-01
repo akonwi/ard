@@ -30,7 +30,11 @@ func LowerModulesWithTests(modules []checker.Module) (*Program, error) {
 }
 
 func LowerModulesWithOptions(modules []checker.Module, options LowerOptions) (*Program, error) {
-	l := newLowerer(options)
+	// A single root has one complete, immutable import graph, so owner lookups
+	// remain valid as its transitive modules are registered in moduleByName.
+	// Multiple roots may contain independent graphs with competing method tables;
+	// preserve their existing uncached lookup behavior rather than sharing entries.
+	l := newLowerer(options, len(modules))
 	for _, module := range modules {
 		if err := l.lowerModule(module); err != nil {
 			return nil, err
@@ -55,6 +59,12 @@ type lowerer struct {
 	impls        map[string]ImplID
 	functions    map[string]FunctionID
 	globals      map[string]GlobalID
+
+	cacheMethodLookups       bool
+	structMethodsByOwner     map[checker.MethodOwner]map[string]*checker.FunctionDef
+	traitMethodsByOwner      map[checker.TraitMethodOwner]map[string]*checker.FunctionDef
+	requiredGoMethodsByOwner map[checker.MethodOwner]map[string]*checker.FunctionDef
+	inherentMethodsByOwner   map[checker.MethodOwner]map[string]*checker.FunctionDef
 
 	loweringModules          map[string]bool
 	loweredModules           map[string]bool
@@ -87,7 +97,7 @@ type functionLowerer struct {
 	directLetValue checker.Expression
 }
 
-func newLowerer(options LowerOptions) *lowerer {
+func newLowerer(options LowerOptions, rootCount int) *lowerer {
 	l := &lowerer{
 		program: Program{
 			Entry:  NoFunction,
@@ -101,6 +111,8 @@ func newLowerer(options LowerOptions) *lowerer {
 		functions:    map[string]FunctionID{},
 		globals:      map[string]GlobalID{},
 
+		cacheMethodLookups: rootCount == 1,
+
 		loweringModules:          map[string]bool{},
 		loweredModules:           map[string]bool{},
 		loweringFuncs:            map[FunctionID]bool{},
@@ -113,6 +125,12 @@ func newLowerer(options LowerOptions) *lowerer {
 		genericFunctionOriginals: map[string]*checker.FunctionDef{},
 		genericMethodDefs:        map[string]FunctionID{},
 		includeTests:             options.IncludeTests,
+	}
+	if l.cacheMethodLookups {
+		l.structMethodsByOwner = map[checker.MethodOwner]map[string]*checker.FunctionDef{}
+		l.traitMethodsByOwner = map[checker.TraitMethodOwner]map[string]*checker.FunctionDef{}
+		l.requiredGoMethodsByOwner = map[checker.MethodOwner]map[string]*checker.FunctionDef{}
+		l.inherentMethodsByOwner = map[checker.MethodOwner]map[string]*checker.FunctionDef{}
 	}
 	l.mustIntern(checker.Void)
 	l.mustIntern(checker.Int)
@@ -137,29 +155,69 @@ func (l *lowerer) structMethods(def *checker.StructDef) map[string]*checker.Func
 	if def == nil {
 		return nil
 	}
-	return checker.StructMethodsInModules(l.moduleByName, checker.StructMethodOwner(def))
+	owner := checker.StructMethodOwner(def)
+	if !l.cacheMethodLookups {
+		return checker.StructMethodsInModules(l.moduleByName, owner)
+	}
+	if methods, ok := l.structMethodsByOwner[owner]; ok {
+		return methods
+	}
+	methods := checker.StructMethodsInModules(l.moduleByName, owner)
+	l.structMethodsByOwner[owner] = methods
+	return methods
 }
 
 func (l *lowerer) traitMethods(typ checker.Type, trait *checker.Trait) map[string]*checker.FunctionDef {
 	owner, ok := checker.MethodOwnerForType(typ)
-	if !ok {
+	if !ok || trait == nil {
 		return nil
 	}
-	return checker.TraitMethodsInModules(l.moduleByName, owner, trait)
+	if !l.cacheMethodLookups {
+		return checker.TraitMethodsInModules(l.moduleByName, owner, trait)
+	}
+	key := checker.TraitMethodOwner{
+		MethodOwner:     owner,
+		TraitModulePath: trait.ModulePath,
+		TraitName:       trait.Name,
+	}
+	if methods, ok := l.traitMethodsByOwner[key]; ok {
+		return methods
+	}
+	methods := checker.TraitMethodsInModules(l.moduleByName, owner, trait)
+	l.traitMethodsByOwner[key] = methods
+	return methods
 }
 
 func (l *lowerer) requiredGoMethods(def *checker.StructDef) map[string]*checker.FunctionDef {
 	if def == nil {
 		return nil
 	}
-	return checker.RequiredGoMethodsInModules(l.moduleByName, checker.StructMethodOwner(def))
+	owner := checker.StructMethodOwner(def)
+	if !l.cacheMethodLookups {
+		return checker.RequiredGoMethodsInModules(l.moduleByName, owner)
+	}
+	if methods, ok := l.requiredGoMethodsByOwner[owner]; ok {
+		return methods
+	}
+	methods := checker.RequiredGoMethodsInModules(l.moduleByName, owner)
+	l.requiredGoMethodsByOwner[owner] = methods
+	return methods
 }
 
 func (l *lowerer) inherentMethods(def *checker.StructDef) map[string]*checker.FunctionDef {
 	if def == nil {
 		return nil
 	}
-	return checker.InherentMethodsInModules(l.moduleByName, checker.StructMethodOwner(def))
+	owner := checker.StructMethodOwner(def)
+	if !l.cacheMethodLookups {
+		return checker.InherentMethodsInModules(l.moduleByName, owner)
+	}
+	if methods, ok := l.inherentMethodsByOwner[owner]; ok {
+		return methods
+	}
+	methods := checker.InherentMethodsInModules(l.moduleByName, owner)
+	l.inherentMethodsByOwner[owner] = methods
+	return methods
 }
 
 func (l *lowerer) findReachableModule(path string) checker.Module {
