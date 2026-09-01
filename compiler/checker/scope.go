@@ -4,6 +4,7 @@ import (
 	"fmt"
 	gotypes "go/types"
 	"slices"
+	"sync"
 )
 
 type SymbolTable struct {
@@ -410,10 +411,25 @@ func mutableGenericTraitArgument(patterns []Type, params []string, args []Type) 
 	return "", nil, false
 }
 
+var typeTraversalSeenPool = sync.Pool{
+	New: func() any { return make(map[Type]struct{}) },
+}
+
+func acquireTypeTraversalSeen() map[Type]struct{} {
+	return typeTraversalSeenPool.Get().(map[Type]struct{})
+}
+
+func releaseTypeTraversalSeen(seen map[Type]struct{}) {
+	clear(seen)
+	typeTraversalSeenPool.Put(seen)
+}
+
 // hasGenericsInType checks if a type contains any generic parameters.
 // Used for quick detection before generic handling.
 func hasGenericsInType(t Type) bool {
-	return hasGenericsInTypeSeen(t, map[Type]struct{}{})
+	seen := acquireTypeTraversalSeen()
+	defer releaseTypeTraversalSeen(seen)
+	return hasGenericsInTypeSeen(t, seen)
 }
 
 func hasGenericsInTypeSeen(t Type, seen map[Type]struct{}) bool {

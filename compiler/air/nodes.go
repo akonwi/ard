@@ -226,81 +226,11 @@ const (
 )
 
 type Expr struct {
-	Kind ExprKind
-	Type TypeID
-
-	Int   string
-	Float string
-	Bool  bool
-	Str   string
-
-	Variant      int
-	Discriminant int
-	Tag          uint32
-
-	Local  LocalID
-	Global GlobalID
-
-	Function           FunctionID
-	ForeignTarget      string
-	ForeignNamespace   string
-	ForeignQualifier   string
-	ForeignSymbol      string
-	ForeignReceiver    string
-	ForeignPointer     bool
-	InterfaceMode      InterfaceConversionMode
-	ReferenceMode      ReferenceMode
-	Observational      bool
-	ForeignResultShape ForeignResultShape
-	ForeignArgABI      []ABIParamMode
-	// TailSpread marks the final call argument as a referenced slice descriptor
-	// forwarded to a variadic callable with Go `...` semantics (ADR 0062).
-	TailSpread     bool
-	SpreadElement  TypeID
-	SpreadCallable TypeID
-	TypeArgs       []TypeID
-	Impl           ImplID
-	Trait          TraitID
-	Method         int
-	Args           []Expr
-	ArgOrder       []int
-	Entries        []MapEntry
-	CaptureLocals  []LocalID
-
-	Fields []StructFieldValue
-	Target *Expr
-	Field  int
-
-	Left  *Expr
-	Right *Expr
-
-	Condition *Expr
-	Body      Block
-	Then      Block
-	Else      Block
-
-	EnumCases    []EnumMatchCase
-	IntCases     []IntMatchCase
-	StrCases     []StrMatchCase
-	RangeCases   []IntRangeMatchCase
-	UnionCases   []UnionMatchCase
-	ForeignCases []ForeignTypeMatchCase
-	CatchAll     Block
-
-	SomeLocal LocalID
-	Some      Block
-	None      Block
-
-	OkLocal  LocalID
-	ErrLocal LocalID
-	Ok       Block
-	Err      Block
-
-	HasCatch   bool
-	CatchLocal LocalID
-	Catch      Block
-
-	SelectCases []SelectMatchCase
+	Kind    ExprKind
+	Type    TypeID
+	Target  *Expr
+	Args    []Expr
+	Payload ExprPayload
 }
 
 // SelectArmKind distinguishes the lowered select arm forms (ADR 0032).

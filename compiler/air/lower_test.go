@@ -39,6 +39,25 @@ func TestSortedModulesUsesCanonicalPathOrder(t *testing.T) {
 	}
 }
 
+func TestLowererCachesUnresolvedTypeVarQueries(t *testing.T) {
+	lowerer := newLowerer(LowerOptions{}, 1)
+	unresolved := checker.MakeMaybe(&checker.TypeVar{})
+	concrete := checker.MakeMaybe(checker.Int)
+
+	for range 2 {
+		if !lowerer.typeHasUnresolvedTypeVar(unresolved) {
+			t.Fatal("unresolved Maybe type reported as concrete")
+		}
+		if lowerer.typeHasUnresolvedTypeVar(concrete) {
+			t.Fatal("concrete Maybe type reported as unresolved")
+		}
+	}
+
+	if got, want := len(lowerer.unresolvedTypeVarByType), 2; got != want {
+		t.Fatalf("cached unresolved-type queries = %d, want %d", got, want)
+	}
+}
+
 func TestSortedMethodDefinitionsUsesCanonicalKeyOrder(t *testing.T) {
 	first := &checker.FunctionDef{Name: "first"}
 	middle := &checker.FunctionDef{Name: "middle"}
@@ -184,13 +203,14 @@ fn main() {
 			continue
 		}
 		call := stmt.Value
-		if !call.TailSpread {
+		spread := call.ForeignPayload().Spread
+		if spread == nil {
 			t.Fatal("foreign call lost tail spread metadata")
 		}
-		if typeKind(t, program, call.SpreadElement) != TypeStr {
-			t.Fatalf("spread element kind = %v, want Str", typeKind(t, program, call.SpreadElement))
+		if typeKind(t, program, spread.Element) != TypeStr {
+			t.Fatalf("spread element kind = %v, want Str", typeKind(t, program, spread.Element))
 		}
-		callable := program.Types[call.SpreadCallable-1]
+		callable := program.Types[spread.Callable-1]
 		if callable.Kind != TypeFunction || !callable.Variadic || len(callable.Params) != 2 {
 			t.Fatalf("spread callable = %#v, want two-parameter variadic function", callable)
 		}
@@ -221,11 +241,12 @@ func TestLowerTinyProgram(t *testing.T) {
 	if add.Body.Result == nil || add.Body.Result.Kind != ExprIntAdd {
 		t.Fatalf("add result = %#v, want ExprIntAdd", add.Body.Result)
 	}
-	if add.Body.Result.Left.Kind != ExprLoadLocal || add.Body.Result.Left.Local != 0 {
-		t.Fatalf("add left = %#v, want local 0", add.Body.Result.Left)
+	addPayload := add.Body.Result.BinaryPayload()
+	if addPayload.Left.Kind != ExprLoadLocal || addPayload.Left.LocalPayload().Local != 0 {
+		t.Fatalf("add left = %#v, want local 0", addPayload.Left)
 	}
-	if add.Body.Result.Right.Kind != ExprLoadLocal || add.Body.Result.Right.Local != 1 {
-		t.Fatalf("add right = %#v, want local 1", add.Body.Result.Right)
+	if addPayload.Right.Kind != ExprLoadLocal || addPayload.Right.LocalPayload().Local != 1 {
+		t.Fatalf("add right = %#v, want local 1", addPayload.Right)
 	}
 
 	if program.Entry != NoFunction {
@@ -238,8 +259,8 @@ func TestLowerTinyProgram(t *testing.T) {
 	if script.Body.Result == nil || script.Body.Result.Kind != ExprCall {
 		t.Fatalf("script result = %#v, want ExprCall", script.Body.Result)
 	}
-	if script.Body.Result.Function != add.ID {
-		t.Fatalf("script calls function %d, want add %d", script.Body.Result.Function, add.ID)
+	if script.Body.Result.CallPayload().Function != add.ID {
+		t.Fatalf("script calls function %d, want add %d", script.Body.Result.CallPayload().Function, add.ID)
 	}
 	if got := len(script.Body.Result.Args); got != 2 {
 		t.Fatalf("script call arg count = %d, want 2", got)
@@ -279,11 +300,12 @@ func TestLowerNestedBlockShadowDoesNotLeakInnerLocal(t *testing.T) {
 	if res == nil || res.Kind != ExprIntAdd {
 		t.Fatalf("f result = %#v, want ExprIntAdd", res)
 	}
-	if res.Left == nil || res.Left.Kind != ExprLoadLocal {
-		t.Fatalf("f result left = %#v, want ExprLoadLocal", res.Left)
+	left := res.BinaryPayload().Left
+	if left == nil || left.Kind != ExprLoadLocal {
+		t.Fatalf("f result left = %#v, want ExprLoadLocal", left)
 	}
-	if res.Left.Local != outerX {
-		t.Fatalf("f result references local %d, want outer x local %d (inner binding leaked)", res.Left.Local, outerX)
+	if left.LocalPayload().Local != outerX {
+		t.Fatalf("f result references local %d, want outer x local %d (inner binding leaked)", left.LocalPayload().Local, outerX)
 	}
 }
 func TestLowerTransitiveStructMethodCanReadOwnerModuleGlobal(t *testing.T) {
@@ -369,8 +391,8 @@ func TestLowerFunctionCanReadModuleLevelLet(t *testing.T) {
 	if eventName.Body.Result == nil || eventName.Body.Result.Kind != ExprLoadGlobal {
 		t.Fatalf("event_name result = %#v, want ExprLoadGlobal", eventName.Body.Result)
 	}
-	if eventName.Body.Result.Global != program.Globals[0].ID {
-		t.Fatalf("event_name loads global %d, want %d", eventName.Body.Result.Global, program.Globals[0].ID)
+	if eventName.Body.Result.GlobalPayload().Global != program.Globals[0].ID {
+		t.Fatalf("event_name loads global %d, want %d", eventName.Body.Result.GlobalPayload().Global, program.Globals[0].ID)
 	}
 }
 func TestLowerMutableModuleGlobalAssignment(t *testing.T) {
@@ -510,12 +532,12 @@ func TestLowerStructLayoutAndFieldAccess(t *testing.T) {
 	if nextAge.Body.Result == nil || nextAge.Body.Result.Kind != ExprIntAdd {
 		t.Fatalf("next_age result = %#v, want ExprIntAdd", nextAge.Body.Result)
 	}
-	field := nextAge.Body.Result.Left
+	field := nextAge.Body.Result.BinaryPayload().Left
 	if field.Kind != ExprGetField {
 		t.Fatalf("next_age left = %#v, want ExprGetField", field)
 	}
-	if field.Field != 0 {
-		t.Fatalf("field index = %d, want age index 0", field.Field)
+	if field.FieldPayload().Field != 0 {
+		t.Fatalf("field index = %d, want age index 0", field.FieldPayload().Field)
 	}
 }
 func TestLowerIfExpression(t *testing.T) {
@@ -533,14 +555,15 @@ func TestLowerIfExpression(t *testing.T) {
 	if choose.Body.Result == nil || choose.Body.Result.Kind != ExprIf {
 		t.Fatalf("choose result = %#v, want ExprIf", choose.Body.Result)
 	}
-	if choose.Body.Result.Condition == nil || choose.Body.Result.Condition.Kind != ExprLoadLocal {
-		t.Fatalf("condition = %#v, want local load", choose.Body.Result.Condition)
+	ifPayload := choose.Body.Result.IfPayload()
+	if ifPayload.Condition == nil || ifPayload.Condition.Kind != ExprLoadLocal {
+		t.Fatalf("condition = %#v, want local load", ifPayload.Condition)
 	}
-	if choose.Body.Result.Then.Result == nil || choose.Body.Result.Then.Result.Int != "1" {
-		t.Fatalf("then block = %#v, want 1", choose.Body.Result.Then.Result)
+	if ifPayload.Then.Result == nil || ifPayload.Then.Result.TextPayload().Value != "1" {
+		t.Fatalf("then block = %#v, want 1", ifPayload.Then.Result)
 	}
-	if choose.Body.Result.Else.Result == nil || choose.Body.Result.Else.Result.Int != "2" {
-		t.Fatalf("else block = %#v, want 2", choose.Body.Result.Else.Result)
+	if ifPayload.Else.Result == nil || ifPayload.Else.Result.TextPayload().Value != "2" {
+		t.Fatalf("else block = %#v, want 2", ifPayload.Else.Result)
 	}
 }
 func TestLowerBoolMatch(t *testing.T) {
@@ -557,20 +580,32 @@ func TestLowerBoolMatch(t *testing.T) {
 	if choose.Body.Result == nil || choose.Body.Result.Kind != ExprIf {
 		t.Fatalf("choose result = %#v, want ExprIf", choose.Body.Result)
 	}
-	if choose.Body.Result.Condition == nil || choose.Body.Result.Condition.Kind != ExprLoadLocal {
-		t.Fatalf("condition = %#v, want local load", choose.Body.Result.Condition)
+	ifPayload := choose.Body.Result.IfPayload()
+	if ifPayload.Condition == nil || ifPayload.Condition.Kind != ExprLoadLocal {
+		t.Fatalf("condition = %#v, want local load", ifPayload.Condition)
 	}
-	if choose.Body.Result.Then.Result == nil || choose.Body.Result.Then.Result.Int != "1" {
-		t.Fatalf("then block = %#v, want 1", choose.Body.Result.Then.Result)
+	if ifPayload.Then.Result == nil || ifPayload.Then.Result.TextPayload().Value != "1" {
+		t.Fatalf("then block = %#v, want 1", ifPayload.Then.Result)
 	}
-	if choose.Body.Result.Else.Result == nil || choose.Body.Result.Else.Result.Int != "2" {
-		t.Fatalf("else block = %#v, want 2", choose.Body.Result.Else.Result)
+	if ifPayload.Else.Result == nil || ifPayload.Else.Result.TextPayload().Value != "2" {
+		t.Fatalf("else block = %#v, want 2", ifPayload.Else.Result)
 	}
 }
+func TestLowerEmptyTemplateStringCarriesPayload(t *testing.T) {
+	expr, err := (&functionLowerer{}).lowerTemplateStr(1, &checker.TemplateStr{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := expr.TextPayload()
+	if expr.Kind != ExprConstStr || payload == nil || payload.Value != "" {
+		t.Fatalf("empty template = %#v, want empty string payload", expr)
+	}
+}
+
 func TestLowerRawStrings(t *testing.T) {
 	literalProgram := lowerSource(t, "`\n  first\n  second\n  `")
 	literal := literalProgram.Functions[literalProgram.Script].Body.Result
-	if literal == nil || literal.Kind != ExprConstStr || literal.Str != "first\nsecond" {
+	if literal == nil || literal.Kind != ExprConstStr || literal.TextPayload().Value != "first\nsecond" {
 		t.Fatalf("raw literal = %#v, want exact ExprConstStr", literal)
 	}
 
@@ -631,7 +666,7 @@ func TestLowerSizedScalarToStrObservesMutableReference(t *testing.T) {
 	if result == nil || result.Kind != ExprToStr || result.Target == nil {
 		t.Fatalf("render result = %#v, want ExprToStr with target", result)
 	}
-	if result.Target.Kind != ExprDeref || !result.Target.Observational {
+	if result.Target.Kind != ExprDeref || !result.Target.ReferencePayload().Observational {
 		t.Fatalf("to_str target = %#v, want observational ExprDeref", result.Target)
 	}
 }
@@ -696,7 +731,7 @@ func TestLowerEnums(t *testing.T) {
 	if right.Body.Result == nil || right.Body.Result.Kind != ExprEnumVariant {
 		t.Fatalf("right result = %#v, want ExprEnumVariant", right.Body.Result)
 	}
-	if right.Body.Result.Variant != 3 || right.Body.Result.Discriminant != 3 {
+	if right.Body.Result.EnumPayload().Variant != 3 || right.Body.Result.EnumPayload().Discriminant != 3 {
 		t.Fatalf("right variant = %#v, want index/discriminant 3", right.Body.Result)
 	}
 
@@ -704,11 +739,12 @@ func TestLowerEnums(t *testing.T) {
 	if name.Body.Result == nil || name.Body.Result.Kind != ExprMatchEnum {
 		t.Fatalf("name result = %#v, want ExprMatchEnum", name.Body.Result)
 	}
-	if len(name.Body.Result.EnumCases) != 4 {
-		t.Fatalf("enum case count = %d, want 4", len(name.Body.Result.EnumCases))
+	matchPayload := name.Body.Result.EnumMatchPayload()
+	if len(matchPayload.Cases) != 4 {
+		t.Fatalf("enum case count = %d, want 4", len(matchPayload.Cases))
 	}
-	if name.Body.Result.EnumCases[3].Discriminant != 3 {
-		t.Fatalf("right case = %#v, want discriminant 3", name.Body.Result.EnumCases[3])
+	if matchPayload.Cases[3].Discriminant != 3 {
+		t.Fatalf("right case = %#v, want discriminant 3", matchPayload.Cases[3])
 	}
 }
 func TestLowerMaybes(t *testing.T) {
@@ -738,7 +774,7 @@ func TestLowerMaybes(t *testing.T) {
 	if some.Body.Result == nil || some.Body.Result.Kind != ExprMakeMaybeSome {
 		t.Fatalf("some result = %#v, want ExprMakeMaybeSome", some.Body.Result)
 	}
-	if some.Body.Result.Target == nil || some.Body.Result.Target.Int != "42" {
+	if some.Body.Result.Target == nil || some.Body.Result.Target.TextPayload().Value != "42" {
 		t.Fatalf("some target = %#v, want 42", some.Body.Result.Target)
 	}
 
@@ -756,8 +792,8 @@ func TestLowerMaybes(t *testing.T) {
 	if pick.Body.Result == nil || pick.Body.Result.Kind != ExprMatchMaybe {
 		t.Fatalf("pick result = %#v, want ExprMatchMaybe", pick.Body.Result)
 	}
-	if pick.Body.Result.SomeLocal < LocalID(len(pick.Signature.Params)) {
-		t.Fatalf("some local = %d, want local after params", pick.Body.Result.SomeLocal)
+	if pick.Body.Result.MaybeMatchPayload().SomeLocal < LocalID(len(pick.Signature.Params)) {
+		t.Fatalf("some local = %d, want local after params", pick.Body.Result.MaybeMatchPayload().SomeLocal)
 	}
 }
 func TestLowerResults(t *testing.T) {
@@ -783,11 +819,12 @@ func TestLowerResults(t *testing.T) {
 	if pick.Body.Result == nil || pick.Body.Result.Kind != ExprMatchResult {
 		t.Fatalf("pick result = %#v, want ExprMatchResult", pick.Body.Result)
 	}
-	if pick.Body.Result.OkLocal < LocalID(len(pick.Signature.Params)) {
-		t.Fatalf("ok local = %d, want local after params", pick.Body.Result.OkLocal)
+	resultPayload := pick.Body.Result.ResultMatchPayload()
+	if resultPayload.OkLocal < LocalID(len(pick.Signature.Params)) {
+		t.Fatalf("ok local = %d, want local after params", resultPayload.OkLocal)
 	}
-	if pick.Body.Result.ErrLocal < LocalID(len(pick.Signature.Params)) {
-		t.Fatalf("err local = %d, want local after params", pick.Body.Result.ErrLocal)
+	if resultPayload.ErrLocal < LocalID(len(pick.Signature.Params)) {
+		t.Fatalf("err local = %d, want local after params", resultPayload.ErrLocal)
 	}
 }
 func TestLowerTraitAndImplTables(t *testing.T) {
@@ -857,8 +894,8 @@ func TestLowerTraitAndImplTables(t *testing.T) {
 	if method.Body.Result == nil || method.Body.Result.Kind != ExprStrConcat {
 		t.Fatalf("method result = %#v, want ExprStrConcat", method.Body.Result)
 	}
-	if method.Body.Result.Left == nil || method.Body.Result.Left.Kind != ExprGetField {
-		t.Fatalf("method left = %#v, want field access", method.Body.Result.Left)
+	if method.Body.Result.BinaryPayload().Left == nil || method.Body.Result.BinaryPayload().Left.Kind != ExprGetField {
+		t.Fatalf("method left = %#v, want field access", method.Body.Result.BinaryPayload().Left)
 	}
 }
 func TestLowerTraitObjectDispatch(t *testing.T) {
@@ -888,8 +925,8 @@ func TestLowerTraitObjectDispatch(t *testing.T) {
 	if describe.Body.Result == nil || describe.Body.Result.Kind != ExprCallTrait {
 		t.Fatalf("describe result = %#v, want ExprCallTrait", describe.Body.Result)
 	}
-	if describe.Body.Result.Method != 0 {
-		t.Fatalf("trait method index = %d, want 0", describe.Body.Result.Method)
+	if describe.Body.Result.TraitPayload().Method != 0 {
+		t.Fatalf("trait method index = %d, want 0", describe.Body.Result.TraitPayload().Method)
 	}
 
 	script := program.Functions[program.Script]
@@ -899,8 +936,8 @@ func TestLowerTraitObjectDispatch(t *testing.T) {
 	if len(script.Body.Result.Args) != 1 || script.Body.Result.Args[0].Kind != ExprTraitUpcast {
 		t.Fatalf("script arg = %#v, want ExprTraitUpcast", script.Body.Result.Args)
 	}
-	if script.Body.Result.Args[0].Impl != program.Impls[0].ID {
-		t.Fatalf("upcast impl = %d, want %d", script.Body.Result.Args[0].Impl, program.Impls[0].ID)
+	if script.Body.Result.Args[0].TraitPayload().Impl != program.Impls[0].ID {
+		t.Fatalf("upcast impl = %d, want %d", script.Body.Result.Args[0].TraitPayload().Impl, program.Impls[0].ID)
 	}
 }
 func TestLowerMutatingTraitMethodContract(t *testing.T) {
@@ -1111,7 +1148,7 @@ func TestValidateRejectsIncoherentExecutableTypes(t *testing.T) {
 		`)
 		value := findFunction(t, program, "value")
 		match := value.Body.Result
-		value.Locals[match.SomeLocal].Type = findType(t, program, "Bool").ID
+		value.Locals[match.MaybeMatchPayload().SomeLocal].Type = findType(t, program, "Bool").ID
 		program.Functions[value.ID] = value
 
 		if err := Validate(program); err == nil || !strings.Contains(err.Error(), "Maybe match local type") {
@@ -1130,7 +1167,7 @@ func TestValidateRejectsIncoherentExecutableTypes(t *testing.T) {
 		`)
 		value := findFunction(t, program, "value")
 		match := value.Body.Result
-		value.Locals[match.ErrLocal].Type = findType(t, program, "Bool").ID
+		value.Locals[match.ResultMatchPayload().ErrLocal].Type = findType(t, program, "Bool").ID
 		program.Functions[value.ID] = value
 
 		if err := Validate(program); err == nil || !strings.Contains(err.Error(), "Result err match local type") {
@@ -1146,7 +1183,7 @@ func TestValidateRejectsIncoherentExecutableTypes(t *testing.T) {
 		`)
 		value := findFunction(t, program, "value")
 		tryExpr := value.Body.Result
-		value.Locals[tryExpr.CatchLocal].Type = findType(t, program, "Bool").ID
+		value.Locals[tryExpr.TryPayload().CatchLocal].Type = findType(t, program, "Bool").ID
 		program.Functions[value.ID] = value
 
 		if err := Validate(program); err == nil || !strings.Contains(err.Error(), "Result try catch local type") {
@@ -1181,7 +1218,7 @@ func TestLowerTryOps(t *testing.T) {
 	if firstLet.Value == nil || firstLet.Value.Kind != ExprTryResult {
 		t.Fatalf("result try = %#v, want ExprTryResult", firstLet.Value)
 	}
-	if firstLet.Value.HasCatch {
+	if firstLet.Value.TryPayload() != nil {
 		t.Fatalf("result try HasCatch = true, want false")
 	}
 
@@ -1190,11 +1227,11 @@ func TestLowerTryOps(t *testing.T) {
 	if catchLet.Value == nil || catchLet.Value.Kind != ExprTryResult {
 		t.Fatalf("catch try = %#v, want ExprTryResult", catchLet.Value)
 	}
-	if !catchLet.Value.HasCatch {
+	if catchLet.Value.TryPayload() == nil {
 		t.Fatalf("catch try HasCatch = false, want true")
 	}
-	if catchLet.Value.CatchLocal < LocalID(len(catchResult.Signature.Params)) {
-		t.Fatalf("catch local = %d, want local after params", catchLet.Value.CatchLocal)
+	if catchLet.Value.TryPayload().CatchLocal < LocalID(len(catchResult.Signature.Params)) {
+		t.Fatalf("catch local = %d, want local after params", catchLet.Value.TryPayload().CatchLocal)
 	}
 
 	maybeValue := findFunction(t, program, "maybe_value")
@@ -1218,8 +1255,8 @@ func TestLowerImportedModuleFunctionCall(t *testing.T) {
 	if len(check.Body.Stmts) != 1 || check.Body.Stmts[0].Value == nil || check.Body.Stmts[0].Value.Kind != ExprCall {
 		t.Fatalf("check function = %#v, want let ExprCall", check)
 	}
-	if check.Body.Stmts[0].Value.Function != assert.ID {
-		t.Fatalf("check calls function %d, want assert %d", check.Body.Stmts[0].Value.Function, assert.ID)
+	if check.Body.Stmts[0].Value.CallPayload().Function != assert.ID {
+		t.Fatalf("check calls function %d, want assert %d", check.Body.Stmts[0].Value.CallPayload().Function, assert.ID)
 	}
 	for _, test := range program.Tests {
 		if test.Function == assert.ID || test.Name == "test_assert_true_passes" {
@@ -1474,12 +1511,12 @@ func TestLowerGenericStructTraitImplementation(t *testing.T) {
 	}
 	for _, name := range []string{"int_view", "str_view"} {
 		fn := findFunction(t, program, name)
-		if fn.Body.Result == nil || fn.Body.Result.Kind != ExprTraitUpcast || fn.Body.Result.Impl != impl.ID {
+		if fn.Body.Result == nil || fn.Body.Result.Kind != ExprTraitUpcast || fn.Body.Result.TraitPayload().Impl != impl.ID {
 			t.Fatalf("%s result = %#v, want upcast through impl %d", name, fn.Body.Result, impl.ID)
 		}
 	}
 	direct := findFunction(t, program, "direct_label")
-	if direct.Body.Result == nil || direct.Body.Result.Kind != ExprCall || direct.Body.Result.Function != impl.Methods[0] {
+	if direct.Body.Result == nil || direct.Body.Result.Kind != ExprCall || direct.Body.Result.CallPayload().Function != impl.Methods[0] {
 		t.Fatalf("direct result = %#v, want exact trait method %d", direct.Body.Result, impl.Methods[0])
 	}
 }
@@ -1569,7 +1606,7 @@ func TestLowerGenericTraitImplRegistersBeforeSelfProjection(t *testing.T) {
 	}
 	impl := program.Impls[0]
 	method := program.Functions[impl.Methods[0]]
-	if method.Body.Result == nil || method.Body.Result.Kind != ExprTraitRefProject || method.Body.Result.Impl != impl.ID {
+	if method.Body.Result == nil || method.Body.Result.Kind != ExprTraitRefProject || method.Body.Result.TraitPayload().Impl != impl.ID {
 		t.Fatalf("method result = %#v, want self projection through impl %d", method.Body.Result, impl.ID)
 	}
 	if len(method.Signature.Params) != 1 || typeKind(t, program, method.Signature.Params[0].Type) != TypeReference {
@@ -1913,18 +1950,20 @@ func TestLowerGenericStructMethodLowersOnceAsGeneric(t *testing.T) {
 	}
 	// Both calls resolve to the single generic method definition (no
 	// monomorphized specializations), each supplying its own type argument.
-	if intGet.Body.Result.Function != strGet.Body.Result.Function {
-		t.Fatalf("generic method should lower once, got functions %d and %d", intGet.Body.Result.Function, strGet.Body.Result.Function)
+	intCall := intGet.Body.Result.CallPayload()
+	strCall := strGet.Body.Result.CallPayload()
+	if intCall.Function != strCall.Function {
+		t.Fatalf("generic method should lower once, got functions %d and %d", intCall.Function, strCall.Function)
 	}
-	method := program.Functions[intGet.Body.Result.Function]
+	method := program.Functions[intCall.Function]
 	if len(method.TypeParams) == 0 || typeKind(t, program, method.Signature.Return) != TypeParam {
 		t.Fatalf("method should be generic with a TypeParam return, got %#v", method.Signature)
 	}
-	if len(intGet.Body.Result.TypeArgs) != 1 || typeKind(t, program, intGet.Body.Result.TypeArgs[0]) != TypeInt {
-		t.Fatalf("get_int call type args = %v, want [Int]", intGet.Body.Result.TypeArgs)
+	if len(intCall.TypeArgs) != 1 || typeKind(t, program, intCall.TypeArgs[0]) != TypeInt {
+		t.Fatalf("get_int call type args = %v, want [Int]", intCall.TypeArgs)
 	}
-	if len(strGet.Body.Result.TypeArgs) != 1 || typeKind(t, program, strGet.Body.Result.TypeArgs[0]) != TypeStr {
-		t.Fatalf("get_str call type args = %v, want [Str]", strGet.Body.Result.TypeArgs)
+	if len(strCall.TypeArgs) != 1 || typeKind(t, program, strCall.TypeArgs[0]) != TypeStr {
+		t.Fatalf("get_str call type args = %v, want [Str]", strCall.TypeArgs)
 	}
 }
 func TestLowerInstanceMethodKeepsDeclaredTraitParameterType(t *testing.T) {
@@ -2107,7 +2146,7 @@ func TestValidateRejectsSpreadOnDirectArdCall(t *testing.T) {
 		{ID: 3, Kind: TypeReference, Name: "mut [Str]", Elem: 2},
 		{ID: 4, Kind: TypeFunction, Name: "fn(...Str)", Params: []TypeID{1}, Return: 1, Variadic: true},
 	}}
-	expr := Expr{Kind: ExprCall, Type: 1, TailSpread: true, SpreadElement: 1, SpreadCallable: 4, Args: []Expr{{Kind: ExprLoadLocal, Type: 3}}}
+	expr := Expr{Kind: ExprCall, Type: 1, Args: []Expr{{Kind: ExprLoadLocal, Type: 3, Payload: &LocalExprPayload{Local: 0}}}, Payload: &CallExprPayload{Spread: &SpreadExprPayload{Element: 1, Callable: 4}}}
 	if err := validateTailSpread(program, expr); err == nil {
 		t.Fatal("direct Ard call accepted variadic spread")
 	}
@@ -2123,10 +2162,11 @@ func TestValidateBindsSpreadCallableToClosureTarget(t *testing.T) {
 		{ID: 6, Kind: TypeFunction, Name: "fn(...Str)", Params: []TypeID{2}, Return: 2, Variadic: true},
 	}}
 	expr := Expr{
-		Kind: ExprCallClosure, Type: 2,
-		Target:     &Expr{Kind: ExprLoadLocal, Type: 5},
-		TailSpread: true, SpreadElement: 2, SpreadCallable: 6,
-		Args: []Expr{{Kind: ExprLoadLocal, Type: 4}},
+		Kind:    ExprCallClosure,
+		Type:    2,
+		Target:  &Expr{Kind: ExprLoadLocal, Type: 5, Payload: &LocalExprPayload{Local: 0}},
+		Args:    []Expr{{Kind: ExprLoadLocal, Type: 4, Payload: &LocalExprPayload{Local: 1}}},
+		Payload: &CallExprPayload{Spread: &SpreadExprPayload{Element: 2, Callable: 6}},
 	}
 	if err := validateTailSpread(program, expr); err == nil {
 		t.Fatal("spread callable metadata was not bound to closure target")
@@ -2140,9 +2180,71 @@ func TestValidateRejectsGenericDependentSpreadElement(t *testing.T) {
 		{ID: 3, Kind: TypeReference, Name: "mut [T]", Elem: 2},
 		{ID: 4, Kind: TypeFunction, Name: "fn(...T)", Params: []TypeID{1}, Return: 1, Variadic: true},
 	}}
-	expr := Expr{Kind: ExprCallClosure, Type: 1, TailSpread: true, SpreadElement: 1, SpreadCallable: 4, Args: []Expr{{Kind: ExprLoadLocal, Type: 3}}}
+	expr := Expr{Kind: ExprCallClosure, Type: 1, Args: []Expr{{Kind: ExprLoadLocal, Type: 3, Payload: &LocalExprPayload{Local: 0}}}, Payload: &CallExprPayload{Spread: &SpreadExprPayload{Element: 1, Callable: 4}}}
 	if err := validateTailSpread(program, expr); err == nil {
 		t.Fatal("generic-dependent spread element passed AIR validation")
+	}
+}
+
+func TestValidateRejectsInvalidExprInForeignTypeCase(t *testing.T) {
+	program := &Program{
+		Modules: []Module{{ID: 0, Path: "main"}},
+		Types:   []TypeInfo{{ID: 1, Kind: TypeVoid, Name: "Void"}},
+		Functions: []Function{{
+			ID:        0,
+			Module:    0,
+			Name:      "main",
+			Signature: Signature{Return: 1},
+			Body: Block{Stmts: []Stmt{{Kind: StmtExpr, Expr: &Expr{
+				Kind:   ExprMatchForeignType,
+				Type:   1,
+				Target: &Expr{Kind: ExprConstVoid, Type: 1},
+				Payload: &ForeignMatchExprPayload{Cases: []ForeignTypeMatchCase{{
+					Type: 1,
+					Body: Block{Stmts: []Stmt{{Kind: StmtExpr, Expr: &Expr{
+						Kind:    ExprLoadLocal,
+						Type:    1,
+						Payload: &LocalExprPayload{Local: 99},
+					}}}},
+				}}},
+			}}}},
+		}},
+		Entry:  0,
+		Script: NoFunction,
+	}
+
+	if err := Validate(program); err == nil || !strings.Contains(err.Error(), "invalid local") {
+		t.Fatalf("Validate error = %v, want invalid local in foreign type case", err)
+	}
+}
+
+func TestValidateRejectsInvalidSelectArmOperand(t *testing.T) {
+	program := &Program{
+		Modules: []Module{{ID: 0, Path: "main"}},
+		Types: []TypeInfo{
+			{ID: 1, Kind: TypeVoid, Name: "Void"},
+			{ID: 2, Kind: TypeChannel, Name: "Chan<Void>", Elem: 1},
+		},
+		Functions: []Function{{
+			ID:        0,
+			Module:    0,
+			Name:      "main",
+			Signature: Signature{Return: 1},
+			Body: Block{Result: &Expr{
+				Kind: ExprSelect,
+				Type: 1,
+				Payload: &SelectExprPayload{Cases: []SelectMatchCase{{
+					Kind:    SelectArmRecv,
+					Channel: &Expr{Kind: ExprLoadLocal, Type: 2, Payload: &LocalExprPayload{Local: 99}},
+				}}},
+			}},
+		}},
+		Entry:  0,
+		Script: NoFunction,
+	}
+
+	if err := Validate(program); err == nil || !strings.Contains(err.Error(), "invalid local") {
+		t.Fatalf("Validate error = %v, want invalid local in select arm", err)
 	}
 }
 
@@ -2157,9 +2259,10 @@ func TestValidateRejectsMutableReferenceWithoutMode(t *testing.T) {
 			Name:      "main",
 			Signature: Signature{Return: 1},
 			Body: Block{Result: &Expr{
-				Kind:   ExprMutRef,
-				Type:   2,
-				Target: &Expr{Kind: ExprConstInt, Type: 1, Int: "1"},
+				Kind:    ExprMutRef,
+				Type:    2,
+				Target:  &Expr{Kind: ExprConstInt, Type: 1, Payload: &TextExprPayload{Value: "1"}},
+				Payload: &ReferenceExprPayload{},
 			}},
 		}},
 		Entry:  0,
@@ -2283,12 +2386,21 @@ func containsExprKind(expr *Expr, kind ExprKind) bool {
 	if expr.Kind == kind {
 		return true
 	}
-	return containsExprKind(expr.Target, kind) ||
-		containsExprKind(expr.Left, kind) ||
-		containsExprKind(expr.Right, kind) ||
-		containsExprKind(expr.Condition, kind) ||
-		containsExprKind(expr.Then.Result, kind) ||
-		containsExprKind(expr.Else.Result, kind)
+	if containsExprKind(expr.Target, kind) {
+		return true
+	}
+	for i := range expr.Args {
+		if containsExprKind(&expr.Args[i], kind) {
+			return true
+		}
+	}
+	if payload := expr.BinaryPayload(); payload != nil {
+		return containsExprKind(payload.Left, kind) || containsExprKind(payload.Right, kind)
+	}
+	if payload := expr.IfPayload(); payload != nil {
+		return containsExprKind(payload.Condition, kind) || containsExprKind(payload.Then.Result, kind) || containsExprKind(payload.Else.Result, kind)
+	}
+	return false
 }
 
 func findType(t *testing.T, program *Program, name string) TypeInfo {

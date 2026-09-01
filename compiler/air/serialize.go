@@ -10,6 +10,36 @@ import (
 	"encoding/gob"
 )
 
+func init() {
+	gob.Register(&TextExprPayload{})
+	gob.Register(&BoolExprPayload{})
+	gob.Register(&EnumExprPayload{})
+	gob.Register(&LocalExprPayload{})
+	gob.Register(&GlobalExprPayload{})
+	gob.Register(&CallExprPayload{})
+	gob.Register(&ForeignExprPayload{})
+	gob.Register(&InterfaceExprPayload{})
+	gob.Register(&ReferenceExprPayload{})
+	gob.Register(&FieldExprPayload{})
+	gob.Register(&TagExprPayload{})
+	gob.Register(&TraitExprPayload{})
+	gob.Register(&AggregateExprPayload{})
+	gob.Register(&BinaryExprPayload{})
+	gob.Register(&BlockExprPayload{})
+	gob.Register(&IfExprPayload{})
+	gob.Register(&EnumMatchExprPayload{})
+	gob.Register(&IntMatchExprPayload{})
+	gob.Register(&StrMatchExprPayload{})
+	gob.Register(&UnionMatchExprPayload{})
+	gob.Register(&ForeignMatchExprPayload{})
+	gob.Register(&MaybeMatchExprPayload{})
+	gob.Register(&ResultMatchExprPayload{})
+	gob.Register(&TryExprPayload{})
+	gob.Register(&SelectExprPayload{})
+	gob.Register(&MaybeCallExprPayload{})
+	gob.Register(&UnsafeCastExprPayload{})
+}
+
 func SerializeProgram(program *Program) ([]byte, error) {
 	var buf bytes.Buffer
 	enc := gob.NewEncoder(&buf)

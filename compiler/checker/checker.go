@@ -63,22 +63,24 @@ func deref(t Type) Type {
 // Example: If $T is bound to Int, derefType([$T]) returns [Int].
 // Ensures anonymous function parameters see fully resolved types.
 func derefType(t Type) Type {
-	return derefTypeSeen(t, map[Type]bool{})
+	seen := acquireTypeTraversalSeen()
+	defer releaseTypeTraversalSeen(seen)
+	return derefTypeSeen(t, seen)
 }
 
 // derefTypeSeen guards against cycles in named type graphs, such as a struct
 // with an impl method returning the same struct type. Longer term, methods
 // should probably live outside StructDef's type identity so value shape and
 // method namespace cannot recursively contain each other.
-func derefTypeSeen(t Type, seen map[Type]bool) Type {
+func derefTypeSeen(t Type, seen map[Type]struct{}) Type {
 	t = deref(t) // First dereference at the top level
 	if t == nil {
 		return nil
 	}
-	if seen[t] {
+	if _, ok := seen[t]; ok {
 		return t
 	}
-	seen[t] = true
+	seen[t] = struct{}{}
 	switch typ := t.(type) {
 	case *List:
 		derefInner := derefTypeSeen(typ.of, seen)

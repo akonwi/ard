@@ -257,7 +257,7 @@ func TestLowerExprQualifiesCrossModuleCompositeLiteralsAndEnumCastsInModulePacka
 		},
 	}
 	l := &lowerer{program: program, currentModule: 1, currentImports: map[string]string{}, useModulePackages: true}
-	makeStruct, err := l.lowerExpr(air.Function{Module: 1}, air.Expr{Kind: air.ExprMakeStruct, Type: 1})
+	makeStruct, err := l.lowerExpr(air.Function{Module: 1}, air.Expr{Kind: air.ExprMakeStruct, Type: 1, Payload: &air.AggregateExprPayload{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -268,7 +268,7 @@ func TestLowerExprQualifiesCrossModuleCompositeLiteralsAndEnumCastsInModulePacka
 	if got := astExprName(lit.Type); got != "user.User" {
 		t.Fatalf("cross-module composite literal type = %q, want user.User", got)
 	}
-	enumVariant, err := l.lowerExpr(air.Function{Module: 1}, air.Expr{Kind: air.ExprEnumVariant, Type: 2, Variant: 0})
+	enumVariant, err := l.lowerExpr(air.Function{Module: 1}, air.Expr{Kind: air.ExprEnumVariant, Type: 2, Payload: &air.EnumExprPayload{Variant: 0}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -302,7 +302,7 @@ func TestLowerExprQualifiesCrossModuleUnionWrapAndMatchInModulePackageMode(t *te
 		},
 	}
 	l := &lowerer{program: program, currentModule: 1, currentImports: map[string]string{}, useModulePackages: true, declaredLocals: map[air.LocalID]bool{}}
-	wrap, err := l.lowerExpr(air.Function{Module: 1}, air.Expr{Kind: air.ExprUnionWrap, Type: 3, Tag: 0, Target: &air.Expr{Kind: air.ExprConstInt, Type: 1, Int: "7"}})
+	wrap, err := l.lowerExpr(air.Function{Module: 1}, air.Expr{Kind: air.ExprUnionWrap, Type: 3, Target: &air.Expr{Kind: air.ExprConstInt, Type: 1, Payload: &air.TextExprPayload{Value: "7"}}, Payload: &air.TagExprPayload{Tag: 0}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -321,13 +321,15 @@ func TestLowerExprQualifiesCrossModuleUnionWrapAndMatchInModulePackageMode(t *te
 	match, err := l.lowerExpr(fn, air.Expr{
 		Kind:   air.ExprMatchUnion,
 		Type:   1,
-		Target: &air.Expr{Kind: air.ExprLoadLocal, Type: 3, Local: 0},
-		UnionCases: []air.UnionMatchCase{{
-			Tag:   0,
-			Local: 1,
-			Body:  air.Block{Result: &air.Expr{Kind: air.ExprLoadLocal, Type: 1, Local: 1}},
-		}},
-		CatchAll: air.Block{Result: &air.Expr{Kind: air.ExprConstInt, Type: 1, Int: "0"}},
+		Target: &air.Expr{Kind: air.ExprLoadLocal, Type: 3, Payload: &air.LocalExprPayload{Local: 0}},
+		Payload: &air.UnionMatchExprPayload{
+			Cases: []air.UnionMatchCase{{
+				Tag:   0,
+				Local: 1,
+				Body:  air.Block{Result: &air.Expr{Kind: air.ExprLoadLocal, Type: 1, Payload: &air.LocalExprPayload{Local: 1}}},
+			}},
+			CatchAll: air.Block{Result: &air.Expr{Kind: air.ExprConstInt, Type: 1, Payload: &air.TextExprPayload{Value: "0"}}},
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -337,6 +339,38 @@ func TestLowerExprQualifiesCrossModuleUnionWrapAndMatchInModulePackageMode(t *te
 	}
 	if got := l.currentImports["value"]; got != "generated/models/value" {
 		t.Fatalf("registered import = %q, want generated/models/value", got)
+	}
+}
+
+func TestLowerSelectDereferencesReferenceChannel(t *testing.T) {
+	program := &air.Program{Types: []air.TypeInfo{
+		{ID: 1, Kind: air.TypeInt, Name: "Int"},
+		{ID: 2, Kind: air.TypeChannel, Name: "Chan<Int>", Elem: 1},
+		{ID: 3, Kind: air.TypeReference, Name: "mut Chan<Int>", Elem: 2},
+		{ID: 4, Kind: air.TypeVoid, Name: "Void"},
+	}}
+	fn := air.Function{Locals: []air.Local{{ID: 0, Name: "channel", Type: 3}}}
+	expr := air.Expr{
+		Kind: air.ExprSelect,
+		Type: 4,
+		Payload: &air.SelectExprPayload{Cases: []air.SelectMatchCase{{
+			Kind:    air.SelectArmRecv,
+			Channel: &air.Expr{Kind: air.ExprLoadLocal, Type: 3, Payload: &air.LocalExprPayload{Local: 0}},
+		}}},
+	}
+	l := &lowerer{program: program, declaredLocals: map[air.LocalID]bool{}}
+	lowered, err := l.lowerExpr(fn, expr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selectStmt, ok := lowered.stmts[len(lowered.stmts)-1].(*ast.SelectStmt)
+	if !ok || len(selectStmt.Body.List) != 1 {
+		t.Fatalf("select lowered to %#v, want one select clause", lowered.stmts)
+	}
+	clause := selectStmt.Body.List[0].(*ast.CommClause)
+	recv := clause.Comm.(*ast.ExprStmt).X.(*ast.UnaryExpr)
+	if _, ok := recv.X.(*ast.StarExpr); !ok {
+		t.Fatalf("receive channel = %#v, want dereferenced reference", recv.X)
 	}
 }
 
