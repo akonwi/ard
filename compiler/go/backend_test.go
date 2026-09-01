@@ -5150,6 +5150,26 @@ func TestArtifactWorkspaceUsesProjectLocalArdOut(t *testing.T) {
 	}
 }
 
+func TestSortedDependencyGoModPackagesUsesModulePathOrder(t *testing.T) {
+	firstRoot := t.TempDir()
+	lastRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(firstRoot, "go.mod"), []byte("module example.com/a_first\n\ngo 1.27\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(lastRoot, "go.mod"), []byte("module example.com/z_last\n\ngo 1.27\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	project := &checker.ProjectInfo{Dependencies: map[string]checker.DependencyInfo{
+		"last":  {Alias: "last", RootPath: lastRoot},
+		"first": {Alias: "first", RootPath: firstRoot},
+	}}
+
+	ordered := sortedDependencyGoModPackages(nil, project)
+	if len(ordered) != 2 || ordered[0].modulePath != "example.com/a_first" || ordered[1].modulePath != "example.com/z_last" {
+		t.Fatalf("sorted dependency Go modules = %#v", ordered)
+	}
+}
+
 func mapsKeys[V any](m map[string]V) []string {
 	keys := make([]string, 0, len(m))
 	for key := range m {

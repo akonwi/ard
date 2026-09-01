@@ -195,6 +195,31 @@ func TestReadonlyModuleCompletionErrorClassification(t *testing.T) {
 	}
 }
 
+func TestDependencyReplaceOverlayUsesCanonicalModuleOrder(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/app\n\ngo 1.27\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	resolver := NewGoPackagesResolver(root, nil)
+	resolver.DependencyModuleRoots = map[string]string{
+		"example.com/z_last":  t.TempDir(),
+		"example.com/a_first": t.TempDir(),
+	}
+
+	overlay := resolver.dependencyReplaceOverlay()
+	got := string(overlay[filepath.Join(root, "go.mod")])
+	firstRequire := strings.Index(got, "example.com/a_first v0.0.0")
+	lastRequire := strings.Index(got, "example.com/z_last v0.0.0")
+	firstReplace := strings.Index(got, "replace example.com/a_first")
+	lastReplace := strings.Index(got, "replace example.com/z_last")
+	if firstRequire < 0 || lastRequire < 0 || firstRequire > lastRequire {
+		t.Fatalf("dependency requirements are not canonical:\n%s", got)
+	}
+	if firstReplace < 0 || lastReplace < 0 || firstReplace > lastReplace {
+		t.Fatalf("dependency replacements are not canonical:\n%s", got)
+	}
+}
+
 func TestDependencyModfilesTrustOnlyProjectChecksums(t *testing.T) {
 	cacheRoot := t.TempDir()
 	t.Setenv("HOME", cacheRoot)

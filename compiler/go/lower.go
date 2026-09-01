@@ -1193,6 +1193,12 @@ func traitDispatchMethodName(trait air.TraitID, methodIndex int) string {
 }
 
 func (l *lowerer) lowerGlobal(global air.Global) (ast.Decl, error) {
+	// Generated temporaries are lexical to one initializer. Restarting here
+	// prevents unrelated declaration order from renumbering this global's output.
+	previousTempCounter := l.tempCounter
+	l.tempCounter = 0
+	defer func() { l.tempCounter = previousTempCounter }()
+
 	globalType, err := l.goType(global.Type)
 	if err != nil {
 		return nil, err
@@ -1233,6 +1239,12 @@ func (l *lowerer) lowerGlobal(global air.Global) (ast.Decl, error) {
 }
 
 func (l *lowerer) lowerFunction(fn air.Function) (ast.Decl, error) {
+	// Generated temporaries are function-local. Restarting here keeps one
+	// function's output independent of functions lowered before it.
+	previousTempCounter := l.tempCounter
+	l.tempCounter = 0
+	defer func() { l.tempCounter = previousTempCounter }()
+
 	l.declaredLocals = map[air.LocalID]bool{}
 	methodName, directMethod := l.directGoMethodName(fn)
 	if fn.RequiredGoMethodName != "" && !directMethod {
