@@ -686,8 +686,14 @@ func (r *GoPackagesResolver) dependencyReplaceOverlay() map[string][]byte {
 	if err != nil {
 		return nil
 	}
+	modulePaths := make([]string, 0, len(r.DependencyModuleRoots))
+	for modulePath := range r.DependencyModuleRoots {
+		modulePaths = append(modulePaths, modulePath)
+	}
+	sort.Strings(modulePaths)
 	changed := false
-	for modulePath, dir := range r.DependencyModuleRoots {
+	for _, modulePath := range modulePaths {
+		dir := r.DependencyModuleRoots[modulePath]
 		if modulePath == "" || dir == "" {
 			continue
 		}
@@ -759,24 +765,39 @@ func DependencyGoModuleRoots(info *ProjectInfo) map[string]string {
 		}
 		roots[modulePath] = root
 	}
+	dependencyAliases := make([]string, 0, len(info.Dependencies))
+	for alias := range info.Dependencies {
+		dependencyAliases = append(dependencyAliases, alias)
+	}
+	sort.Strings(dependencyAliases)
+	packageIDs := make([]string, 0, len(info.Packages))
+	for packageID := range info.Packages {
+		packageIDs = append(packageIDs, packageID)
+	}
+	sort.Strings(packageIDs)
+
 	// Add path dependencies first so a locked Git checkout retains precedence
 	// if malformed dependency metadata names the same Go module from both.
-	for _, dep := range info.Dependencies {
+	for _, alias := range dependencyAliases {
+		dep := info.Dependencies[alias]
 		if dep.Git == "" {
 			add(dep.RootPath)
 		}
 	}
-	for packageID, pkg := range info.Packages {
+	for _, packageID := range packageIDs {
+		pkg := info.Packages[packageID]
 		if packageID != info.RootPackageID && pkg.Git == "" && pkg.Path != "" {
 			add(pkg.RootPath)
 		}
 	}
-	for _, dep := range info.Dependencies {
+	for _, alias := range dependencyAliases {
+		dep := info.Dependencies[alias]
 		if dep.Git != "" {
 			add(dep.RootPath)
 		}
 	}
-	for packageID, pkg := range info.Packages {
+	for _, packageID := range packageIDs {
+		pkg := info.Packages[packageID]
 		if packageID != info.RootPackageID && pkg.Git != "" {
 			add(pkg.RootPath)
 		}

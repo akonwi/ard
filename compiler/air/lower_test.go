@@ -12,6 +12,54 @@ import (
 	"github.com/akonwi/ard/parse"
 )
 
+type orderingTestModule struct {
+	path string
+}
+
+func (m orderingTestModule) Path() string                       { return m.path }
+func (m orderingTestModule) Get(string) checker.Symbol          { return checker.Symbol{} }
+func (m orderingTestModule) Program() *checker.Program          { return nil }
+func (m orderingTestModule) Symbols() map[string]checker.Symbol { return nil }
+
+func TestSortedModulesUsesCanonicalPathOrder(t *testing.T) {
+	modules := map[string]checker.Module{
+		"middle": orderingTestModule{path: "demo/middle"},
+		"last":   orderingTestModule{path: "demo/z_last"},
+		"first":  orderingTestModule{path: "demo/a_first"},
+	}
+
+	ordered := sortedModules(modules)
+	got := make([]string, len(ordered))
+	for i, module := range ordered {
+		got[i] = module.Path()
+	}
+	want := []string{"demo/a_first", "demo/middle", "demo/z_last"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("sorted modules = %v, want %v", got, want)
+	}
+}
+
+func TestSortedMethodDefinitionsUsesCanonicalKeyOrder(t *testing.T) {
+	first := &checker.FunctionDef{Name: "first"}
+	middle := &checker.FunctionDef{Name: "middle"}
+	last := &checker.FunctionDef{Name: "last"}
+	methods := map[string]*checker.FunctionDef{
+		"z_last":  last,
+		"middle":  middle,
+		"a_first": first,
+	}
+
+	ordered := sortedMethodDefinitions(methods)
+	got := make([]string, len(ordered))
+	for i, method := range ordered {
+		got[i] = method.Name
+	}
+	want := []string{"first", "middle", "last"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("sorted methods = %v, want %v", got, want)
+	}
+}
+
 func TestLowerFunctionParameterWithIndirectMutuallyRecursiveStructs(t *testing.T) {
 	const helperEnv = "ARD_TEST_AIR_RECURSIVE_TYPE_BINDING"
 	const input = `

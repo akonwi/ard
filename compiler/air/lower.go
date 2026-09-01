@@ -224,7 +224,7 @@ func (l *lowerer) findReachableModule(path string) checker.Module {
 	if mod, ok := l.moduleByName[path]; ok {
 		return mod
 	}
-	for _, mod := range l.moduleByName {
+	for _, mod := range sortedModules(l.moduleByName) {
 		if found := findReachableModuleSeen(mod, path, map[string]bool{}); found != nil {
 			l.moduleByName[path] = found
 			return found
@@ -249,7 +249,7 @@ func findReachableModuleSeen(mod checker.Module, path string, seen map[string]bo
 	if program == nil {
 		return nil
 	}
-	for _, imported := range program.Imports {
+	for _, imported := range sortedModules(program.Imports) {
 		if found := findReachableModuleSeen(imported, path, seen); found != nil {
 			return found
 		}
@@ -285,7 +285,7 @@ func (l *lowerer) lowerModule(module checker.Module) error {
 		return nil
 	}
 
-	for _, imported := range prog.Imports {
+	for _, imported := range sortedModules(prog.Imports) {
 		l.moduleByName[imported.Path()] = imported
 		importID := l.internModule(imported.Path())
 		mod.Imports = append(mod.Imports, importID)
@@ -657,7 +657,8 @@ func (l *lowerer) declareGenericFunctionDef(module ModuleID, callDef *checker.Fu
 	})
 	l.program.Modules[module].Functions = appendUniqueFunction(l.program.Modules[module].Functions, id)
 	typeVars := make(map[string]TypeID, len(params))
-	for p, idx := range params {
+	for _, p := range paramNames {
+		idx := params[p]
 		tp, err := l.internTypeParam(paramOwner, p, idx)
 		if err != nil {
 			return NoFunction, err
@@ -869,11 +870,16 @@ func (l *lowerer) newFunctionLowerer(fn *Function, def *checker.FunctionDef, par
 		for name, typeID := range l.functionTypeVars[fn.ID] {
 			fl.typeVars[name] = typeID
 		}
-		for name, typ := range def.GenericBindings {
+		bindingNames := make([]string, 0, len(def.GenericBindings))
+		for name := range def.GenericBindings {
+			bindingNames = append(bindingNames, name)
+		}
+		sort.Strings(bindingNames)
+		for _, name := range bindingNames {
 			if _, ok := fl.typeVars[name]; ok {
 				continue
 			}
-			typeID, err := fl.internResolvedType(typ)
+			typeID, err := fl.internResolvedType(def.GenericBindings[name])
 			if err == nil {
 				fl.typeVars[name] = typeID
 			}
@@ -966,9 +972,9 @@ func (fl *functionLowerer) bindTypeVarsSeen(pattern checker.Type, actual TypeID,
 			for _, field := range actualInfo.Fields {
 				fieldsByName[field.Name] = field
 			}
-			for name, fieldType := range typ.Fields {
+			for _, name := range sortedFieldNames(typ.Fields) {
 				if field, ok := fieldsByName[name]; ok {
-					fl.bindTypeVarsSeen(fieldType, field.Type, seen)
+					fl.bindTypeVarsSeen(typ.Fields[name], field.Type, seen)
 				}
 			}
 		}
@@ -1634,7 +1640,7 @@ func (l *lowerer) declareGenericStructMethodsAndTraitImpls(module ModuleID, def 
 	// Required Go methods use their exact native name. Builtin Error shares
 	// that method function with its Ard trait implementation.
 	requiredMethods := map[string]*checker.FunctionDef{}
-	for _, method := range l.requiredGoMethods(def) {
+	for _, method := range sortedMethodDefinitions(l.requiredGoMethods(def)) {
 		if method != nil {
 			requiredMethods[method.Name] = method
 		}
@@ -1643,8 +1649,14 @@ func (l *lowerer) declareGenericStructMethodsAndTraitImpls(module ModuleID, def 
 		if !checker.IsBuiltinError(trait) {
 			continue
 		}
-		for name, method := range l.traitMethods(def, trait) {
-			if method != nil {
+		methods := l.traitMethods(def, trait)
+		methodNames := make([]string, 0, len(methods))
+		for name := range methods {
+			methodNames = append(methodNames, name)
+		}
+		sort.Strings(methodNames)
+		for _, name := range methodNames {
+			if method := methods[name]; method != nil {
 				requiredMethods[name] = method
 			}
 		}
@@ -1752,11 +1764,11 @@ func (l *lowerer) declareInherentImplMethodsForStruct(module ModuleID, def *chec
 		if trait == nil {
 			continue
 		}
-		for _, method := range l.traitMethods(def, trait) {
+		for _, method := range sortedMethodDefinitions(l.traitMethods(def, trait)) {
 			traitMethodDefs[method] = true
 		}
 	}
-	for _, method := range l.requiredGoMethods(def) {
+	for _, method := range sortedMethodDefinitions(l.requiredGoMethods(def)) {
 		if method == nil || traitMethodDefs[method] || functionHasUnresolvedTypeVar(method) {
 			continue
 		}
@@ -1768,7 +1780,7 @@ func (l *lowerer) declareInherentImplMethodsForStruct(module ModuleID, def *chec
 			return err
 		}
 	}
-	for _, method := range l.inherentMethods(def) {
+	for _, method := range sortedMethodDefinitions(l.inherentMethods(def)) {
 		if method == nil || functionHasUnresolvedTypeVar(method) {
 			continue
 		}
@@ -2281,7 +2293,8 @@ func (fl *functionLowerer) declareGenericMethodFunction(module ModuleID, instanc
 	})
 	fl.l.program.Modules[module].Functions = appendUniqueFunction(fl.l.program.Modules[module].Functions, id)
 	typeVars := make(map[string]TypeID, len(paramNames))
-	for p, idx := range params {
+	for _, p := range paramNames {
+		idx := params[p]
 		tp, err := fl.l.internTypeParam(paramOwner, p, idx)
 		if err != nil {
 			return NoFunction, nil, err
@@ -2467,7 +2480,7 @@ func collectReachableModules(mod checker.Module, seen map[string]checker.Module)
 	if mod.Program() == nil {
 		return
 	}
-	for _, imported := range mod.Program().Imports {
+	for _, imported := range sortedModules(mod.Program().Imports) {
 		collectReachableModules(imported, seen)
 	}
 }
@@ -2486,11 +2499,11 @@ func (l *lowerer) lookupStructDef(modulePath, name string, generic bool) *checke
 	// recover only a unique declaration of the same generic shape. Ambiguity must
 	// not merge unrelated nominal types.
 	modules := map[string]checker.Module{}
-	for _, mod := range l.moduleByName {
+	for _, mod := range sortedModules(l.moduleByName) {
 		collectReachableModules(mod, modules)
 	}
 	var found *checker.StructDef
-	for _, mod := range modules {
+	for _, mod := range sortedModules(modules) {
 		sd := structDefInModule(mod, name, generic)
 		if sd == nil {
 			continue
@@ -2882,10 +2895,10 @@ func (l *lowerer) typeOwnerPath(t checker.Type) string {
 	default:
 		return ""
 	}
-	for path, module := range l.moduleByName {
+	for _, module := range sortedModules(l.moduleByName) {
 		sym := module.Get(name)
 		if sym.Type == t {
-			return path
+			return module.Path()
 		}
 	}
 	return ""
@@ -4733,8 +4746,13 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		return &Expr{Kind: ExprDiscardingFunctionCoercion, Type: typeID, Target: value}, nil
 	case *checker.ForeignStructInstance:
 		fields := make([]StructFieldValue, 0, len(e.Fields))
-		for name, valueExpr := range e.Fields {
-			value, err := fl.lowerExpr(valueExpr)
+		fieldNames := make([]string, 0, len(e.Fields))
+		for name := range e.Fields {
+			fieldNames = append(fieldNames, name)
+		}
+		sort.Strings(fieldNames)
+		for _, name := range fieldNames {
+			value, err := fl.lowerExpr(e.Fields[name])
 			if err != nil {
 				return nil, err
 			}
@@ -6632,9 +6650,14 @@ func (fl *functionLowerer) localKind(local LocalID) TypeKind {
 }
 
 func (l *lowerer) lookupFunction(name string) (FunctionID, bool) {
-	for key, id := range l.functions {
+	keys := make([]string, 0, len(l.functions))
+	for key := range l.functions {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
 		if keyHasFunctionName(key, name) {
-			return id, true
+			return l.functions[key], true
 		}
 	}
 	return NoFunction, false
@@ -6662,7 +6685,7 @@ func (l *lowerer) ensureModuleImportTraitImplsDeclared(moduleID ModuleID) error 
 	if !ok || mod.Program() == nil {
 		return nil
 	}
-	for _, imported := range mod.Program().Imports {
+	for _, imported := range sortedModules(mod.Program().Imports) {
 		importedID := l.internModule(imported.Path())
 		l.program.Modules[moduleID].Imports = appendUniqueModule(l.program.Modules[moduleID].Imports, importedID)
 		if err := l.ensureModuleTraitImplsDeclaredRecursive(imported.Path(), map[string]bool{}); err != nil {
@@ -6684,7 +6707,7 @@ func (l *lowerer) ensureModuleTraitImplsDeclaredRecursive(modulePath string, see
 	if !ok || mod.Program() == nil {
 		return nil
 	}
-	for _, imported := range mod.Program().Imports {
+	for _, imported := range sortedModules(mod.Program().Imports) {
 		if err := l.ensureModuleTraitImplsDeclaredRecursive(imported.Path(), seen); err != nil {
 			return err
 		}
@@ -6736,7 +6759,7 @@ func (l *lowerer) ensureModuleTypesDeclared(modulePath string) error {
 	}
 	modID := l.internModule(modulePath)
 	prog := mod.Program()
-	for _, imported := range prog.Imports {
+	for _, imported := range sortedModules(prog.Imports) {
 		l.moduleByName[imported.Path()] = imported
 		importedID := l.internModule(imported.Path())
 		l.program.Modules[modID].Imports = appendUniqueModule(l.program.Modules[modID].Imports, importedID)
@@ -6785,7 +6808,7 @@ func (l *lowerer) ensureModuleGlobalsDeclared(modulePath string) error {
 	}
 	modID := l.internModule(modulePath)
 	prog := mod.Program()
-	for _, imported := range prog.Imports {
+	for _, imported := range sortedModules(prog.Imports) {
 		l.moduleByName[imported.Path()] = imported
 		importedID := l.internModule(imported.Path())
 		l.program.Modules[modID].Imports = appendUniqueModule(l.program.Modules[modID].Imports, importedID)
@@ -6969,7 +6992,7 @@ func (l *lowerer) moduleForInstanceMethod(method *checker.InstanceMethod, fallba
 		l.findReachableModule(ownerModulePath)
 		return l.internModule(ownerModulePath)
 	}
-	for modulePath, mod := range l.moduleByName {
+	for _, mod := range sortedModules(l.moduleByName) {
 		if mod.Program() == nil {
 			continue
 		}
@@ -6977,11 +7000,11 @@ func (l *lowerer) moduleForInstanceMethod(method *checker.InstanceMethod, fallba
 			switch def := stmt.Stmt.(type) {
 			case *checker.StructDef:
 				if def.Name == ownerName && l.hasStructMethod(def, method.Method.Name) {
-					return l.internModule(modulePath)
+					return l.internModule(mod.Path())
 				}
 			case *checker.Enum:
 				if def.Name == ownerName && def.Methods[method.Method.Name] != nil {
-					return l.internModule(modulePath)
+					return l.internModule(mod.Path())
 				}
 			}
 		}
@@ -7071,6 +7094,51 @@ func sortedFieldNames(fields map[string]checker.Type) []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+// sortedModules makes checker map traversal safe for AIR ID allocation. Module,
+// type, and function IDs become part of generated names, so discovery order must
+// not depend on Go's randomized map iteration.
+func sortedModules(modules map[string]checker.Module) []checker.Module {
+	type moduleEntry struct {
+		key    string
+		path   string
+		module checker.Module
+	}
+	entries := make([]moduleEntry, 0, len(modules))
+	for key, module := range modules {
+		path := ""
+		if module != nil {
+			path = module.Path()
+		}
+		entries = append(entries, moduleEntry{key: key, path: path, module: module})
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].path == entries[j].path {
+			return entries[i].key < entries[j].key
+		}
+		return entries[i].path < entries[j].path
+	})
+	ordered := make([]checker.Module, len(entries))
+	for i, entry := range entries {
+		ordered[i] = entry.module
+	}
+	return ordered
+}
+
+// sortedMethodDefinitions preserves the method table's canonical key order
+// before declarations allocate AIR function IDs.
+func sortedMethodDefinitions(methods map[string]*checker.FunctionDef) []*checker.FunctionDef {
+	names := make([]string, 0, len(methods))
+	for name := range methods {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	ordered := make([]*checker.FunctionDef, len(names))
+	for i, name := range names {
+		ordered[i] = methods[name]
+	}
+	return ordered
 }
 
 func appendUniqueType(items []TypeID, id TypeID) []TypeID {

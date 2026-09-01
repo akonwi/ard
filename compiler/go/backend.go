@@ -440,12 +440,14 @@ func generatedGoMod(dir string, program *air.Program, projectInfo *checker.Proje
 	requireSeen := requireKeys(goMod)
 	requires := make([]string, 0)
 	addDependencyGoModRequirements(&requires, requireSeen, program, projectInfo)
+	sort.Strings(requires)
 	goMod += formatRequireBlock(requires)
 
 	replaceSeen := replaceKeys(goMod)
 	replaces := make([]string, 0)
 	addDependencyGoModRootReplaces(&replaces, replaceSeen, program, projectInfo)
 	addDependencyGoModReplaces(&replaces, replaceSeen, program, projectInfo)
+	sort.Strings(replaces)
 	goMod += formatReplaceBlock(replaces)
 	return goMod, nil
 }
@@ -455,12 +457,12 @@ func generatedGoMod(dir string, program *air.Program, projectInfo *checker.Proje
 // or the declared source root for path dependencies (#437). This mirrors the
 // checker's resolution, keeping type-checking and the build in agreement.
 func addDependencyGoModRootReplaces(out *[]string, seen map[string]bool, program *air.Program, projectInfo *checker.ProjectInfo) {
-	for modulePath, root := range dependencyGoModPackages(program, projectInfo) {
-		abs, err := filepath.Abs(root)
+	for _, dependency := range sortedDependencyGoModPackages(program, projectInfo) {
+		abs, err := filepath.Abs(dependency.root)
 		if err != nil {
 			continue
 		}
-		addGoModReplace(out, seen, fmt.Sprintf("%s => %s", modulePath, abs))
+		addGoModReplace(out, seen, fmt.Sprintf("%s => %s", dependency.modulePath, abs))
 	}
 }
 
@@ -542,14 +544,14 @@ func isRelativeLocalReplacePath(path string) bool {
 }
 
 func addDependencyGoModRequirements(out *[]string, seen map[string]bool, program *air.Program, projectInfo *checker.ProjectInfo) {
-	packages := dependencyGoModPackages(program, projectInfo)
-	for _, root := range packages {
-		addGoModRequirementsFromFile(out, seen, filepath.Join(root, "go.mod"))
+	dependencies := sortedDependencyGoModPackages(program, projectInfo)
+	for _, dependency := range dependencies {
+		addGoModRequirementsFromFile(out, seen, filepath.Join(dependency.root, "go.mod"))
 	}
-	for modulePath := range packages {
-		if !seen[modulePath] {
-			seen[modulePath] = true
-			*out = append(*out, modulePath+" v0.0.0")
+	for _, dependency := range dependencies {
+		if !seen[dependency.modulePath] {
+			seen[dependency.modulePath] = true
+			*out = append(*out, dependency.modulePath+" v0.0.0")
 		}
 	}
 }
@@ -665,8 +667,8 @@ func projectGoModuleName(projectInfo *checker.ProjectInfo) string {
 }
 
 func addDependencyGoModReplaces(out *[]string, seen map[string]bool, program *air.Program, projectInfo *checker.ProjectInfo) {
-	for _, root := range dependencyGoModPackages(program, projectInfo) {
-		addGoModReplacesFromFile(out, seen, filepath.Join(root, "go.mod"), root)
+	for _, dependency := range sortedDependencyGoModPackages(program, projectInfo) {
+		addGoModReplacesFromFile(out, seen, filepath.Join(dependency.root, "go.mod"), dependency.root)
 	}
 }
 
@@ -802,12 +804,13 @@ func mergeGoSum(dir string, program *air.Program, projectInfo *checker.ProjectIn
 	if projectInfo != nil && strings.TrimSpace(projectInfo.RootPath) != "" {
 		addGoSumLines(&lines, seen, filepath.Join(projectInfo.RootPath, "go.sum"))
 	}
-	for _, root := range dependencyGoModPackages(program, projectInfo) {
-		addGoSumLines(&lines, seen, filepath.Join(root, "go.sum"))
+	for _, dependency := range sortedDependencyGoModPackages(program, projectInfo) {
+		addGoSumLines(&lines, seen, filepath.Join(dependency.root, "go.sum"))
 	}
 	if len(lines) == 0 {
 		return nil
 	}
+	sort.Strings(lines)
 	return os.WriteFile(goSumPath, []byte(strings.Join(lines, "\n")+"\n"), 0o644)
 }
 
@@ -1049,6 +1052,26 @@ func dependencyGoModPackages(program *air.Program, projectInfo *checker.ProjectI
 	return checker.DependencyGoModuleRoots(projectInfo)
 }
 
+type dependencyGoModPackage struct {
+	modulePath string
+	root       string
+}
+
+func sortedDependencyGoModPackages(program *air.Program, projectInfo *checker.ProjectInfo) []dependencyGoModPackage {
+	packages := dependencyGoModPackages(program, projectInfo)
+	ordered := make([]dependencyGoModPackage, 0, len(packages))
+	for modulePath, root := range packages {
+		ordered = append(ordered, dependencyGoModPackage{modulePath: modulePath, root: root})
+	}
+	sort.Slice(ordered, func(i, j int) bool {
+		if ordered[i].modulePath == ordered[j].modulePath {
+			return ordered[i].root < ordered[j].root
+		}
+		return ordered[i].modulePath < ordered[j].modulePath
+	})
+	return ordered
+}
+
 func dependencyAliasForModulePath(modulePath string, projectInfo *checker.ProjectInfo) (string, bool) {
 	key, _, ok := dependencyPackageForModulePath(modulePath, projectInfo)
 	return key, ok
@@ -1059,7 +1082,13 @@ func dependencyPackageForModulePath(modulePath string, projectInfo *checker.Proj
 		return "", "", false
 	}
 	first := strings.Split(modulePath, "/")[0]
-	for _, dep := range projectInfo.Dependencies {
+	dependencyAliases := make([]string, 0, len(projectInfo.Dependencies))
+	for alias := range projectInfo.Dependencies {
+		dependencyAliases = append(dependencyAliases, alias)
+	}
+	sort.Strings(dependencyAliases)
+	for _, alias := range dependencyAliases {
+		dep := projectInfo.Dependencies[alias]
 		packageID := dep.PackageID
 		if packageID == "" {
 			packageID = dep.Alias
@@ -1069,13 +1098,18 @@ func dependencyPackageForModulePath(modulePath string, projectInfo *checker.Proj
 			return key, dependencyRootPath(dep), true
 		}
 	}
-	for packageID, pkg := range projectInfo.Packages {
+	packageIDs := make([]string, 0, len(projectInfo.Packages))
+	for packageID := range projectInfo.Packages {
+		packageIDs = append(packageIDs, packageID)
+	}
+	sort.Strings(packageIDs)
+	for _, packageID := range packageIDs {
 		if packageID == projectInfo.RootPackageID || packageID == "" {
 			continue
 		}
 		key := checker.PackageModulePrefix(packageID)
 		if first == key {
-			return key, pkg.RootPath, true
+			return key, projectInfo.Packages[packageID].RootPath, true
 		}
 	}
 	return "", "", false
