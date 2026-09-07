@@ -34,11 +34,13 @@ the Ard project's standalone `go.mod`, `go.sum`, and `replace` directives. When
 their environment would otherwise select a workspace, they can invoke Ard with
 `GOWORK=off`.
 
-Ard may still create a private temporary `go.work` as an implementation detail
-when resolving locked/path dependencies for a project without its own
-`go.mod`. Such a compiler-owned file is isolated from the user's workspace,
-does not make user workspace configuration part of Ard's supported project
-model, and may be replaced by another internal mechanism without notice.
+Ard does not create, select, or configure `go.work` files. Locked/path
+dependency FFI is resolved through module files only. When the project has a
+`go.mod`, the resolver derives a private alternate modfile without mutating the
+source module. When the project has no `go.mod`, the resolver creates an
+isolated temporary standalone module outside the source tree. Its requirements
+and replacements mirror the generated backend module so checking and builds
+select the same dependency roots.
 
 Adding support for user Go workspaces requires a separate architecture decision
 that defines checker/backend parity, generated-output behavior, invalidation,
@@ -50,8 +52,9 @@ diagnostics, and project-boundary semantics.
   project.
 - Parent-directory `go.work` files and user `GOWORK` settings are not Ard project
   inputs and receive no compatibility guarantee.
-- Resolver paths may use module-only Go features such as `-modfile` without a
-  workspace compatibility path.
+- Resolver paths use only standalone module mechanisms, including private
+  `-modfile` overlays and isolated temporary modules; Ard never synthesizes a
+  Go workspace.
 - The compiler does not add workspace-specific branches or tests merely to make
   ambient user workspaces succeed.
 - Users who also maintain a Go workspace must run Ard outside workspace mode,
