@@ -434,11 +434,15 @@ func isTypeNameSymbol(sym *checker.Symbol) bool {
 // computeImportCompletions serves `use ` path completion, which is
 // filesystem/parse based rather than semantic.
 func computeImportCompletions(source string, filePath string, position protocol.Position) []protocol.CompletionItem {
+	return computeImportCompletionsWithRoot(source, filePath, "", position)
+}
+
+func computeImportCompletionsWithRoot(source string, filePath string, projectRoot string, position protocol.Position) []protocol.CompletionItem {
 	cctx, ok := completionContextAt(source, position)
 	if !ok || cctx.kind != completionImport {
 		return []protocol.CompletionItem{}
 	}
-	return withCompletionTextEdits(importPathCompletionItems(cctx.importPath, filePath), cctx, position)
+	return withCompletionTextEdits(importPathCompletionItemsWithRoot(cctx.importPath, filePath, projectRoot), cctx, position)
 }
 
 // mergedStructMethods returns a struct's methods across the local program

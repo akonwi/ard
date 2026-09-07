@@ -943,7 +943,18 @@ func (c *Checker) Check() {
 			continue
 		}
 
-		if strings.HasPrefix(imp.Path, "ard/") {
+		if imp.Path == BuildModulePath {
+			if c.moduleResolver == nil {
+				c.addUnresolvedReference(unknownModule, imp.Path, imp.GetLocation())
+				continue
+			}
+			mod, err := c.moduleResolver.resolveBuildModule(c.modulePath, c.filePath)
+			if err != nil {
+				c.addDiagnostic(ardImportResolutionDiagnostic{Path: imp.Path, Cause: err.Error(), Span: c.sourceSpan(imp.PathLocation)}.build())
+				continue
+			}
+			c.program.Imports[imp.Name] = mod
+		} else if strings.HasPrefix(imp.Path, "ard/") {
 			// Handle standard library imports
 			if mod, ok := findInStdLib(imp.Path); ok {
 				c.program.Imports[imp.Name] = mod

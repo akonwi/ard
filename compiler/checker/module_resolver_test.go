@@ -152,7 +152,11 @@ build_tags = ["sqlite", "debug", "sqlite",]
 			if err == nil {
 				t.Fatalf("expected error for assignment %s", assignment)
 			}
-			if !strings.Contains(err.Error(), "[go].build_tags must be a list of quoted strings") {
+			want := "invalid TOML"
+			if assignment == `build_tags = "sqlite"` {
+				want = "[go].build_tags must be a list of quoted strings"
+			}
+			if !strings.Contains(err.Error(), want) {
 				t.Fatalf("unexpected error for %s: %v", assignment, err)
 			}
 		}

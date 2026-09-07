@@ -671,7 +671,8 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 		if len(items) == 0 {
 			// Import-path completion is parse/filesystem based and stays on
 			// its own dedicated path.
-			items = computeImportCompletions(doc.Text, filePath, params.Position)
+			projectRoot := s.workspaceFor(filePath).Engine().ProjectRoot()
+			items = computeImportCompletionsWithRoot(doc.Text, filePath, projectRoot, params.Position)
 		}
 	}()
 	if items == nil {

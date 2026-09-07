@@ -1012,6 +1012,15 @@ func (l *lexer) takePath(start *char) (token, bool) {
 	}, true
 }
 
+// IsValidIdentifier reports whether name is an identifier token in Ard. It is
+// intentionally stricter than accepting a name in an arbitrary grammar
+// position: keywords cannot be addressed as static properties.
+func IsValidIdentifier(name string) bool {
+	lexer := NewLexer([]byte(name))
+	tokens := lexer.Scan()
+	return len(lexer.errors) == 0 && len(tokens) == 2 && tokens[0].kind == identifier && tokens[0].text == name && tokens[1].kind == eof
+}
+
 func (l *lexer) takeIdentifier() token {
 	// record the start column
 	column := l.column - 1

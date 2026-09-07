@@ -15,7 +15,15 @@ type LoadResult struct {
 	ProjectInfo *checker.ProjectInfo
 }
 
+type LoadOptions struct {
+	Build checker.BuildOptions
+}
+
 func LoadModule(inputPath string) (*LoadResult, error) {
+	return LoadModuleWithOptions(inputPath, LoadOptions{})
+}
+
+func LoadModuleWithOptions(inputPath string, options LoadOptions) (*LoadResult, error) {
 	sourceCode, err := os.ReadFile(inputPath)
 	if err != nil {
 		return nil, fmt.Errorf("error reading file %s - %v", inputPath, err)
@@ -31,7 +39,7 @@ func LoadModule(inputPath string) (*LoadResult, error) {
 	program := result.Program
 
 	workingDir := filepath.Dir(inputPath)
-	moduleResolver, err := checker.NewModuleResolver(workingDir)
+	moduleResolver, err := checker.NewModuleResolverWithOptions(workingDir, options.Build)
 	if err != nil {
 		return nil, fmt.Errorf("error initializing module resolver: %w", err)
 	}
