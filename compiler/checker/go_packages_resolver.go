@@ -18,6 +18,7 @@ import (
 	"sync"
 
 	"golang.org/x/mod/modfile"
+	"golang.org/x/mod/module"
 	"golang.org/x/tools/go/gcexportdata"
 	"golang.org/x/tools/go/packages"
 )
@@ -467,81 +468,55 @@ func (r *GoPackagesResolver) loadConfig() *packages.Config {
 
 func (r *GoPackagesResolver) loadConfigWithDependencies() (*packages.Config, func(), error) {
 	cfg := r.loadConfig()
-	if overlay := r.dependencyReplaceOverlay(); overlay != nil {
-		goModPath := filepath.Join(r.ProjectRoot, "go.mod")
-		modData := overlay[goModPath]
-		sumData, err := r.projectGoSum()
+	modData, standalone, err := r.dependencyGoMod()
+	if err != nil {
+		return cfg, func() {}, err
+	}
+	if modData == nil {
+		return cfg, func() {}, nil
+	}
+	sumData, err := r.dependencyGoSum(standalone)
+	if err != nil {
+		return cfg, func() {}, err
+	}
+	if standalone {
+		moduleDir, cleanup, err := prepareDependencyGoModule(modData, sumData)
 		if err != nil {
 			return cfg, func() {}, err
 		}
-		modPath, cleanup, err := prepareDependencyGoModfile(modData, sumData)
-		if err != nil {
-			return cfg, func() {}, err
-		}
-		cfg.BuildFlags = append(cfg.BuildFlags, "-modfile="+modPath, "-mod=readonly")
+		cfg.Dir = moduleDir
+		cfg.BuildFlags = append(cfg.BuildFlags, "-mod=readonly")
 		return cfg, cleanup, nil
 	}
-	if len(r.DependencyModuleRoots) == 0 || r.ProjectRoot == "" {
-		return cfg, func() {}, nil
-	}
-	if _, err := os.Stat(filepath.Join(r.ProjectRoot, "go.mod")); err == nil || !os.IsNotExist(err) {
-		return cfg, func() {}, nil
-	}
-
-	// Without a consumer go.mod, resolve dependency FFI through a temporary Go
-	// workspace whose main modules are the dependency roots. Keeping Dir at the
-	// Ard project root preserves package diagnostics while avoiding any writes
-	// to the user's project (#437).
-	workspaceDir, err := os.MkdirTemp("", "ard-go-work-")
+	modPath, cleanup, err := prepareDependencyGoModfile(modData, sumData)
 	if err != nil {
-		return cfg, func() {}, fmt.Errorf("create dependency Go workspace: %w", err)
+		return cfg, func() {}, err
 	}
-	cleanup := func() { _ = os.RemoveAll(workspaceDir) }
-	roots := make([]string, 0, len(r.DependencyModuleRoots))
-	seen := map[string]bool{}
-	for _, root := range r.DependencyModuleRoots {
-		absRoot, err := filepath.Abs(root)
-		if err != nil || seen[absRoot] {
-			continue
-		}
-		seen[absRoot] = true
-		roots = append(roots, absRoot)
-	}
-	if len(roots) == 0 {
-		cleanup()
-		return cfg, func() {}, nil
-	}
-	sort.Strings(roots)
-	var workFile strings.Builder
-	workFile.WriteString("go 1.27.0\n\nuse (\n")
-	for _, root := range roots {
-		fmt.Fprintf(&workFile, "\t%q\n", filepath.ToSlash(root))
-	}
-	workFile.WriteString(")\n")
-	workPath := filepath.Join(workspaceDir, "go.work")
-	if err := os.WriteFile(workPath, []byte(workFile.String()), 0o644); err != nil {
-		cleanup()
-		return cfg, func() {}, fmt.Errorf("write dependency Go workspace: %w", err)
-	}
-	for _, entry := range os.Environ() {
-		if !strings.HasPrefix(entry, "GOWORK=") {
-			cfg.Env = append(cfg.Env, entry)
-		}
-	}
-	cfg.Env = append(cfg.Env, "GOWORK="+workPath)
+	cfg.BuildFlags = append(cfg.BuildFlags, "-modfile="+modPath, "-mod=readonly")
 	return cfg, cleanup, nil
 }
 
 func (r *GoPackagesResolver) loadWritableConfigWithDependencies() (*packages.Config, func(), bool, error) {
 	cfg := r.loadConfig()
-	overlay := r.dependencyReplaceOverlay()
-	if overlay == nil {
-		return cfg, func() {}, false, nil
-	}
-	modData := overlay[filepath.Join(r.ProjectRoot, "go.mod")]
-	sumData, err := r.projectGoSum()
+	modData, standalone, err := r.dependencyGoMod()
 	if err != nil {
 		return cfg, func() {}, false, err
+	}
+	if modData == nil {
+		return cfg, func() {}, false, nil
+	}
+	sumData, err := r.dependencyGoSum(standalone)
+	if err != nil {
+		return cfg, func() {}, false, err
+	}
+	if standalone {
+		moduleDir, cleanup, err := prepareWritableDependencyGoModule(modData, sumData)
+		if err != nil {
+			return cfg, func() {}, false, err
+		}
+		cfg.Dir = moduleDir
+		cfg.BuildFlags = append(cfg.BuildFlags, "-mod=mod")
+		return cfg, cleanup, true, nil
 	}
 	modPath, cleanup, err := prepareWritableDependencyGoModfile(modData, sumData)
 	if err != nil {
@@ -551,10 +526,14 @@ func (r *GoPackagesResolver) loadWritableConfigWithDependencies() (*packages.Con
 	return cfg, cleanup, true, nil
 }
 
-// projectGoSum seeds synthetic module files only with checksums trusted by the
-// consumer. A dependency's go.sum is not a trust root for the main module;
-// missing entries are verified and added only in the private writable retry.
-func (r *GoPackagesResolver) projectGoSum() ([]byte, error) {
+// dependencyGoSum seeds private module files only with checksums trusted by an
+// existing consumer module. A dependency's go.sum is not a trust root for the
+// main module; missing entries are verified and added only in the private
+// writable retry. A standalone resolver module starts without checksums.
+func (r *GoPackagesResolver) dependencyGoSum(standalone bool) ([]byte, error) {
+	if standalone {
+		return nil, nil
+	}
 	data, err := os.ReadFile(filepath.Join(r.ProjectRoot, "go.sum"))
 	if os.IsNotExist(err) {
 		return nil, nil
@@ -566,29 +545,43 @@ func (r *GoPackagesResolver) projectGoSum() ([]byte, error) {
 }
 
 func prepareWritableDependencyGoModfile(modData []byte, sumData []byte) (string, func(), error) {
-	workspaceDir, err := os.MkdirTemp("", "ard-go-mod-retry-")
+	moduleDir, cleanup, err := writeTemporaryGoModule("ard-go-mod-retry-", "ard.mod", modData, sumData)
 	if err != nil {
-		return "", func() {}, fmt.Errorf("create writable dependency Go module files: %w", err)
+		return "", func() {}, err
 	}
-	cleanup := func() { _ = os.RemoveAll(workspaceDir) }
-	modPath := filepath.Join(workspaceDir, "ard.mod")
-	if err := os.WriteFile(modPath, modData, 0o600); err != nil {
-		cleanup()
-		return "", func() {}, fmt.Errorf("write writable dependency Go module file: %w", err)
-	}
-	if len(sumData) > 0 {
-		if err := os.WriteFile(filepath.Join(workspaceDir, "ard.sum"), sumData, 0o600); err != nil {
-			cleanup()
-			return "", func() {}, fmt.Errorf("write writable dependency Go checksum file: %w", err)
-		}
-	}
-	return modPath, cleanup, nil
+	return filepath.Join(moduleDir, "ard.mod"), cleanup, nil
 }
 
-// dependencyReplaceOverlay synthesizes a go.mod overlay that redirects each
-// dependency's Go module to the root backing its Ard source. It returns nil
-// when there is nothing to redirect or no project go.mod to overlay. The
-// user's on-disk go.mod is never modified.
+func prepareDependencyGoModule(modData []byte, sumData []byte) (string, func(), error) {
+	return writeTemporaryGoModule("ard-go-module-", "go.mod", modData, sumData)
+}
+
+func prepareWritableDependencyGoModule(modData []byte, sumData []byte) (string, func(), error) {
+	return writeTemporaryGoModule("ard-go-module-retry-", "go.mod", modData, sumData)
+}
+
+func writeTemporaryGoModule(pattern string, modName string, modData []byte, sumData []byte) (string, func(), error) {
+	moduleDir, err := os.MkdirTemp("", pattern)
+	if err != nil {
+		return "", func() {}, fmt.Errorf("create dependency Go module files: %w", err)
+	}
+	cleanup := func() { _ = os.RemoveAll(moduleDir) }
+	if err := os.WriteFile(filepath.Join(moduleDir, modName), modData, 0o600); err != nil {
+		cleanup()
+		return "", func() {}, fmt.Errorf("write dependency Go module file: %w", err)
+	}
+	if len(sumData) > 0 {
+		sumName := strings.TrimSuffix(modName, ".mod") + ".sum"
+		if err := os.WriteFile(filepath.Join(moduleDir, sumName), sumData, 0o600); err != nil {
+			cleanup()
+			return "", func() {}, fmt.Errorf("write dependency Go checksum file: %w", err)
+		}
+	}
+	return moduleDir, cleanup, nil
+}
+
+// prepareDependencyGoModfile caches the read-only alternate module files used
+// when the source project already has a go.mod.
 func prepareDependencyGoModfile(modData []byte, sumData []byte) (string, func(), error) {
 	hash := sha256.New()
 	_, _ = hash.Write([]byte("ard-go-mod-v2\x00"))
@@ -598,13 +591,13 @@ func prepareDependencyGoModfile(modData []byte, sumData []byte) (string, func(),
 	_, _ = hash.Write(sumData)
 	cacheKey := fmt.Sprintf("%x", hash.Sum(nil))
 	if cacheRoot, err := os.UserCacheDir(); err == nil {
-		workspaceDir := filepath.Join(cacheRoot, "ard", "go-mod", cacheKey)
-		if err := os.MkdirAll(workspaceDir, 0o700); err == nil {
-			modPath := filepath.Join(workspaceDir, "ard.mod")
+		moduleDir := filepath.Join(cacheRoot, "ard", "go-mod", cacheKey)
+		if err := os.MkdirAll(moduleDir, 0o700); err == nil {
+			modPath := filepath.Join(moduleDir, "ard.mod")
 			modErr := writeCachedGoModuleFile(modPath, modData)
 			sumErr := error(nil)
 			if len(sumData) > 0 {
-				sumErr = writeCachedGoModuleFile(filepath.Join(workspaceDir, "ard.sum"), sumData)
+				sumErr = writeCachedGoModuleFile(filepath.Join(moduleDir, "ard.sum"), sumData)
 			}
 			if modErr == nil && sumErr == nil {
 				return modPath, func() {}, nil
@@ -612,18 +605,18 @@ func prepareDependencyGoModfile(modData []byte, sumData []byte) (string, func(),
 		}
 	}
 
-	workspaceDir, err := os.MkdirTemp("", "ard-go-mod-")
+	moduleDir, err := os.MkdirTemp("", "ard-go-mod-")
 	if err != nil {
 		return "", func() {}, fmt.Errorf("create dependency Go module files: %w", err)
 	}
-	cleanup := func() { _ = os.RemoveAll(workspaceDir) }
-	modPath := filepath.Join(workspaceDir, "ard.mod")
+	cleanup := func() { _ = os.RemoveAll(moduleDir) }
+	modPath := filepath.Join(moduleDir, "ard.mod")
 	if err := os.WriteFile(modPath, modData, 0o600); err != nil {
 		cleanup()
 		return "", func() {}, fmt.Errorf("write dependency Go module file: %w", err)
 	}
 	if len(sumData) > 0 {
-		if err := os.WriteFile(filepath.Join(workspaceDir, "ard.sum"), sumData, 0o600); err != nil {
+		if err := os.WriteFile(filepath.Join(moduleDir, "ard.sum"), sumData, 0o600); err != nil {
 			cleanup()
 			return "", func() {}, fmt.Errorf("write dependency Go checksum file: %w", err)
 		}
@@ -673,64 +666,248 @@ func writeCachedGoModuleFile(path string, data []byte) error {
 	return nil
 }
 
-func (r *GoPackagesResolver) dependencyReplaceOverlay() map[string][]byte {
-	if len(r.DependencyModuleRoots) == 0 || r.ProjectRoot == "" {
-		return nil
+type dependencyGoModuleSource struct {
+	modulePath string
+	root       string
+	file       *modfile.File
+}
+
+// dependencyGoMod builds the private module definition used to redirect each
+// dependency's Go module to the root backing its Ard source. Existing project
+// modules remain the main module through -modfile. Projects without go.mod use
+// a standalone private module rooted outside the source tree. The user's module
+// files are never modified.
+func (r *GoPackagesResolver) dependencyGoMod() ([]byte, bool, error) {
+	dependencies, err := r.dependencyGoModuleSources()
+	if err != nil || len(dependencies) == 0 {
+		return nil, false, err
 	}
 	goModPath := filepath.Join(r.ProjectRoot, "go.mod")
 	data, err := os.ReadFile(goModPath)
-	if err != nil {
-		return nil
-	}
-	file, err := modfile.Parse("go.mod", data, nil)
-	if err != nil {
-		return nil
-	}
-	modulePaths := make([]string, 0, len(r.DependencyModuleRoots))
-	for modulePath := range r.DependencyModuleRoots {
-		modulePaths = append(modulePaths, modulePath)
-	}
-	sort.Strings(modulePaths)
-	changed := false
-	for _, modulePath := range modulePaths {
-		dir := r.DependencyModuleRoots[modulePath]
-		if modulePath == "" || dir == "" {
-			continue
-		}
-		absDir, err := filepath.Abs(dir)
+	standalone := false
+	var file *modfile.File
+	switch {
+	case err == nil:
+		file, err = modfile.Parse("go.mod", data, nil)
 		if err != nil {
-			continue
+			return nil, false, fmt.Errorf("parse project go.mod: %w", err)
 		}
-		// A local replace needs the module to be required to enter the build
-		// graph; add a placeholder require when the consumer's go.mod omits it.
-		if !moduleRequired(file, modulePath) {
-			if err := file.AddRequire(modulePath, "v0.0.0"); err != nil {
+	case os.IsNotExist(err):
+		standalone = true
+		file = new(modfile.File)
+		if err := file.AddModuleStmt(privateResolverModulePath(dependencies)); err != nil {
+			return nil, false, fmt.Errorf("create private Go module: %w", err)
+		}
+		if err := file.AddGoStmt("1.27.0"); err != nil {
+			return nil, false, fmt.Errorf("create private Go module: %w", err)
+		}
+	default:
+		return nil, false, fmt.Errorf("read project go.mod: %w", err)
+	}
+
+	required := make(map[string]bool, len(file.Require)+len(dependencies))
+	for _, require := range file.Require {
+		required[require.Mod.Path] = true
+	}
+	// Promote transitive requirements because generated modules do the same,
+	// keeping checker and backend module graphs identical when dependencies use
+	// local replacement modules.
+	for _, dependency := range dependencies {
+		for _, require := range dependency.file.Require {
+			if required[require.Mod.Path] {
 				continue
 			}
+			file.AddNewRequire(require.Mod.Path, require.Mod.Version, require.Indirect)
+			required[require.Mod.Path] = true
 		}
-		if err := file.AddReplace(modulePath, "", absDir, ""); err != nil {
+	}
+	for _, dependency := range dependencies {
+		if required[dependency.modulePath] {
 			continue
 		}
-		changed = true
+		if err := file.AddRequire(dependency.modulePath, DependencyGoModuleVersion(dependency.modulePath)); err != nil {
+			return nil, false, fmt.Errorf("require dependency Go module %s: %w", dependency.modulePath, err)
+		}
+		required[dependency.modulePath] = true
 	}
-	if !changed {
-		return nil
+
+	// Locked/path roots override a stale consumer replacement for the same
+	// module, so FFI always comes from the source selected by Ard (#353, #437).
+	for _, dependency := range dependencies {
+		for _, replace := range append([]*modfile.Replace(nil), file.Replace...) {
+			if replace.Old.Path == dependency.modulePath {
+				if err := file.DropReplace(replace.Old.Path, replace.Old.Version); err != nil {
+					return nil, false, fmt.Errorf("replace dependency Go module %s: %w", dependency.modulePath, err)
+				}
+			}
+		}
+		if err := file.AddReplace(dependency.modulePath, "", dependency.root, ""); err != nil {
+			return nil, false, fmt.Errorf("replace dependency Go module %s: %w", dependency.modulePath, err)
+		}
 	}
+
+	selected := make(map[string]bool, len(dependencies))
+	for _, dependency := range dependencies {
+		selected[dependency.modulePath] = true
+	}
+	replaced := make(map[string]bool, len(file.Replace))
+	wildcardReplaced := make(map[string]bool, len(file.Replace))
+	for _, replace := range file.Replace {
+		replaced[goModReplaceKey(replace.Old.Path, replace.Old.Version)] = true
+		if replace.Old.Version == "" {
+			wildcardReplaced[replace.Old.Path] = true
+		}
+	}
+	for _, dependency := range dependencies {
+		sourceWildcards := map[string]bool{}
+		for _, replace := range dependency.file.Replace {
+			key := goModReplaceKey(replace.Old.Path, replace.Old.Version)
+			if selected[replace.Old.Path] || wildcardReplaced[replace.Old.Path] || replaced[key] {
+				continue
+			}
+			newPath := replace.New.Path
+			if replace.New.Version == "" && modfile.IsDirectoryPath(newPath) {
+				newPath, err = ResolveLocalGoModulePath(dependency.root, newPath)
+				if err != nil {
+					return nil, false, fmt.Errorf("resolve replacement from dependency Go module %s: %w", dependency.modulePath, err)
+				}
+			}
+			if err := file.AddReplace(replace.Old.Path, replace.Old.Version, newPath, replace.New.Version); err != nil {
+				return nil, false, fmt.Errorf("merge replacement from dependency Go module %s: %w", dependency.modulePath, err)
+			}
+			replaced[key] = true
+			if replace.Old.Version == "" {
+				sourceWildcards[replace.Old.Path] = true
+			}
+		}
+		for modulePath := range sourceWildcards {
+			wildcardReplaced[modulePath] = true
+		}
+	}
+
 	file.Cleanup()
 	formatted, err := file.Format()
 	if err != nil {
-		return nil
+		return nil, false, fmt.Errorf("format dependency Go module: %w", err)
 	}
-	return map[string][]byte{goModPath: formatted}
+	return formatted, standalone, nil
 }
 
-func moduleRequired(file *modfile.File, modulePath string) bool {
-	for _, require := range file.Require {
-		if require.Mod.Path == modulePath {
-			return true
+func (r *GoPackagesResolver) dependencyGoModuleSources() ([]dependencyGoModuleSource, error) {
+	if len(r.DependencyModuleRoots) == 0 || r.ProjectRoot == "" {
+		return nil, nil
+	}
+	modulePaths := make([]string, 0, len(r.DependencyModuleRoots))
+	for modulePath := range r.DependencyModuleRoots {
+		if modulePath != "" && r.DependencyModuleRoots[modulePath] != "" {
+			modulePaths = append(modulePaths, modulePath)
 		}
 	}
-	return false
+	sort.Strings(modulePaths)
+	dependencies := make([]dependencyGoModuleSource, 0, len(modulePaths))
+	for _, modulePath := range modulePaths {
+		root, err := filepath.Abs(r.DependencyModuleRoots[modulePath])
+		if err != nil {
+			return nil, fmt.Errorf("resolve dependency Go module %s: %w", modulePath, err)
+		}
+		data, err := os.ReadFile(filepath.Join(root, "go.mod"))
+		if err != nil {
+			return nil, fmt.Errorf("read dependency Go module %s: %w", modulePath, err)
+		}
+		file, err := modfile.Parse("go.mod", data, nil)
+		if err != nil {
+			return nil, fmt.Errorf("parse dependency Go module %s: %w", modulePath, err)
+		}
+		if file.Module == nil || file.Module.Mod.Path != modulePath {
+			return nil, fmt.Errorf("dependency Go module root %s declares %q, want %q", root, readModfileModulePath(file), modulePath)
+		}
+		dependencies = append(dependencies, dependencyGoModuleSource{modulePath: modulePath, root: root, file: file})
+	}
+	return dependencies, nil
+}
+
+func readModfileModulePath(file *modfile.File) string {
+	if file == nil || file.Module == nil {
+		return ""
+	}
+	return file.Module.Mod.Path
+}
+
+func privateResolverModulePath(dependencies []dependencyGoModuleSource) string {
+	forbidden := map[string]bool{}
+	for _, dependency := range dependencies {
+		forbidden[dependency.modulePath] = true
+		if dependency.file != nil {
+			for _, require := range dependency.file.Require {
+				forbidden[require.Mod.Path] = true
+			}
+		}
+	}
+	modulePaths := make([]string, 0, len(forbidden))
+	for modulePath := range forbidden {
+		modulePaths = append(modulePaths, modulePath)
+	}
+	sort.Strings(modulePaths)
+	hash := sha256.New()
+	for _, modulePath := range modulePaths {
+		_, _ = hash.Write([]byte(modulePath))
+		_, _ = hash.Write([]byte{0})
+	}
+	digest := fmt.Sprintf("%x", hash.Sum(nil))[:12]
+	for suffix := 0; ; suffix++ {
+		root := "ard-resolver"
+		if suffix > 0 {
+			root += fmt.Sprintf("-%d", suffix)
+		}
+		candidate := fmt.Sprintf("%s.invalid/%s", root, digest)
+		conflict := false
+		for _, modulePath := range modulePaths {
+			if GoModulePathsOverlap(candidate, modulePath) {
+				conflict = true
+				break
+			}
+		}
+		if !conflict {
+			return candidate
+		}
+	}
+}
+
+// GoModulePathsOverlap reports whether either module path owns the other's
+// import-path namespace.
+func GoModulePathsOverlap(left string, right string) bool {
+	return left == right || strings.HasPrefix(left, right+"/") || strings.HasPrefix(right, left+"/")
+}
+
+func goModReplaceKey(path string, version string) string {
+	return path + "\x00" + version
+}
+
+// ResolveLocalGoModulePath resolves a Go module replacement directory against
+// the go.mod that declares it, accepting both slash conventions.
+func ResolveLocalGoModulePath(baseDir string, path string) (string, error) {
+	if strings.HasPrefix(path, `.\`) || strings.HasPrefix(path, `..\`) {
+		path = strings.ReplaceAll(path, `\`, "/")
+	}
+	path = filepath.FromSlash(path)
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(baseDir, path)
+	}
+	return filepath.Abs(path)
+}
+
+// DependencyGoModuleVersion returns a valid placeholder version for a locally
+// replaced module, including modules with semantic-import-version suffixes.
+func DependencyGoModuleVersion(modulePath string) string {
+	_, pathMajor, ok := module.SplitPathVersion(modulePath)
+	if !ok || pathMajor == "" {
+		return "v0.0.0"
+	}
+	major := strings.TrimPrefix(strings.TrimPrefix(pathMajor, "/v"), ".v")
+	if major == "" {
+		return "v0.0.0"
+	}
+	return "v" + major + ".0.0"
 }
 
 func (r *GoPackagesResolver) packageFromLoadResult(path string, pkg *packages.Package) (*GoPackage, error) {

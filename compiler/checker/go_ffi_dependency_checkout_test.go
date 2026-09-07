@@ -138,42 +138,54 @@ func Make() model.Item { return model.Item{} }
 		t.Fatal(err)
 	}
 
-	consumer := t.TempDir()
-	consumerMod := "module example.com/app\n\ngo 1.27\n"
-	if err := os.WriteFile(filepath.Join(consumer, "go.mod"), []byte(consumerMod), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	for _, test := range []struct {
+		name      string
+		withGoMod bool
+	}{
+		{name: "consumer module", withGoMod: true},
+		{name: "standalone private module", withGoMod: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			consumer := t.TempDir()
+			if test.withGoMod {
+				consumerMod := "module example.com/app\n\ngo 1.27\n"
+				if err := os.WriteFile(filepath.Join(consumer, "go.mod"), []byte(consumerMod), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
 
-	resolver := checker.NewGoPackagesResolver(consumer, nil)
-	resolver.DependencyModuleRoots = map[string]string{"example.com/dep": dependency}
-	if err := resolver.Prime([]string{"example.com/dep/ffi/producer", "example.com/dep/ffi/model"}); err != nil {
-		t.Fatalf("Prime: %v", err)
-	}
-	producer, err := resolver.ResolveGoPackage("example.com/dep/ffi/producer")
-	if err != nil {
-		t.Fatalf("resolve producer with incomplete sums: %v", err)
-	}
-	model, err := resolver.ResolveGoPackage("example.com/dep/ffi/model")
-	if err != nil {
-		t.Fatalf("resolve model with incomplete sums: %v", err)
-	}
-	makeFn := producer.Functions["Make"]
-	if makeFn == nil {
-		t.Fatal("dependency FFI did not expose Make after private module retry")
-	}
-	returned, ok := makeFn.ReturnType.(*checker.ForeignType)
-	if !ok {
-		t.Fatalf("Make return = %T, want *checker.ForeignType", producer.Functions["Make"].ReturnType)
-	}
-	declared, ok := model.Types["Item"].(*checker.ForeignType)
-	if !ok {
-		t.Fatalf("model.Item = %T, want *checker.ForeignType", model.Types["Item"])
-	}
-	if !gotypes.Identical(returned.GoType, declared.GoType) {
-		t.Fatalf("retry split the shared Go type universe: %v != %v", returned.GoType, declared.GoType)
-	}
-	if _, err := os.Stat(filepath.Join(consumer, "go.sum")); !os.IsNotExist(err) {
-		t.Fatalf("consumer go.sum was created or stat failed: %v", err)
+			resolver := checker.NewGoPackagesResolver(consumer, nil)
+			resolver.DependencyModuleRoots = map[string]string{"example.com/dep": dependency}
+			if err := resolver.Prime([]string{"example.com/dep/ffi/producer", "example.com/dep/ffi/model"}); err != nil {
+				t.Fatalf("Prime: %v", err)
+			}
+			producer, err := resolver.ResolveGoPackage("example.com/dep/ffi/producer")
+			if err != nil {
+				t.Fatalf("resolve producer with incomplete sums: %v", err)
+			}
+			model, err := resolver.ResolveGoPackage("example.com/dep/ffi/model")
+			if err != nil {
+				t.Fatalf("resolve model with incomplete sums: %v", err)
+			}
+			makeFn := producer.Functions["Make"]
+			if makeFn == nil {
+				t.Fatal("dependency FFI did not expose Make after private module retry")
+			}
+			returned, ok := makeFn.ReturnType.(*checker.ForeignType)
+			if !ok {
+				t.Fatalf("Make return = %T, want *checker.ForeignType", producer.Functions["Make"].ReturnType)
+			}
+			declared, ok := model.Types["Item"].(*checker.ForeignType)
+			if !ok {
+				t.Fatalf("model.Item = %T, want *checker.ForeignType", model.Types["Item"])
+			}
+			if !gotypes.Identical(returned.GoType, declared.GoType) {
+				t.Fatalf("retry split the shared Go type universe: %v != %v", returned.GoType, declared.GoType)
+			}
+			if _, err := os.Stat(filepath.Join(consumer, "go.sum")); !os.IsNotExist(err) {
+				t.Fatalf("consumer go.sum was created or stat failed: %v", err)
+			}
+		})
 	}
 	if _, err := os.Stat(filepath.Join(dependency, "go.sum")); !os.IsNotExist(err) {
 		t.Fatalf("dependency go.sum was created or stat failed: %v", err)
@@ -218,6 +230,128 @@ func Value() string { return "ok" }
 	}
 	if pkg.Functions["Value"] == nil {
 		t.Fatal("path dependency FFI did not expose Value")
+	}
+}
+
+func TestGoPackagesResolverPromotesDependencyRelativeReplacesWithoutConsumerGoModule(t *testing.T) {
+	t.Setenv("GOPROXY", "off")
+	t.Setenv("GOSUMDB", "off")
+	t.Setenv("GOWORK", "off")
+	t.Setenv("GOFLAGS", "")
+	t.Setenv("GOPACKAGESDRIVER", "off")
+
+	root := t.TempDir()
+	consumer := filepath.Join(root, "consumer")
+	dependency := filepath.Join(root, "dependency")
+	helper := filepath.Join(root, "helper with space")
+	for _, dir := range []string{consumer, dependency, helper} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeGoModule(t, helper, "example.com/helper", `package ffi
+
+func Value() string { return "ok" }
+`)
+	dependencyMod := "module example.com/dep\n\ngo 1.27.0\n\nrequire example.com/helper v0.0.0\n\nreplace example.com/helper => \"../helper with space\"\n"
+	if err := os.WriteFile(filepath.Join(dependency, "go.mod"), []byte(dependencyMod), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ffiDir := filepath.Join(dependency, "ffi")
+	if err := os.MkdirAll(ffiDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ffiSource := "package ffi\n\nimport helper \"example.com/helper/ffi\"\n\nfunc Value() string { return helper.Value() }\n"
+	if err := os.WriteFile(filepath.Join(ffiDir, "ffi.go"), []byte(ffiSource), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	resolver := checker.NewGoPackagesResolver(consumer, nil)
+	resolver.DependencyModuleRoots = map[string]string{"example.com/dep": dependency}
+	if err := resolver.Prime([]string{"example.com/dep/ffi"}); err != nil {
+		t.Fatalf("Prime: %v", err)
+	}
+	pkg, err := resolver.ResolveGoPackage("example.com/dep/ffi")
+	if err != nil {
+		t.Fatalf("resolve dependency FFI through relative replacement: %v", err)
+	}
+	if pkg.Functions["Value"] == nil {
+		t.Fatal("dependency FFI did not expose Value")
+	}
+	for _, dir := range []string{consumer, dependency, helper} {
+		if _, err := os.Stat(filepath.Join(dir, "go.sum")); !os.IsNotExist(err) {
+			t.Fatalf("source go.sum was created under %s or stat failed: %v", dir, err)
+		}
+	}
+}
+
+func TestGoPackagesResolverSelectedRootOverridesDependencyVersionReplace(t *testing.T) {
+	t.Setenv("GOPROXY", "off")
+	t.Setenv("GOSUMDB", "off")
+	t.Setenv("GOWORK", "off")
+	t.Setenv("GOFLAGS", "")
+	t.Setenv("GOPACKAGESDRIVER", "off")
+
+	root := t.TempDir()
+	dependencyA := filepath.Join(root, "a")
+	dependencyB := filepath.Join(root, "b")
+	staleB := filepath.Join(root, "stale-b")
+	for _, dir := range []string{dependencyA, dependencyB, staleB} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeGoModule(t, dependencyB, "example.com/b", `package ffi
+
+func Selected() string { return "selected" }
+`)
+	writeGoModule(t, staleB, "example.com/b", `package ffi
+
+func Stale() string { return "stale" }
+`)
+	dependencyAMod := "module example.com/a\n\ngo 1.27.0\n\nrequire example.com/b v1.2.3\n\nreplace example.com/b v1.2.3 => ../stale-b\n"
+	if err := os.WriteFile(filepath.Join(dependencyA, "go.mod"), []byte(dependencyAMod), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	aFFI := filepath.Join(dependencyA, "ffi")
+	if err := os.MkdirAll(aFFI, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	aSource := "package ffi\n\nimport b \"example.com/b/ffi\"\n\nfunc Value() string { return b.Selected() }\n"
+	if err := os.WriteFile(filepath.Join(aFFI, "ffi.go"), []byte(aSource), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, test := range []struct {
+		name      string
+		withGoMod bool
+	}{
+		{name: "consumer module", withGoMod: true},
+		{name: "standalone private module", withGoMod: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			consumer := t.TempDir()
+			if test.withGoMod {
+				if err := os.WriteFile(filepath.Join(consumer, "go.mod"), []byte("module example.com/app\n\ngo 1.27.0\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			resolver := checker.NewGoPackagesResolver(consumer, nil)
+			resolver.DependencyModuleRoots = map[string]string{
+				"example.com/a": dependencyA,
+				"example.com/b": dependencyB,
+			}
+			if err := resolver.Prime([]string{"example.com/a/ffi"}); err != nil {
+				t.Fatalf("Prime: %v", err)
+			}
+			pkg, err := resolver.ResolveGoPackage("example.com/a/ffi")
+			if err != nil {
+				t.Fatalf("resolve with selected dependency root: %v", err)
+			}
+			if pkg.Functions["Value"] == nil {
+				t.Fatal("dependency FFI did not expose Value")
+			}
+		})
 	}
 }
 

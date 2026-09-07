@@ -437,6 +437,11 @@ func generatedGoMod(dir string, program *air.Program, projectInfo *checker.Proje
 	if err != nil {
 		return "", err
 	}
+	dependencies := sortedDependencyGoModPackages(program, projectInfo)
+	goMod, err = dropSelectedDependencyReplaces(goMod, dependencies)
+	if err != nil {
+		return "", err
+	}
 	requireSeen := requireKeys(goMod)
 	requires := make([]string, 0)
 	addDependencyGoModRequirements(&requires, requireSeen, program, projectInfo)
@@ -452,6 +457,39 @@ func generatedGoMod(dir string, program *air.Program, projectInfo *checker.Proje
 	return goMod, nil
 }
 
+func dropSelectedDependencyReplaces(goMod string, dependencies []dependencyGoModPackage) (string, error) {
+	if len(dependencies) == 0 {
+		return goMod, nil
+	}
+	file, err := modfile.Parse("go.mod", []byte(goMod), nil)
+	if err != nil {
+		return "", err
+	}
+	selected := make(map[string]bool, len(dependencies))
+	for _, dependency := range dependencies {
+		selected[dependency.modulePath] = true
+	}
+	changed := false
+	for _, replace := range append([]*modfile.Replace(nil), file.Replace...) {
+		if !selected[replace.Old.Path] {
+			continue
+		}
+		if err := file.DropReplace(replace.Old.Path, replace.Old.Version); err != nil {
+			return "", err
+		}
+		changed = true
+	}
+	if !changed {
+		return goMod, nil
+	}
+	file.Cleanup()
+	formatted, err := file.Format()
+	if err != nil {
+		return "", err
+	}
+	return string(formatted), nil
+}
+
 // addDependencyGoModRootReplaces redirects each dependency's Go module to the
 // root backing its Ard source: a locked checkout for Git dependencies (#353)
 // or the declared source root for path dependencies (#437). This mirrors the
@@ -462,7 +500,7 @@ func addDependencyGoModRootReplaces(out *[]string, seen map[string]bool, program
 		if err != nil {
 			continue
 		}
-		addGoModReplace(out, seen, fmt.Sprintf("%s => %s", dependency.modulePath, abs))
+		addGoModReplace(out, seen, fmt.Sprintf("%s => %s", dependency.modulePath, modfile.AutoQuote(abs)))
 	}
 }
 
@@ -470,10 +508,52 @@ func generatedModulePath(projectInfo *checker.ProjectInfo) string {
 	if module := projectGoModuleName(projectInfo); module != "" {
 		return module
 	}
+	preferred := "generated"
 	if projectInfo != nil && strings.TrimSpace(projectInfo.ProjectName) != "" {
-		return projectInfo.ProjectName
+		preferred = projectInfo.ProjectName
 	}
-	return "generated"
+	dependencyPaths := generatedDependencyModulePaths(projectInfo)
+	conflicts := func(candidate string) bool {
+		for modulePath := range dependencyPaths {
+			if checker.GoModulePathsOverlap(candidate, modulePath) {
+				return true
+			}
+		}
+		return false
+	}
+	if !conflicts(preferred) {
+		return preferred
+	}
+	for suffix := 0; ; suffix++ {
+		root := "ard-generated"
+		if suffix > 0 {
+			root += fmt.Sprintf("-%d", suffix)
+		}
+		candidate := root + ".invalid/project"
+		if !conflicts(candidate) {
+			return candidate
+		}
+	}
+}
+
+func generatedDependencyModulePaths(projectInfo *checker.ProjectInfo) map[string]bool {
+	roots := checker.DependencyGoModuleRoots(projectInfo)
+	paths := make(map[string]bool, len(roots))
+	for modulePath, root := range roots {
+		paths[modulePath] = true
+		data, err := os.ReadFile(filepath.Join(root, "go.mod"))
+		if err != nil {
+			continue
+		}
+		file, err := modfile.Parse("go.mod", data, nil)
+		if err != nil {
+			continue
+		}
+		for _, require := range file.Require {
+			paths[require.Mod.Path] = true
+		}
+	}
+	return paths
 }
 
 func generatedGoModBase(projectInfo *checker.ProjectInfo) (string, error) {
@@ -490,11 +570,8 @@ func generatedGoModBase(projectInfo *checker.ProjectInfo) (string, error) {
 		if !os.IsNotExist(err) {
 			return "", err
 		}
-		if strings.TrimSpace(projectInfo.ProjectName) != "" {
-			return fmt.Sprintf("module %s\n\ngo 1.27.0\n", projectInfo.ProjectName), nil
-		}
 	}
-	return "module generated\n\ngo 1.27.0\n", nil
+	return fmt.Sprintf("module %s\n\ngo 1.27.0\n", generatedModulePath(projectInfo)), nil
 }
 
 func rewriteRelativeReplaces(data []byte, projectRoot string) ([]byte, error) {
@@ -519,10 +596,10 @@ func rewriteRelativeReplaces(data []byte, projectRoot string) ([]byte, error) {
 	}
 	rewrites := []replacementRewrite{}
 	for _, replace := range file.Replace {
-		if replace.New.Version != "" || !isRelativeLocalReplacePath(replace.New.Path) {
+		if replace.New.Version != "" || !modfile.IsDirectoryPath(replace.New.Path) || filepath.IsAbs(filepath.FromSlash(replace.New.Path)) {
 			continue
 		}
-		abs, err := filepath.Abs(filepath.Join(projectRoot, replace.New.Path))
+		abs, err := checker.ResolveLocalGoModulePath(projectRoot, replace.New.Path)
 		if err != nil {
 			return nil, err
 		}
@@ -539,10 +616,6 @@ func rewriteRelativeReplaces(data []byte, projectRoot string) ([]byte, error) {
 	return file.Format()
 }
 
-func isRelativeLocalReplacePath(path string) bool {
-	return strings.HasPrefix(path, "./") || strings.HasPrefix(path, "../") || path == "." || path == ".."
-}
-
 func addDependencyGoModRequirements(out *[]string, seen map[string]bool, program *air.Program, projectInfo *checker.ProjectInfo) {
 	dependencies := sortedDependencyGoModPackages(program, projectInfo)
 	for _, dependency := range dependencies {
@@ -551,7 +624,7 @@ func addDependencyGoModRequirements(out *[]string, seen map[string]bool, program
 	for _, dependency := range dependencies {
 		if !seen[dependency.modulePath] {
 			seen[dependency.modulePath] = true
-			*out = append(*out, dependency.modulePath+" v0.0.0")
+			*out = append(*out, dependency.modulePath+" "+checker.DependencyGoModuleVersion(dependency.modulePath))
 		}
 	}
 }
@@ -640,13 +713,6 @@ func extractRequireLines(goMod string) []string {
 	return lines
 }
 
-func addProjectGoModReplaces(out *[]string, seen map[string]bool, projectInfo *checker.ProjectInfo) {
-	if projectInfo == nil || strings.TrimSpace(projectInfo.RootPath) == "" {
-		return
-	}
-	addGoModReplacesFromFile(out, seen, filepath.Join(projectInfo.RootPath, "go.mod"), projectInfo.RootPath)
-}
-
 // projectGoModuleName returns the module path declared in the project's go.mod,
 // or "" if the project has no Go module. This is the module that owns the
 func projectGoModuleName(projectInfo *checker.ProjectInfo) string {
@@ -667,29 +733,64 @@ func projectGoModuleName(projectInfo *checker.ProjectInfo) string {
 }
 
 func addDependencyGoModReplaces(out *[]string, seen map[string]bool, program *air.Program, projectInfo *checker.ProjectInfo) {
-	for _, dependency := range sortedDependencyGoModPackages(program, projectInfo) {
-		addGoModReplacesFromFile(out, seen, filepath.Join(dependency.root, "go.mod"), dependency.root)
+	dependencies := sortedDependencyGoModPackages(program, projectInfo)
+	selected := make(map[string]bool, len(dependencies))
+	for _, dependency := range dependencies {
+		selected[dependency.modulePath] = true
 	}
-}
-
-func addGoModReplacesFromFile(out *[]string, seen map[string]bool, path string, baseDir string) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return
+	wildcardReplaced := map[string]bool{}
+	for key := range seen {
+		if fields := strings.Fields(key); len(fields) == 1 {
+			wildcardReplaced[fields[0]] = true
+		}
 	}
-	for _, replace := range extractReplaceLines(string(data)) {
-		normalized, ok := normalizeReplaceLine(replace, baseDir)
-		if !ok {
+	for _, dependency := range dependencies {
+		data, err := os.ReadFile(filepath.Join(dependency.root, "go.mod"))
+		if err != nil {
 			continue
 		}
-		addGoModReplace(out, seen, normalized)
+		file, err := modfile.Parse("go.mod", data, nil)
+		if err != nil {
+			continue
+		}
+		sourceWildcards := map[string]bool{}
+		for _, replace := range file.Replace {
+			if selected[replace.Old.Path] || wildcardReplaced[replace.Old.Path] {
+				continue
+			}
+			normalized, err := formatDependencyGoModReplace(replace, dependency.root)
+			if err != nil {
+				continue
+			}
+			addGoModReplace(out, seen, normalized)
+			if replace.Old.Version == "" {
+				sourceWildcards[replace.Old.Path] = true
+			}
+		}
+		for modulePath := range sourceWildcards {
+			wildcardReplaced[modulePath] = true
+		}
 	}
 }
 
-func addGoModReplaces(out *[]string, seen map[string]bool, goMod string) {
-	for _, replace := range extractReplaceLines(goMod) {
-		addGoModReplace(out, seen, replace)
+func formatDependencyGoModReplace(replace *modfile.Replace, baseDir string) (string, error) {
+	newPath := replace.New.Path
+	if replace.New.Version == "" && modfile.IsDirectoryPath(newPath) {
+		var err error
+		newPath, err = checker.ResolveLocalGoModulePath(baseDir, newPath)
+		if err != nil {
+			return "", err
+		}
 	}
+	oldSide := modfile.AutoQuote(replace.Old.Path)
+	if replace.Old.Version != "" {
+		oldSide += " " + replace.Old.Version
+	}
+	newSide := modfile.AutoQuote(newPath)
+	if replace.New.Version != "" {
+		newSide += " " + replace.New.Version
+	}
+	return oldSide + " => " + newSide, nil
 }
 
 func addGoModReplace(out *[]string, seen map[string]bool, replace string) {
@@ -738,49 +839,12 @@ func extractReplaceLines(goMod string) []string {
 	return lines
 }
 
-func normalizeReplaceLine(line string, baseDir string) (string, bool) {
-	parts := strings.SplitN(line, "=>", 2)
-	if len(parts) != 2 {
-		return "", false
-	}
-	lhs := strings.TrimSpace(parts[0])
-	rhs := strings.TrimSpace(parts[1])
-	rhsWithoutComment := strings.TrimSpace(strings.SplitN(rhs, "//", 2)[0])
-	fields := strings.Fields(rhsWithoutComment)
-	if len(fields) == 1 && baseDir != "" && isLocalReplacePath(fields[0]) {
-		path := fields[0]
-		if !filepath.IsAbs(path) {
-			path = filepath.Join(baseDir, path)
-		}
-		if abs, err := filepath.Abs(path); err == nil {
-			path = abs
-		}
-		rhs = filepath.Clean(path)
-	}
-	if lhs == "" || rhs == "" {
-		return "", false
-	}
-	return lhs + " => " + rhs, true
-}
-
 func replaceKey(replace string) string {
 	parts := strings.SplitN(replace, "=>", 2)
 	if len(parts) != 2 {
 		return ""
 	}
 	return strings.TrimSpace(parts[0])
-}
-
-func replacedModulePath(key string) string {
-	fields := strings.Fields(key)
-	if len(fields) == 0 {
-		return ""
-	}
-	return fields[0]
-}
-
-func isLocalReplacePath(path string) bool {
-	return filepath.IsAbs(path) || strings.HasPrefix(path, "./") || strings.HasPrefix(path, "../")
 }
 
 func formatReplaceBlock(replaces []string) string {
@@ -796,6 +860,9 @@ func formatReplaceBlock(replaces []string) string {
 	return out.String()
 }
 
+// mergeGoSum retains checksums verified in prior generated builds and supplied
+// by the consumer module. Dependency go.sum files are not main-module trust
+// roots; missing checksums are verified by Go in the generated module.
 func mergeGoSum(dir string, program *air.Program, projectInfo *checker.ProjectInfo) error {
 	goSumPath := filepath.Join(dir, "go.sum")
 	lines := make([]string, 0)
@@ -803,9 +870,6 @@ func mergeGoSum(dir string, program *air.Program, projectInfo *checker.ProjectIn
 	addGoSumLines(&lines, seen, goSumPath)
 	if projectInfo != nil && strings.TrimSpace(projectInfo.RootPath) != "" {
 		addGoSumLines(&lines, seen, filepath.Join(projectInfo.RootPath, "go.sum"))
-	}
-	for _, dependency := range sortedDependencyGoModPackages(program, projectInfo) {
-		addGoSumLines(&lines, seen, filepath.Join(dependency.root, "go.sum"))
 	}
 	if len(lines) == 0 {
 		return nil

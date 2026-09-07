@@ -195,7 +195,176 @@ func TestReadonlyModuleCompletionErrorClassification(t *testing.T) {
 	}
 }
 
-func TestDependencyReplaceOverlayUsesCanonicalModuleOrder(t *testing.T) {
+func TestDependencyConfigWithoutProjectGoModUsesPrivateModuleFile(t *testing.T) {
+	root := t.TempDir()
+	dependency := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dependency, "go.mod"), []byte("module example.com/dep\n\ngo 1.27.0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	resolver := NewGoPackagesResolver(root, nil)
+	resolver.DependencyModuleRoots = map[string]string{"example.com/dep": dependency}
+	cfg, cleanup, err := resolver.loadConfigWithDependencies()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	if value, found := environmentValue(cfg.Env, "GOWORK"); found {
+		t.Fatalf("dependency config overrides GOWORK=%q, want module-only config", value)
+	}
+	foundReadonly := false
+	for _, flag := range cfg.BuildFlags {
+		if strings.HasPrefix(flag, "-modfile=") {
+			t.Fatalf("standalone dependency config uses alternate modfile: %v", cfg.BuildFlags)
+		}
+		if flag == "-mod=readonly" {
+			foundReadonly = true
+		}
+	}
+	if !foundReadonly || cfg.Dir == root {
+		t.Fatalf("dependency config dir/flags = %q %v, want private standalone module", cfg.Dir, cfg.BuildFlags)
+	}
+	modData, err := os.ReadFile(filepath.Join(cfg.Dir, "go.mod"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(modData)
+	if !strings.Contains(got, "module ard-resolver") || !strings.Contains(got, "example.com/dep v0.0.0") {
+		t.Fatalf("private module is incomplete:\n%s", got)
+	}
+	wantReplace := "replace example.com/dep => " + dependency
+	if !strings.Contains(got, wantReplace) {
+		t.Fatalf("private module missing %q:\n%s", wantReplace, got)
+	}
+	writable, writableCleanup, available, err := resolver.loadWritableConfigWithDependencies()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer writableCleanup()
+	if !available {
+		t.Fatal("private standalone module has no writable retry")
+	}
+	if value, found := environmentValue(writable.Env, "GOWORK"); found {
+		t.Fatalf("writable dependency config overrides GOWORK=%q, want module-only config", value)
+	}
+	if writable.Dir == root || !slices.Contains(writable.BuildFlags, "-mod=mod") {
+		t.Fatalf("writable dependency config dir/flags = %q %v, want private standalone module", writable.Dir, writable.BuildFlags)
+	}
+	for _, flag := range writable.BuildFlags {
+		if strings.HasPrefix(flag, "-modfile=") {
+			t.Fatalf("writable standalone dependency config uses alternate modfile: %v", writable.BuildFlags)
+		}
+	}
+	if writableMod, err := os.ReadFile(filepath.Join(writable.Dir, "go.mod")); err != nil {
+		t.Fatal(err)
+	} else if string(writableMod) != got {
+		t.Fatalf("writable private module differs from readonly module:\n%s\nwant:\n%s", writableMod, got)
+	}
+	if _, err := os.Stat(filepath.Join(root, "go.mod")); !os.IsNotExist(err) {
+		t.Fatalf("source project go.mod was created or stat failed: %v", err)
+	}
+}
+
+func TestResolveLocalGoModulePathAcceptsSlashConventions(t *testing.T) {
+	base := t.TempDir()
+	want := filepath.Join(base, "helper")
+	for _, path := range []string{"./helper", `.\helper`} {
+		got, err := ResolveLocalGoModulePath(base, path)
+		if err != nil {
+			t.Fatalf("ResolveLocalGoModulePath(%q): %v", path, err)
+		}
+		if got != want {
+			t.Errorf("ResolveLocalGoModulePath(%q) = %q, want %q", path, got, want)
+		}
+	}
+}
+
+func TestDependencyGoModuleVersion(t *testing.T) {
+	tests := map[string]string{
+		"example.com/dep":      "v0.0.0",
+		"example.com/dep/v2":   "v2.0.0",
+		"gopkg.in/example.v3":  "v3.0.0",
+		"example.com/dep/v100": "v100.0.0",
+	}
+	for modulePath, want := range tests {
+		if got := DependencyGoModuleVersion(modulePath); got != want {
+			t.Errorf("DependencyGoModuleVersion(%q) = %q, want %q", modulePath, got, want)
+		}
+	}
+}
+
+func TestPrivateResolverModulePathDoesNotOverlapDependencies(t *testing.T) {
+	dependencies := []dependencyGoModuleSource{
+		{modulePath: "ard-resolver.invalid"},
+		{modulePath: "example.com/dep"},
+	}
+	got := privateResolverModulePath(dependencies)
+	for _, dependency := range dependencies {
+		if GoModulePathsOverlap(got, dependency.modulePath) {
+			t.Fatalf("private module %q overlaps dependency %q", got, dependency.modulePath)
+		}
+	}
+}
+
+func TestDependencyGoModPreservesConsumerWildcardReplace(t *testing.T) {
+	root := t.TempDir()
+	dependency := t.TempDir()
+	trusted := filepath.Join(root, "trusted")
+	stale := filepath.Join(root, "stale")
+	projectMod := "module example.com/app\n\ngo 1.27.0\n\nrequire example.com/transitive v1.2.3\n\nreplace example.com/transitive => " + trusted + "\n"
+	dependencyMod := "module example.com/dep\n\ngo 1.27.0\n\nrequire example.com/transitive v1.2.3\n\nreplace example.com/transitive v1.2.3 => " + stale + "\n"
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte(projectMod), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dependency, "go.mod"), []byte(dependencyMod), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	resolver := NewGoPackagesResolver(root, nil)
+	resolver.DependencyModuleRoots = map[string]string{"example.com/dep": dependency}
+	modData, _, err := resolver.dependencyGoMod()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(modData)
+	if !strings.Contains(got, "example.com/transitive => "+trusted) || strings.Contains(got, stale) {
+		t.Fatalf("dependency module overrode consumer wildcard replacement:\n%s", got)
+	}
+}
+
+func TestDependencyGoModUsesFirstDependencyWildcardReplace(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/app\n\ngo 1.27.0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dependencyA := t.TempDir()
+	dependencyB := t.TempDir()
+	trusted := filepath.Join(root, "trusted")
+	specific := filepath.Join(root, "specific")
+	stale := filepath.Join(root, "stale")
+	aMod := "module example.com/a\n\ngo 1.27.0\n\nrequire example.com/transitive v1.2.3\n\nreplace (\n\texample.com/transitive => " + trusted + "\n\texample.com/transitive v1.2.3 => " + specific + "\n)\n"
+	bMod := "module example.com/b\n\ngo 1.27.0\n\nrequire example.com/transitive v1.2.4\n\nreplace example.com/transitive v1.2.4 => " + stale + "\n"
+	if err := os.WriteFile(filepath.Join(dependencyA, "go.mod"), []byte(aMod), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dependencyB, "go.mod"), []byte(bMod), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	resolver := NewGoPackagesResolver(root, nil)
+	resolver.DependencyModuleRoots = map[string]string{
+		"example.com/a": dependencyA,
+		"example.com/b": dependencyB,
+	}
+	modData, _, err := resolver.dependencyGoMod()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(modData)
+	if !strings.Contains(got, "example.com/transitive => "+trusted) || !strings.Contains(got, "example.com/transitive v1.2.3 => "+specific) || strings.Contains(got, stale) {
+		t.Fatalf("dependency replacement precedence is inconsistent:\n%s", got)
+	}
+}
+
+func TestDependencyGoModUsesCanonicalModuleOrder(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/app\n\ngo 1.27\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -205,9 +374,20 @@ func TestDependencyReplaceOverlayUsesCanonicalModuleOrder(t *testing.T) {
 		"example.com/z_last":  t.TempDir(),
 		"example.com/a_first": t.TempDir(),
 	}
+	for modulePath, moduleRoot := range resolver.DependencyModuleRoots {
+		if err := os.WriteFile(filepath.Join(moduleRoot, "go.mod"), []byte("module "+modulePath+"\n\ngo 1.27.0\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
 
-	overlay := resolver.dependencyReplaceOverlay()
-	got := string(overlay[filepath.Join(root, "go.mod")])
+	modData, standalone, err := resolver.dependencyGoMod()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if standalone {
+		t.Fatal("project module dependency config marked standalone")
+	}
+	got := string(modData)
 	firstRequire := strings.Index(got, "example.com/a_first v0.0.0")
 	lastRequire := strings.Index(got, "example.com/z_last v0.0.0")
 	firstReplace := strings.Index(got, "replace example.com/a_first")
