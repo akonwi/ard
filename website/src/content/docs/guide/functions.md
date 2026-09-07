@@ -192,6 +192,28 @@ let squared = apply(3, fn(x: Int) Int { x * x })
 
 Anonymous functions may also use enclosing function or receiver generics as explicit call type arguments. See [Generics in anonymous functions](../advanced/generics/#generics-in-anonymous-functions).
 
+## Nested Named Functions
+
+A named function declared inside another function is a local closure. It captures values when its declaration executes, and direct calls and function references use that same captured closure:
+
+```ard
+fn make_offsetter(offset: Int) fn(Int) Int {
+  fn add(value: Int) Int {
+    offset + value
+  }
+  add
+}
+
+let add_two = make_offsetter(2)
+let result = add_two(40) // 42
+```
+
+Ordinary captured values and existing reference handles are snapshotted when the declaration executes. If the local function assigns to an enclosing mutable binding, it captures that binding's stable slot instead, so the update remains visible outside the function.
+
+Local declarations are visible from their declaration through the remainder of the block. Their own name is available in their body, so direct recursion works, but calls before the declaration and mutual recursion through a later declaration are not supported. When a nested named declaration is the block's final expression, it evaluates to the bound closure just as writing its name after the declaration would.
+
+Local named function signatures cannot contain generic parameters. Move a generic named helper to module scope, or use an anonymous function value when its signature refers to an enclosing generic. Type-qualified static function declarations, such as `fn User::new() User`, must also be declared at module scope.
+
 ## Function Signatures
 
 When referring to function types, use the `fn` syntax and just omit the body:

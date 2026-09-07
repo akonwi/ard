@@ -791,6 +791,14 @@ func (n *localNamer) mustSuffix(name string, scopeRefs []int) bool {
 }
 
 func (n *localNamer) assign(id air.LocalID, scopeRefs []int) {
+	n.assignWithMode(id, scopeRefs, false)
+}
+
+func (n *localNamer) assignUnique(id air.LocalID, scopeRefs []int) {
+	n.assignWithMode(id, scopeRefs, true)
+}
+
+func (n *localNamer) assignWithMode(id air.LocalID, scopeRefs []int, forceSuffix bool) {
 	if _, ok := n.names[id]; ok {
 		return
 	}
@@ -799,7 +807,7 @@ func (n *localNamer) assign(id air.LocalID, scopeRefs []int) {
 		base = "local"
 	}
 	cand := base
-	if n.mustSuffix(cand, scopeRefs) {
+	if forceSuffix || n.mustSuffix(cand, scopeRefs) {
 		cand = fmt.Sprintf("%s_%d", base, id)
 		for k := 1; n.mustSuffix(cand, scopeRefs); k++ {
 			cand = fmt.Sprintf("%s_%d_%d", base, id, k)
@@ -875,7 +883,11 @@ func (n *localNamer) walkStmt(s air.Stmt, scopeRefs []int) {
 		if s.Value != nil {
 			n.walkExpr(*s.Value) // initializer is evaluated before the local binds
 		}
-		n.assign(s.Local, scopeRefs)
+		if s.LocalFunction {
+			n.assignUnique(s.Local, scopeRefs)
+		} else {
+			n.assign(s.Local, scopeRefs)
+		}
 	case air.StmtWhile:
 		if s.Condition != nil {
 			n.walkExpr(*s.Condition)

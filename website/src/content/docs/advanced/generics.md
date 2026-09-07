@@ -83,6 +83,28 @@ The inherited `$T` still belongs to `callback`. Calling the returned anonymous f
 
 For explicit call type arguments, generics created temporarily while inferring a contextual callback do not declare source names. A nested named function declaration starts a new boundary and cannot use a body-only outer generic as an explicit call type argument.
 
+### Generic signatures on local named functions
+
+Nested named functions are closure values, so their signatures cannot contain generic parameters. This includes generics belonging to the enclosing declaration:
+
+```ard
+// Not allowed: the local named function has a generic signature.
+fn read_value(value: $T) $T {
+  fn read() $T { value }
+  read()
+}
+```
+
+Use an anonymous function when a local closure signature refers to the enclosing generic:
+
+```ard
+fn reader(value: $T) fn() $T {
+  fn() $T { value }
+}
+```
+
+A local named function with a concrete signature may still capture a generic-typed value for operations that do not expose that type in its signature. Move independently generic named helpers to module scope.
+
 ## Generic Structs
 
 Structs can also hold generics. If a generic type appears in a field, that field introduces the struct's generic parameter:

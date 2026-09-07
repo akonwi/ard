@@ -43,6 +43,8 @@ Each generic function call should use fresh type variables for that call site, s
 
 Anonymous functions may use declaration generics from their enclosing function or receiver method as explicit call type arguments, including when a generic appears only in the anonymous function body. Inherited generics remain owned by the enclosing declaration and are not independently instantiated when the anonymous function is called. Contextual call-inference variables do not bind names written as explicit call type arguments. A named function declaration establishes a new boundary for explicit call type arguments rather than inheriting body-only generic names.
 
+Nested named functions are lexical closure values and may not have generic parameters in their signatures, including parameters owned by an enclosing declaration. They may capture generic-typed enclosing values when their own signature remains concrete. Code that needs a generic named helper must declare it at module scope; code that needs a local function whose signature contains an enclosing generic uses an anonymous function value.
+
 Conflicting bindings for the same generic parameter must be rejected.
 
 ## Consequences
@@ -50,6 +52,7 @@ Conflicting bindings for the same generic parameter must be rejected.
 - Generic declarations stay concise because `$T` in a function or struct signature is enough to introduce a type parameter.
 - Common higher-order functions can infer anonymous callback parameter types from earlier arguments.
 - Anonymous functions can reference enclosing declaration generics without becoming independently generic.
+- Nested named function signatures remain concrete so they can be represented as closure values on every target.
 - The checker must support per-call fresh generic variables and consistent type refinement.
 - Backends should receive concrete specialized types after checking/AIR lowering rather than open generic definitions where executable code requires concrete types.
 - Future generic constraints, if added, can build on the generic parameter model without changing the basic syntax.

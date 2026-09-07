@@ -371,6 +371,14 @@ func validateBlock(program *Program, fn Function, block Block) error {
 				return err
 			}
 		}
+		if stmt.Predeclare && stmt.Kind != StmtLet {
+			return fmt.Errorf("only let statements may predeclare a local")
+		}
+		if stmt.LocalFunction {
+			if stmt.Kind != StmtLet || stmt.Value == nil || stmt.Value.Kind != ExprMakeClosure {
+				return fmt.Errorf("local function binding must be a closure-valued let")
+			}
+		}
 		if stmt.Kind == StmtLet || stmt.Kind == StmtAssign {
 			if stmt.Local < 0 || int(stmt.Local) >= len(fn.Locals) {
 				return fmt.Errorf("local statement references invalid local %d", stmt.Local)

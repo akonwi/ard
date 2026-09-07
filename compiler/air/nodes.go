@@ -29,11 +29,18 @@ type Stmt struct {
 	Name       string
 	Type       TypeID
 	Mutable    bool
-	Value      *Expr
-	Expr       *Expr
-	Target     *Expr
-	Field      int
-	FieldName  string
+	// Predeclare makes a StmtLet binding available while its initializer is
+	// evaluated. Recursive local functions use it so their closure can capture
+	// the stable self slot before the closure value is assigned.
+	Predeclare bool
+	// LocalFunction identifies a lexical named-function binding. Targets may
+	// need a unique storage name when expression scopes are flattened.
+	LocalFunction bool
+	Value         *Expr
+	Expr          *Expr
+	Target        *Expr
+	Field         int
+	FieldName     string
 
 	ForeignTarget    string
 	ForeignNamespace string

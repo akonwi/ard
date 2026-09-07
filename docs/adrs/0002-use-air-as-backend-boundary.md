@@ -34,7 +34,7 @@ AIR should remain:
 - explicit about resolved program semantics targets need
 - structured enough to preserve source-oriented diagnostics and control flow
 
-AIR should expose target-facing program structure such as modules, functions, concrete type identities, struct layouts, enum/union metadata, captures, closure shape, extern signatures, statements/expressions, and entry/script roots. During checker-to-AIR lowering, statically dispatched source calls and direct source function references carry the exact declaration selected by the checker; AIR assigns that declaration a `FunctionID` rather than rediscovering it by name. Trait calls carry the resolved trait identity and method slot. Dynamic function-value calls carry only their callable signature and storage target.
+AIR should expose target-facing program structure such as modules, functions, concrete type identities, struct layouts, enum/union metadata, captures, closure shape, extern signatures, statements/expressions, and entry/script roots. During checker-to-AIR lowering, statically dispatched source calls and direct source function references carry the exact declaration selected by the checker; AIR assigns that declaration a `FunctionID` rather than rediscovering it by name. Nested named declarations instead become lexical closure-valued locals, and every call or reference to one uses that same local binding; recursive locals explicitly predeclare and capture their self slot. Trait calls carry the resolved trait identity and method slot. Dynamic function-value calls carry only their callable signature and storage target.
 
 AIR models two execution roots:
 

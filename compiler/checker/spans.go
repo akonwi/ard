@@ -364,14 +364,19 @@ func (c *Checker) recordTypeRef(loc parse.Location, name string) {
 // recordCallAttempt records a call site whose checking failed (wrong arity,
 // bad argument) so tooling can still resolve the callee. Signature help
 // depends on this: its whole purpose is mid-typing, when calls are invalid.
-func (c *Checker) recordCallAttempt(source parse.Expression, name string, fnDef *FunctionDef) {
-	if c.spans == nil || source == nil || fnDef == nil {
+func (c *Checker) recordCallAttempt(source parse.Expression, call *FunctionCall) {
+	if c.spans == nil || source == nil || call == nil {
 		return
+	}
+	var key any
+	if call.declaration != nil && call.declaration.LocalNamed && call.binding != nil {
+		key = call.binding
 	}
 	c.spans.add(SpanRecord{
 		Loc:    source.GetLocation(),
 		Source: source,
-		Node:   &FunctionCall{Name: name, signature: fnDef, ReturnType: fnDef.ReturnType},
+		Node:   call,
+		Key:    key,
 	})
 }
 
@@ -393,6 +398,9 @@ func (c *Checker) recordDef(loc parse.Location, key string) {
 func (c *Checker) spanKeyFor(node Expression) any {
 	switch n := node.(type) {
 	case *FunctionCall:
+		if n.declaration != nil && n.declaration.LocalNamed && n.binding != nil {
+			return n.binding
+		}
 		// Only key module-local, non-namespaced calls. Namespaced calls
 		// (mod::fn, Type::fn, Go packages) would mis-key under the current
 		// module path; cross-module identity is a later slice.
