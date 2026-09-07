@@ -281,9 +281,9 @@ Module-level variables lower to package-level Go `var` declarations (`0021-repre
 
 Module-level variables always lower to `var`, never `const`, even when the initializer is a literal. Ard module lets can hold arbitrary expressions, and uniform `var` lowering avoids special-casing; a future optimization may emit `const` for literal-initialized lets but is out of scope here.
 
-When an initializer requires setup statements (for example a block or match expression), the initializer is wrapped in an immediately-invoked function literal (`var x T = func() T { ...; return v }()`). An IIFE is preferred over a generated `init()` function because it keeps Go's dependency-aware package variable initialization intact: a later variable whose initializer reads `x` still observes the initialized value, which an `init()`-assigned variable would not guarantee.
+AIR keeps each initializer expression together with its global-owned local table. When an initializer requires setup statements (for example a block or match expression), the initializer is wrapped in an immediately-invoked function literal (`var x T = func() T { ...; return v }()`). An IIFE is preferred over a generated `init()` function because it keeps Go's dependency-aware package variable initialization intact: a later variable whose initializer reads `x` still observes the initialized value, which an `init()`-assigned variable would not guarantee. Initializers whose Go lowering produces no setup statements remain direct package-variable expressions.
 
-Initialization order relies on Go's package-level variable initialization: declaration order is preserved for otherwise-independent variables, and reference dependencies are resolved automatically. This matches Ard's top-to-bottom module-load order. Cyclic global initializers are rejected during AIR lowering before code generation.
+Initialization order relies on Go's package-level variable initialization: declaration order is preserved for otherwise-independent variables, and reference dependencies are resolved automatically. This matches Ard's top-to-bottom module-load order. Direct forward references are rejected during checking. Function-mediated cycles currently surface as Go initialization-cycle diagnostics; target-neutral transitive cycle detection remains future AIR validation work.
 
 A `mut` global receives no special treatment beyond being an unexported package variable; it is ordinary package state, as in Ard today. Assignments to a `mut` global from function bodies lower to ordinary Go package-variable assignments.
 
@@ -386,14 +386,14 @@ The prelude `ToString` trait is the one trait given a well-known Go mapping: it 
 
 Ard is expression-oriented and Go is statement-oriented, so the general rule is that a control-flow construct in value position lowers to Go statements that compute into a temporary, and the temporary is used by the surrounding expression. In statement position it lowers to the natural Go statement.
 
-Statement hoisting always suffices; the backend does not use immediately-invoked function literals. Two positions need slightly more care than a plain hoist:
+Statement hoisting normally suffices inside a function. Two positions need different treatment:
 
-- a package-level initializer that requires statements is assigned in a generated `init()` function rather than inline
+- a package-level initializer cannot hoist statements to package scope, so a statement-producing initializer remains attached to its `var` declaration through an immediately-invoked function literal
 - a short-circuit operand (the right side of `&&` or `||`) that requires statements is lowered with a guarded temporary, so its statements run only when the operand is actually evaluated
 
 #### Blocks, if, and match
 
-- A block evaluates to its final expression: its statements lower in order and the final expression becomes the block's value.
+- A block evaluates to its final expression: its statements lower in order and the final expression becomes the block's value. Setup statements retain an explicit Go block scope so nested Ard bindings and shadowed names are not flattened into the surrounding scope.
 - `if`/`else` lowers to Go `if`/`else`; in value position each branch assigns the same temporary.
 - `match` lowers per subject:
   - a value-binding match arm binds the matched value into the case body: the implicit `it` binds the subject; named arms such as `ok(x)`, `err(e)`, and `some(x)` bind the extracted `Result`/`Maybe` payload; and a union member arm written as `Type(x)` (for example `Str(s)`, `Int(i)`) binds the matched member field into `x`
