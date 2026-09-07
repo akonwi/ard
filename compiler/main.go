@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -21,6 +22,7 @@ import (
 	"github.com/akonwi/ard/frontend"
 	gotarget "github.com/akonwi/ard/go"
 	"github.com/akonwi/ard/lsp"
+	"github.com/akonwi/ard/manifest"
 	"github.com/akonwi/ard/parse"
 	"github.com/akonwi/ard/version"
 )
@@ -94,12 +96,12 @@ func main() {
 		}
 	case "build":
 		{
-			inputPath, outputPath, err := parseBuildArgs(os.Args[2:])
+			args, err := parseBuildArgs(os.Args[2:])
 			if err != nil {
 				reportCLIError(os.Stderr, err)
 				os.Exit(1)
 			}
-			if _, err := buildGoBinary(inputPath, outputPath); err != nil {
+			if _, err := buildGoBinaryWithOptions(args.Input, args.Output, checker.BuildOptions{Release: args.Release, Overrides: args.Overrides}); err != nil {
 				reportCLIError(os.Stderr, err)
 				os.Exit(1)
 			}
@@ -273,7 +275,8 @@ func printUsage(w io.Writer) {
 Commands:
   check <file.ard>                  Type-check a program
   run <file.ard>                    Run a program
-  build <file.ard> [--out <path>]    Build a program
+  build <file.ard> [--out <path>] [--release] [--define <name=value>]
+                                      Build a program
   test [path] [--filter <pattern>]   Run Ard tests
   add <git-source@ref> [as alias]    Add or update a Git dependency and lock it
   update [alias...]                  Update Git dependencies to their latest commit
@@ -335,34 +338,14 @@ func runAddCommand(args []string) error {
 }
 
 func dependencyAliasesForGitInManifest(path string, git string, keepAlias string) ([]string, error) {
-	data, err := os.ReadFile(path)
+	document, err := manifest.ParseFile(path)
 	if err != nil {
 		return nil, err
 	}
 	git = checker.CanonicalGitSource(git)
 	aliases := []string{}
-	inDependencies := false
-	depRe := regexp.MustCompile(`^\s*([A-Za-z_][A-Za-z0-9_-]*)\s*=\s*\{([^}]*)\}`)
-	gitRe := regexp.MustCompile(`\bgit\s*=\s*["']([^"']+)["']`)
-	for _, line := range strings.Split(string(data), "\n") {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
-			inDependencies = trimmed == "[dependencies]"
-			continue
-		}
-		if !inDependencies {
-			continue
-		}
-		matches := depRe.FindStringSubmatch(line)
-		if len(matches) < 3 {
-			continue
-		}
-		alias := matches[1]
-		if alias == keepAlias {
-			continue
-		}
-		gitMatches := gitRe.FindStringSubmatch(matches[2])
-		if len(gitMatches) >= 2 && checker.CanonicalGitSource(gitMatches[1]) == git {
+	for alias, dependency := range document.Dependencies {
+		if alias != keepAlias && checker.CanonicalGitSource(dependency.Git) == git {
 			aliases = append(aliases, alias)
 		}
 	}
@@ -691,16 +674,11 @@ func cloneDependencyForManifest(dep checker.DependencyInfo) (string, func(), err
 }
 
 func parseManifestName(path string) (string, bool) {
-	content, err := os.ReadFile(path)
-	if err != nil {
+	document, err := manifest.ParseFile(path)
+	if err != nil || document.Name == "" {
 		return "", false
 	}
-	re := regexp.MustCompile(`(?m)^\s*name\s*=\s*["']([^"']+)["']`)
-	matches := re.FindStringSubmatch(string(content))
-	if len(matches) < 2 {
-		return "", false
-	}
-	return matches[1], true
+	return document.Name, true
 }
 
 func isGitCommitish(ref string) bool {
@@ -751,6 +729,9 @@ func replaceDependencyInManifest(path string, removeAliases []string, dep checke
 	for _, alias := range removeAliases {
 		remove[alias] = true
 	}
+	if err := requireEditableDependencyDeclarations(data, lines, remove); err != nil {
+		return err
+	}
 	if start < 0 {
 		text := strings.TrimRight(string(data), "\n") + "\n\n[dependencies]\n" + entry + "\n"
 		return os.WriteFile(path, []byte(text), 0o644)
@@ -778,13 +759,57 @@ func replaceDependencyInManifest(path string, removeAliases []string, dep checke
 }
 
 func manifestLineMatchesAnyAlias(line string, aliases map[string]bool) bool {
-	for alias := range aliases {
-		aliasRe := regexp.MustCompile("^\\s*" + regexp.QuoteMeta(alias) + "\\s*=")
-		if aliasRe.MatchString(line) {
-			return true
+	alias, ok := editableDependencyLineAlias(line)
+	return ok && aliases[alias]
+}
+
+func requireEditableDependencyDeclarations(data []byte, lines []string, aliases map[string]bool) error {
+	document, err := manifest.Parse(data)
+	if err != nil {
+		return err
+	}
+	found := map[string]bool{}
+	inDependencies := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
+			inDependencies = trimmed == "[dependencies]"
+			continue
+		}
+		if inDependencies {
+			if alias, ok := editableDependencyLineAlias(line); ok {
+				found[alias] = true
+			}
 		}
 	}
-	return false
+	for alias := range aliases {
+		if _, exists := document.Dependencies[alias]; exists && !found[alias] {
+			return fmt.Errorf("dependency %q uses a TOML form that cannot be edited safely; rewrite it as a one-line inline table", alias)
+		}
+	}
+	return nil
+}
+
+func editableDependencyLineAlias(line string) (string, bool) {
+	trimmed := strings.TrimSpace(line)
+	equals := strings.IndexByte(trimmed, '=')
+	if equals < 1 {
+		return "", false
+	}
+	key := strings.TrimSpace(trimmed[:equals])
+	value := strings.TrimSpace(trimmed[equals+1:])
+	if !strings.HasPrefix(value, "{") || !strings.Contains(value, "}") {
+		return "", false
+	}
+	if len(key) >= 2 && key[0] == '\'' && key[len(key)-1] == '\'' {
+		return key[1 : len(key)-1], true
+	}
+	if len(key) >= 2 && key[0] == '"' && key[len(key)-1] == '"' {
+		unquoted, err := strconv.Unquote(key)
+		return unquoted, err == nil
+	}
+	matched, _ := regexp.MatchString(`^[A-Za-z_][A-Za-z0-9_-]*$`, key)
+	return key, matched
 }
 
 func removeDependencyFromManifest(path string, alias string) (bool, error) {
@@ -808,14 +833,16 @@ func removeDependencyFromManifest(path string, alias string) (bool, error) {
 			}
 		}
 	}
+	if err := requireEditableDependencyDeclarations(data, lines, map[string]bool{alias: true}); err != nil {
+		return false, err
+	}
 	if start < 0 {
 		return false, nil
 	}
-	aliasRe := regexp.MustCompile("^\\s*" + regexp.QuoteMeta(alias) + "\\s*=")
 	removed := false
 	updated := make([]string, 0, len(lines))
 	for i, line := range lines {
-		if i > start && i < end && aliasRe.MatchString(line) {
+		if i > start && i < end && manifestLineMatchesAnyAlias(line, map[string]bool{alias: true}) {
 			removed = true
 			continue
 		}
@@ -863,38 +890,68 @@ func parseRunArgs(args []string) (string, error) {
 	return inputPath, nil
 }
 
-func parseBuildArgs(args []string) (string, string, error) {
-	inputPath := ""
-	outputPath := ""
+type buildArgs struct {
+	Input     string
+	Output    string
+	Release   bool
+	Overrides []checker.BuildOverride
+}
+
+func parseBuildArgs(args []string) (buildArgs, error) {
+	result := buildArgs{}
+	seenOutput := false
+	seenRelease := false
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
-		if arg == "--out" {
-			if i+1 >= len(args) {
-				return "", "", fmt.Errorf("--out requires a path")
+		switch arg {
+		case "--out":
+			if seenOutput {
+				return buildArgs{}, fmt.Errorf("--out may be provided only once")
 			}
-			outputPath = args[i+1]
+			if i+1 >= len(args) || args[i+1] == "" || strings.HasPrefix(args[i+1], "-") {
+				return buildArgs{}, fmt.Errorf("--out requires a path")
+			}
+			seenOutput = true
+			result.Output = args[i+1]
 			i++
-			continue
+		case "--release":
+			if seenRelease {
+				return buildArgs{}, fmt.Errorf("--release may be provided only once")
+			}
+			seenRelease = true
+			result.Release = true
+		case "--define":
+			if i+1 >= len(args) {
+				return buildArgs{}, fmt.Errorf("--define requires name=value")
+			}
+			definition := args[i+1]
+			name, value, ok := strings.Cut(definition, "=")
+			if !ok || name == "" {
+				return buildArgs{}, fmt.Errorf("--define requires name=value")
+			}
+			result.Overrides = append(result.Overrides, checker.BuildOverride{Name: name, Value: value})
+			i++
+		default:
+			if strings.HasPrefix(arg, "-") {
+				return buildArgs{}, fmt.Errorf("unknown flag: %s", arg)
+			}
+			if result.Input == "" {
+				result.Input = arg
+				continue
+			}
+			return buildArgs{}, fmt.Errorf("unexpected argument: %s", arg)
 		}
-		if strings.HasPrefix(arg, "-") {
-			return "", "", fmt.Errorf("unknown flag: %s", arg)
-		}
-		if inputPath == "" {
-			inputPath = arg
-			continue
-		}
-		return "", "", fmt.Errorf("unexpected argument: %s", arg)
 	}
-	if inputPath == "" {
-		return "", "", fmt.Errorf("expected filepath argument")
+	if result.Input == "" {
+		return buildArgs{}, fmt.Errorf("expected filepath argument")
 	}
-	if outputPath == "" {
-		outputPath = filepath.Base(strings.TrimSuffix(inputPath, filepath.Ext(inputPath)))
-		if outputPath == "" || outputPath == "." || outputPath == string(filepath.Separator) {
-			outputPath = "main"
+	if result.Output == "" {
+		result.Output = filepath.Base(strings.TrimSuffix(result.Input, filepath.Ext(result.Input)))
+		if result.Output == "" || result.Output == "." || result.Output == string(filepath.Separator) {
+			result.Output = "main"
 		}
 	}
-	return inputPath, outputPath, nil
+	return result, nil
 }
 
 func parseFormatArgs(args []string) (string, bool, error) {
@@ -1477,12 +1534,16 @@ func reportTestSummary(outcomes []testOutcome) {
 }
 
 func buildGoBinary(inputPath string, outputPath string) (string, error) {
+	return buildGoBinaryWithOptions(inputPath, outputPath, checker.BuildOptions{})
+}
+
+func buildGoBinaryWithOptions(inputPath string, outputPath string, buildOptions checker.BuildOptions) (string, error) {
 	profile := newPipelineProfile("build go")
 	defer profile.Print()
 	var loaded *frontend.LoadResult
 	if err := profile.Time("frontend.load_module", func() error {
 		var loadErr error
-		loaded, loadErr = frontend.LoadModule(inputPath)
+		loaded, loadErr = frontend.LoadModuleWithOptions(inputPath, frontend.LoadOptions{Build: buildOptions})
 		return loadErr
 	}); err != nil {
 		return "", err

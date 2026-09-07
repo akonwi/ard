@@ -18,6 +18,7 @@ import (
 
 	"slices"
 
+	"github.com/akonwi/ard/manifest"
 	"github.com/akonwi/ard/parse"
 	"github.com/akonwi/ard/version"
 )
@@ -28,6 +29,7 @@ type ProjectInfo struct {
 	ProjectName   string                    // project name from ard.toml or directory name
 	Dependencies  map[string]DependencyInfo // dependency aliases from ard.toml
 	Go            GoProjectConfig
+	Build         manifest.BuildConfig
 	RootPackageID string
 	Packages      map[string]PackageInfo
 }
@@ -86,6 +88,7 @@ type ModuleResolver struct {
 	overlays       map[string]string         // unsaved source text by resolved file path
 	loadingChain   []string                  // track canonical module paths currently being loaded for circular dependency detection
 	modulePackages map[string]string         // canonical module path -> package ID
+	buildModule    Module
 }
 
 type ResolvedImport struct {
@@ -114,29 +117,23 @@ func FindProjectRoot(startPath string) (*ProjectInfo, error) {
 			if err != nil {
 				return nil, err
 			}
-			// Found ard.toml, parse project name
-			projectName, err := parseProjectName(tomlPath)
+			document, err := manifest.ParseFile(tomlPath)
 			if err != nil {
 				return nil, fmt.Errorf("failed to parse ard.toml: %w", err)
 			}
-
-			// Check ard version constraint (required in ard.toml)
-			constraint, ok := parseArdVersion(tomlPath)
-			if !ok {
+			projectName := document.Name
+			if projectName == "" {
+				return nil, fmt.Errorf("failed to parse ard.toml: no project name found in ard.toml")
+			}
+			if document.Ard == "" {
 				return nil, fmt.Errorf("ard.toml is missing required field: ard (e.g. ard = \">= 0.13.0\")")
 			}
-			if err := version.CheckVersion(constraint); err != nil {
+			if err := version.CheckVersion(document.Ard); err != nil {
 				return nil, err
 			}
 
-			dependencies, err := parseProjectDependencies(tomlPath, current)
-			if err != nil {
-				return nil, fmt.Errorf("failed to parse ard.toml: %w", err)
-			}
-			goConfig, err := parseGoProjectConfig(tomlPath)
-			if err != nil {
-				return nil, fmt.Errorf("failed to parse ard.toml: %w", err)
-			}
+			dependencies := projectDependencies(document.Dependencies, current)
+			goConfig := GoProjectConfig{BuildTags: append([]string(nil), document.Go.BuildTags...)}
 			rootPackageID := "root"
 			packages := map[string]PackageInfo{
 				rootPackageID: {
@@ -159,6 +156,7 @@ func FindProjectRoot(startPath string) (*ProjectInfo, error) {
 				ProjectName:   projectName,
 				Dependencies:  dependencies,
 				Go:            goConfig,
+				Build:         document.Build,
 				RootPackageID: rootPackageID,
 				Packages:      packages,
 			}, nil
@@ -215,144 +213,47 @@ func validatePackageRoot(rootPath string) (string, error) {
 	return absPath, nil
 }
 
-// parseProjectName extracts the project name from ard.toml
-// For now, use simple regex parsing. Format: name = "project_name"
 func parseProjectName(tomlPath string) (string, error) {
-	content, err := os.ReadFile(tomlPath)
+	document, err := manifest.ParseFile(tomlPath)
 	if err != nil {
 		return "", err
 	}
-
-	// Simple regex to match: name = "project_name" or name = 'project_name'
-	re := regexp.MustCompile(`(?m)^\s*name\s*=\s*["']([^"']+)["']`)
-	matches := re.FindStringSubmatch(string(content))
-	if len(matches) < 2 {
+	if document.Name == "" {
 		return "", fmt.Errorf("no project name found in ard.toml")
 	}
-
-	return matches[1], nil
-}
-
-// parseArdVersion extracts the ard constraint from ard.toml if present.
-// Format: ard = ">= 0.13.0" or ard = "0.13.0"
-func parseArdVersion(tomlPath string) (string, bool) {
-	content, err := os.ReadFile(tomlPath)
-	if err != nil {
-		return "", false
-	}
-
-	re := regexp.MustCompile(`(?m)^\s*ard\s*=\s*["']([^"']+)["']`)
-	matches := re.FindStringSubmatch(string(content))
-	if len(matches) < 2 {
-		return "", false
-	}
-
-	return matches[1], true
-}
-
-func parseGoProjectConfig(tomlPath string) (GoProjectConfig, error) {
-	content, err := os.ReadFile(tomlPath)
-	if err != nil {
-		return GoProjectConfig{}, err
-	}
-	config := GoProjectConfig{}
-	section := ""
-	sectionRe := regexp.MustCompile(`^\s*\[([^\]]+)\]\s*$`)
-	buildTagsAssignRe := regexp.MustCompile(`^\s*build_tags\s*=`)
-	buildTagsRe := regexp.MustCompile(`^\s*build_tags\s*=\s*\[(.*)\]\s*(?:#.*)?$`)
-	quotedTagRe := regexp.MustCompile(`["']([^"']*)["']`)
-	validTagRe := regexp.MustCompile(`^[A-Za-z0-9_.]+$`)
-	for _, line := range strings.Split(string(content), "\n") {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
-			continue
-		}
-		if matches := sectionRe.FindStringSubmatch(line); len(matches) == 2 {
-			section = matches[1]
-			continue
-		}
-		if section != "go" {
-			continue
-		}
-		if !buildTagsAssignRe.MatchString(line) {
-			continue
-		}
-		matches := buildTagsRe.FindStringSubmatch(line)
-		if len(matches) != 2 {
-			return GoProjectConfig{}, fmt.Errorf("[go].build_tags must be a list of quoted strings")
-		}
-		rawList := strings.TrimSpace(matches[1])
-		if rawList == "" {
-			continue
-		}
-		rawItems := strings.Split(rawList, ",")
-		for i, rawItem := range rawItems {
-			rawItem = strings.TrimSpace(rawItem)
-			if rawItem == "" {
-				if i == len(rawItems)-1 && strings.HasSuffix(strings.TrimSpace(rawList), ",") {
-					continue
-				}
-				return GoProjectConfig{}, fmt.Errorf("[go].build_tags must be a list of quoted strings")
-			}
-			tagMatch := quotedTagRe.FindStringSubmatch(rawItem)
-			if len(tagMatch) != 2 || tagMatch[0] != rawItem {
-				return GoProjectConfig{}, fmt.Errorf("[go].build_tags must be a list of quoted strings")
-			}
-			tag := tagMatch[1]
-			if tag == "" || !validTagRe.MatchString(tag) {
-				return GoProjectConfig{}, fmt.Errorf("invalid Go build tag %q", tag)
-			}
-			config.BuildTags = append(config.BuildTags, tag)
-		}
-	}
-	return config, nil
+	return document.Name, nil
 }
 
 func parseProjectDependencies(tomlPath string, projectRoot string) (map[string]DependencyInfo, error) {
-	content, err := os.ReadFile(tomlPath)
+	document, err := manifest.ParseFile(tomlPath)
 	if err != nil {
 		return nil, err
 	}
-	deps := map[string]DependencyInfo{}
-	inDependencies := false
-	depRe := regexp.MustCompile(`^\s*([A-Za-z_][A-Za-z0-9_-]*)\s*=\s*\{([^}]*)\}`)
-	pathRe := regexp.MustCompile(`\bpath\s*=\s*["']([^"']+)["']`)
-	gitRe := regexp.MustCompile(`\bgit\s*=\s*["']([^"']+)["']`)
-	tagRe := regexp.MustCompile(`\btag\s*=\s*["']([^"']+)["']`)
-	commitRe := regexp.MustCompile(`\bcommit\s*=\s*["']([^"']+)["']`)
-	for _, line := range strings.Split(string(content), "\n") {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
-			inDependencies = trimmed == "[dependencies]"
-			continue
+	return projectDependencies(document.Dependencies, projectRoot), nil
+}
+
+func projectDependencies(declarations map[string]manifest.Dependency, projectRoot string) map[string]DependencyInfo {
+	deps := make(map[string]DependencyInfo, len(declarations))
+	for alias, declaration := range declarations {
+		dep := DependencyInfo{
+			Alias:  alias,
+			Name:   alias,
+			Git:    declaration.Git,
+			Tag:    declaration.Tag,
+			Commit: declaration.Commit,
 		}
-		if !inDependencies || trimmed == "" || strings.HasPrefix(trimmed, "#") {
-			continue
-		}
-		matches := depRe.FindStringSubmatch(line)
-		if len(matches) < 3 {
-			continue
-		}
-		alias := matches[1]
-		body := matches[2]
-		dep := DependencyInfo{Alias: alias, Name: alias}
-		if pathMatches := pathRe.FindStringSubmatch(body); len(pathMatches) >= 2 {
-			dep.SourcePath = pathMatches[1]
+		if declaration.Path != "" {
+			dep.SourcePath = declaration.Path
 			if !filepath.IsAbs(dep.SourcePath) {
 				dep.SourcePath = filepath.Clean(filepath.Join(projectRoot, dep.SourcePath))
 			}
 			dep.RootPath = dep.SourcePath
 			dep.PackageID = "path:" + dep.SourcePath
 		}
-		if gitMatches := gitRe.FindStringSubmatch(body); len(gitMatches) >= 2 {
-			dep.Git = gitMatches[1]
-		}
-		if tagMatches := tagRe.FindStringSubmatch(body); len(tagMatches) >= 2 {
-			dep.Tag = tagMatches[1]
+		if dep.Tag != "" {
 			dep.Requested = dep.Tag
 		}
-		if commitMatches := commitRe.FindStringSubmatch(body); len(commitMatches) >= 2 {
-			dep.Commit = commitMatches[1]
+		if dep.Commit != "" {
 			dep.Requested = dep.Commit
 		}
 		if dep.SourcePath == "" && dep.Git == "" {
@@ -360,7 +261,7 @@ func parseProjectDependencies(tomlPath string, projectRoot string) (map[string]D
 		}
 		deps[alias] = dep
 	}
-	return deps, nil
+	return deps
 }
 
 func ReadDependencyLock(projectRoot string) (LockFile, bool, error) {
@@ -1256,9 +1157,19 @@ func PruneLockDependency(projectRoot string, alias string) error {
 	return WriteDependencyLock(projectRoot, lock)
 }
 
-// NewModuleResolver creates a new module resolver for the given working directory
+// NewModuleResolver creates a resolver using manifest defaults for build values.
 func NewModuleResolver(workingDir string) (*ModuleResolver, error) {
+	return NewModuleResolverWithOptions(workingDir, BuildOptions{})
+}
+
+// NewModuleResolverWithOptions creates a resolver with invocation-specific
+// build value overrides and release policy.
+func NewModuleResolverWithOptions(workingDir string, options BuildOptions) (*ModuleResolver, error) {
 	project, err := FindProjectRoot(workingDir)
+	if err != nil {
+		return nil, err
+	}
+	values, err := resolveBuildValues(project.Build, options)
 	if err != nil {
 		return nil, err
 	}
@@ -1270,7 +1181,54 @@ func NewModuleResolver(workingDir string) (*ModuleResolver, error) {
 		overlays:       make(map[string]string),
 		loadingChain:   make([]string, 0),
 		modulePackages: make(map[string]string),
+		buildModule:    newBuildModule(values),
 	}, nil
+}
+
+// IsRootPackageModule reports whether a checked module belongs to the
+// application package whose manifest supplied the build values. Unknown files
+// fail closed instead of inheriting packageIDForModule's root fallback.
+func (mr *ModuleResolver) IsRootPackageModule(modulePath string, filePath string) bool {
+	if mr == nil || mr.project == nil {
+		return false
+	}
+	if packageID, ok := mr.modulePackages[modulePath]; ok {
+		return packageID == mr.project.RootPackageID
+	}
+	absolutePath := filePath
+	if !filepath.IsAbs(absolutePath) {
+		absolutePath = filepath.Join(mr.project.RootPath, absolutePath)
+	}
+	absolutePath = filepath.Clean(absolutePath)
+	for packageID, pkg := range mr.project.Packages {
+		if packageID == mr.project.RootPackageID || pkg.RootPath == "" {
+			continue
+		}
+		if pathWithinRoot(absolutePath, pkg.RootPath) {
+			return false
+		}
+	}
+	root, ok := mr.project.Packages[mr.project.RootPackageID]
+	return ok && pathWithinRoot(absolutePath, root.RootPath)
+}
+
+func pathWithinRoot(filePath string, rootPath string) bool {
+	absoluteRoot, err := filepath.Abs(rootPath)
+	if err != nil {
+		return false
+	}
+	relative, err := filepath.Rel(absoluteRoot, filePath)
+	return err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) && !filepath.IsAbs(relative)
+}
+
+func (mr *ModuleResolver) resolveBuildModule(importerModulePath string, filePath string) (Module, error) {
+	if !mr.IsRootPackageModule(importerModulePath, filePath) {
+		return nil, fmt.Errorf("%s is available only to modules in the root application package", BuildModulePath)
+	}
+	if mr.buildModule == nil || len(mr.project.Build.Values) == 0 {
+		return nil, fmt.Errorf("%s requires declarations in [build.values] in the root ard.toml", BuildModulePath)
+	}
+	return mr.buildModule, nil
 }
 
 // SetOverlay provides unsaved source text for a resolved module file path.

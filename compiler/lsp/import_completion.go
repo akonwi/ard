@@ -23,7 +23,14 @@ func importCompletionPrefix(linePrefix string) (string, bool) {
 }
 
 func importPathCompletionItems(pathPrefix string, filePath string) []protocol.CompletionItem {
-	workingDir := filepath.Dir(filePath)
+	return importPathCompletionItemsWithRoot(pathPrefix, filePath, "")
+}
+
+func importPathCompletionItemsWithRoot(pathPrefix string, filePath string, projectRoot string) []protocol.CompletionItem {
+	workingDir := projectRoot
+	if workingDir == "" {
+		workingDir = filepath.Dir(filePath)
+	}
 	resolver, err := checker.NewModuleResolver(workingDir)
 	if err != nil {
 		return nil
@@ -57,6 +64,9 @@ func importPathCompletionItems(pathPrefix string, filePath string) []protocol.Co
 	} else if base == "ard" {
 		for _, entry := range listArdStdlibImportChildren("") {
 			add(entry)
+		}
+		if len(project.Build.Values) > 0 && resolver.IsRootPackageModule("", filePath) {
+			add("build")
 		}
 	} else if strings.HasPrefix(base, "ard/") {
 		for _, entry := range listArdStdlibImportChildren(strings.TrimPrefix(base, "ard/")) {

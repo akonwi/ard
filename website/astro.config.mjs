@@ -202,6 +202,7 @@ export default defineConfig({
             { label: "Pattern Matching", slug: "guide/pattern-matching" },
             { label: "Modules", slug: "guide/modules" },
             { label: "Dependencies", slug: "guide/dependencies" },
+            { label: "Build values", slug: "guide/build-values" },
             { label: "Testing", slug: "guide/testing" },
             { label: "Formatting", slug: "guide/formatting" },
           ],

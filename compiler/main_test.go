@@ -912,6 +912,51 @@ func TestBuildGoBinary(t *testing.T) {
 		t.Fatalf("stat built binary: %v", err)
 	}
 }
+func TestBuildGoBinaryEmbedsBuildValueOverrides(t *testing.T) {
+	tempDir := t.TempDir()
+	manifest := `name = "buildmeta"
+ard = ">= 0.40.0"
+
+[build.values]
+version = { type = "Str", default = "dev", release = true }
+build_number = { type = "Int", default = 0 }
+experimental = { type = "Bool", default = false }
+`
+	if err := os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sourcePath := filepath.Join(tempDir, "main.ard")
+	source := `use ard/build
+use go:fmt
+
+fn main() {
+  fmt::Printf("%s:%d:%t", build::version, build::build_number, build::experimental)
+}
+`
+	if err := os.WriteFile(sourcePath, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	outputPath := filepath.Join(tempDir, "buildmeta")
+	_, err := buildGoBinaryWithOptions(sourcePath, outputPath, checker.BuildOptions{
+		Release: true,
+		Overrides: []checker.BuildOverride{
+			{Name: "version", Value: "v1=final"},
+			{Name: "build_number", Value: "42"},
+			{Name: "experimental", Value: "true"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	output, err := exec.Command(outputPath).CombinedOutput()
+	if err != nil {
+		t.Fatalf("run: %v: %s", err, output)
+	}
+	if got, want := string(output), "v1=final:42:true"; got != want {
+		t.Fatalf("output = %q, want %q", got, want)
+	}
+}
+
 func TestParseTestArgs(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -990,44 +1035,30 @@ func TestParseBuildArgs(t *testing.T) {
 		args       []string
 		path       string
 		out        string
+		release    bool
+		overrides  []checker.BuildOverride
 		expectErr  bool
 		errMessage string
 	}{
+		{name: "input only", args: []string{"demo.ard"}, path: "demo.ard", out: "demo"},
+		{name: "nested input defaults to file basename", args: []string{"samples/main.ard"}, path: "samples/main.ard", out: "main"},
+		{name: "explicit output", args: []string{"samples/main.ard", "--out", "demo"}, path: "samples/main.ard", out: "demo"},
 		{
-			name: "input only",
-			args: []string{"demo.ard"},
-			path: "demo.ard",
-			out:  "demo",
+			name:      "release with definitions",
+			args:      []string{"samples/main.ard", "--release", "--define", "version=v1=final", "--define", "channel="},
+			path:      "samples/main.ard",
+			out:       "main",
+			release:   true,
+			overrides: []checker.BuildOverride{{Name: "version", Value: "v1=final"}, {Name: "channel", Value: ""}},
 		},
-		{
-			name: "nested input defaults to file basename",
-			args: []string{"samples/main.ard"},
-			path: "samples/main.ard",
-			out:  "main",
-		},
-		{
-			name: "explicit output",
-			args: []string{"samples/main.ard", "--out", "demo"},
-			path: "samples/main.ard",
-			out:  "demo",
-		},
-		{
-			name:       "removed target flag",
-			args:       []string{"samples/main.ard", "--target", "go"},
-			expectErr:  true,
-			errMessage: "unknown flag: --target",
-		},
-		{
-			name:       "unknown flag",
-			args:       []string{"samples/main.ard", "--wat"},
-			expectErr:  true,
-			errMessage: "unknown flag: --wat",
-		},
+		{name: "missing output before flag", args: []string{"samples/main.ard", "--out", "--release"}, expectErr: true, errMessage: "--out requires a path"},
+		{name: "removed target flag", args: []string{"samples/main.ard", "--target", "go"}, expectErr: true, errMessage: "unknown flag: --target"},
+		{name: "unknown flag", args: []string{"samples/main.ard", "--wat"}, expectErr: true, errMessage: "unknown flag: --wat"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			path, out, err := parseBuildArgs(tt.args)
+			got, err := parseBuildArgs(tt.args)
 			if tt.expectErr {
 				if err == nil {
 					t.Fatalf("expected error %q, got nil", tt.errMessage)
@@ -1037,15 +1068,14 @@ func TestParseBuildArgs(t *testing.T) {
 				}
 				return
 			}
-
 			if err != nil {
 				t.Fatalf("did not expect error: %v", err)
 			}
-			if path != tt.path {
-				t.Fatalf("expected path %q, got %q", tt.path, path)
+			if got.Input != tt.path || got.Output != tt.out {
+				t.Fatalf("paths = input %q output %q, want input %q output %q", got.Input, got.Output, tt.path, tt.out)
 			}
-			if out != tt.out {
-				t.Fatalf("expected output %q, got %q", tt.out, out)
+			if got.Release != tt.release || fmt.Sprint(got.Overrides) != fmt.Sprint(tt.overrides) {
+				t.Fatalf("build options = %#v, want release=%t overrides=%#v", got, tt.release, tt.overrides)
 			}
 		})
 	}
@@ -1598,6 +1628,23 @@ func TestReplaceDependencyInManifestRemovesOldAlias(t *testing.T) {
 		t.Fatalf("manifest missing replacement or existing dependency:\n%s", got)
 	}
 }
+func TestReplaceDependencyInManifestRejectsMultilineDeclaration(t *testing.T) {
+	dir := t.TempDir()
+	manifestPath := filepath.Join(dir, "ard.toml")
+	input := "name = \"demo\"\nard = \">= 0.1.0\"\n\n[dependencies.vaxis]\ngit = \"https://github.com/akonwi/vaxis-ard.git\"\ncommit = \"old\"\n"
+	if err := os.WriteFile(manifestPath, []byte(input), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dep := checker.DependencyInfo{Alias: "vaxis", Git: "https://github.com/akonwi/vaxis-ard.git", Commit: "new"}
+	err := replaceDependencyInManifest(manifestPath, nil, dep)
+	if err == nil || !strings.Contains(err.Error(), "cannot be edited safely") {
+		t.Fatalf("error = %v, want safe-edit diagnostic", err)
+	}
+	if data, readErr := os.ReadFile(manifestPath); readErr != nil || string(data) != input {
+		t.Fatalf("manifest changed after rejection: %v\n%s", readErr, data)
+	}
+}
+
 func TestDependencyAliasesForGitInManifestCanonicalizesRawEntries(t *testing.T) {
 	dir := t.TempDir()
 	manifest := filepath.Join(dir, "ard.toml")
@@ -1649,6 +1696,19 @@ func TestRemoveDependencyFromManifest(t *testing.T) {
 		t.Fatalf("manifest lost remaining dependencies:\n%s", got)
 	}
 }
+func TestRemoveDependencyFromManifestRejectsNestedTable(t *testing.T) {
+	dir := t.TempDir()
+	manifestPath := filepath.Join(dir, "ard.toml")
+	input := "name = \"demo\"\nard = \">= 0.1.0\"\n\n[dependencies.vaxis]\ngit = \"https://github.com/akonwi/vaxis-ard.git\"\ncommit = \"old\"\n"
+	if err := os.WriteFile(manifestPath, []byte(input), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	removed, err := removeDependencyFromManifest(manifestPath, "vaxis")
+	if err == nil || !strings.Contains(err.Error(), "cannot be edited safely") || removed {
+		t.Fatalf("removed = %t, error = %v, want safe-edit rejection", removed, err)
+	}
+}
+
 func TestRemoveDependencyFromManifestMissing(t *testing.T) {
 	dir := t.TempDir()
 	manifest := filepath.Join(dir, "ard.toml")
