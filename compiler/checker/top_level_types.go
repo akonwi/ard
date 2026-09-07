@@ -102,7 +102,7 @@ func (c *Checker) hoistTopLevelFunctionSignatures() {
 		// generics merely captured by nested closures or receiver methods.
 		fn.CallGenericParams = append([]string{}, genericParamsForFunction(fn)...)
 		c.hoistedTopLevelFunctions[def] = fn
-		c.scope.add(def.Name, fn, false)
+		c.scope.addFunctionDeclaration(def.Name, fn)
 	}
 }
 

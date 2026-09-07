@@ -45,14 +45,14 @@ func TestContextualReturnTypeInfersGenericCall(t *testing.T) {
 	if len(original.GenericBindings) != 0 {
 		t.Fatalf("original bindings = %v, want none", original.GenericBindings)
 	}
-	definition := mainFn.Body.Stmts[0].Stmt.(*checker.VariableDef).Value.(*checker.FunctionCall).Definition()
+	definition := mainFn.Body.Stmts[0].Stmt.(*checker.VariableDef).Value.(*checker.FunctionCall).Signature()
 	if got := definition.GenericBindings["T"]; got == nil || got.String() != "Str" {
 		t.Fatalf("contextual binding T = %v, want Str", got)
 	}
 	if got := definition.ReturnType.String(); got != "Key<Str>" {
 		t.Fatalf("call return type = %s, want Key<Str>", got)
 	}
-	second := mainFn.Body.Stmts[1].Stmt.(*checker.VariableDef).Value.(*checker.FunctionCall).Definition()
+	second := mainFn.Body.Stmts[1].Stmt.(*checker.VariableDef).Value.(*checker.FunctionCall).Signature()
 	if got := second.GenericBindings["T"]; got == nil || got.String() != "Int" {
 		t.Fatalf("second contextual binding T = %v, want Int", got)
 	}
@@ -91,7 +91,7 @@ func TestParameterContextInfersNestedGenericCall(t *testing.T) {
 	}
 	outer := mainFn.Body.Stmts[0].Expr.(*checker.FunctionCall)
 	inner := outer.Args[0].(*checker.FunctionCall)
-	if got := inner.Definition().GenericBindings["T"]; got == nil || got.String() != "Str" {
+	if got := inner.Signature().GenericBindings["T"]; got == nil || got.String() != "Str" {
 		t.Fatalf("nested contextual binding T = %v, want Str", got)
 	}
 	if got := inner.Type().String(); got != "Key<Str>" {

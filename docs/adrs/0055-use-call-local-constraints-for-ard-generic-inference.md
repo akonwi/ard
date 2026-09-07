@@ -93,12 +93,27 @@ The exact Go API may differ, but it must preserve these invariants:
 - every call receives fresh variables;
 - variables have call- and declaration-scoped identity rather than only names such as `$T`;
 - the shared source `FunctionDef` is never mutated by call-site inference;
+- every source-backed call retains that exact canonical declaration separately from its call-local specialized signature;
+- call-local signatures never own or snapshot declaration bodies;
 - one call produces at most one final specialized `FunctionDef`;
 - independently generic nested calls do not share mutable inference state;
 - all binding sources are validated as constraints rather than silently overwriting earlier bindings;
 - nominal struct applications unify by canonical declaration identity and ordered type arguments, never by pointer identity, type name alone, or declaration-field traversal.
 
 Receiver generic IDs remain owned conceptually by the receiver declaration, but each method call creates fresh local inference slots for those IDs. A receiver value constrains the call-local slots; no mutable receiver application or source method state is reused.
+
+### Declaration identity
+
+A statically dispatched source call carries two distinct views of its callable:
+
+- the canonical declaration selected by name, visibility, method, and trait resolution;
+- the call-local signature produced by inference and substitution.
+
+The declaration owns the body and declaration metadata. The specialized signature owns parameter/result types and concrete generic bindings for that call. A non-generic call may use the declaration itself as its signature, but a specialized signature must not copy the declaration body. Direct source function references retain the same canonical declaration. Dynamic function-value calls have no source declaration and carry only their callable signature and storage target.
+
+Trait-object calls retain the resolved trait identity and method slot rather than a concrete function body. Statically dispatched calls to a concrete trait implementation retain both that trait slot and the canonical implementation declaration.
+
+AIR consumes these resolved identities directly. It may assign or reuse an AIR `FunctionID`, but it must not recover a source declaration or trait slot by scanning modules or method tables by name. This keeps forward references, recursion, imports, trait dispatch, and generic specialization independent of source and traversal order.
 
 ### Constraint and obligation kinds
 

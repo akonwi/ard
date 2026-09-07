@@ -636,13 +636,24 @@ func (c *Checker) addStructMethod(def *StructDef, method *FunctionDef) {
 	}
 }
 
-func (c *Checker) traitForStructMethod(def *StructDef, method *FunctionDef) *Trait {
-	if def == nil || method == nil {
+func (c *Checker) traitForMethod(typ Type, method *FunctionDef) *Trait {
+	if typ == nil || method == nil {
 		return nil
 	}
-	definition := canonicalStructDefinition(def)
-	owner := StructMethodOwner(definition)
-	for _, trait := range definition.Traits {
+	var traits []*Trait
+	switch typed := typ.(type) {
+	case *StructDef:
+		traits = canonicalStructDefinition(typed).Traits
+	case *Enum:
+		traits = typed.Traits
+	default:
+		return nil
+	}
+	owner, ok := MethodOwnerForType(typ)
+	if !ok {
+		return nil
+	}
+	for _, trait := range traits {
 		methods := c.program.TraitMethodsFor(owner, trait)
 		if methods == nil {
 			methods = TraitMethodsInModules(c.program.Imports, owner, trait)
@@ -653,6 +664,40 @@ func (c *Checker) traitForStructMethod(def *StructDef, method *FunctionDef) *Tra
 		}
 	}
 	return nil
+}
+
+func traitMethodSlot(trait *Trait, name string) (int, bool) {
+	if trait == nil {
+		return 0, false
+	}
+	for i := range trait.methods {
+		if trait.methods[i].Name == name {
+			return i, true
+		}
+	}
+	return 0, false
+}
+
+func (c *Checker) traitMethodDeclaration(typ Type, trait *Trait, name string) *FunctionDef {
+	typ = derefMutableRef(typ)
+	if receiverTrait, ok := typ.(*Trait); ok {
+		if receiverTrait.ModulePath != trait.ModulePath || receiverTrait.Name != trait.Name {
+			return nil
+		}
+		if slot, ok := traitMethodSlot(receiverTrait, name); ok {
+			return &receiverTrait.methods[slot]
+		}
+		return nil
+	}
+	owner, ok := MethodOwnerForType(typ)
+	if !ok {
+		return nil
+	}
+	methods := c.program.TraitMethodsFor(owner, trait)
+	if methods == nil {
+		methods = TraitMethodsInModules(c.program.Imports, owner, trait)
+	}
+	return methods[name]
 }
 
 func (c *Checker) hasAmbiguousTraitMethod(typ Type, name string) bool {

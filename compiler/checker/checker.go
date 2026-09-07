@@ -6805,14 +6805,42 @@ func applySliceArgumentOrder(node Expression, sourceArgs []parse.Argument, param
 	return node
 }
 
-func (c *Checker) createInterpolationMethodNode(original, observed Expression, fnDef *FunctionDef, loc parse.Location) Expression {
+func (c *Checker) specializeZeroArgumentMethod(subject Expression, declaration *FunctionDef, loc parse.Location) *FunctionDef {
+	genericParams := append([]string(nil), callGenericParamsForFunction(declaration)...)
+	var receiverBindings map[string]Type
+	if structType, ok := derefMutableRef(subject.Type()).(*StructDef); ok {
+		if originalDef := c.structDefinition(structType); originalDef != nil && originalDef.hasGenerics() {
+			genericParams = appendUniqueStrings(genericParams, originalDef.GenericParams...)
+			receiverBindings = c.extractGenericBindingsFromSpecializedStruct(originalDef, structType)
+		}
+	}
+	signature, genericScope, err := c.setupFunctionCallWithBindings(
+		declaration,
+		genericParams,
+		receiverBindings,
+		nil,
+		nil,
+		nil,
+	)
+	if err != nil {
+		c.addGenericFunctionResolutionError(err, loc)
+		return nil
+	}
+	args, specialized := c.checkAndProcessArguments(declaration, nil, signature, genericScope, 0, nil, loc, false)
+	if args == nil {
+		return nil
+	}
+	return specialized
+}
+
+func (c *Checker) createInterpolationMethodNode(original, observed Expression, declaration *FunctionDef, loc parse.Location) Expression {
 	subject := observed
-	if fnDef.Mutates {
+	if declaration.Mutates {
 		if !c.permitsInteriorMutation(original) {
 			c.addDiagnostic(referenceReceiverDiagnostic{
 				Kind:            referenceArdReceiver,
 				Receiver:        fmt.Sprint(original),
-				Method:          fnDef.Name,
+				Method:          declaration.Name,
 				Span:            c.sourceSpan(loc),
 				DeclarationSpan: expressionBindingSpan(original),
 			}.build())
@@ -6820,7 +6848,25 @@ func (c *Checker) createInterpolationMethodNode(original, observed Expression, f
 		}
 		subject = original
 	}
-	return c.createPrimitiveMethodNode(subject, fnDef.Name, []Expression{}, fnDef, nil, parse.Location{})
+	signature := c.specializeZeroArgumentMethod(subject, declaration, loc)
+	if signature == nil {
+		return nil
+	}
+	node := c.createPrimitiveMethodNode(subject, declaration.Name, []Expression{}, signature, nil, parse.Location{})
+	if instance, ok := node.(*InstanceMethod); ok {
+		instance.Method.declaration = declaration
+		trait := c.traitForMethod(derefMutableRef(subject.Type()), declaration)
+		if trait != nil {
+			instance.DispatchTrait = trait
+		} else {
+			trait = instance.TraitType
+		}
+		if slot, ok := traitMethodSlot(trait, declaration.Name); ok {
+			instance.TraitMethodSlot = slot
+			instance.HasTraitMethodSlot = true
+		}
+	}
+	return node
 }
 
 func (c *Checker) createPrimitiveMethodNode(subject Expression, methodName string, args []Expression, fnDef *FunctionDef, typeArgs []Type, loc parse.Location) Expression {
@@ -6908,11 +6954,12 @@ func (c *Checker) createPrimitiveMethodNode(subject Expression, methodName strin
 		ReceiverMode: receiverMode,
 		ReceiverType: receiverType,
 		Method: &FunctionCall{
-			Name:       methodName,
-			Args:       args,
-			TypeArgs:   typeArgs,
-			fn:         fnDef,
-			ReturnType: fnDef.ReturnType,
+			Name:        methodName,
+			Args:        args,
+			TypeArgs:    typeArgs,
+			declaration: fnDef,
+			signature:   fnDef,
+			ReturnType:  fnDef.ReturnType,
 		},
 		ReceiverKind: receiverKind,
 		StructType:   structType,
@@ -7832,8 +7879,17 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 					toStringTrait := strMod.Get("ToString").Type.(*Trait)
 					if cx.Type().hasTrait(toStringTrait) {
 						// For non-string types that satisfy ToString trait, wrap with to_str() call.
-						toStrMethod := toStringTrait.methods[0]
-						methodNode := c.createPrimitiveMethodNode(cx, toStrMethod.Name, []Expression{}, &toStrMethod, nil, parse.Location{})
+						toStrMethod := &toStringTrait.methods[0]
+						declaration := c.traitMethodDeclaration(cx.Type(), toStringTrait, toStrMethod.Name)
+						if declaration == nil {
+							declaration = toStrMethod
+						}
+						methodNode := c.createInterpolationMethodNode(original, cx, declaration, s.Chunks[i].GetLocation())
+						if instanceMethod, ok := methodNode.(*InstanceMethod); ok {
+							instanceMethod.DispatchTrait = toStringTrait
+							instanceMethod.TraitMethodSlot = 0
+							instanceMethod.HasTraitMethodSlot = true
+						}
 						chunks[i] = methodNode
 						continue
 					}
@@ -7845,13 +7901,19 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 				_, concreteError := cx.Type().(*StructDef)
 				_, errorObject := cx.Type().(*Trait)
 				if (concreteError || errorObject) && cx.Type().hasTrait(BuiltinError) {
-					errorMethod := BuiltinError.methods[0]
-					methodNode := c.createInterpolationMethodNode(original, cx, &errorMethod, s.Chunks[i].GetLocation())
+					errorMethod := &BuiltinError.methods[0]
+					declaration := c.traitMethodDeclaration(cx.Type(), BuiltinError, errorMethod.Name)
+					if declaration == nil {
+						declaration = errorMethod
+					}
+					methodNode := c.createInterpolationMethodNode(original, cx, declaration, s.Chunks[i].GetLocation())
 					if methodNode == nil {
 						chunks[i] = &StrLiteral{}
 					} else {
 						if instanceMethod, ok := methodNode.(*InstanceMethod); ok {
 							instanceMethod.DispatchTrait = BuiltinError
+							instanceMethod.TraitMethodSlot = 0
+							instanceMethod.HasTraitMethodSlot = true
 						}
 						chunks[i] = methodNode
 					}
@@ -7941,6 +8003,7 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 				return nil
 			}
 			c.recordCallAttempt(s, s.Name, fnDef)
+			declaration := fnSym.callableDeclaration
 
 			callTypeArgs := c.resolveCallTypeArgs(s.TypeArgs)
 
@@ -7982,12 +8045,13 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 			}
 
 			call := &FunctionCall{
-				Name:       s.Name,
-				Args:       args,
-				TypeArgs:   callTypeArgs,
-				TailSpread: tailSpread,
-				fn:         fnToUse,
-				ReturnType: fnToUse.ReturnType,
+				Name:        s.Name,
+				Args:        args,
+				TypeArgs:    callTypeArgs,
+				TailSpread:  tailSpread,
+				declaration: declaration,
+				signature:   fnToUse,
+				ReturnType:  fnToUse.ReturnType,
 			}
 			return call
 		}
@@ -8178,10 +8242,9 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 				c.addNonCallable(fmt.Sprintf("%s.%s", subj, s.Method.Name), s.Method.GetLocation(), nil, nonCallableSuffix)
 				return nil
 			}
-			var dispatchTrait *Trait
-			if receiver, ok := derefMutableRef(subj.Type()).(*StructDef); ok {
-				dispatchTrait = c.traitForStructMethod(receiver, fnDef)
-			}
+			memberType = derefMutableRef(subj.Type())
+			dispatchTrait := c.traitForMethod(memberType, fnDef)
+			declaration := fnDef
 
 			if fnDef.Mutates && !c.permitsInteriorMutation(subj) {
 				// A mutating method is interior mutation of the receiver: it
@@ -8285,13 +8348,22 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 					}
 				}
 				pointer := foreign.Pointer || foreignPointerReceiver
-				return &ForeignMethodCall{Subject: subj, Target: foreign.Target, Namespace: foreign.Namespace, Qualifier: foreign.Qualifier, Receiver: foreign.Name, Pointer: pointer, Symbol: s.Method.Name, ForeignResultShape: fnToUse.ForeignResultShape, Call: &FunctionCall{Name: s.Method.Name, Args: args, TailSpread: tailSpread, fn: fnToUse, ReturnType: fnToUse.ReturnType}}
+				return &ForeignMethodCall{Subject: subj, Target: foreign.Target, Namespace: foreign.Namespace, Qualifier: foreign.Qualifier, Receiver: foreign.Name, Pointer: pointer, Symbol: s.Method.Name, ForeignResultShape: fnToUse.ForeignResultShape, Call: &FunctionCall{Name: s.Method.Name, Args: args, TailSpread: tailSpread, signature: fnToUse, ReturnType: fnToUse.ReturnType}}
 			}
 			// Create function call. Slice bounds retain source evaluation order even
 			// though named arguments are stored by destination parameter index.
 			node := c.createPrimitiveMethodNode(subj, s.Method.Name, args, fnToUse, callTypeArgs, s.Method.GetLocation())
 			if instance, ok := node.(*InstanceMethod); ok {
+				instance.Method.declaration = declaration
 				instance.DispatchTrait = dispatchTrait
+				trait := dispatchTrait
+				if trait == nil {
+					trait = instance.TraitType
+				}
+				if slot, ok := traitMethodSlot(trait, s.Method.Name); ok {
+					instance.TraitMethodSlot = slot
+					instance.HasTraitMethodSlot = true
+				}
 			}
 			return applySliceArgumentOrder(node, s.Method.Args, fnToUse.Parameters)
 		}
@@ -8700,6 +8772,7 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 					}
 				}
 				fnDef := sym.Type.(*FunctionDef)
+				declaration := sym.callableDeclaration
 				callTypeArgs := c.resolveCallTypeArgs(s.Function.TypeArgs)
 
 				// Resolve named and positional arguments to match parameters.
@@ -8733,12 +8806,13 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 				}
 
 				return &FunctionCall{
-					Name:       absolutePath,
-					Args:       args,
-					TypeArgs:   callTypeArgs,
-					TailSpread: tailSpread,
-					fn:         fnToUse,
-					ReturnType: fnToUse.ReturnType,
+					Name:        absolutePath,
+					Args:        args,
+					TypeArgs:    callTypeArgs,
+					TailSpread:  tailSpread,
+					declaration: declaration,
+					signature:   fnToUse,
+					ReturnType:  fnToUse.ReturnType,
 				}
 			}
 
@@ -8877,7 +8951,7 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 						args[i] = checkedArg
 					}
 				}
-				return &ForeignFunctionCall{Target: "go", Namespace: goPkg.Path, Qualifier: goPkg.TypesName, Symbol: name, TypeArgs: callTypeArgs, PointerResult: pointerResult, ForeignResultShape: effectiveFnDef.ForeignResultShape, Call: &FunctionCall{Name: name, Args: args, TailSpread: tailSpread, fn: effectiveFnDef, ReturnType: effectiveFnDef.ReturnType}}
+				return &ForeignFunctionCall{Target: "go", Namespace: goPkg.Path, Qualifier: goPkg.TypesName, Symbol: name, TypeArgs: callTypeArgs, PointerResult: pointerResult, ForeignResultShape: effectiveFnDef.ForeignResultShape, Call: &FunctionCall{Name: name, Args: args, TailSpread: tailSpread, signature: effectiveFnDef, ReturnType: effectiveFnDef.ReturnType}}
 			}
 
 			var fnDef *FunctionDef
@@ -8914,6 +8988,7 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 				c.addNonCallable(fmt.Sprintf("%s::%s", targetName, s.Function.Name), s.GetLocation(), nil, nonCallableSuffix)
 				return nil
 			}
+			declaration := sym.callableDeclaration
 			callTypeArgs := c.resolveCallTypeArgs(s.Function.TypeArgs)
 
 			// Resolve named and positional arguments to match parameters.
@@ -8956,12 +9031,13 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 			// distinguish real module functions from function-typed module variables.
 			callName := name
 			call := &FunctionCall{
-				Name:       callName,
-				Args:       args,
-				TypeArgs:   callTypeArgs,
-				TailSpread: tailSpread,
-				fn:         fnToUse,
-				ReturnType: fnToUse.ReturnType,
+				Name:        callName,
+				Args:        args,
+				TypeArgs:    callTypeArgs,
+				TailSpread:  tailSpread,
+				declaration: declaration,
+				signature:   fnToUse,
+				ReturnType:  fnToUse.ReturnType,
 			}
 			c.recordTarget(s, call, SpanTarget{Kind: TargetFunction, Module: mod.Path(), Symbol: name})
 			return &ModuleFunctionCall{
@@ -9047,7 +9123,7 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 		fn := c.checkFunction(&s.FunctionDeclaration, nil)
 		if fn != nil {
 			fn.Name = s.Path.String()
-			c.scope.add(fn.Name, fn, false)
+			c.scope.addFunctionDeclaration(fn.Name, fn)
 		}
 
 		return fn
@@ -10175,7 +10251,7 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 							if c.rejectUnspecializedGenericFunctionValue(fnDef, propIdent.GetLocation()) {
 								return nil
 							}
-							return &Variable{Symbol{Name: staticFnName, Type: fnDef}}
+							return &Variable{*fnSym}
 						}
 					}
 				}
@@ -11359,7 +11435,7 @@ func (c *Checker) checkExprAsInner(expr parse.Expression, expectedType Type, exp
 				callDef.ReturnType = derefType(resultType)
 				return &ModuleFunctionCall{
 					Module: mod.Path(),
-					Call:   &FunctionCall{Name: callDef.name(), fn: &callDef, ReturnType: callDef.ReturnType},
+					Call:   &FunctionCall{Name: callDef.name(), signature: &callDef, ReturnType: callDef.ReturnType},
 				}
 			}
 
@@ -11391,7 +11467,7 @@ func (c *Checker) checkExprAsInner(expr parse.Expression, expectedType Type, exp
 				Call: &FunctionCall{
 					Name:       callDef.name(),
 					Args:       []Expression{arg},
-					fn:         &callDef,
+					signature:  &callDef,
 					ReturnType: callDef.ReturnType,
 				},
 			}
@@ -11546,7 +11622,7 @@ func (c *Checker) resolveReturnTypeWithContext(returnTypeNode parse.DeclaredType
 // checkFunctionBody validates the function body and returns the checked block
 func (c *Checker) checkFunctionBody(fn *FunctionDef, bodyStmts []parse.Statement, params []Parameter, returnType Type, location parse.Location) *Block {
 	// Add function to scope BEFORE checking body
-	c.scope.add(fn.Name, fn, false)
+	c.scope.addFunctionDeclaration(fn.Name, fn)
 
 	previousDiscard := c.discardExprContext
 	c.discardExprContext = false
@@ -11747,7 +11823,7 @@ func (c *Checker) checkFunctionWithSignature(def *parse.FunctionDeclaration, ini
 	// For methods (when init != nil), only add within the body scope.
 	if init == nil {
 		if _, ok := c.hoistedTopLevelFunctions[def]; !ok {
-			c.scope.add(def.Name, fn, false)
+			c.scope.addFunctionDeclaration(def.Name, fn)
 		}
 	}
 
@@ -12065,7 +12141,7 @@ func (c *Checker) checkMaybeNewStatic(s *parse.StaticFunction, mod Module, expec
 			Name:     "none",
 			Args:     []Expression{},
 			TypeArgs: callTypeArgs,
-			fn: &FunctionDef{
+			signature: &FunctionDef{
 				Name:          "new",
 				GenericParams: []string{"T"},
 				Parameters:    []Parameter{},
@@ -12105,7 +12181,7 @@ func (c *Checker) checkMaybeNewStatic(s *parse.StaticFunction, mod Module, expec
 			Name:     "new",
 			Args:     []Expression{value},
 			TypeArgs: callTypeArgs,
-			fn: &FunctionDef{
+			signature: &FunctionDef{
 				Name:          "new",
 				GenericParams: []string{"T"},
 				Parameters:    []Parameter{{Name: "value", Type: valueMaybe}},
@@ -12139,7 +12215,7 @@ func (c *Checker) checkMaybeNewStatic(s *parse.StaticFunction, mod Module, expec
 		Name:     "some",
 		Args:     []Expression{value},
 		TypeArgs: callTypeArgs,
-		fn: &FunctionDef{
+		signature: &FunctionDef{
 			Name:          "new",
 			GenericParams: []string{"T"},
 			Parameters:    []Parameter{{Name: "value", Type: value.Type()}},
@@ -12170,7 +12246,7 @@ func (c *Checker) synthesizeMaybeNone(paramType Type) Expression {
 		Call: &FunctionCall{
 			Name: "none",
 			Args: []Expression{},
-			fn: &FunctionDef{
+			signature: &FunctionDef{
 				Name:       "none",
 				Parameters: []Parameter{},
 				ReturnType: paramType, // The return type is the Maybe type we're filling in
@@ -12190,7 +12266,7 @@ func (c *Checker) synthesizeMaybeSome(value Expression, maybeType Type) Expressi
 		Call: &FunctionCall{
 			Name: "some",
 			Args: []Expression{value},
-			fn: &FunctionDef{
+			signature: &FunctionDef{
 				Name: "some",
 				Parameters: []Parameter{
 					{
@@ -12240,6 +12316,7 @@ func expandFunctionDefForRepeatedVariadic(fnDef *FunctionDef, argCount int) *Fun
 		return fnDef
 	}
 	expanded := *fnDef
+	expanded.Body = nil
 	expanded.Parameters = append([]Parameter(nil), fnDef.Parameters...)
 	lastIndex := len(expanded.Parameters) - 1
 	last := expanded.Parameters[lastIndex]
@@ -12895,7 +12972,6 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 				ReturnType:              substituteType(fnDefCopy.ReturnType, bindings),
 				ForeignResultShape:      fnDefCopy.ForeignResultShape,
 				InferReturnTypeFromBody: fnDefCopy.InferReturnTypeFromBody,
-				Body:                    fnDefCopy.Body,
 				Mutates:                 fnDefCopy.Mutates,
 				Private:                 fnDefCopy.Private,
 				GenericBindings:         cloneTypeMap(bindings),

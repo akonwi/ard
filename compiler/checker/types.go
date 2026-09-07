@@ -153,9 +153,9 @@ func (t Trait) _type() Type {
 }
 
 func (t Trait) get(name string) Type {
-	for _, method := range t.methods {
-		if method.Name == name {
-			return &method
+	for i := range t.methods {
+		if t.methods[i].Name == name {
+			return &t.methods[i]
 		}
 	}
 	return nil

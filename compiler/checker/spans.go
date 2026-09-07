@@ -371,7 +371,7 @@ func (c *Checker) recordCallAttempt(source parse.Expression, name string, fnDef 
 	c.spans.add(SpanRecord{
 		Loc:    source.GetLocation(),
 		Source: source,
-		Node:   &FunctionCall{Name: name, fn: fnDef, ReturnType: fnDef.ReturnType},
+		Node:   &FunctionCall{Name: name, signature: fnDef, ReturnType: fnDef.ReturnType},
 	})
 }
 
@@ -396,9 +396,9 @@ func (c *Checker) spanKeyFor(node Expression) any {
 		// Only key module-local, non-namespaced calls. Namespaced calls
 		// (mod::fn, Type::fn, Go packages) would mis-key under the current
 		// module path; cross-module identity is a later slice.
-		if n.fn != nil && n.fn.Name != "" && n.fn.Receiver == "" &&
+		if n.signature != nil && n.signature.Name != "" && n.signature.Receiver == "" &&
 			!strings.Contains(n.Name, "::") {
-			return FunctionKey(c.typeOwnerPath(), n.fn.Name)
+			return FunctionKey(c.typeOwnerPath(), n.signature.Name)
 		}
 	}
 	return nil

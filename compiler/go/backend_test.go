@@ -6445,9 +6445,9 @@ func TestRunProgramReturnsGenericResultThroughABI(t *testing.T) {
 }
 
 // TestRunProgramForwardReferencesGenericFunctions covers calling a generic
-// function declared after the caller: the call site's specialized copy of
-// the hoisted signature has no body yet, and lowering must resolve the
-// original definition instead of failing the call target lookup.
+// function declared after the caller. The checker preserves the canonical
+// declaration separately from the bodyless specialized call signature, so AIR
+// does not need to rediscover the target by name.
 func TestRunProgramForwardReferencesGenericFunctions(t *testing.T) {
 	program := lowerSource(t, `
 		fn main() {

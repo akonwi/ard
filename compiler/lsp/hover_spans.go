@@ -93,7 +93,7 @@ func renderSpanHover(rec checker.SpanRecord) string {
 	case *checker.InstanceMethod:
 		if node.Method != nil {
 			owner := instanceMethodOwner(node)
-			if def := node.Method.Definition(); def != nil {
+			if def := node.Method.Signature(); def != nil {
 				return methodSignatureString(owner, def)
 			}
 		}
@@ -104,7 +104,7 @@ func renderSpanHover(rec checker.SpanRecord) string {
 		}
 		return fmt.Sprintf("%s.%s: %s", checkerTypeString(ownerType), node.Property, checkerTypeString(node.Type()))
 	case *checker.FunctionCall:
-		if def := node.Definition(); def != nil {
+		if def := node.Signature(); def != nil {
 			return functionSignatureString(node.Name, def)
 		}
 	case *checker.Variable:
