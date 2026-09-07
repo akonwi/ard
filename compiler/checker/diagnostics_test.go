@@ -2044,6 +2044,32 @@ func TestUnboundGenericTypeArgumentHasStructuredDiagnostic(t *testing.T) {
 	}
 }
 
+func TestStaticFunctionNotTopLevelHasStructuredDiagnostic(t *testing.T) {
+	result := parse.Parse([]byte("struct Box {}\nfn outer() {\n  fn Box::read() Int { 1 }\n  ()\n}\n"), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	c := checker.New("main.ard", result.Program, nil)
+	c.Check()
+	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeStaticFunctionNotTopLevel)
+	if diagnostic.Message != "static function Box::read must be a top-level declaration" || diagnostic.Primary.Message != "move this static function to the module level" {
+		t.Fatalf("diagnostic = %#v", diagnostic)
+	}
+}
+
+func TestUnsupportedLocalGenericFunctionHasStructuredDiagnostic(t *testing.T) {
+	result := parse.Parse([]byte("fn outer() {\n  fn identity(value: $T) $T { value }\n}\n"), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	c := checker.New("main.ard", result.Program, nil)
+	c.Check()
+	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeUnsupportedLocalGeneric)
+	if diagnostic.Message != "generic local function identity is not supported" || diagnostic.Primary.Message != "local function signatures cannot contain generic parameters" {
+		t.Fatalf("diagnostic = %#v", diagnostic)
+	}
+}
+
 func TestBuiltInTypeRedeclarationHasStructuredDiagnostic(t *testing.T) {
 	result := parse.Parse([]byte("struct Sender {}\n"), "main.ard")
 	if len(result.Errors) > 0 {

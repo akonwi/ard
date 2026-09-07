@@ -1253,6 +1253,9 @@ type FunctionDef struct {
 	Name          string
 	Receiver      string
 	GenericParams []string
+	// LocalNamed marks a named function declared in a lexical block. Unlike a
+	// top-level declaration, it is a closure value bound at its declaration.
+	LocalNamed bool
 	// CallGenericParams are generics introduced by this source function and
 	// instantiated independently at each call. They exclude receiver and
 	// enclosing-declaration generics referenced by methods and closures.
@@ -1339,7 +1342,10 @@ type FunctionCall struct {
 	TailSpread  bool
 	declaration *FunctionDef
 	signature   *FunctionDef
-	ReturnType  Type // Pre-computed by checker
+	// binding retains lexical symbol identity for local named function calls.
+	// Module-level calls use nominal FunctionKey identity instead.
+	binding    *Symbol
+	ReturnType Type // Pre-computed by checker
 }
 
 // CreateCall constructs a call whose supplied definition is its static target.

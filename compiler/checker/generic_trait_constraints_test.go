@@ -109,7 +109,7 @@ struct Box<$T> {
 
 impl Contract for Box {
   fn check() Bool {
-    fn compare(value: $T) Bool { value == value }
+    fn compare() Bool { self.value == self.value }
     true
   }
 }`,

@@ -80,6 +80,7 @@ type lowerer struct {
 	genericStructDefs   map[string]TypeID
 	genericFunctionDefs map[string]FunctionID
 	genericMethodDefs   map[string]FunctionID
+	localNamedFunctions map[*checker.FunctionDef]FunctionID
 	defParams           map[string]int
 	defParamOwner       string
 	includeTests        bool
@@ -127,6 +128,7 @@ func newLowerer(options LowerOptions, rootCount int) *lowerer {
 		genericStructDefs:   map[string]TypeID{},
 		genericFunctionDefs: map[string]FunctionID{},
 		genericMethodDefs:   map[string]FunctionID{},
+		localNamedFunctions: map[*checker.FunctionDef]FunctionID{},
 		includeTests:        options.IncludeTests,
 	}
 	if l.cacheMethodLookups {
@@ -722,17 +724,30 @@ func (l *lowerer) declareClosureFunction(module ModuleID, keyName string, def *c
 		params[i] = Param{Name: param.Name, Type: typeInfo.Params[i]}
 	}
 	signature := Signature{Params: params, Return: typeInfo.Return}
+	if def.LocalNamed {
+		if id, ok := l.localNamedFunctions[def]; ok {
+			return id, nil
+		}
+		// FunctionID assignment follows deterministic source traversal. Keep the
+		// canonical checker declaration as the cache identity so same-named local
+		// declarations can never share a lifted helper.
+		keyName = fmt.Sprintf("local-closure/%d", len(l.localNamedFunctions))
+	}
 	key := concreteFunctionKey(module, keyName, signature, "")
 	if id, ok := l.functions[key]; ok {
 		return id, nil
 	}
 	id := FunctionID(len(l.program.Functions))
 	l.functions[key] = id
+	if def.LocalNamed {
+		l.localNamedFunctions[def] = id
+	}
 	l.program.Functions = append(l.program.Functions, Function{
 		ID:        id,
 		Module:    module,
 		Name:      def.Name,
 		Signature: signature,
+		Private:   def.LocalNamed || def.Private,
 	})
 	l.program.Modules[module].Functions = appendUniqueFunction(l.program.Modules[module].Functions, id)
 	return id, nil
@@ -3299,6 +3314,19 @@ func (fl *functionLowerer) lowerBlockWithDefault(stmts []checker.Statement, defa
 			continue
 		}
 		if i == last && stmt.Expr != nil {
+			if def := localNamedFunctionDeclaration(stmt.Expr); def != nil {
+				binding, _, err := fl.lowerLocalNamedFunction(def)
+				if err != nil {
+					return block, err
+				}
+				block.Stmts = append(block.Stmts, *binding)
+				expr, _, err := fl.lowerContextualExpr(stmt.Expr, defaultType)
+				if err != nil {
+					return block, err
+				}
+				block.Result = expr
+				continue
+			}
 			expr, _, err := fl.lowerContextualExpr(stmt.Expr, defaultType)
 			if err != nil {
 				return block, err
@@ -3986,11 +4014,59 @@ func (fl *functionLowerer) lowerTraitUpcastIfNeeded(expr checker.Expression, exp
 	return &Expr{Kind: ExprTraitUpcast, Type: expected, Target: value, Payload: &TraitExprPayload{Impl: impl, Trait: expectedInfo.Trait}}, true, nil
 }
 
+func localNamedFunctionDeclaration(expr checker.Expression) *checker.FunctionDef {
+	switch expr := expr.(type) {
+	case *checker.FunctionDef:
+		if expr.LocalNamed {
+			return expr
+		}
+	case *checker.InterfaceConversion:
+		return localNamedFunctionDeclaration(expr.Value)
+	case *checker.ReferenceTraitProjection:
+		return localNamedFunctionDeclaration(expr.Value)
+	case *checker.DiscardingFunctionCoercion:
+		return localNamedFunctionDeclaration(expr.Value)
+	}
+	return nil
+}
+
+func (fl *functionLowerer) lowerLocalNamedFunction(def *checker.FunctionDef) (*Stmt, *Expr, error) {
+	if def == nil || !def.LocalNamed {
+		return nil, nil, fmt.Errorf("expected local named function declaration")
+	}
+	if len(def.CallGenericParams) > 0 || fl.l.functionHasUnresolvedTypeVar(def) {
+		return nil, nil, fmt.Errorf("generic local function %s reached AIR", def.Name)
+	}
+	typeID, err := fl.internType(def.Type())
+	if err != nil {
+		return nil, nil, err
+	}
+	local := fl.defineLocal(def.Name, typeID, false)
+	value, recursive, err := fl.lowerClosureWithSelf(typeID, def, local)
+	if err != nil {
+		return nil, nil, err
+	}
+	binding := &Stmt{
+		Kind:          StmtLet,
+		Local:         local,
+		Name:          def.Name,
+		Type:          typeID,
+		Predeclare:    recursive,
+		LocalFunction: true,
+		Value:         value,
+	}
+	return binding, loadLocal(typeID, local), nil
+}
+
 func (fl *functionLowerer) lowerStmt(stmt checker.Statement) (*Stmt, error) {
 	if stmt.Break {
 		return &Stmt{Kind: StmtBreak}, nil
 	}
 	if stmt.Expr != nil {
+		if def, ok := stmt.Expr.(*checker.FunctionDef); ok && def.LocalNamed {
+			binding, _, err := fl.lowerLocalNamedFunction(def)
+			return binding, err
+		}
 		expr, err := fl.lowerExpr(stmt.Expr)
 		if err != nil {
 			return nil, err
@@ -4576,6 +4652,9 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 				return &Expr{Kind: ExprLoadGlobal, Type: fl.l.program.Globals[global].Type, Payload: &GlobalExprPayload{Global: global}}, nil
 			}
 			if declaration := e.Declaration(); declaration != nil {
+				if declaration.LocalNamed {
+					return nil, fmt.Errorf("local function reference %s has no lexical binding", declaration.Name)
+				}
 				functionType, err := fl.internType(e.Type())
 				if err != nil {
 					return nil, err
@@ -4640,6 +4719,16 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 	case *checker.TemplateStr:
 		return fl.lowerTemplateStr(typeID, e)
 	case *checker.FunctionDef:
+		if e.LocalNamed {
+			local, ok, err := fl.resolveLocal(e.Name)
+			if err != nil {
+				return nil, err
+			}
+			if !ok || fl.localKind(local) != TypeFunction {
+				return nil, fmt.Errorf("local function declaration %s reached expression lowering without a binding", e.Name)
+			}
+			return loadLocal(fl.fn.Locals[local].Type, local), nil
+		}
 		return fl.lowerClosure(typeID, e)
 	case *checker.FunctionValueCall:
 		target, err := fl.lowerExpr(e.Callee)
@@ -4668,6 +4757,9 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 			return fl.lowerFunctionTypeCall(e.Name, e.Args, target, e.TailSpread)
 		}
 		if declaration := e.Declaration(); declaration != nil {
+			if declaration.LocalNamed {
+				return nil, fmt.Errorf("local function call %s has no lexical binding", declaration.Name)
+			}
 			if declaration.Body == nil {
 				return nil, fmt.Errorf("function call target %s has no checked body", declaration.Name)
 			}
@@ -6197,10 +6289,15 @@ func (fl *functionLowerer) lowerFieldAssignment(prop *checker.InstanceProperty, 
 }
 
 func (fl *functionLowerer) lowerClosure(typeID TypeID, def *checker.FunctionDef) (*Expr, error) {
+	expr, _, err := fl.lowerClosureWithSelf(typeID, def, -1)
+	return expr, err
+}
+
+func (fl *functionLowerer) lowerClosureWithSelf(typeID TypeID, def *checker.FunctionDef, selfLocal LocalID) (*Expr, bool, error) {
 	keyName := fmt.Sprintf("closure/%d/%s", fl.fn.ID, def.Name)
 	id, err := fl.l.declareClosureFunction(fl.fn.Module, keyName, def, typeID)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	// A closure created inside a generic definition is lifted to a top-level Go
 	// function whose body references the enclosing type parameters, so it must
@@ -6225,12 +6322,21 @@ func (fl *functionLowerer) lowerClosure(typeID TypeID, def *checker.FunctionDef)
 	if def.Body != nil {
 		body, err := child.lowerBlock(def.Body.Stmts)
 		if err != nil {
-			return nil, fmt.Errorf("lower closure %s: %w", def.Name, err)
+			return nil, false, fmt.Errorf("lower closure %s: %w", def.Name, err)
 		}
 		fn.Body = body
 	}
 	fn.Captures = child.fn.Captures
 	fn.Locals = child.fn.Locals
+	recursive := false
+	if selfLocal >= 0 {
+		for index, capturedLocal := range child.captureLocals {
+			if capturedLocal == selfLocal && index < len(fn.Captures) {
+				fn.Captures[index].Mode = CaptureSlot
+				recursive = true
+			}
+		}
+	}
 	fl.l.program.Functions[id] = fn
 	for index, capture := range fn.Captures {
 		if capture.Mode == CaptureSlot && index < len(child.captureLocals) {
@@ -6240,7 +6346,7 @@ func (fl *functionLowerer) lowerClosure(typeID TypeID, def *checker.FunctionDef)
 		}
 	}
 
-	return &Expr{Kind: ExprMakeClosure, Type: typeID, Payload: &CallExprPayload{Function: id, CaptureLocals: child.captureLocals}}, nil
+	return &Expr{Kind: ExprMakeClosure, Type: typeID, Payload: &CallExprPayload{Function: id, CaptureLocals: child.captureLocals}}, recursive, nil
 }
 
 func (fl *functionLowerer) lowerModuleSymbol(typeID TypeID, symbol *checker.ModuleSymbol) (*Expr, error) {

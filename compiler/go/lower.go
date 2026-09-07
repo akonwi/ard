@@ -2039,6 +2039,22 @@ func (l *lowerer) lowerStmt(fn air.Function, stmt air.Stmt) ([]ast.Stmt, error) 
 			return nil, fmt.Errorf("let statement missing value")
 		}
 		localType := fn.Locals[stmt.Local].Type
+		name := l.localName(fn, stmt.Local)
+		out := []ast.Stmt{}
+		if stmt.Predeclare && !l.declaredLocals[stmt.Local] {
+			goType, err := l.goType(localType)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, &ast.DeclStmt{Decl: &ast.GenDecl{
+				Tok: token.VAR,
+				Specs: []ast.Spec{&ast.ValueSpec{
+					Names: []*ast.Ident{l.ident(name)},
+					Type:  goType,
+				}},
+			}})
+			l.declaredLocals[stmt.Local] = true
+		}
 		value, err := l.lowerExprWithExpectedType(fn, *stmt.Value, localType)
 		if err != nil {
 			return nil, err
@@ -2049,8 +2065,7 @@ func (l *lowerer) lowerStmt(fn air.Function, stmt air.Stmt) ([]ast.Stmt, error) 
 			// referenced storage instead of aliasing it.
 			value.expr = &ast.StarExpr{X: value.expr}
 		}
-		out := append([]ast.Stmt{}, value.stmts...)
-		name := l.localName(fn, stmt.Local)
+		out = append(out, value.stmts...)
 		tok := token.DEFINE
 		if l.declaredLocals[stmt.Local] {
 			tok = token.ASSIGN

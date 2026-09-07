@@ -316,7 +316,11 @@ A `mut` parameter lowers to a pointer parameter, and call sites pass the address
 
 #### Closures
 
-Closures lower to Go function literals with explicit creation-time capture snapshots. Value captures copy the current value, reference captures copy the current reference handle, and slot captures copy a pointer to the stable binding slot before constructing the literal. The literal body closes over those snapshot locals directly, so retained callbacks preserve Ard semantics without a lifted helper or trampoline. The only exception is a closure that must be named for its own definition, such as a directly recursive local function; such cases may retain a named helper or lower to a named local function.
+Closures lower to Go function literals with explicit creation-time capture snapshots. Value captures copy the current value, reference captures copy the current reference handle, and slot captures copy a pointer to the stable binding slot before constructing the literal. The literal retains those snapshots and forwards to a lifted helper whose capture parameters make the environment explicit, so retained callbacks preserve Ard semantics.
+
+A nested named function is a lexical closure binding created at its declaration. Its name is available inside its own body for direct recursion and throughout the remainder of its block, but local declarations are not hoisted: forward calls and mutual recursion through later declarations remain invalid. Direct calls and bare references load the same closure value rather than separately lowering the declaration as a package function.
+
+A recursive local binding is predeclared and captures its own stable binding slot, equivalent to `var inner func(...); inner = func(...) { inner(...) }` in Go. Lifted closure helpers use canonical declaration identity, so same-named declarations in different lexical scopes cannot share bodies. Local named function signatures must be concrete; generic helpers belong at module scope. A local named function with a concrete signature may still capture values from an enclosing generic function or receiver method, and its lifted helper inherits those enclosing type parameters.
 
 A reference to a top-level function as a value lowers to the Go function identifier; a reference to a method as a value lowers to a Go method value or method expression.
 

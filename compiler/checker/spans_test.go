@@ -117,6 +117,72 @@ fn main() {
 	}
 }
 
+func TestSpansRecordNestedNamedFunctionDefAndUses(t *testing.T) {
+	spans := checkWithSpans(t, `fn inner() Int { 1 }
+
+fn outer(value: Int) Int {
+  fn inner() Int { value }
+  let callback = inner
+  let _ = callback
+  inner()
+}
+`)
+	referenceKey := keyAt(t, spans, parse.Point{Row: 5, Col: 18})
+	callKey := keyAt(t, spans, parse.Point{Row: 7, Col: 4})
+	if referenceKey != callKey {
+		t.Fatal("nested function reference and call have different identity keys")
+	}
+	if referenceKey == checker.FunctionKey("test.ard", "inner") {
+		t.Fatal("nested function uses top-level nominal identity")
+	}
+	definition, ok := spans.Def(referenceKey)
+	if !ok {
+		t.Fatal("nested function definition was not recorded")
+	}
+	if definition.Loc.Start.Row != 4 {
+		t.Fatalf("nested function definition row = %d, want 4", definition.Loc.Start.Row)
+	}
+	group := spans.ByKey(referenceKey)
+	defs := 0
+	uses := 0
+	for _, record := range group {
+		if record.IsDef {
+			defs++
+		} else {
+			uses++
+		}
+	}
+	if defs != 1 || uses != 2 {
+		t.Fatalf("nested function span group has %d definitions and %d uses, want 1 and 2", defs, uses)
+	}
+}
+
+func TestSpansRecordInvalidNestedNamedFunctionCall(t *testing.T) {
+	result := parse.Parse([]byte(`fn outer() Int {
+  fn inner(value: Int) Int { value }
+  inner()
+}
+`), "test.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	resolver, err := checker.NewModuleResolver(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := checker.New("test.ard", result.Program, resolver, checker.CheckOptions{RecordSpans: true})
+	c.Check()
+	if !c.HasErrors() {
+		t.Fatal("checker succeeded; expected missing argument diagnostic")
+	}
+	spans := c.Spans()
+	callKey := keyAt(t, spans, parse.Point{Row: 3, Col: 4})
+	definition, ok := spans.Def(callKey)
+	if !ok || definition.Loc.Start.Row != 2 {
+		t.Fatalf("invalid local call definition = %#v, want nested declaration on row 2", definition)
+	}
+}
+
 func TestSpansRecordExpressionTypes(t *testing.T) {
 	spans := checkWithSpans(t, `fn main() {
   let msg = "hello"

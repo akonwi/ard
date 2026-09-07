@@ -51,6 +51,7 @@ const (
 	DiagnosticCodeRecursiveStructLayout         DiagnosticCode = "recursive_struct_layout"
 	DiagnosticCodeUnresolvedGeneric             DiagnosticCode = "unresolved_generic"
 	DiagnosticCodeUnboundGenericTypeArg         DiagnosticCode = "unbound_generic_type_argument"
+	DiagnosticCodeUnsupportedLocalGeneric       DiagnosticCode = "unsupported_local_generic_function"
 	DiagnosticCodeNonGenericSpecialization      DiagnosticCode = "non_generic_type_specialization"
 	DiagnosticCodeIncorrectTypeArgCount         DiagnosticCode = "incorrect_type_argument_count"
 	DiagnosticCodeMissingTypeArguments          DiagnosticCode = "missing_type_arguments"
@@ -83,6 +84,7 @@ const (
 	DiagnosticCodeDuplicateArgument             DiagnosticCode = "duplicate_argument"
 	DiagnosticCodeNamedArgumentsUnsupported     DiagnosticCode = "named_arguments_unsupported"
 	DiagnosticCodeInvalidFunctionTypeArgs       DiagnosticCode = "invalid_function_type_arguments"
+	DiagnosticCodeStaticFunctionNotTopLevel     DiagnosticCode = "static_function_not_top_level"
 	DiagnosticCodeTestNotTopLevel               DiagnosticCode = "test_not_top_level"
 	DiagnosticCodeTestParametersNotAllowed      DiagnosticCode = "test_parameters_not_allowed"
 	DiagnosticCodeGenericTestNotAllowed         DiagnosticCode = "generic_test_not_allowed"
@@ -969,6 +971,23 @@ func (d invalidFunctionTypeArgumentsDiagnostic) build() Diagnostic {
 		DiagnosticLabel{Span: d.Span, Message: primary},
 	)
 	diagnostic.Code = DiagnosticCodeInvalidFunctionTypeArgs
+	return diagnostic
+}
+
+type staticFunctionNotTopLevelDiagnostic struct {
+	Name string
+	Span SourceSpan
+}
+
+func (d staticFunctionNotTopLevelDiagnostic) build() Diagnostic {
+	diagnostic := newLabeledDiagnostic(
+		Error,
+		fmt.Sprintf("static function %s must be a top-level declaration", d.Name),
+		"Static function must be top-level",
+		"Type-qualified static functions do not create lexical closure bindings. Move this declaration to module scope.",
+		DiagnosticLabel{Span: d.Span, Message: "move this static function to the module level"},
+	)
+	diagnostic.Code = DiagnosticCodeStaticFunctionNotTopLevel
 	return diagnostic
 }
 
@@ -2191,6 +2210,23 @@ func (d unboundGenericTypeArgumentDiagnostic) build() Diagnostic {
 		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("`$%s` cannot be used as a type argument here", d.Name)},
 	)
 	diagnostic.Code = DiagnosticCodeUnboundGenericTypeArg
+	return diagnostic
+}
+
+type unsupportedLocalGenericFunctionDiagnostic struct {
+	Name string
+	Span SourceSpan
+}
+
+func (d unsupportedLocalGenericFunctionDiagnostic) build() Diagnostic {
+	diagnostic := newLabeledDiagnostic(
+		Error,
+		fmt.Sprintf("generic local function %s is not supported", d.Name),
+		"Generic local function is not supported",
+		"Nested named functions are closure values, and their signatures cannot contain generic parameters. Move this function to module scope.",
+		DiagnosticLabel{Span: d.Span, Message: "local function signatures cannot contain generic parameters"},
+	)
+	diagnostic.Code = DiagnosticCodeUnsupportedLocalGeneric
 	return diagnostic
 }
 

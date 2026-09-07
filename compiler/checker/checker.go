@@ -251,6 +251,7 @@ func derefTypeSeen(t Type, seen map[Type]struct{}) Type {
 			Name:                    typ.Name,
 			GenericParams:           append([]string(nil), typ.GenericParams...),
 			CallGenericParams:       append([]string(nil), typ.CallGenericParams...),
+			LocalNamed:              typ.LocalNamed,
 			DefaultVoidGeneric:      typ.DefaultVoidGeneric,
 			DeferCallCompleteness:   typ.DeferCallCompleteness,
 			Parameters:              newParams,
@@ -644,6 +645,8 @@ type Checker struct {
 	topLevelStructDeclarations        map[string]*parse.StructDefinition
 	topLevelTypeAliases               map[string]*parse.TypeDeclaration
 	hoistedTopLevelFunctions          map[*parse.FunctionDeclaration]*FunctionDef
+	topLevelFunctions                 map[*parse.FunctionDeclaration]bool
+	topLevelStaticFunctions           map[*parse.StaticFunctionDeclaration]bool
 	preparedInherentMethods           map[*parse.FunctionDeclaration]preparedInherentMethod
 	preparedTraitMethods              map[*parse.FunctionDeclaration]preparedTraitMethod
 	resolvingTopLevelStructs          map[string]bool
@@ -699,6 +702,8 @@ func New(filePath string, input *parse.Program, moduleResolver *ModuleResolver, 
 		scope:                     &rootScope,
 		goTypesContext:            gotypes.NewContext(),
 		foreignABIParameters:      map[*parse.FunctionDeclaration][]ForeignParameterABI{},
+		topLevelFunctions:         map[*parse.FunctionDeclaration]bool{},
+		topLevelStaticFunctions:   map[*parse.StaticFunctionDeclaration]bool{},
 		preparedInherentMethods:   map[*parse.FunctionDeclaration]preparedInherentMethod{},
 		preparedTraitMethods:      map[*parse.FunctionDeclaration]preparedTraitMethod{},
 		constraintFunctionStack:   []*FunctionDef{},
@@ -707,6 +712,14 @@ func New(filePath string, input *parse.Program, moduleResolver *ModuleResolver, 
 	if checkOptions.RecordSpans {
 		c.spans = &SpanIndex{}
 		c.moduleFiles = map[string]string{}
+	}
+	for _, stmt := range input.Statements {
+		switch def := stmt.(type) {
+		case *parse.FunctionDeclaration:
+			c.topLevelFunctions[def] = true
+		case *parse.StaticFunctionDeclaration:
+			c.topLevelStaticFunctions[def] = true
+		}
 	}
 
 	return c
@@ -3581,7 +3594,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					c.pushMethodGenericAllowlist(receiverGenerics)
 					fnDef := c.checkFunctionWithSignature(method, func() {
 						c.scope.add(s.Receiver.Name, receiverBindingType(targetType, method.Mutates), false)
-					}, prepared.Signature, receiverGenerics...)
+					}, prepared.Signature, false, receiverGenerics...)
 					c.popMethodGenericAllowlist()
 					if fnDef != nil && !methodUsesOnlyReceiverGenerics(fnDef, receiverGenerics) {
 						c.addMethodIntroducedGeneric("", methodGenericSemanticLeak, method.GetLocation())
@@ -3721,7 +3734,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					c.pushMethodGenericAllowlist(receiverGenerics)
 					fnDef := c.checkFunctionWithSignature(method, func() {
 						c.scope.add(s.Receiver.Name, targetType, false) // Enums are immutable, so always false
-					}, prepared.Signature, receiverGenerics...)
+					}, prepared.Signature, false, receiverGenerics...)
 					c.popMethodGenericAllowlist()
 					if fnDef != nil && !methodUsesOnlyReceiverGenerics(fnDef, receiverGenerics) {
 						c.addMethodIntroducedGeneric("", methodGenericSemanticLeak, method.GetLocation())
@@ -4539,7 +4552,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					c.pushMethodGenericAllowlist(receiverGenerics)
 					fnDef := c.checkFunctionWithSignature(method, func() {
 						c.scope.add(s.Receiver.Name, receiverBindingType(def, method.Mutates), false)
-					}, prepared.Signature, receiverGenerics...)
+					}, prepared.Signature, false, receiverGenerics...)
 					c.popMethodGenericAllowlist()
 					if !methodUsesOnlyReceiverGenerics(fnDef, receiverGenerics) {
 						c.addMethodIntroducedGeneric("", methodGenericSemanticLeak, method.GetLocation())
@@ -4564,7 +4577,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					c.pushMethodGenericAllowlist(receiverGenerics)
 					fnDef := c.checkFunctionWithSignature(method, func() {
 						c.scope.add(s.Receiver.Name, def, false)
-					}, prepared.Signature, receiverGenerics...)
+					}, prepared.Signature, false, receiverGenerics...)
 					c.popMethodGenericAllowlist()
 					if !methodUsesOnlyReceiverGenerics(fnDef, receiverGenerics) {
 						c.addMethodIntroducedGeneric("", methodGenericSemanticLeak, method.GetLocation())
@@ -8024,8 +8037,15 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 				c.addNonCallable(s.Name, s.GetLocation(), sourceSpanIfPresent(fnSym.declaredAt), nonCallablePrefix)
 				return nil
 			}
-			c.recordCallAttempt(s, s.Name, fnDef)
 			declaration := fnSym.callableDeclaration
+			call := &FunctionCall{
+				Name:        s.Name,
+				declaration: declaration,
+				signature:   fnDef,
+				binding:     fnSym,
+				ReturnType:  fnDef.ReturnType,
+			}
+			c.recordCallAttempt(s, call)
 
 			callTypeArgs := c.resolveCallTypeArgs(s.TypeArgs)
 
@@ -8066,15 +8086,11 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 				return nil
 			}
 
-			call := &FunctionCall{
-				Name:        s.Name,
-				Args:        args,
-				TypeArgs:    callTypeArgs,
-				TailSpread:  tailSpread,
-				declaration: declaration,
-				signature:   fnToUse,
-				ReturnType:  fnToUse.ReturnType,
-			}
+			call.Args = args
+			call.TypeArgs = callTypeArgs
+			call.TailSpread = tailSpread
+			call.signature = fnToUse
+			call.ReturnType = fnToUse.ReturnType
 			return call
 		}
 	case *parse.InstanceProperty:
@@ -9070,7 +9086,10 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 	case *parse.IfStatement:
 		return c.checkIfChain(s)
 	case *parse.FunctionDeclaration:
-		return c.checkFunction(s, nil)
+		if c.topLevelFunctions[s] {
+			return c.checkFunction(s, nil)
+		}
+		return c.checkLocalFunction(s)
 	case *parse.AnonymousFunction:
 		{
 			parentConstraintFunction := c.currentConstraintFunction()
@@ -9135,6 +9154,13 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 			return fn
 		}
 	case *parse.StaticFunctionDeclaration:
+		if !c.topLevelStaticFunctions[s] {
+			c.addDiagnostic(staticFunctionNotTopLevelDiagnostic{
+				Name: s.Path.String(),
+				Span: c.sourceSpan(s.GetLocation()),
+			}.build())
+			return nil
+		}
 		if c.spans != nil {
 			if target, ok := s.Path.Target.(*parse.Identifier); ok {
 				if sym, found := c.scope.get(target.Name); found && isNominalType(sym.Type) {
@@ -11747,16 +11773,20 @@ func (c *Checker) resolveMethodSignature(def *parse.FunctionDeclaration) *Functi
 }
 
 func (c *Checker) checkFunction(def *parse.FunctionDeclaration, init func(), extraGenericParams ...string) *FunctionDef {
-	return c.checkFunctionWithSignature(def, init, nil, extraGenericParams...)
+	return c.checkFunctionWithSignature(def, init, nil, false, extraGenericParams...)
 }
 
-func (c *Checker) checkFunctionWithSignature(def *parse.FunctionDeclaration, init func(), signature *FunctionDef, extraGenericParams ...string) *FunctionDef {
+func (c *Checker) checkLocalFunction(def *parse.FunctionDeclaration) *FunctionDef {
+	return c.checkFunctionWithSignature(def, nil, nil, true)
+}
+
+func (c *Checker) checkFunctionWithSignature(def *parse.FunctionDeclaration, init func(), signature *FunctionDef, localNamed bool, extraGenericParams ...string) *FunctionDef {
 	if init != nil {
 		init()
 	}
-	if c.spans != nil && init == nil {
-		// Module-level function definition. Methods (init != nil) are keyed
-		// separately when method identity recording lands.
+	if c.spans != nil && init == nil && !localNamed {
+		// Module-level function definition. Methods and local named functions
+		// have separate lexical identities.
 		c.recordDef(def.GetLocation(), FunctionKey(c.typeOwnerPath(), def.Name))
 	}
 
@@ -11799,6 +11829,8 @@ func (c *Checker) checkFunctionWithSignature(def *parse.FunctionDeclaration, ini
 		}
 	}
 
+	fn.LocalNamed = localNamed
+
 	if paramABI, foreignABI := c.foreignABIParameters[def]; foreignABI {
 		for i := range fn.Parameters {
 			if i < len(paramABI) {
@@ -11809,7 +11841,7 @@ func (c *Checker) checkFunctionWithSignature(def *parse.FunctionDeclaration, ini
 	}
 
 	if def.IsTest {
-		if init != nil {
+		if init != nil || localNamed {
 			c.addDiagnostic(invalidTestFunctionDiagnostic{
 				Kind: testNotTopLevel,
 				Span: c.sourceSpan(def.GetLocation()),
@@ -11845,12 +11877,32 @@ func (c *Checker) checkFunctionWithSignature(def *parse.FunctionDeclaration, ini
 	// For methods (when init != nil), only add within the body scope.
 	if init == nil {
 		if _, ok := c.hoistedTopLevelFunctions[def]; !ok {
-			c.scope.addFunctionDeclaration(def.Name, fn)
+			sym := c.scope.addFunctionDeclaration(def.Name, fn)
+			if localNamed {
+				c.recordBinding(def.GetLocation(), sym)
+			}
 		}
 	}
 
 	if init == nil {
 		fn.CallGenericParams = append([]string{}, genericParamsForFunction(fn)...)
+	}
+	if localNamed && len(fn.CallGenericParams) > 0 {
+		c.addDiagnostic(unsupportedLocalGenericFunctionDiagnostic{
+			Name: def.Name,
+			Span: c.sourceSpan(def.GetLocation()),
+		}.build())
+		// Generics already owned by the enclosing declaration remain fixed while
+		// checking later uses. Independently introduced names keep their ordinary
+		// inference behavior so the primary unsupported-declaration diagnostic
+		// does not cascade into unrelated argument errors.
+		callParams := make([]string, 0, len(fn.CallGenericParams))
+		for _, param := range fn.CallGenericParams {
+			if !c.genericInCurrentContext(param) {
+				callParams = append(callParams, param)
+			}
+		}
+		fn.CallGenericParams = callParams
 	}
 	diagnosticsBeforeBody := len(c.diagnostics)
 	parentConstraintFunction := c.currentConstraintFunction()
@@ -11935,6 +11987,7 @@ func substituteType(t Type, typeMap map[string]Type) Type {
 			Name:                    typ.Name,
 			GenericParams:           append([]string(nil), typ.GenericParams...),
 			CallGenericParams:       append([]string(nil), typ.CallGenericParams...),
+			LocalNamed:              typ.LocalNamed,
 			DefaultVoidGeneric:      typ.DefaultVoidGeneric,
 			DeferCallCompleteness:   typ.DeferCallCompleteness,
 			Parameters:              substitutedParams,
@@ -12988,6 +13041,7 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 				Name:                    fnDefCopy.Name,
 				GenericParams:           append([]string(nil), fnDefCopy.GenericParams...),
 				CallGenericParams:       append([]string(nil), fnDefCopy.CallGenericParams...),
+				LocalNamed:              fnDefCopy.LocalNamed,
 				DefaultVoidGeneric:      fnDefCopy.DefaultVoidGeneric,
 				DeferCallCompleteness:   fnDefCopy.DeferCallCompleteness,
 				Parameters:              make([]Parameter, len(fnDefCopy.Parameters)),
