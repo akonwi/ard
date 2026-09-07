@@ -70,20 +70,19 @@ type lowerer struct {
 	inherentMethodsByOwner   map[checker.MethodOwner]map[string]*checker.FunctionDef
 	unresolvedTypeVarByType  map[checker.Type]bool
 
-	loweringModules          map[string]bool
-	loweredModules           map[string]bool
-	loweringFuncs            map[FunctionID]bool
-	loweredFuncs             map[FunctionID]bool
-	loweringGlobals          map[GlobalID]bool
-	loweredGlobals           map[GlobalID]bool
-	functionTypeVars         map[FunctionID]map[string]TypeID
-	genericStructDefs        map[string]TypeID
-	genericFunctionDefs      map[string]FunctionID
-	genericFunctionOriginals map[string]*checker.FunctionDef
-	genericMethodDefs        map[string]FunctionID
-	defParams                map[string]int
-	defParamOwner            string
-	includeTests             bool
+	loweringModules     map[string]bool
+	loweredModules      map[string]bool
+	loweringFuncs       map[FunctionID]bool
+	loweredFuncs        map[FunctionID]bool
+	loweringGlobals     map[GlobalID]bool
+	loweredGlobals      map[GlobalID]bool
+	functionTypeVars    map[FunctionID]map[string]TypeID
+	genericStructDefs   map[string]TypeID
+	genericFunctionDefs map[string]FunctionID
+	genericMethodDefs   map[string]FunctionID
+	defParams           map[string]int
+	defParamOwner       string
+	includeTests        bool
 }
 
 type functionLowerer struct {
@@ -118,18 +117,17 @@ func newLowerer(options LowerOptions, rootCount int) *lowerer {
 		cacheMethodLookups:      rootCount == 1,
 		unresolvedTypeVarByType: map[checker.Type]bool{},
 
-		loweringModules:          map[string]bool{},
-		loweredModules:           map[string]bool{},
-		loweringFuncs:            map[FunctionID]bool{},
-		loweredFuncs:             map[FunctionID]bool{},
-		loweringGlobals:          map[GlobalID]bool{},
-		loweredGlobals:           map[GlobalID]bool{},
-		functionTypeVars:         map[FunctionID]map[string]TypeID{},
-		genericStructDefs:        map[string]TypeID{},
-		genericFunctionDefs:      map[string]FunctionID{},
-		genericFunctionOriginals: map[string]*checker.FunctionDef{},
-		genericMethodDefs:        map[string]FunctionID{},
-		includeTests:             options.IncludeTests,
+		loweringModules:     map[string]bool{},
+		loweredModules:      map[string]bool{},
+		loweringFuncs:       map[FunctionID]bool{},
+		loweredFuncs:        map[FunctionID]bool{},
+		loweringGlobals:     map[GlobalID]bool{},
+		loweredGlobals:      map[GlobalID]bool{},
+		functionTypeVars:    map[FunctionID]map[string]TypeID{},
+		genericStructDefs:   map[string]TypeID{},
+		genericFunctionDefs: map[string]FunctionID{},
+		genericMethodDefs:   map[string]FunctionID{},
+		includeTests:        options.IncludeTests,
 	}
 	if l.cacheMethodLookups {
 		l.structMethodsByOwner = map[checker.MethodOwner]map[string]*checker.FunctionDef{}
@@ -283,11 +281,6 @@ func findReachableModuleSeen(mod checker.Module, path string, seen map[string]bo
 	return nil
 }
 
-func (l *lowerer) hasStructMethod(def *checker.StructDef, name string) bool {
-	methods := l.structMethods(def)
-	return methods != nil && methods[name] != nil
-}
-
 func (l *lowerer) lowerModule(module checker.Module) error {
 	if module == nil {
 		return fmt.Errorf("cannot lower nil module")
@@ -362,12 +355,6 @@ func (l *lowerer) lowerModule(module checker.Module) error {
 		switch expr := stmt.Expr.(type) {
 		case *checker.FunctionDef:
 			if l.functionHasUnresolvedTypeVar(expr) || (!l.includeTests && expr.IsTest) {
-				// Register generic function definitions (with their $T parameters
-				// intact) so call sites can recover the generic shape even for
-				// private functions not exposed in the module's public symbols.
-				if l.functionHasUnresolvedTypeVar(expr) {
-					l.genericFunctionOriginals[functionKey(modID, expr.Name)] = expr
-				}
 				continue
 			}
 			if _, err := l.declareFunction(modID, expr); err != nil {
@@ -607,10 +594,13 @@ func (l *lowerer) declareFunctionSpecializationWithSignatureAndGenericKey(module
 // TypeParam-kind types; call sites reference this single definition and supply
 // concrete type arguments via Expr.TypeArgs.
 // genericParamNames returns the ordered generic parameter names of a function
-// definition. At call sites the checker leaves GenericParams empty but records
-// the resolved type variables in GenericBindings, so fall back to the sorted
-// binding keys to keep a stable ordering across call sites.
+// declaration or specialized call signature. Source declarations record
+// call-owned inference parameters in CallGenericParams; older/synthetic call
+// signatures can fall back to GenericParams or their sorted binding keys.
 func genericParamNames(def *checker.FunctionDef) []string {
+	if len(def.CallGenericParams) > 0 {
+		return def.CallGenericParams
+	}
 	if len(def.GenericParams) > 0 {
 		return def.GenericParams
 	}
@@ -622,36 +612,12 @@ func genericParamNames(def *checker.FunctionDef) []string {
 	return keys
 }
 
-// originalGenericFunctionDef returns the unsubstituted generic definition (with
-// $T parameters) for a call-site definition. Call sites carry a derefed clone
-// whose parameters are already concrete, so recover the original from the
-// registry or the owning module's checked statements. The latter includes
-// private functions and does not depend on the declaring module being lowered
-// before an imported closure requests the specialization.
-func (l *lowerer) originalGenericFunctionDef(module ModuleID, callDef *checker.FunctionDef) *checker.FunctionDef {
-	if orig, ok := l.genericFunctionOriginals[functionKey(module, callDef.Name)]; ok {
-		return orig
-	}
-	mod := l.findReachableModule(l.program.Modules[module].Path)
-	if mod == nil || mod.Program() == nil {
-		return callDef
-	}
-	statements := mod.Program().Statements
-	for i := len(statements) - 1; i >= 0; i-- {
-		if orig, ok := statements[i].Expr.(*checker.FunctionDef); ok && orig.Name == callDef.Name {
-			return orig
-		}
-	}
-	return callDef
-}
-
-func (l *lowerer) declareGenericFunctionDef(module ModuleID, callDef *checker.FunctionDef) (FunctionID, error) {
-	key := functionKey(module, callDef.Name)
+func (l *lowerer) declareGenericFunctionDef(module ModuleID, declaration *checker.FunctionDef) (FunctionID, error) {
+	key := functionKey(module, declaration.Name)
 	if id, ok := l.genericFunctionDefs[key]; ok {
 		return id, nil
 	}
-	def := l.originalGenericFunctionDef(module, callDef)
-	paramNames := genericParamNames(callDef)
+	paramNames := genericParamNames(declaration)
 	params := map[string]int{}
 	goParams := make([]string, len(paramNames))
 	for i, p := range paramNames {
@@ -663,23 +629,23 @@ func (l *lowerer) declareGenericFunctionDef(module ModuleID, callDef *checker.Fu
 	prevOwner := l.defParamOwner
 	l.defParams = params
 	l.defParamOwner = paramOwner
-	signature, err := l.signatureForFunction(def.Parameters, def.ReturnType)
+	signature, err := l.signatureForFunction(declaration.Parameters, declaration.ReturnType)
 	l.defParams = prev
 	l.defParamOwner = prevOwner
 	if err != nil {
 		return NoFunction, err
 	}
 	id := FunctionID(len(l.program.Functions))
-	l.functions[concreteFunctionKey(module, def.Name, signature, "genericdef")] = id
+	l.functions[concreteFunctionKey(module, declaration.Name, signature, "genericdef")] = id
 	l.genericFunctionDefs[key] = id
 	l.program.Functions = append(l.program.Functions, Function{
 		ID:         id,
 		Module:     module,
-		Name:       def.Name,
+		Name:       declaration.Name,
 		Signature:  signature,
 		TypeParams: goParams,
-		IsTest:     def.IsTest,
-		Private:    def.Private,
+		IsTest:     declaration.IsTest,
+		Private:    declaration.Private,
 	})
 	l.program.Modules[module].Functions = appendUniqueFunction(l.program.Modules[module].Functions, id)
 	typeVars := make(map[string]TypeID, len(params))
@@ -692,7 +658,7 @@ func (l *lowerer) declareGenericFunctionDef(module ModuleID, callDef *checker.Fu
 		typeVars[p] = tp
 	}
 	l.setFunctionTypeVars(id, typeVars)
-	if err := l.lowerFunctionByID(id, def); err != nil {
+	if err := l.lowerFunctionByID(id, declaration); err != nil {
 		return NoFunction, err
 	}
 	return id, nil
@@ -709,29 +675,33 @@ func (l *lowerer) declareAndLowerFunction(module ModuleID, def *checker.Function
 	return id, nil
 }
 
-func (fl *functionLowerer) declareAndLowerFunctionCall(module ModuleID, def *checker.FunctionDef, call *checker.FunctionCall) (FunctionID, error) {
+func (fl *functionLowerer) declareAndLowerFunctionCall(module ModuleID, declaration *checker.FunctionDef, call *checker.FunctionCall) (FunctionID, error) {
+	specialized := call.Signature()
+	if specialized == nil {
+		return NoFunction, fmt.Errorf("call to %s has no specialized signature", call.Name)
+	}
 	// Generic functions are lowered once as a Go generic definition (ADR 0031,
 	// Phase 2) rather than monomorphized per call.
-	if len(def.GenericBindings) > 0 {
-		return fl.l.declareGenericFunctionDef(module, def)
+	if len(specialized.GenericBindings) > 0 {
+		return fl.l.declareGenericFunctionDef(module, declaration)
 	}
-	if fl.l.functionHasUnresolvedTypeVar(def) && len(def.GenericBindings) == 0 {
-		return NoFunction, fmt.Errorf("cannot declare unspecialized generic function %s", def.Name)
+	if fl.l.functionHasUnresolvedTypeVar(specialized) {
+		return NoFunction, fmt.Errorf("cannot declare unspecialized generic function %s", declaration.Name)
 	}
 	signature, err := fl.signatureForCall(call)
 	if err != nil {
 		return NoFunction, err
 	}
-	genericKey, typeVars, err := fl.genericBindingsKeyAndTypeVars(def)
+	genericKey, typeVars, err := fl.genericBindingsKeyAndTypeVars(specialized)
 	if err != nil {
 		return NoFunction, err
 	}
-	id, err := fl.l.declareFunctionSpecializationWithSignatureAndGenericKey(module, def, signature, genericKey)
+	id, err := fl.l.declareFunctionSpecializationWithSignatureAndGenericKey(module, declaration, signature, genericKey)
 	if err != nil {
 		return NoFunction, err
 	}
 	fl.l.setFunctionTypeVars(id, typeVars)
-	if err := fl.l.lowerFunctionByID(id, def); err != nil {
+	if err := fl.l.lowerFunctionByID(id, declaration); err != nil {
 		return NoFunction, err
 	}
 	return id, nil
@@ -2210,25 +2180,17 @@ func methodUsesOnlyStructTypeParams(def *checker.FunctionDef, structParams []str
 	return true
 }
 
-func (fl *functionLowerer) declareGenericInstanceMethodFunction(module ModuleID, instanceType TypeID, structType *checker.StructDef, callDef *checker.FunctionDef) (FunctionID, []TypeID, error) {
+func (fl *functionLowerer) declareGenericInstanceMethodFunction(module ModuleID, instanceType TypeID, structType *checker.StructDef, declaration *checker.FunctionDef) (FunctionID, []TypeID, error) {
 	definition := checker.StructDefinition(structType)
 	if definition == nil {
-		return NoFunction, nil, fmt.Errorf("generic method %s has no struct definition", callDef.Name)
+		return NoFunction, nil, fmt.Errorf("generic method %s has no struct definition", declaration.Name)
 	}
-	orig := callDef
-	if callDef.RequiredGoMethodName == "" {
-		if methods := fl.l.inherentMethods(structType); methods != nil {
-			if method := methods[callDef.Name]; method != nil {
-				orig = method
-			}
-		}
-	}
-	key := "genericmethod:" + definition.ModulePath + ":" + definition.Name + ":" + callDef.Name
-	id, typeArgs, err := fl.declareGenericMethodFunction(module, instanceType, orig, key, definition.Name+"."+callDef.Name, "genericmethod")
+	key := "genericmethod:" + definition.ModulePath + ":" + definition.Name + ":" + declaration.Name
+	id, typeArgs, err := fl.declareGenericMethodFunction(module, instanceType, declaration, key, definition.Name+"."+declaration.Name, "genericmethod")
 	if err != nil {
 		return NoFunction, nil, err
 	}
-	if err := fl.l.lowerFunctionByID(id, orig); err != nil {
+	if err := fl.l.lowerFunctionByID(id, declaration); err != nil {
 		return NoFunction, nil, err
 	}
 	return id, typeArgs, nil
@@ -2347,7 +2309,7 @@ func (fl *functionLowerer) spreadElementTypeForCall(call *checker.FunctionCall) 
 	if call == nil || !call.TailSpread {
 		return NoType, nil
 	}
-	definition := call.Definition()
+	definition := call.Signature()
 	if definition == nil || len(definition.Parameters) == 0 || !definition.Parameters[len(definition.Parameters)-1].Variadic {
 		return NoType, fmt.Errorf("spread call is missing a variadic parameter")
 	}
@@ -2358,7 +2320,7 @@ func (fl *functionLowerer) spreadCallableTypeForCall(call *checker.FunctionCall)
 	if call == nil || !call.TailSpread {
 		return NoType, nil
 	}
-	definition := call.Definition()
+	definition := call.Signature()
 	if definition == nil {
 		return NoType, fmt.Errorf("spread call is missing its callable definition")
 	}
@@ -2381,7 +2343,7 @@ func typeArgsForCallWithInterner(call *checker.FunctionCall, intern func(checker
 }
 
 func signatureForCallWithInterner(call *checker.FunctionCall, intern func(checker.Type) (TypeID, error)) (Signature, error) {
-	if def := call.Definition(); def != nil {
+	if def := call.Signature(); def != nil {
 		if !functionHasTypeVar(def) {
 			return signatureForFunctionWithInterner(def.Parameters, def.ReturnType, intern)
 		}
@@ -4613,12 +4575,12 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 			if global, ok := fl.l.lookupGlobalInModule(fl.fn.Module, e.Name()); ok {
 				return &Expr{Kind: ExprLoadGlobal, Type: fl.l.program.Globals[global].Type, Payload: &GlobalExprPayload{Global: global}}, nil
 			}
-			if def, ok := e.Type().(*checker.FunctionDef); ok {
+			if declaration := e.Declaration(); declaration != nil {
 				functionType, err := fl.internType(e.Type())
 				if err != nil {
 					return nil, err
 				}
-				id, err := fl.l.declareAndLowerFunction(fl.fn.Module, def)
+				id, err := fl.l.declareAndLowerFunction(fl.fn.Module, declaration)
 				if err != nil {
 					return nil, err
 				}
@@ -4699,54 +4661,23 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 				return fl.lowerFunctionTypeCall(e.Name, e.Args, target, e.TailSpread)
 			}
 		}
-		if def := e.Definition(); def != nil {
-			// Forward references to generic functions carry a specialized
-			// copy of the hoisted signature whose Body is still nil (the
-			// original's body is attached after the copy). Generic calls
-			// resolve the original definition inside declareAndLower, so the
-			// nil body does not block them.
-			if def.Body != nil || len(def.GenericBindings) > 0 {
-				id, err := fl.declareAndLowerFunctionCall(fl.fn.Module, def, e)
-				if err != nil {
-					return nil, err
-				}
-				return fl.buildResolvedCallExpr(id, def, e, e.Args)
+		if local, hasLocal, err := fl.resolveLocal(e.Name); err != nil {
+			return nil, err
+		} else if hasLocal && fl.localKind(local) == TypeFunction {
+			target := &Expr{Kind: ExprLoadLocal, Type: fl.fn.Locals[local].Type, Payload: &LocalExprPayload{Local: local}}
+			return fl.lowerFunctionTypeCall(e.Name, e.Args, target, e.TailSpread)
+		}
+		if declaration := e.Declaration(); declaration != nil {
+			if declaration.Body == nil {
+				return nil, fmt.Errorf("function call target %s has no checked body", declaration.Name)
 			}
-			id, ok := fl.l.lookupFunction(def.Name)
-			if !ok {
-				local, hasLocal, err := fl.resolveLocal(e.Name)
-				if err != nil {
-					return nil, err
-				}
-				if hasLocal && fl.localKind(local) == TypeFunction {
-					target := &Expr{Kind: ExprLoadLocal, Type: fl.fn.Locals[local].Type, Payload: &LocalExprPayload{Local: local}}
-					args, err := fl.lowerArgsForFunctionType(e.Args, target.Type, e.TailSpread)
-					if err != nil {
-						return nil, err
-					}
-					returnType := typeID
-					if typeInfo, ok := fl.l.typeInfo(target.Type); ok && typeInfo.Kind == TypeFunction {
-						returnType = typeInfo.Return
-					}
-					spreadElement := NoType
-					spreadCallable := NoType
-					if e.TailSpread {
-						if typeInfo, ok := fl.l.typeInfo(target.Type); ok && typeInfo.Kind == TypeFunction && typeInfo.Variadic && len(typeInfo.Params) > 0 {
-							spreadElement = typeInfo.Params[len(typeInfo.Params)-1]
-							spreadCallable = target.Type
-						}
-					}
-					return &Expr{Kind: ExprCallClosure, Type: returnType, Target: target, Args: args, Payload: &CallExprPayload{Spread: newSpreadExprPayload(e.TailSpread, spreadElement, spreadCallable)}}, nil
-				}
-				return nil, fmt.Errorf("unknown function call target %s", def.Name)
-			}
-			args, err := fl.lowerArgsWithSignature(e.Args, fl.l.program.Functions[id].Signature)
+			id, err := fl.declareAndLowerFunctionCall(fl.fn.Module, declaration, e)
 			if err != nil {
 				return nil, err
 			}
-			return &Expr{Kind: ExprCall, Type: fl.l.program.Functions[id].Signature.Return, Args: args, Payload: &CallExprPayload{Function: id}}, nil
+			return fl.buildResolvedCallExpr(id, e, e.Args)
 		}
-		return nil, fmt.Errorf("unsupported unresolved function call %s", e.Name)
+		return nil, fmt.Errorf("unresolved function call %s has no declaration", e.Name)
 	case *checker.ForeignValue:
 		var argABI []ABIParamMode
 		if functionDef, ok := e.Type().(*checker.FunctionDef); ok {
@@ -4828,7 +4759,7 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 			return nil, err
 		}
 		args := make([]Expr, len(e.Call.Args))
-		methodDef := e.Call.Definition()
+		methodDef := e.Call.Signature()
 		for i, arg := range e.Call.Args {
 			var lowered *Expr
 			var err error
@@ -4922,7 +4853,7 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 			return nil, fmt.Errorf("a Go call returning %s must be bound directly with let", e.Call.Type())
 		}
 		args := make([]Expr, len(e.Call.Args))
-		fnDef := e.Call.Definition()
+		fnDef := e.Call.Signature()
 		for i, arg := range e.Call.Args {
 			var lowered *Expr
 			if e.Call.TailSpread && i == len(e.Call.Args)-1 {
@@ -5000,23 +4931,18 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 				return fl.lowerFunctionTypeCall(e.Call.Name, e.Call.Args, target, e.Call.TailSpread)
 			}
 		}
-		if def := fl.l.moduleFunctionDefinitionForCall(e); def != nil && def.Body != nil {
-			id, err := fl.declareAndLowerFunctionCall(moduleID, def, e.Call)
-			if err != nil {
-				return nil, err
-			}
-			return fl.buildResolvedCallExpr(id, def, e.Call, e.Call.Args)
+		declaration := e.Call.Declaration()
+		if declaration == nil {
+			return nil, fmt.Errorf("module function call %s::%s has no declaration", e.Module, e.Call.Name)
 		}
-		if id, ok, err := fl.l.resolveModuleFunction(e.Module, e.Call.Name); err != nil {
+		if declaration.Body == nil {
+			return nil, fmt.Errorf("module function call target %s::%s has no checked body", e.Module, declaration.Name)
+		}
+		id, err := fl.declareAndLowerFunctionCall(moduleID, declaration, e.Call)
+		if err != nil {
 			return nil, err
-		} else if ok {
-			args, err := fl.lowerArgsWithSignature(e.Call.Args, fl.l.program.Functions[id].Signature)
-			if err != nil {
-				return nil, err
-			}
-			return &Expr{Kind: ExprCall, Type: fl.l.program.Functions[id].Signature.Return, Args: args, Payload: &CallExprPayload{Function: id}}, nil
 		}
-		return nil, fmt.Errorf("unsupported module function call %s::%s", e.Module, e.Call.Name)
+		return fl.buildResolvedCallExpr(id, e.Call, e.Call.Args)
 	case *checker.ModuleSymbol:
 		return fl.lowerModuleSymbol(typeID, e)
 	case *checker.ListLiteral:
@@ -6327,20 +6253,19 @@ func (fl *functionLowerer) lowerModuleSymbol(typeID TypeID, symbol *checker.Modu
 	if err := fl.l.ensureModuleGlobalsDeclared(symbol.Module); err != nil {
 		return nil, err
 	}
-	def, ok := fl.l.moduleFunctionDefinitionForSymbol(symbol)
-	if ok {
-		module := fl.l.internModule(symbol.Module)
-		if err := fl.l.ensureModuleTraitImplsDeclared(symbol.Module); err != nil {
-			return nil, err
-		}
-		id, err := fl.l.declareAndLowerFunction(module, def)
-		if err != nil {
-			return nil, err
-		}
-		return &Expr{Kind: ExprFunctionRef, Type: typeID, Payload: &CallExprPayload{Function: id}}, nil
+	declaration := symbol.Declaration()
+	if declaration == nil || declaration.Body == nil {
+		return nil, fmt.Errorf("unsupported AIR module symbol %s::%s of type %s", symbol.Module, symbol.Symbol.Name, symbol.Type().String())
 	}
-
-	return nil, fmt.Errorf("unsupported AIR module symbol %s::%s of type %s", symbol.Module, symbol.Symbol.Name, symbol.Type().String())
+	module := fl.l.internModule(symbol.Module)
+	if err := fl.l.ensureModuleTraitImplsDeclared(symbol.Module); err != nil {
+		return nil, err
+	}
+	id, err := fl.l.declareAndLowerFunction(module, declaration)
+	if err != nil {
+		return nil, err
+	}
+	return &Expr{Kind: ExprFunctionRef, Type: typeID, Payload: &CallExprPayload{Function: id}}, nil
 }
 
 func (fl *functionLowerer) lowerInstanceMethod(typeID TypeID, method *checker.InstanceMethod) (*Expr, error) {
@@ -6374,17 +6299,19 @@ func (fl *functionLowerer) lowerInstanceMethod(typeID TypeID, method *checker.In
 			return nil, fmt.Errorf("trait object %s references invalid trait %d", typeInfo.Name, typeInfo.Trait)
 		}
 		trait := fl.l.program.Traits[typeInfo.Trait]
-		for i, traitMethod := range trait.Methods {
-			if traitMethod.Name != method.Method.Name {
-				continue
-			}
-			args, err := fl.lowerArgsWithSignature(method.Method.Args, traitMethod.Signature)
-			if err != nil {
-				return nil, err
-			}
-			return &Expr{Kind: ExprCallTrait, Type: typeID, Target: target, Args: args, Payload: &TraitExprPayload{Trait: typeInfo.Trait, Method: i}}, nil
+		if !method.HasTraitMethodSlot {
+			return nil, fmt.Errorf("trait call %s.%s has no resolved method slot", trait.Name, method.Method.Name)
 		}
-		return nil, fmt.Errorf("trait %s has no method %s", trait.Name, method.Method.Name)
+		slot := method.TraitMethodSlot
+		if slot < 0 || slot >= len(trait.Methods) {
+			return nil, fmt.Errorf("trait call %s.%s has invalid method slot %d", trait.Name, method.Method.Name, slot)
+		}
+		traitMethod := trait.Methods[slot]
+		args, err := fl.lowerArgsWithSignature(method.Method.Args, traitMethod.Signature)
+		if err != nil {
+			return nil, err
+		}
+		return &Expr{Kind: ExprCallTrait, Type: typeID, Target: target, Args: args, Payload: &TraitExprPayload{Trait: typeInfo.Trait, Method: slot}}, nil
 	}
 	if typeInfo.Kind == TypeChannel || typeInfo.Kind == TypeReceiver || typeInfo.Kind == TypeSender {
 		return fl.lowerChanMethod(typeID, target, method)
@@ -6422,8 +6349,8 @@ func (fl *functionLowerer) lowerChanMethod(typeID TypeID, target *Expr, method *
 }
 
 func (fl *functionLowerer) lowerUserInstanceMethod(typeID TypeID, target *Expr, typeInfo TypeInfo, method *checker.InstanceMethod) (*Expr, error) {
-	def := method.Method.Definition()
-	if def != nil && !def.Mutates {
+	declaration := method.Method.Declaration()
+	if declaration != nil && !declaration.Mutates {
 		if reference, ok := fl.l.typeInfo(target.Type); ok && reference.Kind == TypeReference {
 			// A value-receiver method observes through a reference rather than
 			// passing the handle to a value-shaped receiver parameter. Preserve
@@ -6432,20 +6359,25 @@ func (fl *functionLowerer) lowerUserInstanceMethod(typeID TypeID, target *Expr, 
 		}
 	}
 	if method.DispatchTrait != nil {
-		if expr, ok, err := fl.lowerStaticTraitMethod(typeID, target, method); ok || err != nil {
-			return expr, err
+		expr, ok, err := fl.lowerStaticTraitMethod(typeID, target, method)
+		if err != nil {
+			return nil, err
 		}
+		if !ok {
+			return nil, fmt.Errorf("AIR trait implementation %s has no resolved method %s", method.DispatchTrait.Name, method.Method.Name)
+		}
+		return expr, nil
 	}
-	if def == nil || def.Body == nil {
-		if expr, ok, err := fl.lowerStaticTraitMethod(typeID, target, method); ok || err != nil {
-			return expr, err
-		}
+	if declaration == nil || declaration.Body == nil {
 		return nil, fmt.Errorf("unsupported AIR instance method %s on %s", method.Method.Name, method.Subject.Type().String())
 	}
-	return fl.lowerUserDefinedInstanceMethod(typeID, target, typeInfo, method, def)
+	return fl.lowerUserDefinedInstanceMethod(typeID, target, typeInfo, method, declaration)
 }
 
 func (fl *functionLowerer) lowerStaticTraitMethod(typeID TypeID, target *Expr, method *checker.InstanceMethod) (*Expr, bool, error) {
+	if method.DispatchTrait == nil || !method.HasTraitMethodSlot {
+		return nil, false, nil
+	}
 	module := fl.l.moduleForInstanceMethod(method, fl.fn.Module)
 	if module >= 0 && int(module) < len(fl.l.program.Modules) {
 		path := fl.l.program.Modules[module].Path
@@ -6471,34 +6403,30 @@ func (fl *functionLowerer) lowerStaticTraitMethod(typeID TypeID, target *Expr, m
 			return nil, false, fmt.Errorf("impl %d references invalid trait %d", impl.ID, impl.Trait)
 		}
 		trait := fl.l.program.Traits[impl.Trait]
-		if method.DispatchTrait != nil && (trait.ModulePath != method.DispatchTrait.ModulePath || trait.Name != method.DispatchTrait.Name) {
+		if trait.ModulePath != method.DispatchTrait.ModulePath || trait.Name != method.DispatchTrait.Name {
 			continue
 		}
-		for i, traitMethod := range trait.Methods {
-			if traitMethod.Name != method.Method.Name {
-				continue
-			}
-			if i >= len(impl.Methods) {
-				return nil, false, fmt.Errorf("impl %d missing method %d for trait %s", impl.ID, i, trait.Name)
-			}
-			id := impl.Methods[i]
-			if !validFunctionID(&fl.l.program, id) {
-				return nil, false, fmt.Errorf("impl %d method %d has invalid function id %d", impl.ID, i, id)
-			}
-			fn := fl.l.program.Functions[id]
-			args := make([]Expr, 0, len(method.Method.Args)+1)
-			args = append(args, *target)
-			loweredArgs, err := fl.lowerArgsWithSignature(method.Method.Args, Signature{Params: fn.Signature.Params[1:], Return: fn.Signature.Return})
-			if err != nil {
-				return nil, false, err
-			}
-			args = append(args, loweredArgs...)
-			var typeArgs []TypeID
-			if genericMatch {
-				typeArgs = append([]TypeID(nil), implTargetInfo.GenericArgs...)
-			}
-			return &Expr{Kind: ExprCall, Type: typeID, Args: args, Payload: &CallExprPayload{Function: id, TypeArgs: typeArgs}}, true, nil
+		slot := method.TraitMethodSlot
+		if slot < 0 || slot >= len(trait.Methods) || slot >= len(impl.Methods) {
+			return nil, false, fmt.Errorf("impl %d has invalid method slot %d for trait %s", impl.ID, slot, trait.Name)
 		}
+		id := impl.Methods[slot]
+		if !validFunctionID(&fl.l.program, id) {
+			return nil, false, fmt.Errorf("impl %d method %d has invalid function id %d", impl.ID, slot, id)
+		}
+		fn := fl.l.program.Functions[id]
+		args := make([]Expr, 0, len(method.Method.Args)+1)
+		args = append(args, *target)
+		loweredArgs, err := fl.lowerArgsWithSignature(method.Method.Args, Signature{Params: fn.Signature.Params[1:], Return: fn.Signature.Return})
+		if err != nil {
+			return nil, false, err
+		}
+		args = append(args, loweredArgs...)
+		var typeArgs []TypeID
+		if genericMatch {
+			typeArgs = append([]TypeID(nil), implTargetInfo.GenericArgs...)
+		}
+		return &Expr{Kind: ExprCall, Type: typeID, Args: args, Payload: &CallExprPayload{Function: id, TypeArgs: typeArgs}}, true, nil
 	}
 	return nil, false, nil
 }
@@ -6637,31 +6565,8 @@ func (fl *functionLowerer) localKind(local LocalID) TypeKind {
 	return info.Kind
 }
 
-func (l *lowerer) lookupFunction(name string) (FunctionID, bool) {
-	keys := make([]string, 0, len(l.functions))
-	for key := range l.functions {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	for _, key := range keys {
-		if keyHasFunctionName(key, name) {
-			return l.functions[key], true
-		}
-	}
-	return NoFunction, false
-}
-
 func (l *lowerer) lookupGlobalInModule(module ModuleID, name string) (GlobalID, bool) {
 	id, ok := l.globals[globalKey(module, name)]
-	return id, ok
-}
-
-func (l *lowerer) lookupFunctionInModule(modulePath, name string) (FunctionID, bool) {
-	moduleID, ok := l.moduleByPath[modulePath]
-	if !ok {
-		return NoFunction, false
-	}
-	id, ok := l.functions[functionKey(moduleID, name)]
 	return id, ok
 }
 
@@ -6863,141 +6768,22 @@ func (l *lowerer) resolveModuleGlobal(modulePath, name string) (GlobalID, bool, 
 	return id, ok, nil
 }
 
-func (l *lowerer) resolveModuleFunction(modulePath, name string) (FunctionID, bool, error) {
-	if id, ok := l.lookupFunctionInModule(modulePath, name); ok {
-		return id, true, nil
-	}
-
-	mod, ok := l.moduleByName[modulePath]
-	if !ok {
-		return NoFunction, false, nil
-	}
-	if mod.Program() == nil {
-		return NoFunction, false, nil
-	}
-	if err := l.lowerModule(mod); err != nil {
-		return NoFunction, false, err
-	}
-	id, ok := l.lookupFunctionInModule(modulePath, name)
-	return id, ok, nil
-}
-
-func (l *lowerer) moduleFunctionDefinitionForCall(call *checker.ModuleFunctionCall) *checker.FunctionDef {
-	if call == nil || call.Call == nil {
-		return nil
-	}
-	def := call.Call.Definition()
-	if def == nil {
-		return nil
-	}
-	if def.Body != nil {
-		return def
-	}
-	bodyDef := l.lookupModuleFunctionDefinition(call.Module, call.Call.Name)
-	if bodyDef == nil || bodyDef.Body == nil {
-		return def
-	}
-	return &checker.FunctionDef{
-		Name:     def.Name,
-		Receiver: bodyDef.Receiver,
-		// Preserve generic identity so a generic def flowing through this
-		// merge stays on the lower-once path (ADR 0031) instead of being
-		// silently monomorphized with a concrete call-site signature.
-		GenericParams:           bodyDef.GenericParams,
-		GenericBindings:         def.GenericBindings,
-		Parameters:              def.Parameters,
-		ReturnType:              def.ReturnType,
-		ForeignResultShape:      def.ForeignResultShape,
-		InferReturnTypeFromBody: bodyDef.InferReturnTypeFromBody,
-		Mutates:                 bodyDef.Mutates,
-		IsTest:                  bodyDef.IsTest,
-		Body:                    bodyDef.Body,
-		Private:                 bodyDef.Private,
-	}
-}
-
-func (l *lowerer) moduleFunctionDefinitionForSymbol(symbol *checker.ModuleSymbol) (*checker.FunctionDef, bool) {
-	if symbol == nil {
-		return nil, false
-	}
-	def, ok := symbol.Symbol.Type.(*checker.FunctionDef)
-	if !ok {
-		return nil, false
-	}
-	bodyDef := l.lookupModuleFunctionDefinition(symbol.Module, symbol.Symbol.Name)
-	if bodyDef == nil || bodyDef.Body == nil || def.Body != nil {
-		return def, true
-	}
-	return &checker.FunctionDef{
-		Name:     def.Name,
-		Receiver: bodyDef.Receiver,
-		// Preserve generic identity so a generic def flowing through this
-		// merge stays on the lower-once path (ADR 0031) instead of being
-		// silently monomorphized with a concrete call-site signature.
-		GenericParams:           bodyDef.GenericParams,
-		GenericBindings:         def.GenericBindings,
-		Parameters:              def.Parameters,
-		ReturnType:              def.ReturnType,
-		ForeignResultShape:      def.ForeignResultShape,
-		InferReturnTypeFromBody: bodyDef.InferReturnTypeFromBody,
-		Mutates:                 bodyDef.Mutates,
-		IsTest:                  bodyDef.IsTest,
-		Body:                    bodyDef.Body,
-		Private:                 bodyDef.Private,
-	}, true
-}
-
-func (l *lowerer) lookupModuleFunctionDefinition(modulePath, name string) *checker.FunctionDef {
-	mod, ok := l.moduleByName[modulePath]
-	if !ok || mod.Program() == nil {
-		return nil
-	}
-	for _, stmt := range mod.Program().Statements {
-		if def, ok := stmt.Expr.(*checker.FunctionDef); ok && def.Name == name {
-			return def
-		}
-	}
-	return nil
-}
-
 func (l *lowerer) moduleForInstanceMethod(method *checker.InstanceMethod, fallback ModuleID) ModuleID {
 	if method == nil || method.Method == nil {
 		return fallback
 	}
-	ownerName := ""
 	ownerModulePath := ""
 	switch {
 	case method.StructType != nil:
-		ownerName = method.StructType.Name
 		ownerModulePath = method.StructType.ModulePath
 	case method.EnumType != nil:
-		ownerName = method.EnumType.Name
 		ownerModulePath = method.EnumType.ModulePath
-	default:
+	}
+	if ownerModulePath == "" {
 		return fallback
 	}
-	if ownerModulePath != "" {
-		l.findReachableModule(ownerModulePath)
-		return l.internModule(ownerModulePath)
-	}
-	for _, mod := range sortedModules(l.moduleByName) {
-		if mod.Program() == nil {
-			continue
-		}
-		for _, stmt := range mod.Program().Statements {
-			switch def := stmt.Stmt.(type) {
-			case *checker.StructDef:
-				if def.Name == ownerName && l.hasStructMethod(def, method.Method.Name) {
-					return l.internModule(mod.Path())
-				}
-			case *checker.Enum:
-				if def.Name == ownerName && def.Methods[method.Method.Name] != nil {
-					return l.internModule(mod.Path())
-				}
-			}
-		}
-	}
-	return fallback
+	l.findReachableModule(ownerModulePath)
+	return l.internModule(ownerModulePath)
 }
 
 func (l *lowerer) typeInfo(id TypeID) (TypeInfo, bool) {
@@ -7236,7 +7022,7 @@ func (fl *functionLowerer) genericCallTypeArgs(def *checker.FunctionDef) ([]Type
 // For a generic definition the call carries concrete type arguments and is
 // typed/argument-lowered against the call's concrete signature, while the
 // referenced function remains the single generic definition.
-func (fl *functionLowerer) buildResolvedCallExpr(id FunctionID, def *checker.FunctionDef, call *checker.FunctionCall, callArgs []checker.Expression) (*Expr, error) {
+func (fl *functionLowerer) buildResolvedCallExpr(id FunctionID, call *checker.FunctionCall, callArgs []checker.Expression) (*Expr, error) {
 	signature := fl.l.program.Functions[id].Signature
 	var typeArgs []TypeID
 	if len(fl.l.program.Functions[id].TypeParams) > 0 {
@@ -7245,7 +7031,7 @@ func (fl *functionLowerer) buildResolvedCallExpr(id FunctionID, def *checker.Fun
 			return nil, err
 		}
 		signature = concrete
-		typeArgs, err = fl.genericCallTypeArgs(def)
+		typeArgs, err = fl.genericCallTypeArgs(call.Signature())
 		if err != nil {
 			return nil, err
 		}
@@ -7347,15 +7133,6 @@ func implKey(module ModuleID, traitName, typeName string) string {
 
 func methodFunctionKey(module ModuleID, typeName, traitName, methodName string) string {
 	return functionKey(module, fmt.Sprintf("method/%s/%s/%s", typeName, traitName, methodName))
-}
-
-func keyHasFunctionName(key, name string) bool {
-	for i := len(key) - 1; i >= 0; i-- {
-		if key[i] == ':' {
-			return key[i+1:] == name
-		}
-	}
-	return key == name
 }
 
 func isMutableReferenceProducer(expr checker.Expression) bool {

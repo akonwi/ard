@@ -46,13 +46,14 @@ type genericBindingOrigin struct {
 }
 
 type Symbol struct {
-	Name              string
-	Type              Type
-	declaredAt        SourceSpan
-	mutable           bool
-	reference         bool
-	foreignDescriptor bool
-	typeDeclaration   bool
+	Name                string
+	Type                Type
+	declaredAt          SourceSpan
+	mutable             bool
+	reference           bool
+	foreignDescriptor   bool
+	typeDeclaration     bool
+	callableDeclaration *FunctionDef
 }
 
 func (s Symbol) IsZero() bool {
@@ -74,6 +75,12 @@ func (st *SymbolTable) add(name string, type_ Type, mutable bool) *Symbol {
 	}
 	st.symbols[name] = &sym
 	return &sym
+}
+
+func (st *SymbolTable) addFunctionDeclaration(name string, definition *FunctionDef) *Symbol {
+	sym := st.add(name, definition, false)
+	sym.callableDeclaration = definition
+	return sym
 }
 
 func (st *SymbolTable) addType(name string, type_ Type) *Symbol {
@@ -1408,8 +1415,9 @@ func substituteTypeBindings(t Type, bindings map[string]Type) Type {
 	}
 }
 
-// copyFunctionWithTypeVarMap recursively copies a function definition, replacing
-// TypeVar instances with those from the provided map
+// copyFunctionWithTypeVarMap creates a call-local function signature with fresh
+// TypeVar instances. Declaration identity and bodies stay on the canonical
+// FunctionDef selected by name/type checking.
 func copyFunctionWithTypeVarMap(fnDef *FunctionDef, typeVarMap map[string]*TypeVar) *FunctionDef {
 	newParams := make([]Parameter, len(fnDef.Parameters))
 	for i, param := range fnDef.Parameters {
@@ -1434,7 +1442,6 @@ func copyFunctionWithTypeVarMap(fnDef *FunctionDef, typeVarMap map[string]*TypeV
 		ReturnType:              copyTypeWithTypeVarMap(fnDef.ReturnType, typeVarMap),
 		ForeignResultShape:      fnDef.ForeignResultShape,
 		InferReturnTypeFromBody: fnDef.InferReturnTypeFromBody,
-		Body:                    fnDef.Body,
 		Mutates:                 fnDef.Mutates,
 		Private:                 fnDef.Private,
 		GenericBindings:         cloneTypeMap(fnDef.GenericBindings),

@@ -84,20 +84,20 @@ func signatureFromRecord(rec checker.SpanRecord) (string, []hoverParam, parse.Lo
 
 	switch node := rec.Node.(type) {
 	case *checker.FunctionCall:
-		def = node.Definition()
+		def = node.Signature()
 		if def != nil {
 			label = voidLabel(functionSignatureString(node.Name, def), def)
 		}
 	case *checker.InstanceMethod:
 		if node.Method != nil {
-			def = node.Method.Definition()
+			def = node.Method.Signature()
 			if def != nil {
 				label = voidLabel(methodSignatureString(instanceMethodOwner(node), def), def)
 			}
 		}
 	case *checker.ForeignFunctionCall:
 		if node.Call != nil {
-			def = node.Call.Definition()
+			def = node.Call.Signature()
 			if def != nil {
 				label = voidLabel(functionSignatureString(node.Qualifier+"::"+node.Symbol, def), def)
 			}

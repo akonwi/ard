@@ -940,6 +940,27 @@ func TestLowerTraitObjectDispatch(t *testing.T) {
 		t.Fatalf("upcast impl = %d, want %d", script.Body.Result.Args[0].TraitPayload().Impl, program.Impls[0].ID)
 	}
 }
+func TestLowerTraitObjectDispatchUsesResolvedMethodSlot(t *testing.T) {
+	program := lowerSource(t, `
+		trait Pair {
+			fn first() Int
+			fn second() Int
+		}
+
+		fn select_second(pair: Pair) Int {
+			pair.second()
+		}
+	`)
+
+	function := findFunction(t, program, "select_second")
+	if function.Body.Result == nil || function.Body.Result.Kind != ExprCallTrait {
+		t.Fatalf("select_second result = %#v, want ExprCallTrait", function.Body.Result)
+	}
+	if got := function.Body.Result.TraitPayload().Method; got != 1 {
+		t.Fatalf("trait method slot = %d, want 1", got)
+	}
+}
+
 func TestLowerMutatingTraitMethodContract(t *testing.T) {
 	program := lowerSource(t, `
 trait Counter {

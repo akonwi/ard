@@ -98,7 +98,7 @@ fn main() {
 			if !ok {
 				t.Fatalf("main call = %T, want FunctionCall", fn.Body.Stmts[1].Expr)
 			}
-			binding := call.Definition().GenericBindings["T"]
+			binding := call.Signature().GenericBindings["T"]
 			if _, ok := binding.(*MutableRef); !ok {
 				t.Fatalf("inferred Maybe generic = %T %v, want mutable reference", binding, binding)
 			}

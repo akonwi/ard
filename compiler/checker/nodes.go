@@ -197,6 +197,10 @@ func (v Variable) IsReference() bool {
 	return typedReference || v.sym.reference
 }
 
+func (v Variable) Declaration() *FunctionDef {
+	return v.sym.callableDeclaration
+}
+
 type SubjectKind uint8
 
 const (
@@ -321,11 +325,13 @@ type InstanceMethod struct {
 	ReceiverMode *ReferenceMode
 	ReceiverType Type
 
-	ReceiverKind  InstanceReceiverKind
-	StructType    *StructDef
-	EnumType      *Enum
-	TraitType     *Trait
-	DispatchTrait *Trait
+	ReceiverKind       InstanceReceiverKind
+	StructType         *StructDef
+	EnumType           *Enum
+	TraitType          *Trait
+	DispatchTrait      *Trait
+	TraitMethodSlot    int
+	HasTraitMethodSlot bool
 }
 
 func (i *InstanceMethod) Type() Type {
@@ -1321,21 +1327,31 @@ func (f *FunctionDef) hasGenerics() bool {
 	return hasGenericsInType(f.ReturnType)
 }
 
+// FunctionCall separates the declaration selected by name/type checking from
+// the call-local signature produced by generic inference. declaration is nil
+// for builtin, foreign, and function-value calls that have no Ard body. A
+// non-generic signature may alias its declaration; specialized signatures are
+// bodyless and cannot lose declaration identity when copied.
 type FunctionCall struct {
-	Name       string
-	Args       []Expression
-	TypeArgs   []Type
-	TailSpread bool
-	fn         *FunctionDef
-	ReturnType Type // Pre-computed by checker
+	Name        string
+	Args        []Expression
+	TypeArgs    []Type
+	TailSpread  bool
+	declaration *FunctionDef
+	signature   *FunctionDef
+	ReturnType  Type // Pre-computed by checker
 }
 
+// CreateCall constructs a call whose supplied definition is its static target.
+// Compiler call checking uses canonical declaration pointers directly; this
+// value-based constructor remains for synthetic and external checker consumers.
 func CreateCall(name string, args []Expression, fn FunctionDef) *FunctionCall {
 	return &FunctionCall{
-		Name:       name,
-		Args:       args,
-		fn:         &fn,
-		ReturnType: fn.ReturnType,
+		Name:        name,
+		Args:        args,
+		declaration: &fn,
+		signature:   &fn,
+		ReturnType:  fn.ReturnType,
 	}
 }
 
@@ -1343,8 +1359,18 @@ func (f *FunctionCall) Type() Type {
 	return f.ReturnType
 }
 
+func (f *FunctionCall) Declaration() *FunctionDef {
+	return f.declaration
+}
+
+func (f *FunctionCall) Signature() *FunctionDef {
+	return f.signature
+}
+
+// Definition returns the call-local signature for compatibility with existing
+// checker consumers. Deprecated: use Signature or Declaration explicitly.
 func (f *FunctionCall) Definition() *FunctionDef {
-	return f.fn
+	return f.Signature()
 }
 
 type FunctionValueCall struct {
@@ -1493,6 +1519,10 @@ type ModuleSymbol struct {
 
 func (p *ModuleSymbol) Type() Type {
 	return p.Symbol.Type
+}
+
+func (p *ModuleSymbol) Declaration() *FunctionDef {
+	return p.Symbol.callableDeclaration
 }
 
 type EnumValue struct {

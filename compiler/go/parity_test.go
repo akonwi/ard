@@ -52,6 +52,168 @@ func TestGoTargetParityMethodsAcrossImplBlocks(t *testing.T) {
 	})
 }
 
+func TestGoTargetParityGenericMethodForwardReferences(t *testing.T) {
+	runGoParityCases(t, []goParityCase{
+		{
+			name: "direct call to later method",
+			input: `
+				struct Holder<$T> { items: [$T] }
+
+				impl Holder {
+					fn mut reset() {
+						self.clear()
+					}
+
+					private fn mut clear() {
+						self.items = []
+					}
+				}
+
+				fn main() Bool {
+					let holder = mut Holder<Int>{items: [1]}
+					holder.reset()
+					holder.items.size() == 0
+				}
+			`,
+		},
+		{
+			name: "captured receiver calls later method",
+			input: `
+				struct Holder<$T> { items: [$T] }
+
+				impl Holder {
+					fn mut reset_later() fn() {
+						fn() {
+							self.clear()
+						}
+					}
+
+					private fn mut clear() {
+						self.items = []
+					}
+				}
+
+				fn main() Bool {
+					let holder = mut Holder<Int>{items: [1]}
+					let reset = holder.reset_later()
+					reset()
+					holder.items.size() == 0
+				}
+			`,
+		},
+		{
+			name: "later method in a later impl block",
+			input: `
+				struct Holder<$T> { item: $T }
+
+				impl Holder {
+					fn replace(next: $T) $T {
+						self.finish(next)
+					}
+				}
+
+				impl Holder {
+					private fn finish(next: $T) $T {
+						next
+					}
+				}
+
+				fn main() Bool {
+					let holder = Holder<Int>{item: 1}
+					holder.replace(42) == 42
+				}
+			`,
+		},
+		{
+			name: "mutually recursive generic methods",
+			input: `
+				struct Counter<$T> {
+					marker: $T,
+					remaining: Int,
+				}
+
+				impl Counter {
+					fn mut first() {
+						if self.remaining > 0 {
+							self.remaining =- 1
+							self.second()
+						}
+					}
+
+					fn mut second() {
+						if self.remaining > 0 {
+							self.remaining =- 1
+							self.first()
+						}
+					}
+				}
+
+				fn main() Bool {
+					let counter = mut Counter<Str>{marker: "ok", remaining: 3}
+					counter.first()
+					counter.remaining == 0 and counter.marker == "ok"
+				}
+			`,
+		},
+		{
+			name: "generic trait methods call later sibling directly and through closure",
+			input: `
+				trait Pair {
+					fn first() Int
+					fn callback() fn() Int
+					fn second() Int
+				}
+
+				struct Box<$T> { value: $T }
+
+				impl Pair for Box {
+					fn first() Int {
+						self.second()
+					}
+
+					fn callback() fn() Int {
+						fn() Int {
+							self.second()
+						}
+					}
+
+					fn second() Int {
+						42
+					}
+				}
+
+				fn main() Bool {
+					let box = Box<Str>{value: "ok"}
+					box.first() == 42 and box.callback()() == 42
+				}
+			`,
+		},
+	})
+}
+
+func TestGoTargetParitySourceFunctionReferences(t *testing.T) {
+	runGoParityCases(t, []goParityCase{
+		{
+			name: "top-level and static function references captured by closure",
+			input: `
+				fn answer() Int { 40 }
+
+				struct Box {}
+				fn Box::answer() Int { 2 }
+
+				fn main() Bool {
+					let top_level = answer
+					let static = Box::answer
+					let combined = fn() Int {
+						top_level() + static()
+					}
+					combined() == 42
+				}
+			`,
+		},
+	})
+}
+
 func TestGoTargetParityRecursiveStructFields(t *testing.T) {
 	runGoParityCases(t, []goParityCase{
 		{
