@@ -3428,6 +3428,9 @@ func (fl *functionLowerer) lowerExprWithExpectedRaw(expr checker.Expression, exp
 		}
 	}
 	if closure, ok := expr.(*checker.FunctionDef); ok {
+		if closure.LocalNamed {
+			return fl.lowerLocalNamedFunctionReference(closure)
+		}
 		if expectedInfo, hasInfo := fl.l.typeInfo(expected); hasInfo {
 			if expectedInfo.Kind == TypeFunction {
 				return fl.lowerClosure(expected, closure)
@@ -4038,6 +4041,20 @@ func localNamedFunctionDeclaration(expr checker.Expression) *checker.FunctionDef
 		return localNamedFunctionDeclaration(expr.Value)
 	}
 	return nil
+}
+
+func (fl *functionLowerer) lowerLocalNamedFunctionReference(def *checker.FunctionDef) (*Expr, error) {
+	if def == nil || !def.LocalNamed {
+		return nil, fmt.Errorf("expected local named function declaration")
+	}
+	local, ok, err := fl.resolveLocal(def.Name)
+	if err != nil {
+		return nil, err
+	}
+	if !ok || fl.localKind(local) != TypeFunction {
+		return nil, fmt.Errorf("local function declaration %s reached expression lowering without a binding", def.Name)
+	}
+	return loadLocal(fl.fn.Locals[local].Type, local), nil
 }
 
 func (fl *functionLowerer) lowerLocalNamedFunction(def *checker.FunctionDef) (*Stmt, *Expr, error) {
@@ -4730,14 +4747,7 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		return fl.lowerTemplateStr(typeID, e)
 	case *checker.FunctionDef:
 		if e.LocalNamed {
-			local, ok, err := fl.resolveLocal(e.Name)
-			if err != nil {
-				return nil, err
-			}
-			if !ok || fl.localKind(local) != TypeFunction {
-				return nil, fmt.Errorf("local function declaration %s reached expression lowering without a binding", e.Name)
-			}
-			return loadLocal(fl.fn.Locals[local].Type, local), nil
+			return fl.lowerLocalNamedFunctionReference(e)
 		}
 		return fl.lowerClosure(typeID, e)
 	case *checker.FunctionValueCall:
