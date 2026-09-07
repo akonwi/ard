@@ -1990,7 +1990,7 @@ func (c *Checker) resolveType(t parse.DeclaredType) Type {
 		if !c.genericAllowedInCurrentMethod(ty.Name) {
 			c.addMethodIntroducedGeneric(ty.Name, methodGenericInvalidOccurrence, ty.GetLocation())
 		}
-		if existing := c.scope.findGeneric(ty.Name); existing != nil {
+		if existing := c.scope.findDeclarationGeneric(ty.Name); existing != nil {
 			baseType = existing
 		} else {
 			baseType = &TypeVar{name: ty.Name}
@@ -2036,6 +2036,28 @@ func (c *Checker) pushFunctionGenericContext(fnDef *FunctionDef, extraParams ...
 		context[param] = true
 	}
 	c.genericContextStack = append(c.genericContextStack, context)
+}
+
+func (c *Checker) pushAnonymousFunctionGenericContext() {
+	if len(c.genericContextStack) == 0 {
+		c.genericContextStack = append(c.genericContextStack, nil)
+		return
+	}
+
+	// Anonymous functions inherit only the immediate lexical context used to
+	// validate explicit generic call arguments. Named functions still push a
+	// fresh frame, so copying the top frame keeps those declarations as generic
+	// boundaries while allowing nested closures to inherit transitively.
+	current := c.genericContextStack[len(c.genericContextStack)-1]
+	if len(current) == 0 {
+		c.genericContextStack = append(c.genericContextStack, nil)
+		return
+	}
+	inherited := make(map[string]bool, len(current))
+	for name := range current {
+		inherited[name] = true
+	}
+	c.genericContextStack = append(c.genericContextStack, inherited)
 }
 
 func (c *Checker) popFunctionGenericContext() {
@@ -9076,7 +9098,7 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 					c.recordBinding(param.Loc, sym)
 				}
 			}
-			c.pushFunctionGenericContext(fn)
+			c.pushAnonymousFunctionGenericContext()
 			c.pushConstraintFunction(fn, s.GetLocation())
 			previousDeferredWorkDepth := c.deferredWorkDepth
 			c.deferredWorkDepth = 0
@@ -11354,7 +11376,7 @@ func (c *Checker) checkExprAsInner(expr parse.Expression, expectedType Type, exp
 			}
 
 			// Check body
-			c.pushFunctionGenericContext(fn)
+			c.pushAnonymousFunctionGenericContext()
 			previousDeferredWorkDepth := c.deferredWorkDepth
 			c.deferredWorkDepth = 0
 			body := c.checkBlockWithExpected(s.Body, func() {

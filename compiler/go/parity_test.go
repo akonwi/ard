@@ -3032,6 +3032,39 @@ func TestGoTargetParityGenericMethodClosureCapturesInferredLocal(t *testing.T) {
 	}
 }
 
+func TestGoTargetParityAnonymousClosureInheritsReceiverGenericForExplicitCall(t *testing.T) {
+	program := lowerParitySource(t, `
+		fn identity(value: $T) $T { value }
+
+		mut observed = 0
+
+		struct Box<$T> {
+			value: $T,
+		}
+
+		impl Box {
+			fn callback() fn() {
+				fn() {
+					let value = identity<$T>(self.value)
+					let _ = value
+					observed = observed + 1
+				}
+			}
+		}
+
+		fn main() Int {
+			let int_box = Box<Int>{value: 42}
+			int_box.callback()()
+			let str_box = Box<Str>{value: "forty-two"}
+			str_box.callback()()
+			observed
+		}
+	`)
+	if got := runGoTargetParityJSON(t, program); got != "2" {
+		t.Fatalf("got %s, want 2", got)
+	}
+}
+
 func TestGoTargetParityNestedGenericClosuresPreserveNamedTypeIdentity(t *testing.T) {
 	program := lowerParitySource(t, `
 		private struct Value {
