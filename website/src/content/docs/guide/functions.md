@@ -190,6 +190,8 @@ fn apply(value: Int, transform: fn(Int) Int) Int {
 let squared = apply(3, fn(x: Int) Int { x * x })
 ```
 
+Anonymous functions may also use enclosing function or receiver generics as explicit call type arguments. See [Generics in anonymous functions](../advanced/generics/#generics-in-anonymous-functions).
+
 ## Function Signatures
 
 When referring to function types, use the `fn` syntax and just omit the body:

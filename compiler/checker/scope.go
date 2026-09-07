@@ -100,18 +100,20 @@ func (st SymbolTable) get(name string) (*Symbol, bool) {
 	return nil, false
 }
 
-// findGeneric looks for an existing generic type with the given name in the scope chain
-func (st *SymbolTable) findGeneric(genericName string) *TypeVar {
-	// Check current scope
+// findDeclarationGeneric looks for a declaration generic with the given name.
+// Call-owned and provisional variables belong to inference and must not be
+// reused when resolving a generic written in source.
+func (st *SymbolTable) findDeclarationGeneric(genericName string) *TypeVar {
 	for _, symbol := range st.symbols {
-		if typeVar, ok := symbol.Type.(*TypeVar); ok && typeVar.name == genericName {
-			return typeVar
+		typeVar, ok := symbol.Type.(*TypeVar)
+		if !ok || typeVar.name != genericName || typeVar.owner != 0 || typeVar.provisional {
+			continue
 		}
+		return typeVar
 	}
 
-	// Check parent scopes
 	if st.parent != nil {
-		return st.parent.findGeneric(genericName)
+		return st.parent.findDeclarationGeneric(genericName)
 	}
 
 	return nil

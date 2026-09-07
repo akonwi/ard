@@ -62,6 +62,27 @@ let label = apply<Int, Str>(42, fn(value: Int) Str { value.to_str() })
 
 Type arguments correspond to the order of generics introduced in the signature.
 
+## Generics in Anonymous Functions
+
+Anonymous functions may use generic parameters from their enclosing function or receiver method as explicit call type arguments. The generic may be used only in the anonymous function body; it does not need to appear in the anonymous function's own signature:
+
+```ard
+fn identity(value: $T) $T {
+  value
+}
+
+fn callback(value: $T) fn() {
+  fn() {
+    let copy = identity<$T>(value)
+    let _ = copy
+  }
+}
+```
+
+The inherited `$T` still belongs to `callback`. Calling the returned anonymous function does not infer or instantiate `$T` again. Nested anonymous functions may use the same explicit type arguments.
+
+For explicit call type arguments, generics created temporarily while inferring a contextual callback do not declare source names. A nested named function declaration starts a new boundary and cannot use a body-only outer generic as an explicit call type argument.
+
 ## Generic Structs
 
 Structs can also hold generics. If a generic type appears in a field, that field introduces the struct's generic parameter:
