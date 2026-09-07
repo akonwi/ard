@@ -27,41 +27,42 @@ type importAliasKey struct {
 }
 
 type lowerer struct {
-	program                 *air.Program
-	packageName             string
-	tempCounter             int
-	currentImports          map[string]string
-	resolvedImportAliases   map[importAliasKey]string
-	currentModule           air.ModuleID
-	importErr               error
-	reservedGoIdentifiers   map[string]bool
-	topLevelReserved        map[string]bool
-	localNameCache          map[air.FunctionID]map[air.LocalID]string
-	goTypeCache             map[air.TypeID]ast.Expr
-	identCache              map[string]*ast.Ident
-	declaredLocals          map[air.LocalID]bool
-	runtimeHelpers          map[string]bool
-	projectInfo             *checker.ProjectInfo
-	generatedModulePath     string
-	inlineClosures          map[air.FunctionID]bool
-	goMethodCollisions      map[string]bool
-	functionComparable      map[air.FunctionID]map[string]bool
-	functionModules         map[air.FunctionID]air.ModuleID
-	moduleByPath            map[string]air.ModuleID
-	typeModulePaths         []string
-	typeOwnerModules        []air.ModuleID
-	typeHasOwner            []bool
-	typesByModule           map[air.ModuleID][]*air.TypeInfo
-	ownerlessTypes          []*air.TypeInfo
-	declaredTypes           []bool
-	declaredTypeCounts      map[air.ModuleID]int
-	emitTypeOwnerModules    []air.ModuleID
-	emitTypeHasOwner        []bool
-	suppressMain            bool
-	includeTests            bool
-	useModulePackages       bool
-	forceValueResultReturns bool
-	namePlan                *namePlan
+	program                  *air.Program
+	packageName              string
+	tempCounter              int
+	currentImports           map[string]string
+	resolvedImportAliases    map[importAliasKey]string
+	currentModule            air.ModuleID
+	importErr                error
+	reservedGoIdentifiers    map[string]bool
+	topLevelReserved         map[string]bool
+	localNameCache           map[localNameOwner]map[air.LocalID]string
+	currentGlobalInitializer air.GlobalID
+	goTypeCache              map[air.TypeID]ast.Expr
+	identCache               map[string]*ast.Ident
+	declaredLocals           map[air.LocalID]bool
+	runtimeHelpers           map[string]bool
+	projectInfo              *checker.ProjectInfo
+	generatedModulePath      string
+	inlineClosures           map[air.FunctionID]bool
+	goMethodCollisions       map[string]bool
+	functionComparable       map[air.FunctionID]map[string]bool
+	functionModules          map[air.FunctionID]air.ModuleID
+	moduleByPath             map[string]air.ModuleID
+	typeModulePaths          []string
+	typeOwnerModules         []air.ModuleID
+	typeHasOwner             []bool
+	typesByModule            map[air.ModuleID][]*air.TypeInfo
+	ownerlessTypes           []*air.TypeInfo
+	declaredTypes            []bool
+	declaredTypeCounts       map[air.ModuleID]int
+	emitTypeOwnerModules     []air.ModuleID
+	emitTypeHasOwner         []bool
+	suppressMain             bool
+	includeTests             bool
+	useModulePackages        bool
+	forceValueResultReturns  bool
+	namePlan                 *namePlan
 
 	// When the entry root lives in a module named `main` (main.ard) that no
 	// other module imports, that module is emitted as the root `package main`
@@ -91,7 +92,7 @@ func lowerProgram(program *air.Program, options Options) (map[string]*ast.File, 
 	if err := air.Validate(program); err != nil {
 		return nil, err
 	}
-	l := &lowerer{program: program, packageName: defaultPackageName(options.PackageName), runtimeHelpers: map[string]bool{}, projectInfo: options.ProjectInfo, generatedModulePath: generatedModulePath(options.ProjectInfo), suppressMain: options.SuppressMain, includeTests: options.IncludeTests, useModulePackages: true}
+	l := &lowerer{program: program, packageName: defaultPackageName(options.PackageName), runtimeHelpers: map[string]bool{}, projectInfo: options.ProjectInfo, generatedModulePath: generatedModulePath(options.ProjectInfo), suppressMain: options.SuppressMain, includeTests: options.IncludeTests, useModulePackages: true, currentGlobalInitializer: air.NoGlobal}
 	l.indexModuleOwnership()
 	l.inlineClosures = l.collectInlineClosureFunctions()
 	l.functionComparable = l.collectFunctionComparableTypeParams()
@@ -1195,18 +1196,39 @@ func traitDispatchMethodName(trait air.TraitID, methodIndex int) string {
 	return fmt.Sprintf("ArdTraitMethod_%d_%d", trait, methodIndex)
 }
 
+func globalInitializerFunction(global air.Global) air.Function {
+	value := global.Initializer.Value
+	return air.Function{
+		ID:        air.NoFunction,
+		Module:    global.Module,
+		Name:      "<global:" + global.Name + ">",
+		Signature: air.Signature{Return: global.Type},
+		Locals:    global.Initializer.Locals,
+		Body:      air.Block{Result: &value},
+	}
+}
+
 func (l *lowerer) lowerGlobal(global air.Global) (ast.Decl, error) {
-	// Generated temporaries are lexical to one initializer. Restarting here
-	// prevents unrelated declaration order from renumbering this global's output.
+	// Generated temporaries and declared locals are lexical to one initializer.
+	// Restarting here prevents unrelated globals from affecting one another.
 	previousTempCounter := l.tempCounter
+	previousDeclaredLocals := l.declaredLocals
+	previousGlobalInitializer := l.currentGlobalInitializer
 	l.tempCounter = 0
-	defer func() { l.tempCounter = previousTempCounter }()
+	l.declaredLocals = map[air.LocalID]bool{}
+	l.currentGlobalInitializer = global.ID
+	defer func() {
+		l.tempCounter = previousTempCounter
+		l.declaredLocals = previousDeclaredLocals
+		l.currentGlobalInitializer = previousGlobalInitializer
+	}()
 
 	globalType, err := l.goType(global.Type)
 	if err != nil {
 		return nil, err
 	}
-	value, err := l.lowerExprWithExpectedType(air.Function{Module: global.Module, Name: "<global>"}, global.Value, global.Type)
+	initializer := globalInitializerFunction(global)
+	value, err := l.lowerExprWithExpectedType(initializer, global.Initializer.Value, global.Type)
 	if err != nil {
 		return nil, err
 	}
@@ -3311,6 +3333,9 @@ func (l *lowerer) lowerBlockExpr(fn air.Function, expr air.Expr) (loweredExpr, e
 		if err != nil {
 			return loweredExpr{}, err
 		}
+		if len(body) > 0 {
+			body = []ast.Stmt{&ast.BlockStmt{List: body}}
+		}
 		return loweredExpr{stmts: body, expr: l.ident("nil")}, nil
 	}
 	temp := l.nextTemp()
@@ -3322,7 +3347,10 @@ func (l *lowerer) lowerBlockExpr(fn air.Function, expr air.Expr) (loweredExpr, e
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	return loweredExpr{stmts: append(decls, body...), expr: l.ident(temp)}, nil
+	if len(body) > 0 {
+		decls = append(decls, &ast.BlockStmt{List: body})
+	}
+	return loweredExpr{stmts: decls, expr: l.ident(temp)}, nil
 }
 
 func (l *lowerer) lowerUnsafeBlockExpr(fn air.Function, expr air.Expr) (loweredExpr, error) {
@@ -6619,8 +6647,9 @@ func (l *lowerer) lowerInlineClosure(parent air.Function, expr air.Expr, closure
 	for local, name := range sourceNames {
 		allocatedNames[local] = name
 	}
-	l.localNameCache[inlineFn.ID] = allocatedNames
-	defer func() { l.localNameCache[inlineFn.ID] = sourceNames }()
+	inlineOwner := functionLocalOwner(inlineFn.ID)
+	l.localNameCache[inlineOwner] = allocatedNames
+	defer func() { l.localNameCache[inlineOwner] = sourceNames }()
 	for i, capture := range inlineFn.Captures {
 		if int(capture.Local) < 0 || int(capture.Local) >= len(inlineFn.Locals) {
 			return loweredExpr{}, fmt.Errorf("closure %s has invalid capture local %d", closureFn.Name, capture.Local)

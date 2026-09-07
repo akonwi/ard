@@ -353,7 +353,8 @@ func nameScopesOverlap(left air.ModuleID, leftKnown bool, right air.ModuleID, ri
 }
 
 func (p *namePlan) buildImportCollisionSets(l *lowerer) {
-	localNames := p.plannedFunctionLocalNames(l)
+	functionLocalNames := p.plannedFunctionLocalNames(l)
+	globalLocalNames := p.plannedGlobalInitializerLocalNames(l)
 	for _, typ := range p.program.Types {
 		p.addTypeNames(p.programTopLevel, typ)
 	}
@@ -362,6 +363,9 @@ func (p *namePlan) buildImportCollisionSets(l *lowerer) {
 	}
 	for _, global := range p.program.Globals {
 		p.programTopLevel[p.globalName(global)] = true
+		for _, name := range globalLocalNames[global.ID] {
+			p.programTopLevel[name] = true
+		}
 	}
 	for _, fn := range p.program.Functions {
 		if !l.inlineClosures[fn.ID] {
@@ -370,7 +374,7 @@ func (p *namePlan) buildImportCollisionSets(l *lowerer) {
 		for _, name := range fn.TypeParams {
 			p.programTopLevel[name] = true
 		}
-		for _, name := range localNames[fn.ID] {
+		for _, name := range functionLocalNames[fn.ID] {
 			p.programTopLevel[name] = true
 		}
 	}
@@ -400,6 +404,9 @@ func (p *namePlan) buildImportCollisionSets(l *lowerer) {
 		for _, globalID := range module.Globals {
 			if globalID >= 0 && int(globalID) < len(p.program.Globals) {
 				occupied[p.globalName(p.program.Globals[globalID])] = true
+				for _, name := range globalLocalNames[globalID] {
+					occupied[name] = true
+				}
 			}
 		}
 		for _, functionID := range l.functionsForModule(module.ID) {
@@ -413,7 +420,7 @@ func (p *namePlan) buildImportCollisionSets(l *lowerer) {
 			for _, name := range fn.TypeParams {
 				occupied[name] = true
 			}
-			for _, name := range localNames[functionID] {
+			for _, name := range functionLocalNames[functionID] {
 				occupied[name] = true
 			}
 		}
@@ -444,6 +451,25 @@ func (p *namePlan) plannedFunctionLocalNames(l *lowerer) map[air.FunctionID][]st
 			names = append(names, name)
 		}
 		result[fn.ID] = names
+	}
+	return result
+}
+
+func (p *namePlan) plannedGlobalInitializerLocalNames(l *lowerer) map[air.GlobalID][]string {
+	planner := *l
+	planner.namePlan = p
+	planner.topLevelReserved = p.localReserved
+	planner.localNameCache = nil
+
+	result := make(map[air.GlobalID][]string, len(p.program.Globals))
+	for _, global := range p.program.Globals {
+		fn := globalInitializerFunction(global)
+		allocated := planner.allocateLocalNamesForOwner(fn, globalInitializerLocalOwner(global.ID))
+		names := make([]string, 0, len(allocated))
+		for _, name := range allocated {
+			names = append(names, name)
+		}
+		result[global.ID] = names
 	}
 	return result
 }

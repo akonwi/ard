@@ -688,11 +688,38 @@ func rawLocalName(fn air.Function, local air.LocalID) string {
 	return ""
 }
 
+type localNameOwnerKind uint8
+
+const (
+	functionLocalNameOwner localNameOwnerKind = iota
+	globalInitializerLocalNameOwner
+)
+
+type localNameOwner struct {
+	kind localNameOwnerKind
+	id   int
+}
+
+func functionLocalOwner(id air.FunctionID) localNameOwner {
+	return localNameOwner{kind: functionLocalNameOwner, id: int(id)}
+}
+
+func globalInitializerLocalOwner(id air.GlobalID) localNameOwner {
+	return localNameOwner{kind: globalInitializerLocalNameOwner, id: int(id)}
+}
+
+func (l *lowerer) localOwner(fn air.Function) localNameOwner {
+	if fn.ID == air.NoFunction && l.currentGlobalInitializer != air.NoGlobal {
+		return globalInitializerLocalOwner(l.currentGlobalInitializer)
+	}
+	return functionLocalOwner(fn.ID)
+}
+
 // localName renders a local or parameter as its Ard name, kept bare when that is
-// unambiguous within the function. A numeric suffix (the AIR local id) is added
-// only when the bare name is already claimed by an earlier local, or collides
-// with a Go keyword, a predeclared identifier, a generated top-level name, or an
-// generated import alias.
+// unambiguous within its function or global-initializer region. A numeric suffix
+// is added only when the bare name is already claimed by an earlier local, or
+// collides with a Go keyword, predeclared identifier, generated top-level name,
+// or generated import alias.
 func (l *lowerer) localName(fn air.Function, local air.LocalID) string {
 	if name, ok := l.allocateLocalNames(fn)[local]; ok {
 		return name
@@ -709,10 +736,14 @@ func (l *lowerer) localName(fn air.Function, local air.LocalID) string {
 // disjoint `x`s both stay `x` and a suffix appears only where it is genuinely
 // needed to avoid a collision.
 func (l *lowerer) allocateLocalNames(fn air.Function) map[air.LocalID]string {
+	return l.allocateLocalNamesForOwner(fn, l.localOwner(fn))
+}
+
+func (l *lowerer) allocateLocalNamesForOwner(fn air.Function, owner localNameOwner) map[air.LocalID]string {
 	if l.localNameCache == nil {
-		l.localNameCache = map[air.FunctionID]map[air.LocalID]string{}
+		l.localNameCache = map[localNameOwner]map[air.LocalID]string{}
 	}
-	if cached, ok := l.localNameCache[fn.ID]; ok {
+	if cached, ok := l.localNameCache[owner]; ok {
 		return cached
 	}
 	n := &localNamer{l: l, fn: fn, names: map[air.LocalID]string{}}
@@ -738,7 +769,7 @@ func (l *lowerer) allocateLocalNames(fn air.Function) map[air.LocalID]string {
 		n.assign(loc.ID, nil)
 	}
 	n.pop()
-	l.localNameCache[fn.ID] = n.names
+	l.localNameCache[owner] = n.names
 	return n.names
 }
 

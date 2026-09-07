@@ -35,14 +35,19 @@ type Module struct {
 	Functions []FunctionID
 }
 
+type GlobalInitializer struct {
+	Locals []Local
+	Value  Expr
+}
+
 type Global struct {
-	ID      GlobalID
-	Module  ModuleID
-	Name    string
-	Type    TypeID
-	Mutable bool
-	Private bool
-	Value   Expr
+	ID          GlobalID
+	Module      ModuleID
+	Name        string
+	Type        TypeID
+	Mutable     bool
+	Private     bool
+	Initializer GlobalInitializer
 }
 
 type Function struct {

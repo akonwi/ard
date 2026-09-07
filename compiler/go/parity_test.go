@@ -416,6 +416,19 @@ func TestGoTargetParityCoreCorpus(t *testing.T) {
 			`,
 		},
 		{
+			name: "inline block preserves nested shadowing scope",
+			input: `
+				fn main() Int {
+					let value = 20
+					let nested = {
+						let value = 22
+						value
+					}
+					value + nested
+				}
+			`,
+		},
+		{
 			name: "recursive function",
 			input: `
 				fn fib(n: Int) Int {

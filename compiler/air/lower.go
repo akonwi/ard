@@ -497,7 +497,10 @@ func (l *lowerer) lowerGlobalByID(id GlobalID, def *checker.VariableDef) error {
 		return err
 	}
 	global.Type = actualType
-	global.Value = *value
+	global.Initializer = GlobalInitializer{
+		Locals: append([]Local(nil), fn.Locals...),
+		Value:  *value,
+	}
 	l.program.Globals[id] = global
 	l.loweredGlobals[id] = true
 	return nil
@@ -3364,6 +3367,13 @@ func (fl *functionLowerer) lowerExprWithExpected(expr checker.Expression, expect
 }
 
 func (fl *functionLowerer) lowerExprWithExpectedRaw(expr checker.Expression, expected TypeID) (*Expr, error) {
+	if blockExpr, ok := expr.(*checker.Block); ok && validTypeID(&fl.l.program, expected) {
+		body, err := fl.lowerBlockWithDefault(blockExpr.Stmts, expected)
+		if err != nil {
+			return nil, err
+		}
+		return &Expr{Kind: ExprBlock, Type: expected, Payload: &BlockExprPayload{Body: body}}, nil
+	}
 	if panicExpr, ok := expr.(*checker.Panic); ok && validTypeID(&fl.l.program, expected) {
 		message, err := fl.lowerExprWithExpected(panicExpr.Message, fl.l.mustIntern(checker.Str))
 		if err != nil {

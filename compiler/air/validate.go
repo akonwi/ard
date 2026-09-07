@@ -250,13 +250,23 @@ func validateGlobal(program *Program, global Global) error {
 	if !validTypeID(program, global.Type) {
 		return fmt.Errorf("global %s has invalid type %d", global.Name, global.Type)
 	}
-	if global.Value.Type == NoType {
+	initializer := global.Initializer
+	if initializer.Value.Type == NoType {
 		return fmt.Errorf("global %s has no initializer", global.Name)
 	}
-	if global.Value.Type != global.Type {
-		return fmt.Errorf("global %s initializer type %d does not match global type %d", global.Name, global.Value.Type, global.Type)
+	if initializer.Value.Type != global.Type {
+		return fmt.Errorf("global %s initializer type %d does not match global type %d", global.Name, initializer.Value.Type, global.Type)
 	}
-	if err := validateExpr(program, Function{Module: global.Module, Name: "<global>"}, global.Value); err != nil {
+	for i, local := range initializer.Locals {
+		if local.ID != LocalID(i) {
+			return fmt.Errorf("global %s initializer local table entry %d has id %d", global.Name, i, local.ID)
+		}
+		if !validTypeID(program, local.Type) {
+			return fmt.Errorf("global %s initializer local %s has invalid type %d", global.Name, local.Name, local.Type)
+		}
+	}
+	context := Function{Module: global.Module, Name: "<global:" + global.Name + ">", Locals: initializer.Locals}
+	if err := validateExpr(program, context, initializer.Value); err != nil {
 		return fmt.Errorf("global %s: %w", global.Name, err)
 	}
 	return nil

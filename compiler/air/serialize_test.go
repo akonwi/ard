@@ -48,6 +48,42 @@ func TestSerializeProgramPreservesGoFieldTags(t *testing.T) {
 	t.Fatal("decoded Config type missing")
 }
 
+func TestSerializeProgramPreservesGlobalInitializerLocals(t *testing.T) {
+	result := parse.Parse([]byte(`
+		let read: fn() Int = {
+			let value = 42
+			fn() Int { value }
+		}
+		fn main() Int { read() }
+	`), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	c := checker.New("main.ard", result.Program, nil)
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
+	}
+	program, err := air.Lower(c.Module())
+	if err != nil {
+		t.Fatalf("lower AIR: %v", err)
+	}
+	data, err := air.SerializeProgram(program)
+	if err != nil {
+		t.Fatalf("serialize AIR: %v", err)
+	}
+	decoded, err := air.DeserializeProgram(data)
+	if err != nil {
+		t.Fatalf("deserialize AIR: %v", err)
+	}
+	if err := air.Validate(decoded); err != nil {
+		t.Fatalf("validate decoded AIR: %v", err)
+	}
+	if len(decoded.Globals) != 1 || !reflect.DeepEqual(decoded.Globals[0].Initializer, program.Globals[0].Initializer) {
+		t.Fatalf("decoded initializer = %#v, want %#v", decoded.Globals, program.Globals[0].Initializer)
+	}
+}
+
 func TestSerializeProgramPreservesEveryExprPayloadType(t *testing.T) {
 	payloads := []air.ExprPayload{
 		&air.TextExprPayload{},
