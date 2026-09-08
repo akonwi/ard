@@ -39,6 +39,97 @@ func TestSortedModulesUsesCanonicalPathOrder(t *testing.T) {
 	}
 }
 
+func TestFunctionLowererRejectsUnresolvedExecutableType(t *testing.T) {
+	tests := []struct {
+		name      string
+		typeValue checker.Type
+	}{
+		{name: "direct", typeValue: &checker.TypeVar{}},
+		{name: "nested Maybe", typeValue: checker.MakeMaybe(&checker.TypeVar{})},
+		{name: "function parameter", typeValue: &checker.FunctionDef{Parameters: []checker.Parameter{{Type: &checker.TypeVar{}}}, ReturnType: checker.Void}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lowerer := newLowerer(LowerOptions{}, 1)
+			function := &functionLowerer{l: lowerer, typeVars: map[string]TypeID{}}
+			if _, err := function.internType(tt.typeValue); err == nil || !strings.Contains(err.Error(), "unresolved generic type variable") {
+				t.Fatalf("internType error = %v, want unresolved executable type rejection", err)
+			}
+		})
+	}
+}
+
+func TestLowerNonReturningExpressionsUseConcreteContextTypes(t *testing.T) {
+	lowerSource(t, `
+		let global_value = panic("stop")
+		fn choose(a: $T, b: $T) $T { a }
+		fn generic_evidence() Int { choose(panic("stop"), 1) }
+		fn equality() Bool { panic("stop") == 1 }
+		fn not_value() Bool { not panic("stop") }
+		fn both_bool_operands() Bool { panic("left") and panic("right") }
+		fn conditional() Int { if panic("stop") { 1 } else { 2 } }
+		fn local() { let value = panic("stop") }
+		fn list() { let values = [panic("stop")] }
+		fn map() { let values = ["key": panic("value")] }
+		fn maybe() Bool { Maybe::new(panic("stop")).is_none() }
+		fn result_ok() Bool { Result::ok(panic("stop")).is_ok() }
+		fn result_err() Bool { Result::err(panic("stop")).is_err() }
+		fn wrapped_result() Bool { { Result::ok(panic("stop")) }.is_ok() }
+		fn wrapped_err_expect() Int { { Result::err("stop") }.expect("failed") }
+		fn result_or() Int { Result::err("failed").or(1) }
+		fn maybe_or() Int { Maybe::new().or(1) }
+		fn maybe_expect() Int { Maybe::new().expect("failed") }
+		fn result_match() Int {
+			match Result::ok(panic("stop")) {
+				ok => 1,
+				err => 0,
+			}
+		}
+		fn result_branches(flag: Bool) {
+			match flag {
+				true => Result::ok(panic("left")),
+				false => Result::ok(panic("right")),
+			}
+		}
+		fn wrapped_result_branches(flag: Bool) Bool {
+			{ match flag {
+				true => Result::ok(panic("left")),
+				false => Result::ok(panic("right")),
+			} }.is_ok()
+		}
+		fn complementary_result_branches(flag: Bool) {
+			if flag { Result::ok(1) } else { Result::err("failed") }
+		}
+		fn wrapped_complementary_result_branches(flag: Bool) Bool {
+			{ if flag { Result::ok(1) } else { Result::err("failed") } }.is_ok()
+		}
+		fn non_result_branches(flag: Bool) {
+			if flag { Result::ok(1).is_ok() } else { false }
+			if flag { Result::err("failed").or(1) } else { 2 }
+		}
+		fn inferred_never_results(flag: Bool) {
+			let value = Result::ok(panic("stop"))
+			let values = [Result::ok(panic("stop"))]
+			let branched = match flag {
+				true => Result::ok(panic("left")),
+				false => Result::ok(panic("right")),
+			}
+		}
+		fn mixed_discarded_branches(flag: Bool) {
+			if flag { Result::ok(1) } else { 42 }
+		}
+		fn nested_result_arguments() Bool {
+			let present = Maybe::new(Result::ok(panic("inner"))).is_some()
+			present and Result::err("outer").or(Result::ok(panic("inner"))).is_ok()
+		}
+		struct NeverBox { value: $T }
+		fn nested_result_boundaries() {
+			let box = NeverBox{value: Result::ok(panic("stop"))}
+			let make = fn() { Result::ok(panic("stop")) }
+		}
+	`)
+}
+
 func TestLowererCachesUnresolvedTypeVarQueries(t *testing.T) {
 	lowerer := newLowerer(LowerOptions{}, 1)
 	unresolved := checker.MakeMaybe(&checker.TypeVar{})

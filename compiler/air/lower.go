@@ -490,11 +490,7 @@ func (l *lowerer) lowerGlobalByID(id GlobalID, def *checker.VariableDef) error {
 	global := l.program.Globals[id]
 	fn := Function{Module: global.Module, Name: "<global>"}
 	fl := l.newFunctionLowerer(&fn, nil, nil)
-	contextType, err := fl.contextualType(global.Type)
-	if err != nil {
-		return err
-	}
-	value, actualType, err := fl.lowerContextualExpr(def.Value, contextType)
+	value, actualType, err := fl.lowerContextualExpr(def.Value, global.Type)
 	if err != nil {
 		return err
 	}
@@ -1005,7 +1001,7 @@ func (fl *functionLowerer) internType(t checker.Type) (TypeID, error) {
 		if tv.Actual() != nil {
 			return fl.internType(tv.Actual())
 		}
-		return fl.l.internType(checker.Void)
+		return NoType, fmt.Errorf("unresolved generic type variable $%s", tv.Name())
 	}
 	if !typeContainsTypeVar(t) {
 		return fl.l.internType(t)
@@ -1030,96 +1026,6 @@ func (fl *functionLowerer) internResolvedType(t checker.Type) (TypeID, error) {
 		return fl.l.internType(t)
 	}
 	return fl.internResolvedCompositeType(t)
-}
-
-func (fl *functionLowerer) internContextualCheckerType(t checker.Type) (TypeID, error) {
-	typeID, err := fl.internType(t)
-	if err == nil {
-		return fl.contextualType(typeID)
-	}
-	if !fl.l.typeHasUnresolvedTypeVar(t) {
-		return NoType, err
-	}
-	return fl.internWeakContextType(t)
-}
-
-func (fl *functionLowerer) internWeakContextType(t checker.Type) (TypeID, error) {
-	switch typ := t.(type) {
-	case *checker.TypeVar:
-		if id, ok := fl.typeVars[typ.Name()]; ok {
-			return id, nil
-		}
-		if typ.Actual() != nil {
-			return fl.internWeakContextType(typ.Actual())
-		}
-		return fl.l.internType(checker.Void)
-	case *checker.Maybe:
-		elem, err := fl.internWeakContextPart(typ.Of())
-		if err != nil {
-			return NoType, err
-		}
-		return fl.internMaybeType(elem), nil
-	case *checker.Result:
-		value, err := fl.internWeakContextPart(typ.Val())
-		if err != nil {
-			return NoType, err
-		}
-		errType, err := fl.internWeakContextPart(typ.Err())
-		if err != nil {
-			return NoType, err
-		}
-		return fl.internResultType(value, errType), nil
-	default:
-		return NoType, fmt.Errorf("unresolved generic type variable in contextual type %s", t.String())
-	}
-}
-
-func (fl *functionLowerer) internWeakContextPart(t checker.Type) (TypeID, error) {
-	typeID, err := fl.internType(t)
-	if err == nil {
-		return typeID, nil
-	}
-	if !fl.l.typeHasUnresolvedTypeVar(t) {
-		return NoType, err
-	}
-	return fl.l.internType(checker.Void)
-}
-
-func (fl *functionLowerer) contextualType(typeID TypeID) (TypeID, error) {
-	if !validTypeID(&fl.l.program, typeID) {
-		return typeID, nil
-	}
-	info, _ := fl.l.typeInfo(typeID)
-	switch info.Kind {
-	case TypeMaybe:
-		if validTypeID(&fl.l.program, info.Elem) {
-			return typeID, nil
-		}
-		voidID, err := fl.l.internType(checker.Void)
-		if err != nil {
-			return NoType, err
-		}
-		return fl.internMaybeType(voidID), nil
-	case TypeResult:
-		if validTypeID(&fl.l.program, info.Value) && validTypeID(&fl.l.program, info.Error) {
-			return typeID, nil
-		}
-		voidID, err := fl.l.internType(checker.Void)
-		if err != nil {
-			return NoType, err
-		}
-		value := info.Value
-		if !validTypeID(&fl.l.program, value) {
-			value = voidID
-		}
-		errType := info.Error
-		if !validTypeID(&fl.l.program, errType) {
-			errType = voidID
-		}
-		return fl.internResultType(value, errType), nil
-	default:
-		return typeID, nil
-	}
 }
 
 func (fl *functionLowerer) internStructType(typ *checker.StructDef) (TypeID, error) {
@@ -2333,7 +2239,7 @@ func (fl *functionLowerer) spreadElementTypeForCall(call *checker.FunctionCall) 
 	if definition == nil || len(definition.Parameters) == 0 || !definition.Parameters[len(definition.Parameters)-1].Variadic {
 		return NoType, fmt.Errorf("spread call is missing a variadic parameter")
 	}
-	return fl.internContextualCheckerType(definition.Parameters[len(definition.Parameters)-1].Type)
+	return fl.internResolvedType(definition.Parameters[len(definition.Parameters)-1].Type)
 }
 
 func (fl *functionLowerer) spreadCallableTypeForCall(call *checker.FunctionCall) (TypeID, error) {
@@ -2344,7 +2250,7 @@ func (fl *functionLowerer) spreadCallableTypeForCall(call *checker.FunctionCall)
 	if definition == nil {
 		return NoType, fmt.Errorf("spread call is missing its callable definition")
 	}
-	return fl.internContextualCheckerType(definition)
+	return fl.internResolvedType(definition)
 }
 
 func typeArgsForCallWithInterner(call *checker.FunctionCall, intern func(checker.Type) (TypeID, error)) ([]TypeID, error) {
@@ -3191,20 +3097,30 @@ func (fl *functionLowerer) lowerBlockWithDefault(stmts []checker.Statement, defa
 			continue
 		}
 		if i == last && stmt.Expr != nil {
+			expected := defaultType
+			if fl.isVoidType(defaultType) && !checker.IsNever(stmt.Expr.Type()) {
+				checkedType, err := fl.internResolvedType(stmt.Expr.Type())
+				if err != nil {
+					return block, err
+				}
+				if !fl.isVoidType(checkedType) {
+					expected = checkedType
+				}
+			}
 			if def := localNamedFunctionDeclaration(stmt.Expr); def != nil {
 				binding, _, err := fl.lowerLocalNamedFunction(def)
 				if err != nil {
 					return block, err
 				}
 				block.Stmts = append(block.Stmts, *binding)
-				expr, _, err := fl.lowerContextualExpr(stmt.Expr, defaultType)
+				expr, _, err := fl.lowerContextualExpr(stmt.Expr, expected)
 				if err != nil {
 					return block, err
 				}
 				block.Result = expr
 				continue
 			}
-			expr, _, err := fl.lowerContextualExpr(stmt.Expr, defaultType)
+			expr, _, err := fl.lowerContextualExpr(stmt.Expr, expected)
 			if err != nil {
 				return block, err
 			}
@@ -3225,13 +3141,6 @@ func (fl *functionLowerer) lowerContextualExpr(expr checker.Expression, expected
 	if err != nil {
 		return nil, expected, err
 	}
-	if normalized := fl.normalizeContextualType(lowered, expected); normalized != NoType && normalized != expected {
-		lowered, err = fl.lowerExprWithExpectedRaw(expr, normalized)
-		if err != nil {
-			return nil, normalized, err
-		}
-		return lowered, normalized, nil
-	}
 	return lowered, expected, nil
 }
 
@@ -3241,6 +3150,12 @@ func (fl *functionLowerer) lowerExprWithExpected(expr checker.Expression, expect
 }
 
 func (fl *functionLowerer) lowerExprWithExpectedRaw(expr checker.Expression, expected TypeID) (*Expr, error) {
+	if coercion, ok := expr.(*checker.NeverCoercion); ok && validTypeID(&fl.l.program, expected) {
+		return fl.lowerExprWithExpected(coercion.Value, expected)
+	}
+	if method, ok := expr.(*checker.ResultMethod); ok && checker.IsNever(expr.Type()) && validTypeID(&fl.l.program, expected) {
+		return fl.lowerResultMethod(expected, method)
+	}
 	if blockExpr, ok := expr.(*checker.Block); ok && validTypeID(&fl.l.program, expected) {
 		body, err := fl.lowerBlockWithDefault(blockExpr.Stmts, expected)
 		if err != nil {
@@ -3359,313 +3274,12 @@ func (fl *functionLowerer) lowerExprWithExpectedRaw(expr checker.Expression, exp
 	return fl.lowerExpr(expr)
 }
 
-func (fl *functionLowerer) normalizeContextualType(expr *Expr, expected TypeID) TypeID {
-	if expr == nil || !validTypeID(&fl.l.program, expected) || !fl.isWeakContextType(expected) {
-		return NoType
-	}
-	expectedInfo, _ := fl.l.typeInfo(expected)
-	switch expectedInfo.Kind {
-	case TypeMaybe:
-		return fl.inferMaybeType(expr)
-	case TypeResult:
-		return fl.inferResultType(expr, expected)
-	case TypeVoid:
-		if inferred := fl.inferValueType(expr); inferred != NoType {
-			return inferred
-		}
-		if inferred := fl.inferMaybeType(expr); inferred != NoType {
-			return inferred
-		}
-		return fl.inferResultType(expr, expected)
-	default:
-		return NoType
-	}
-}
-
-func (fl *functionLowerer) inferValueType(expr *Expr) TypeID {
-	if expr == nil {
-		return NoType
-	}
-	switch expr.Kind {
-	case ExprTryMaybe:
-		if expr.Target != nil {
-			if targetInfo, ok := fl.l.typeInfo(expr.Target.Type); ok && targetInfo.Kind == TypeMaybe {
-				return targetInfo.Elem
-			}
-		}
-	case ExprTryResult:
-		if expr.Target != nil {
-			if targetInfo, ok := fl.l.typeInfo(expr.Target.Type); ok && targetInfo.Kind == TypeResult {
-				return targetInfo.Value
-			}
-		}
-	case ExprBlock:
-		return fl.inferValueType(exprPayloadAs[*BlockExprPayload](expr).Body.Result)
-	case ExprIf:
-		return fl.mergeValueTypes(fl.inferValueType(exprPayloadAs[*IfExprPayload](expr).Then.Result), fl.inferValueType(exprPayloadAs[*IfExprPayload](expr).Else.Result))
-	case ExprMatchInt:
-		return fl.inferValueTypeFromCases(exprPayloadAs[*IntMatchExprPayload](expr).Cases, exprPayloadAs[*IntMatchExprPayload](expr).RangeCases, exprPayloadAs[*IntMatchExprPayload](expr).CatchAll)
-	case ExprMatchStr:
-		return fl.inferValueTypeFromStrCases(exprPayloadAs[*StrMatchExprPayload](expr).Cases, exprPayloadAs[*StrMatchExprPayload](expr).CatchAll)
-	case ExprMatchMaybe:
-		return fl.mergeValueTypes(fl.inferValueType(exprPayloadAs[*MaybeMatchExprPayload](expr).Some.Result), fl.inferValueType(exprPayloadAs[*MaybeMatchExprPayload](expr).None.Result))
-	case ExprMatchResult:
-		return fl.mergeValueTypes(fl.inferValueType(exprPayloadAs[*ResultMatchExprPayload](expr).Ok.Result), fl.inferValueType(exprPayloadAs[*ResultMatchExprPayload](expr).Err.Result))
-	case ExprMatchEnum:
-		value := NoType
-		for _, c := range exprPayloadAs[*EnumMatchExprPayload](expr).Cases {
-			value = fl.mergeValueTypes(value, fl.inferValueType(c.Body.Result))
-		}
-		return fl.mergeValueTypes(value, fl.inferValueType(exprPayloadAs[*EnumMatchExprPayload](expr).CatchAll.Result))
-	case ExprMatchUnion:
-		value := NoType
-		for _, c := range exprPayloadAs[*UnionMatchExprPayload](expr).Cases {
-			value = fl.mergeValueTypes(value, fl.inferValueType(c.Body.Result))
-		}
-		return fl.mergeValueTypes(value, fl.inferValueType(exprPayloadAs[*UnionMatchExprPayload](expr).CatchAll.Result))
-	}
-	return NoType
-}
-
-func (fl *functionLowerer) inferMaybeType(expr *Expr) TypeID {
-	if expr == nil {
-		return NoType
-	}
-	if info, ok := fl.l.typeInfo(expr.Type); ok && info.Kind == TypeMaybe && !fl.isWeakContextType(expr.Type) {
-		return expr.Type
-	}
-	switch expr.Kind {
-	case ExprMakeMaybeSome:
-		if expr.Target != nil {
-			return fl.internMaybeType(expr.Target.Type)
-		}
-	case ExprBlock:
-		return fl.inferMaybeType(exprPayloadAs[*BlockExprPayload](expr).Body.Result)
-	case ExprIf:
-		return fl.mergeValueTypes(fl.inferMaybeType(exprPayloadAs[*IfExprPayload](expr).Then.Result), fl.inferMaybeType(exprPayloadAs[*IfExprPayload](expr).Else.Result))
-	case ExprMatchInt:
-		return fl.inferMaybeTypeFromCases(exprPayloadAs[*IntMatchExprPayload](expr).Cases, exprPayloadAs[*IntMatchExprPayload](expr).RangeCases, exprPayloadAs[*IntMatchExprPayload](expr).CatchAll)
-	case ExprMatchStr:
-		return fl.inferMaybeTypeFromStrCases(exprPayloadAs[*StrMatchExprPayload](expr).Cases, exprPayloadAs[*StrMatchExprPayload](expr).CatchAll)
-	case ExprMatchMaybe:
-		return fl.mergeValueTypes(fl.inferMaybeType(exprPayloadAs[*MaybeMatchExprPayload](expr).Some.Result), fl.inferMaybeType(exprPayloadAs[*MaybeMatchExprPayload](expr).None.Result))
-	case ExprMatchResult:
-		return fl.mergeValueTypes(fl.inferMaybeType(exprPayloadAs[*ResultMatchExprPayload](expr).Ok.Result), fl.inferMaybeType(exprPayloadAs[*ResultMatchExprPayload](expr).Err.Result))
-	case ExprMatchEnum:
-		value := NoType
-		for _, c := range exprPayloadAs[*EnumMatchExprPayload](expr).Cases {
-			value = fl.mergeValueTypes(value, fl.inferMaybeType(c.Body.Result))
-		}
-		return fl.mergeValueTypes(value, fl.inferMaybeType(exprPayloadAs[*EnumMatchExprPayload](expr).CatchAll.Result))
-	case ExprMatchUnion:
-		value := NoType
-		for _, c := range exprPayloadAs[*UnionMatchExprPayload](expr).Cases {
-			value = fl.mergeValueTypes(value, fl.inferMaybeType(c.Body.Result))
-		}
-		return fl.mergeValueTypes(value, fl.inferMaybeType(exprPayloadAs[*UnionMatchExprPayload](expr).CatchAll.Result))
-	}
-	return NoType
-}
-
-func (fl *functionLowerer) inferResultType(expr *Expr, fallback TypeID) TypeID {
-	valueType, errType := fl.inferResultParts(expr)
-	if info, ok := fl.l.typeInfo(fallback); ok && info.Kind == TypeResult {
-		if valueType == NoType && validTypeID(&fl.l.program, info.Value) && !fl.isVoidType(info.Value) {
-			valueType = info.Value
-		}
-		if errType == NoType && validTypeID(&fl.l.program, info.Error) && !fl.isVoidType(info.Error) {
-			errType = info.Error
-		}
-	}
-	if valueType == NoType || errType == NoType {
-		return NoType
-	}
-	return fl.internResultType(valueType, errType)
-}
-
-func (fl *functionLowerer) inferResultParts(expr *Expr) (TypeID, TypeID) {
-	if expr == nil {
-		return NoType, NoType
-	}
-	if info, ok := fl.l.typeInfo(expr.Type); ok && info.Kind == TypeResult && !fl.isWeakContextType(expr.Type) {
-		return info.Value, info.Error
-	}
-	switch expr.Kind {
-	case ExprMakeResultOk:
-		if expr.Target != nil {
-			return expr.Target.Type, NoType
-		}
-	case ExprMakeResultErr:
-		if expr.Target != nil {
-			return NoType, expr.Target.Type
-		}
-	case ExprBlock:
-		return fl.inferResultParts(exprPayloadAs[*BlockExprPayload](expr).Body.Result)
-	case ExprIf:
-		leftValue, leftErr := fl.inferResultParts(exprPayloadAs[*IfExprPayload](expr).Then.Result)
-		rightValue, rightErr := fl.inferResultParts(exprPayloadAs[*IfExprPayload](expr).Else.Result)
-		return fl.mergeResultParts(leftValue, leftErr, rightValue, rightErr)
-	case ExprMatchInt:
-		return fl.inferResultPartsFromCases(exprPayloadAs[*IntMatchExprPayload](expr).Cases, exprPayloadAs[*IntMatchExprPayload](expr).RangeCases, exprPayloadAs[*IntMatchExprPayload](expr).CatchAll)
-	case ExprMatchStr:
-		return fl.inferResultPartsFromStrCases(exprPayloadAs[*StrMatchExprPayload](expr).Cases, exprPayloadAs[*StrMatchExprPayload](expr).CatchAll)
-	case ExprMatchMaybe:
-		leftValue, leftErr := fl.inferResultParts(exprPayloadAs[*MaybeMatchExprPayload](expr).Some.Result)
-		rightValue, rightErr := fl.inferResultParts(exprPayloadAs[*MaybeMatchExprPayload](expr).None.Result)
-		return fl.mergeResultParts(leftValue, leftErr, rightValue, rightErr)
-	case ExprMatchResult:
-		leftValue, leftErr := fl.inferResultParts(exprPayloadAs[*ResultMatchExprPayload](expr).Ok.Result)
-		rightValue, rightErr := fl.inferResultParts(exprPayloadAs[*ResultMatchExprPayload](expr).Err.Result)
-		return fl.mergeResultParts(leftValue, leftErr, rightValue, rightErr)
-	case ExprMatchEnum:
-		valueType, errType := NoType, NoType
-		for _, c := range exprPayloadAs[*EnumMatchExprPayload](expr).Cases {
-			rightValue, rightErr := fl.inferResultParts(c.Body.Result)
-			valueType, errType = fl.mergeResultParts(valueType, errType, rightValue, rightErr)
-		}
-		rightValue, rightErr := fl.inferResultParts(exprPayloadAs[*EnumMatchExprPayload](expr).CatchAll.Result)
-		return fl.mergeResultParts(valueType, errType, rightValue, rightErr)
-	case ExprMatchUnion:
-		valueType, errType := NoType, NoType
-		for _, c := range exprPayloadAs[*UnionMatchExprPayload](expr).Cases {
-			rightValue, rightErr := fl.inferResultParts(c.Body.Result)
-			valueType, errType = fl.mergeResultParts(valueType, errType, rightValue, rightErr)
-		}
-		rightValue, rightErr := fl.inferResultParts(exprPayloadAs[*UnionMatchExprPayload](expr).CatchAll.Result)
-		return fl.mergeResultParts(valueType, errType, rightValue, rightErr)
-	}
-	return NoType, NoType
-}
-
-func (fl *functionLowerer) inferValueTypeFromCases(intCases []IntMatchCase, rangeCases []IntRangeMatchCase, catchAll Block) TypeID {
-	value := NoType
-	for _, c := range intCases {
-		value = fl.mergeValueTypes(value, fl.inferValueType(c.Body.Result))
-	}
-	for _, c := range rangeCases {
-		value = fl.mergeValueTypes(value, fl.inferValueType(c.Body.Result))
-	}
-	return fl.mergeValueTypes(value, fl.inferValueType(catchAll.Result))
-}
-
-func (fl *functionLowerer) inferValueTypeFromStrCases(strCases []StrMatchCase, catchAll Block) TypeID {
-	value := NoType
-	for _, c := range strCases {
-		value = fl.mergeValueTypes(value, fl.inferValueType(c.Body.Result))
-	}
-	return fl.mergeValueTypes(value, fl.inferValueType(catchAll.Result))
-}
-
-func (fl *functionLowerer) inferMaybeTypeFromCases(intCases []IntMatchCase, rangeCases []IntRangeMatchCase, catchAll Block) TypeID {
-	value := NoType
-	for _, c := range intCases {
-		value = fl.mergeValueTypes(value, fl.inferMaybeType(c.Body.Result))
-	}
-	for _, c := range rangeCases {
-		value = fl.mergeValueTypes(value, fl.inferMaybeType(c.Body.Result))
-	}
-	return fl.mergeValueTypes(value, fl.inferMaybeType(catchAll.Result))
-}
-
-func (fl *functionLowerer) inferMaybeTypeFromStrCases(strCases []StrMatchCase, catchAll Block) TypeID {
-	value := NoType
-	for _, c := range strCases {
-		value = fl.mergeValueTypes(value, fl.inferMaybeType(c.Body.Result))
-	}
-	return fl.mergeValueTypes(value, fl.inferMaybeType(catchAll.Result))
-}
-
-func (fl *functionLowerer) inferResultPartsFromStrCases(strCases []StrMatchCase, catchAll Block) (TypeID, TypeID) {
-	valueType, errType := NoType, NoType
-	for _, c := range strCases {
-		rightValue, rightErr := fl.inferResultParts(c.Body.Result)
-		valueType, errType = fl.mergeResultParts(valueType, errType, rightValue, rightErr)
-	}
-	rightValue, rightErr := fl.inferResultParts(catchAll.Result)
-	return fl.mergeResultParts(valueType, errType, rightValue, rightErr)
-}
-
-func (fl *functionLowerer) inferResultPartsFromCases(intCases []IntMatchCase, rangeCases []IntRangeMatchCase, catchAll Block) (TypeID, TypeID) {
-	valueType, errType := NoType, NoType
-	for _, c := range intCases {
-		rightValue, rightErr := fl.inferResultParts(c.Body.Result)
-		valueType, errType = fl.mergeResultParts(valueType, errType, rightValue, rightErr)
-	}
-	for _, c := range rangeCases {
-		rightValue, rightErr := fl.inferResultParts(c.Body.Result)
-		valueType, errType = fl.mergeResultParts(valueType, errType, rightValue, rightErr)
-	}
-	rightValue, rightErr := fl.inferResultParts(catchAll.Result)
-	return fl.mergeResultParts(valueType, errType, rightValue, rightErr)
-}
-
-func (fl *functionLowerer) mergeValueTypes(left TypeID, right TypeID) TypeID {
-	if left == NoType {
-		return right
-	}
-	if right == NoType || left == right {
-		return left
-	}
-	return NoType
-}
-
-func (fl *functionLowerer) mergeResultParts(leftValue TypeID, leftErr TypeID, rightValue TypeID, rightErr TypeID) (TypeID, TypeID) {
-	valueType := fl.mergeValueTypes(leftValue, rightValue)
-	if valueType == NoType && leftValue != NoType && rightValue != NoType {
-		return NoType, NoType
-	}
-	errType := fl.mergeValueTypes(leftErr, rightErr)
-	if errType == NoType && leftErr != NoType && rightErr != NoType {
-		return NoType, NoType
-	}
-	return valueType, errType
-}
-
-func (fl *functionLowerer) internMaybeType(elem TypeID) TypeID {
-	if !validTypeID(&fl.l.program, elem) {
-		return NoType
-	}
-	id, err := fl.l.internSyntheticType(fl.l.typeName(elem)+"?", TypeInfo{Kind: TypeMaybe, Elem: elem})
-	if err != nil {
-		return NoType
-	}
-	return id
-}
-
-func (fl *functionLowerer) internResultType(value TypeID, errType TypeID) TypeID {
-	if !validTypeID(&fl.l.program, value) || !validTypeID(&fl.l.program, errType) {
-		return NoType
-	}
-	id, err := fl.l.internSyntheticType(fl.l.typeName(value)+"!"+fl.l.typeName(errType), TypeInfo{Kind: TypeResult, Value: value, Error: errType})
-	if err != nil {
-		return NoType
-	}
-	return id
-}
-
 func (fl *functionLowerer) isVoidType(typeID TypeID) bool {
 	if !validTypeID(&fl.l.program, typeID) {
 		return false
 	}
 	info, _ := fl.l.typeInfo(typeID)
 	return info.Kind == TypeVoid
-}
-
-func (fl *functionLowerer) isWeakContextType(typeID TypeID) bool {
-	if !validTypeID(&fl.l.program, typeID) {
-		return false
-	}
-	info, _ := fl.l.typeInfo(typeID)
-	switch info.Kind {
-	case TypeVoid:
-		return true
-	case TypeMaybe:
-		return !validTypeID(&fl.l.program, info.Elem) || fl.isVoidType(info.Elem)
-	case TypeResult:
-		return !validTypeID(&fl.l.program, info.Value) || !validTypeID(&fl.l.program, info.Error) || fl.isVoidType(info.Value) || fl.isVoidType(info.Error)
-	default:
-		return false
-	}
 }
 
 // lowerForeignScalarNarrowIfNeeded converts a foreign named scalar value to
@@ -3732,11 +3346,8 @@ func (fl *functionLowerer) lowerAnyWrapIfNeeded(expr checker.Expression, expecte
 	if !ok || expectedInfo.Kind != TypeAny {
 		return nil, false, nil
 	}
-	actual, err := fl.internType(expr.Type())
+	actual, err := fl.internResolvedType(expr.Type())
 	if err != nil {
-		if fl.l.typeHasUnresolvedTypeVar(expr.Type()) {
-			return nil, false, nil
-		}
 		return nil, false, err
 	}
 	if actual == expected {
@@ -3976,7 +3587,7 @@ func (fl *functionLowerer) lowerStmt(stmt checker.Statement) (*Stmt, error) {
 	}
 	switch s := stmt.Stmt.(type) {
 	case *checker.VariableDef:
-		typeID, err := fl.internContextualCheckerType(s.Type())
+		typeID, err := fl.internResolvedType(s.Type())
 		if err != nil {
 			return nil, err
 		}
@@ -4590,7 +4201,13 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 	if prop, ok := expr.(*checker.InstanceProperty); ok {
 		return fl.lowerInstanceProperty(NoType, prop)
 	}
-	typeID, err := fl.internType(expr.Type())
+	var typeID TypeID
+	var err error
+	if checker.IsNever(expr.Type()) {
+		typeID, err = fl.l.internType(checker.Void)
+	} else {
+		typeID, err = fl.internResolvedType(expr.Type())
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -4611,6 +4228,8 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		return &Expr{Kind: ExprConstStr, Type: typeID, Payload: &TextExprPayload{Value: e.Value}}, nil
 	case *checker.RuneLiteral:
 		return &Expr{Kind: ExprConstInt, Type: typeID, Payload: &TextExprPayload{Value: strconv.Itoa(int(e.Value))}}, nil
+	case *checker.NeverCoercion:
+		return fl.lowerExprWithExpected(e.Value, typeID)
 	case *checker.Panic:
 		message, err := fl.lowerExprWithExpected(e.Message, fl.l.mustIntern(checker.Str))
 		if err != nil {
@@ -4846,7 +4465,7 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 				lowered, err = fl.lowerExpr(arg)
 			} else {
 				var paramType TypeID
-				paramType, err = fl.internContextualCheckerType(fnDef.Parameters[i].Type)
+				paramType, err = fl.internResolvedType(fnDef.Parameters[i].Type)
 				if err == nil {
 					lowered, err = fl.lowerExprWithExpected(arg, paramType)
 				}
@@ -4858,7 +4477,7 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		}
 		var typeArgs []TypeID
 		for _, typeArg := range e.TypeArgs {
-			argID, err := fl.internContextualCheckerType(typeArg)
+			argID, err := fl.internResolvedType(typeArg)
 			if err != nil {
 				return nil, err
 			}
@@ -5834,13 +5453,11 @@ func (fl *functionLowerer) lowerResultMatch(typeID TypeID, match *checker.Result
 }
 
 func (fl *functionLowerer) lowerResultMethod(typeID TypeID, method *checker.ResultMethod) (*Expr, error) {
-	var target *Expr
-	var err error
-	if subjectType, ok := fl.resultMethodSubjectType(method); ok {
-		target, err = fl.lowerExprWithExpected(method.Subject, subjectType)
-	} else {
-		target, err = fl.lowerExpr(method.Subject)
+	subjectType, err := fl.resultMethodSubjectType(method)
+	if err != nil {
+		return nil, err
 	}
+	target, err := fl.lowerExprWithExpected(method.Subject, subjectType)
 	if err != nil {
 		return nil, err
 	}
@@ -5871,26 +5488,12 @@ func (fl *functionLowerer) lowerResultMethod(typeID TypeID, method *checker.Resu
 	return &Expr{Kind: kind, Type: typeID, Target: target, Args: args}, nil
 }
 
-func (fl *functionLowerer) resultMethodSubjectType(method *checker.ResultMethod) (TypeID, bool) {
+func (fl *functionLowerer) resultMethodSubjectType(method *checker.ResultMethod) (TypeID, error) {
 	subjectType, ok := method.Subject.Type().(*checker.Result)
 	if !ok {
-		return NoType, false
+		return NoType, fmt.Errorf("Result method subject has type %T", method.Subject.Type())
 	}
-	valueType := subjectType.Val()
-	errType := subjectType.Err()
-	if returnType, ok := method.ReturnType.(*checker.Result); ok {
-		if fl.l.typeHasUnresolvedTypeVar(valueType) {
-			valueType = returnType.Val()
-		}
-		if fl.l.typeHasUnresolvedTypeVar(errType) {
-			errType = returnType.Err()
-		}
-	}
-	typeID, err := fl.internContextualCheckerType(checker.MakeResult(valueType, errType))
-	if err != nil {
-		return NoType, false
-	}
-	return typeID, true
+	return fl.internResolvedType(subjectType)
 }
 
 func (fl *functionLowerer) lowerTryOp(typeID TypeID, op *checker.TryOp) (*Expr, error) {
@@ -6047,11 +5650,44 @@ func (fl *functionLowerer) lowerArgsWithTypeIDs(args []checker.Expression, expec
 }
 
 func (fl *functionLowerer) lowerBinary(kind ExprKind, typeID TypeID, leftExpr, rightExpr checker.Expression) (*Expr, error) {
-	left, err := fl.lowerExpr(leftExpr)
+	leftExpected, rightExpected := NoType, NoType
+	if checker.IsNever(leftExpr.Type()) {
+		var expected checker.Type = checker.Void
+		if !checker.IsNever(rightExpr.Type()) {
+			expected = rightExpr.Type()
+		}
+		var err error
+		leftExpected, err = fl.internResolvedType(expected)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if checker.IsNever(rightExpr.Type()) {
+		var expected checker.Type = checker.Void
+		if !checker.IsNever(leftExpr.Type()) {
+			expected = leftExpr.Type()
+		}
+		var err error
+		rightExpected, err = fl.internResolvedType(expected)
+		if err != nil {
+			return nil, err
+		}
+	}
+	var left, right *Expr
+	var err error
+	if leftExpected != NoType {
+		left, err = fl.lowerExprWithExpected(leftExpr, leftExpected)
+	} else {
+		left, err = fl.lowerExpr(leftExpr)
+	}
 	if err != nil {
 		return nil, err
 	}
-	right, err := fl.lowerExpr(rightExpr)
+	if rightExpected != NoType {
+		right, err = fl.lowerExprWithExpected(rightExpr, rightExpected)
+	} else {
+		right, err = fl.lowerExpr(rightExpr)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -6059,7 +5695,7 @@ func (fl *functionLowerer) lowerBinary(kind ExprKind, typeID TypeID, leftExpr, r
 }
 
 func (fl *functionLowerer) lowerUnary(kind ExprKind, typeID TypeID, valueExpr checker.Expression) (*Expr, error) {
-	value, err := fl.lowerExpr(valueExpr)
+	value, err := fl.lowerExprWithExpected(valueExpr, typeID)
 	if err != nil {
 		return nil, err
 	}
@@ -6134,7 +5770,7 @@ func (fl *functionLowerer) lowerForeignFieldAssignment(prop *checker.ForeignFiel
 	if err != nil {
 		return nil, err
 	}
-	fieldType, err := fl.internContextualCheckerType(prop.Type())
+	fieldType, err := fl.internResolvedType(prop.Type())
 	if err != nil {
 		return nil, err
 	}
@@ -6149,7 +5785,7 @@ func (fl *functionLowerer) lowerForeignValueAssignment(prop *checker.ForeignValu
 	if !prop.Assignable {
 		return nil, fmt.Errorf("assignment to non-assignable foreign value %s::%s", prop.Namespace, prop.Symbol)
 	}
-	valueType, err := fl.internContextualCheckerType(prop.Type())
+	valueType, err := fl.internResolvedType(prop.Type())
 	if err != nil {
 		return nil, err
 	}

@@ -1791,6 +1791,16 @@ func (r ResultMatch) Type() Type {
 	return r.Ok.Body.Type()
 }
 
+// NeverCoercion records the expected value type at a use of a non-returning
+// expression. The wrapped expression produces no value, but backends still
+// need the destination representation to type unreachable code.
+type NeverCoercion struct {
+	Value      Expression
+	TargetType Type
+}
+
+func (n *NeverCoercion) Type() Type { return n.TargetType }
+
 type Panic struct {
 	Message Expression
 	node    *parse.FunctionCall
@@ -1801,10 +1811,7 @@ func (p Panic) GetLocation() parse.Location {
 }
 
 func (p Panic) Type() Type {
-	// realistically, this is Void but that would break expectations when using `panic()` to signal unreachable code
-	// in a function or block that is declared to return or be a non-Void value.
-	// using TypeVar technically allows empty panicking functions to work; e.g. the `async:start()` function in async.ard
-	return &TypeVar{name: "Unreachable"}
+	return neverType
 }
 
 type TryKind uint8

@@ -85,12 +85,12 @@ Every value-producing executable expression crossing the checker-to-AIR boundary
 has a complete checked result type. That type is either closed or contains only
 type parameters owned by the generic definition currently being lowered.
 
-The current checker represents a non-returning expression such as `panic` with
-an unowned `Unreachable` type-variable sentinel. Before weak AIR inference is
-removed, that representation will become an explicit non-producing/bottom
-classification so it cannot be confused with unresolved call inference. A
-non-returning expression does not invent a concrete result type merely to
-satisfy the resolved-input rule.
+The checker represents a non-returning expression such as `panic` with an
+explicit checker-only `Never` type. AIR lowering replaces that bottom type with
+the surrounding expected representation, or `Void` when the expression is used
+only as a statement. It cannot be confused with unresolved call inference and
+never becomes an AIR `TypeID`. A non-returning expression does not invent a
+source-level value type merely to satisfy the resolved-input rule.
 
 Bound checker inference variables are dereferenced. Unresolved call-owned or
 provisional inference variables are rejected before AIR is finalized.
@@ -132,9 +132,8 @@ foreign assignability remain separate from type identity.
 2. Introduce canonical structural constructors and route both existing
    structural production paths through them.
 3. Preserve checked block/expression typing, including discarded final values,
-   and replace the current `Unreachable` type-variable sentinel with an explicit
-   non-producing/bottom classification while retaining representation-directed
-   expected-type lowering.
+   and model non-returning expressions with an explicit checker-only bottom type
+   while retaining representation-directed expected-type lowering.
 4. Remove `Void`-based weak contextual inference and reject unresolved
    call-owned variables at the boundary.
 5. Consolidate nominal definitions, generic applications, and owner-scoped type

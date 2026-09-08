@@ -61,7 +61,7 @@ func collectComparableGenericNames(t Type, requireComparable bool, seen map[comp
 	case *TypeVar:
 		if typ.actual != nil {
 			collectComparableGenericNames(typ.actual, requireComparable, seen, result, analyzeForeignStructure)
-		} else if requireComparable && typ.name != "" && typ.name != "unknown" && typ.name != "Unreachable" {
+		} else if requireComparable && typ.name != "" && typ.name != "unknown" {
 			result[typ.name] = true
 		}
 	case *Map:
@@ -156,7 +156,7 @@ func collectComparableBindingRequirements(t Type, seen map[string]bool, result *
 	case *TypeVar:
 		if typ.actual != nil {
 			collectComparableBindingRequirements(typ.actual, seen, result)
-		} else if typ.name != "" && typ.name != "unknown" && typ.name != "Unreachable" {
+		} else if typ.name != "" && typ.name != "unknown" {
 			result.generics[typ.name] = true
 		}
 	case *StructDef:

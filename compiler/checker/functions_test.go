@@ -360,7 +360,7 @@ func TestCheckedProgramTypeBoundaryCharacterization(t *testing.T) {
 		}
 	})
 
-	t.Run("panic currently uses Unreachable sentinel", func(t *testing.T) {
+	t.Run("panic has an explicit non-returning type", func(t *testing.T) {
 		result := parse.Parse([]byte(`fn fail() Int { panic("stop") }`), "test.ard")
 		if len(result.Errors) > 0 {
 			t.Fatalf("parse errors: %v", result.Errors)
@@ -371,9 +371,9 @@ func TestCheckedProgramTypeBoundaryCharacterization(t *testing.T) {
 			t.Fatalf("checker diagnostics: %v", c.Diagnostics())
 		}
 		fail := c.Module().Program().Statements[0].Expr.(*checker.FunctionDef)
-		unreachable, ok := fail.Body.Stmts[0].Expr.Type().(*checker.TypeVar)
-		if !ok || unreachable.Name() != "Unreachable" || unreachable.Actual() != nil {
-			t.Fatalf("panic type = %#v, want unresolved Unreachable sentinel", fail.Body.Stmts[0].Expr.Type())
+		coercion, ok := fail.Body.Stmts[0].Expr.(*checker.NeverCoercion)
+		if !ok || coercion.Type() != checker.Int || !checker.IsNever(coercion.Value.Type()) {
+			t.Fatalf("panic result = %#v, want Never coerced to expected Int", fail.Body.Stmts[0].Expr)
 		}
 	})
 }
@@ -388,12 +388,109 @@ func resolvedCheckerType(t checker.Type) checker.Type {
 	}
 }
 
+func TestErasedResultConstructorPreservesDeclarationGenerics(t *testing.T) {
+	result := parse.Parse([]byte(`
+		fn inspect(value: $T) Bool { Result::ok(value).is_ok() }
+		fn identity(value: $T) $T { Result::ok(value).expect("value") }
+		fn consume(value: $T) { Result::ok(value) }
+		fn main() {
+			let inspected = inspect(1)
+			let identified: Int = identity(1)
+			consume(1)
+		}
+	`), "test.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	c := checker.New("test.ard", result.Program, nil)
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
+	}
+	for index, name := range []string{"inspect", "identity", "consume"} {
+		function := c.Module().Program().Statements[index].Expr.(*checker.FunctionDef)
+		if _, ok := function.Parameters[0].Type.(*checker.TypeVar); !ok || function.Parameters[0].Type.String() != "$T" {
+			t.Fatalf("%s parameter type = %#v, want preserved declaration generic $T", name, function.Parameters[0].Type)
+		}
+	}
+}
+
+func TestNeverLoopConditionIsRejectedBeforeLowering(t *testing.T) {
+	result := parse.Parse([]byte(`fn main() { while panic("stop") { () } }`), "test.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	c := checker.New("test.ard", result.Program, nil)
+	c.Check()
+	if !c.HasErrors() || !strings.Contains(diagnosticsString(c.Diagnostics()), "While loop condition must be a boolean expression") {
+		t.Fatalf("checker diagnostics = %v, want non-boolean loop condition", c.Diagnostics())
+	}
+}
+
+func TestErasedConstructorComponentsResolveBeforeAIR(t *testing.T) {
+	result := parse.Parse([]byte(`
+		fn maybe_none() Bool { Maybe::new().is_none() }
+		fn result_ok() Bool { Result::ok(1).is_ok() }
+		fn result_err() Bool { Result::err("bad").is_err() }
+		fn result_match() Int {
+			match Result::ok(1) {
+				ok => ok,
+				err => 0,
+			}
+		}
+	`), "test.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	c := checker.New("test.ard", result.Program, nil)
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
+	}
+
+	statements := c.Module().Program().Statements
+	maybeMethod := statements[0].Expr.(*checker.FunctionDef).Body.Stmts[0].Expr.(*checker.MaybeMethod)
+	maybeType := maybeMethod.Subject.Type().(*checker.Maybe)
+	if got := resolvedCheckerType(maybeType.Of()); got != checker.Void {
+		t.Fatalf("Maybe::new erased element = %s, want concrete Void", got)
+	}
+
+	resultDefaults := []struct {
+		statement int
+		value     checker.Type
+		err       checker.Type
+	}{
+		{statement: 1, value: checker.Int, err: checker.Void},
+		{statement: 2, value: checker.Void, err: checker.Str},
+	}
+	for _, expected := range resultDefaults {
+		method := statements[expected.statement].Expr.(*checker.FunctionDef).Body.Stmts[0].Expr.(*checker.ResultMethod)
+		resultType := method.Subject.Type().(*checker.Result)
+		if got := resolvedCheckerType(resultType.Val()); got != expected.value {
+			t.Fatalf("Result method %d success type = %s, want %s", expected.statement, got, expected.value)
+		}
+		if got := resolvedCheckerType(resultType.Err()); got != expected.err {
+			t.Fatalf("Result method %d error type = %s, want %s", expected.statement, got, expected.err)
+		}
+	}
+
+	match := statements[3].Expr.(*checker.FunctionDef).Body.Stmts[0].Expr.(*checker.ResultMatch)
+	matchType := match.Subject.Type().(*checker.Result)
+	if got := resolvedCheckerType(matchType.Err()); got != checker.Void {
+		t.Fatalf("Result match erased error = %s, want concrete Void", got)
+	}
+}
+
 func TestIncompleteBuiltinConstructorsAreRejected(t *testing.T) {
 	for _, source := range []string{
 		`let value = Maybe::new()`,
 		`let result = Result::ok(1)`,
 		`let result = Result::err("no")`,
 		`let channel = Chan::new()`,
+		`fn identity(value: $T) $T { value }
+		 let value = identity(panic("no value"))`,
+		`struct Marker<$T> { value: Int }
+		 let value = Result::ok(Marker{value: 1}).expect("value")`,
 	} {
 		result := parse.Parse([]byte(source), "test.ard")
 		if len(result.Errors) > 0 {

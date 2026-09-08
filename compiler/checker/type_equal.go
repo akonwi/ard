@@ -41,12 +41,15 @@ func equalTypesWithMode(left Type, right Type, allowUnboundWildcard, allowInfere
 }
 
 func inferenceWildcardTypeVar(typeVar *TypeVar) bool {
-	return typeVar != nil && (typeVar.owner != 0 || typeVar.provisional || typeVar.name == "Unreachable")
+	return typeVar != nil && (typeVar.owner != 0 || typeVar.provisional)
 }
 
 func equalTypesSeen(left Type, right Type, context *typeEqualContext) bool {
 	if left == nil || right == nil {
 		return left == right
+	}
+	if IsNever(left) || IsNever(right) {
+		return IsNever(left) && IsNever(right)
 	}
 	key := typeEqualKey{left: typeEqualID(left), right: typeEqualID(right)}
 	if _, ok := context.seen[key]; ok {
