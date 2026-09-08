@@ -58,15 +58,13 @@ func LowerModulesWithOptions(modules []checker.Module, options LowerOptions) (*P
 type lowerer struct {
 	program Program
 
-	moduleByPath     map[string]ModuleID
-	moduleByName     map[string]checker.Module
-	atomicTypes      map[checker.Type]TypeID
-	traitObjectTypes map[TraitID]TypeID
-	typeInterner     *typeInterner
-	traits           map[string]TraitID
-	impls            map[string]ImplID
-	functions        map[string]FunctionID
-	globals          map[string]GlobalID
+	moduleByPath map[string]ModuleID
+	moduleByName map[string]checker.Module
+	typeInterner *typeInterner
+	traits       map[string]TraitID
+	impls        map[string]ImplID
+	functions    map[string]FunctionID
+	globals      map[string]GlobalID
 
 	cacheMethodLookups       bool
 	structMethodsByOwner     map[checker.MethodOwner]map[string]*checker.FunctionDef
@@ -112,14 +110,12 @@ func newLowerer(options LowerOptions, rootCount int) *lowerer {
 			Entry:  NoFunction,
 			Script: NoFunction,
 		},
-		moduleByPath:     map[string]ModuleID{},
-		moduleByName:     map[string]checker.Module{},
-		atomicTypes:      map[checker.Type]TypeID{},
-		traitObjectTypes: map[TraitID]TypeID{},
-		traits:           map[string]TraitID{},
-		impls:            map[string]ImplID{},
-		functions:        map[string]FunctionID{},
-		globals:          map[string]GlobalID{},
+		moduleByPath: map[string]ModuleID{},
+		moduleByName: map[string]checker.Module{},
+		traits:       map[string]TraitID{},
+		impls:        map[string]ImplID{},
+		functions:    map[string]FunctionID{},
+		globals:      map[string]GlobalID{},
 
 		cacheMethodLookups:      rootCount == 1,
 		unresolvedTypeVarByType: map[checker.Type]bool{},
@@ -2027,10 +2023,10 @@ func (l *lowerer) lowerInstanceMethodFunction(id FunctionID, def *checker.Functi
 // own type parameters (e.g. `Chan[T]`), used as the receiver type of a
 // generic method definition (ADR 0031).
 func (l *lowerer) genericSelfInstance(defID TypeID) (TypeID, error) {
-	if !validTypeID(&l.program, defID) {
-		return NoType, fmt.Errorf("invalid generic struct definition %d", defID)
+	def, ok := l.typeInfo(defID)
+	if !ok {
+		return NoType, fmt.Errorf("generic struct definition %d is invalid or incomplete", defID)
 	}
-	def := l.program.Types[defID-1]
 	paramOwner := genericStructDefKey(def.ModulePath, def.Name)
 	args := make([]TypeID, len(def.TypeParams))
 	for i, name := range def.TypeParams {
@@ -2116,7 +2112,10 @@ func (fl *functionLowerer) declareGenericMethodFunction(module ModuleID, instanc
 		return NoFunction, nil, fmt.Errorf("generic method receiver %d is not a generic instantiation", instanceType)
 	}
 	defID := info.Generic
-	structDef := fl.l.program.Types[defID-1]
+	structDef, ok := fl.l.typeInfo(defID)
+	if !ok {
+		return NoFunction, nil, fmt.Errorf("generic method definition %d is invalid or incomplete", defID)
+	}
 	paramNames := structDef.TypeParams
 	typeArgs := info.GenericArgs
 	if id, ok := fl.l.genericMethodDefs[key]; ok {
@@ -2295,13 +2294,8 @@ func goifyTypeParamName(name string) string {
 
 func (l *lowerer) internTypeParam(owner, name string, idx int) (TypeID, error) {
 	key := typeParamKey{owner: owner, index: idx}
-	if id, ok := l.typeInterner.typeParams[key]; ok {
-		return id, nil
-	}
-	id := TypeID(len(l.program.Types) + 1)
-	l.typeInterner.typeParams[key] = id
-	l.program.Types = append(l.program.Types, TypeInfo{ID: id, Kind: TypeParam, Name: goifyTypeParamName(name), ParamOwner: owner, ParamIndex: idx})
-	return id, nil
+	info := TypeInfo{Kind: TypeParam, Name: goifyTypeParamName(name), ParamOwner: owner, ParamIndex: idx}
+	return l.typeInterner.internTypeParam(key, info)
 }
 
 // internGenericStructDef interns the generic definition of a struct (fields
@@ -2470,16 +2464,8 @@ func (l *lowerer) internAtomicOrTraitType(t checker.Type) (TypeID, error) {
 		if err != nil {
 			return NoType, err
 		}
-		if id, exists := l.traitObjectTypes[traitID]; exists {
-			return id, nil
-		}
-		id := TypeID(len(l.program.Types) + 1)
-		l.traitObjectTypes[traitID] = id
-		l.program.Types = append(l.program.Types, TypeInfo{ID: id, Kind: TypeTraitObject, Name: trait.String(), Trait: traitID})
-		return id, nil
-	}
-	if id, ok := l.atomicTypes[t]; ok {
-		return id, nil
+		info := TypeInfo{Kind: TypeTraitObject, Name: trait.String(), Trait: traitID}
+		return l.typeInterner.internTraitObject(traitID, info)
 	}
 	info := TypeInfo{Name: airTypeName(t)}
 	switch t {
@@ -2504,11 +2490,7 @@ func (l *lowerer) internAtomicOrTraitType(t checker.Type) (TypeID, error) {
 	default:
 		return NoType, fmt.Errorf("unsupported AIR type %T (%s)", t, t.String())
 	}
-	id := TypeID(len(l.program.Types) + 1)
-	info.ID = id
-	l.atomicTypes[t] = id
-	l.program.Types = append(l.program.Types, info)
-	return id, nil
+	return l.typeInterner.internAtomic(t, info)
 }
 
 func (l *lowerer) methodReceiverType(owner TypeID, mutates bool) (TypeID, error) {
@@ -2526,12 +2508,20 @@ func (l *lowerer) internSyntheticType(_ string, info TypeInfo) (TypeID, error) {
 }
 
 func (l *lowerer) typeName(id TypeID) string {
-	if !validTypeID(&l.program, id) {
+	if l.typeInterner == nil {
+		// Some isolated package tests construct finalized lowerer fixtures without
+		// lowering lifecycle state. Such fixtures cannot contain reservations.
+		info, ok := l.typeInfo(id)
+		if !ok {
+			return fmt.Sprintf("<invalid:%d>", id)
+		}
+		return info.Name
+	}
+	name, err := l.typeInterner.displayName(id)
+	if err != nil {
 		return fmt.Sprintf("<invalid:%d>", id)
 	}
-	// Names are presentation metadata seeded at reservation time. Reading the
-	// seed does not expose incomplete semantic shape metadata.
-	return l.program.Types[id-1].Name
+	return name
 }
 
 func (l *lowerer) internTrait(trait *checker.Trait) (TraitID, error) {
@@ -5809,7 +5799,15 @@ func (fl *functionLowerer) lowerUserDefinedInstanceMethod(typeID TypeID, target 
 	// express them. The call references the definition with the receiver's
 	// concrete type arguments and lowers its arguments against their concrete
 	// types.
-	if typeInfo.Generic != NoType && methodUsesOnlyStructTypeParams(def, fl.l.program.Types[typeInfo.Generic-1].TypeParams) {
+	usesOnlyStructTypeParams := false
+	if typeInfo.Generic != NoType {
+		definition, ok := fl.l.typeInfo(typeInfo.Generic)
+		if !ok {
+			return nil, fmt.Errorf("generic method definition %d is invalid or incomplete", typeInfo.Generic)
+		}
+		usesOnlyStructTypeParams = methodUsesOnlyStructTypeParams(def, definition.TypeParams)
+	}
+	if typeInfo.Generic != NoType && usesOnlyStructTypeParams {
 		id, typeArgs, err := fl.declareGenericInstanceMethodFunction(module, typeInfo.ID, method.StructType, def)
 		if err != nil {
 			return nil, err

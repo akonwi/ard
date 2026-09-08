@@ -57,21 +57,74 @@ type typeParamKey struct {
 }
 
 type typeInterner struct {
-	program     *Program
-	structural  map[structuralTypeKey]TypeID
-	nominal     map[nominalTypeKey]*nominalEntry
-	nominalByID map[TypeID]*nominalEntry
-	typeParams  map[typeParamKey]TypeID
+	program      *Program
+	structural   map[structuralTypeKey]TypeID
+	nominal      map[nominalTypeKey]*nominalEntry
+	nominalByID  map[TypeID]*nominalEntry
+	atomic       map[checker.Type]TypeID
+	traitObjects map[TraitID]TypeID
+	typeParams   map[typeParamKey]TypeID
 }
 
 func newTypeInterner(program *Program) *typeInterner {
 	return &typeInterner{
-		program:     program,
-		structural:  map[structuralTypeKey]TypeID{},
-		nominal:     map[nominalTypeKey]*nominalEntry{},
-		nominalByID: map[TypeID]*nominalEntry{},
-		typeParams:  map[typeParamKey]TypeID{},
+		program:      program,
+		structural:   map[structuralTypeKey]TypeID{},
+		nominal:      map[nominalTypeKey]*nominalEntry{},
+		nominalByID:  map[TypeID]*nominalEntry{},
+		atomic:       map[checker.Type]TypeID{},
+		traitObjects: map[TraitID]TypeID{},
+		typeParams:   map[typeParamKey]TypeID{},
 	}
+}
+
+func (i *typeInterner) appendComplete(info TypeInfo) TypeID {
+	id := TypeID(len(i.program.Types) + 1)
+	info.ID = id
+	i.program.Types = append(i.program.Types, info)
+	return id
+}
+
+func (i *typeInterner) internAtomic(t checker.Type, info TypeInfo) (TypeID, error) {
+	if id, ok := i.atomic[t]; ok {
+		existing := i.program.Types[id-1]
+		info.ID = id
+		if !reflect.DeepEqual(existing, info) {
+			return NoType, fmt.Errorf("conflicting AIR metadata for atomic type %s", info.Name)
+		}
+		return id, nil
+	}
+	id := i.appendComplete(info)
+	i.atomic[t] = id
+	return id, nil
+}
+
+func (i *typeInterner) internTraitObject(trait TraitID, info TypeInfo) (TypeID, error) {
+	if id, ok := i.traitObjects[trait]; ok {
+		existing := i.program.Types[id-1]
+		info.ID = id
+		if !reflect.DeepEqual(existing, info) {
+			return NoType, fmt.Errorf("conflicting AIR metadata for trait object %d", trait)
+		}
+		return id, nil
+	}
+	id := i.appendComplete(info)
+	i.traitObjects[trait] = id
+	return id, nil
+}
+
+func (i *typeInterner) internTypeParam(key typeParamKey, info TypeInfo) (TypeID, error) {
+	if id, ok := i.typeParams[key]; ok {
+		existing := i.program.Types[id-1]
+		info.ID = id
+		if !reflect.DeepEqual(existing, info) {
+			return NoType, fmt.Errorf("conflicting AIR metadata for type parameter %q index %d", key.owner, key.index)
+		}
+		return id, nil
+	}
+	id := i.appendComplete(info)
+	i.typeParams[key] = id
+	return id, nil
 }
 
 func (i *typeInterner) reserveNominal(key nominalTypeKey, seed TypeInfo) (TypeID, bool, error) {
@@ -126,6 +179,19 @@ func (i *typeInterner) failNominal(key nominalTypeKey, err error) error {
 func (i *typeInterner) nominalAvailable(id TypeID) bool {
 	entry, nominal := i.nominalByID[id]
 	return !nominal || entry.state == nominalComplete
+}
+
+// displayName is the only read permitted from a building nominal entry. The
+// reservation seed contains identity-independent presentation metadata only;
+// semantic shape remains unavailable until completion.
+func (i *typeInterner) displayName(id TypeID) (string, error) {
+	if !validTypeID(i.program, id) {
+		return "", fmt.Errorf("invalid AIR type %d", id)
+	}
+	if entry, nominal := i.nominalByID[id]; nominal && entry.state == nominalFailed {
+		return "", entry.err
+	}
+	return i.program.Types[id-1].Name, nil
 }
 
 func (i *typeInterner) validateComplete() error {
@@ -184,24 +250,23 @@ func (i *typeInterner) internStructural(info TypeInfo) (TypeID, error) {
 	if id, exists := i.structural[key]; exists {
 		return id, nil
 	}
-	name, err := canonicalStructuralTypeName(i.program, info)
+	name, err := i.canonicalStructuralTypeName(info)
 	if err != nil {
 		return NoType, err
 	}
-	id := TypeID(len(i.program.Types) + 1)
-	info.ID = id
 	info.Name = name
+	id := i.appendComplete(info)
 	i.structural[key] = id
-	i.program.Types = append(i.program.Types, info)
 	return id, nil
 }
 
-func canonicalStructuralTypeName(program *Program, info TypeInfo) (string, error) {
+func (i *typeInterner) canonicalStructuralTypeName(info TypeInfo) (string, error) {
 	typeName := func(id TypeID) (string, error) {
-		if !validTypeID(program, id) {
-			return "", fmt.Errorf("structural AIR type references invalid child type %d", id)
+		name, err := i.displayName(id)
+		if err != nil {
+			return "", fmt.Errorf("structural AIR type references child type %d: %w", id, err)
 		}
-		return program.Types[id-1].Name, nil
+		return name, nil
 	}
 	elemName := func() (string, error) { return typeName(info.Elem) }
 

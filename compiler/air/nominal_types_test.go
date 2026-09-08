@@ -23,6 +23,9 @@ func TestNominalInternerTracksLifecycle(t *testing.T) {
 	if _, available := lowerer.typeInfo(id); available {
 		t.Fatal("building nominal metadata was exposed through typeInfo")
 	}
+	if name, err := lowerer.typeInterner.displayName(id); err != nil || name != "Node" {
+		t.Fatalf("building nominal display name = (%q, %v), want seeded name", name, err)
+	}
 	if err := lowerer.typeInterner.validateComplete(); err == nil || !strings.Contains(err.Error(), "incomplete") {
 		t.Fatalf("validate building reservation = %v, want incomplete error", err)
 	}
@@ -53,6 +56,9 @@ func TestNominalInternerRemembersFailure(t *testing.T) {
 	}
 	failure := errors.New("field lowering failed")
 	lowerer.typeInterner.failNominal(key, failure)
+	if _, err := lowerer.typeInterner.displayName(id); !errors.Is(err, failure) {
+		t.Fatalf("failed nominal display name error = %v, want %v", err, failure)
+	}
 
 	if got, build, err := lowerer.typeInterner.reserveNominal(key, seed); got != NoType || build || !errors.Is(err, failure) {
 		t.Fatalf("repeat reserve = (%d, %t, %v), want remembered failure", got, build, err)
@@ -88,7 +94,7 @@ func TestRecursiveGenericApplicationNamesUseReservedNominalMetadata(t *testing.T
 		fn main() { let value: A<Int>? = Maybe::new() }
 	`)
 	for _, typ := range program.Types {
-		if strings.Contains(typ.Name, "<invalid:") {
+		if strings.Contains(typ.Name, "<invalid") || strings.Contains(typ.Name, "incomplete") {
 			t.Fatalf("completed type %d has incomplete display name %q", typ.ID, typ.Name)
 		}
 	}
