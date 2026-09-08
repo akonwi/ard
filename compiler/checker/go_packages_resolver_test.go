@@ -76,6 +76,44 @@ func Greet(name string) string { return "hello " + name }
 	}
 }
 
+func TestCheckerReportsMissingGoModForProjectFFIShorthand(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ffiDir := filepath.Join(root, "ffi")
+	if err := os.MkdirAll(ffiDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ffiDir, "ffi.go"), []byte("package ffi\n\nfunc Greet() string { return \"hello\" }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	mainPath := filepath.Join(root, "main.ard")
+	result := parse.Parse([]byte("use go:app/ffi\n"), mainPath)
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	moduleResolver, err := checker.NewModuleResolver(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checked := checker.New(mainPath, result.Program, moduleResolver)
+	checked.Check()
+
+	for _, diagnostic := range checked.Diagnostics() {
+		if diagnostic.Code != checker.DiagnosticCodeGoImportResolution {
+			continue
+		}
+		want := "project-local Go FFI requires a go.mod; run `go mod init app` in " + root
+		if diagnostic.Text != want {
+			t.Fatalf("diagnostic text = %q, want %q", diagnostic.Text, want)
+		}
+		return
+	}
+	t.Fatalf("missing Go import resolution diagnostic: %#v", checked.Diagnostics())
+}
+
 func TestCheckerCanonicalizesProjectGoImportShorthands(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n\n[go.imports]\nappgo = \"example.com/owner/app\"\n"), 0o644); err != nil {

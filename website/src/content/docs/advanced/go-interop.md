@@ -18,7 +18,7 @@ use go:image as image
 use go:net/http as gohttp
 ```
 
-A project that imports Go packages relies on the project's `go.mod`. Add Go dependencies with ordinary Go tooling, such as `go get`, before building the Ard project.
+Go standard-library imports work without a `go.mod`. Third-party and project-local Go imports require a source `go.mod`; add them with ordinary Go tooling such as `go mod init` and `go get` before building the Ard project. The synthetic module created for generated Go output does not provide the source module context used during checking.
 
 ## Project FFI Bindings
 
