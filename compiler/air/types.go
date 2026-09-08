@@ -212,6 +212,7 @@ type TypeInfo struct {
 	// records Generic (the definition's TypeID) and GenericArgs (the type
 	// arguments), so the backend can emit it as `Def[args...]`.
 	TypeParams        []string
+	ParamOwner        string
 	ParamIndex        int
 	Generic           TypeID
 	GenericArgs       []TypeID

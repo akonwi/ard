@@ -42,6 +42,9 @@ func Validate(program *Program) error {
 			return err
 		}
 	}
+	if err := validateCanonicalNominalIdentities(program); err != nil {
+		return err
+	}
 	for i, trait := range program.Traits {
 		if trait.ID != TraitID(i) {
 			return fmt.Errorf("trait table entry %d has id %d", i, trait.ID)
@@ -83,6 +86,45 @@ func Validate(program *Program) error {
 	for _, test := range program.Tests {
 		if !validFunctionID(program, test.Function) {
 			return fmt.Errorf("test %s references invalid function %d", test.Name, test.Function)
+		}
+	}
+	return nil
+}
+
+func validateCanonicalNominalIdentities(program *Program) error {
+	seen := map[nominalTypeKey]TypeID{}
+	params := map[typeParamKey]TypeID{}
+	for _, typ := range program.Types {
+		var key nominalTypeKey
+		var nominal bool
+		switch {
+		case typ.Kind == TypeStruct && typ.Generic != NoType:
+			key = applicationNominalKey(TypeStruct, typ.Generic, typ.GenericArgs)
+			nominal = true
+		case typ.Kind == TypeStruct:
+			key = declarationNominalKey(TypeStruct, typ.ModulePath, typ.Name)
+			nominal = true
+		case typ.Kind == TypeEnum:
+			key = declarationNominalKey(TypeEnum, typ.ModulePath, typ.Name)
+			nominal = true
+		case typ.Kind == TypeUnion:
+			key = declarationNominalKey(TypeUnion, typ.ModulePath, typ.Name)
+			nominal = true
+		case typ.Kind == TypeForeignType:
+			key = nominalTypeKey{Kind: TypeForeignType, Target: typ.ForeignTarget, Namespace: typ.ForeignNamespace, Symbol: typ.ForeignSymbol, Pointer: typ.ForeignPointer, Args: typeIDsKey(typ.GenericArgs)}
+			nominal = true
+		case typ.Kind == TypeParam:
+			param := typeParamKey{owner: typ.ParamOwner, index: typ.ParamIndex}
+			if previous, ok := params[param]; ok {
+				return fmt.Errorf("type parameters %d and %d duplicate owner %q index %d", previous, typ.ID, typ.ParamOwner, typ.ParamIndex)
+			}
+			params[param] = typ.ID
+		}
+		if nominal {
+			if previous, ok := seen[key]; ok {
+				return fmt.Errorf("nominal types %d and %d have duplicate identity", previous, typ.ID)
+			}
+			seen[key] = typ.ID
 		}
 	}
 	return nil
@@ -1562,7 +1604,7 @@ func typesStructurallyEquivalent(program *Program, leftID TypeID, rightID TypeID
 	case TypeScalar:
 		return left.Name == right.Name
 	case TypeParam:
-		return left.ParamIndex == right.ParamIndex && left.Name == right.Name
+		return left.ParamOwner == right.ParamOwner && left.ParamIndex == right.ParamIndex
 	case TypeList, TypeSlice, TypeMaybe, TypeChannel, TypeReceiver, TypeSender, TypeReference:
 		return equivalent(left.Elem, right.Elem)
 	case TypeFixedArray:

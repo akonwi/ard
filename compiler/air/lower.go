@@ -43,6 +43,9 @@ func LowerModulesWithOptions(modules []checker.Module, options LowerOptions) (*P
 	if err := l.lowerAllModuleGlobals(); err != nil {
 		return nil, err
 	}
+	if err := l.typeInterner.validateComplete(); err != nil {
+		return nil, err
+	}
 	if err := Validate(&l.program); err != nil {
 		return nil, err
 	}
@@ -1003,6 +1006,9 @@ func (fl *functionLowerer) internType(t checker.Type) (TypeID, error) {
 		}
 		return NoType, fmt.Errorf("unresolved generic type variable $%s", tv.Name())
 	}
+	if typ, ok := t.(*checker.StructDef); ok && len(typ.GenericParams) > 0 {
+		return fl.internStructType(typ)
+	}
 	if !typeContainsTypeVar(t) {
 		return fl.l.internType(t)
 	}
@@ -1021,6 +1027,9 @@ func (fl *functionLowerer) internResolvedType(t checker.Type) (TypeID, error) {
 			return fl.internResolvedType(tv.Actual())
 		}
 		return NoType, fmt.Errorf("unresolved generic type variable $%s", tv.Name())
+	}
+	if typ, ok := t.(*checker.StructDef); ok && len(typ.GenericParams) > 0 {
+		return fl.internResolvedStructType(typ)
 	}
 	if !typeContainsTypeVar(t) {
 		return fl.l.internType(t)
@@ -1044,10 +1053,6 @@ func (l *lowerer) internFunctionParamType(param checker.Parameter, intern func(c
 
 func (l *lowerer) internStructFieldType(fieldTypeValue checker.Type, intern func(checker.Type) (TypeID, error)) (TypeID, error) {
 	return intern(fieldTypeValue)
-}
-
-func nominalStructApplicationKey(modulePath, name string, args []TypeID) string {
-	return "struct " + modulePath + "::" + name + typeIDsKey(args)
 }
 
 func (l *lowerer) internGenericArgument(t checker.Type, intern func(checker.Type) (TypeID, error)) (TypeID, error) {
@@ -1120,23 +1125,15 @@ func (l *lowerer) internGenericArgument(t checker.Type, intern func(checker.Type
 
 func (l *lowerer) internForeignApplicationWithInterner(typ *checker.ForeignType, intern func(checker.Type) (TypeID, error)) (TypeID, error) {
 	genericArgs := make([]TypeID, len(typ.TypeArgs))
-	for i, typeArg := range typ.TypeArgs {
+	for index, typeArg := range typ.TypeArgs {
 		typeID, err := l.internGenericArgument(typeArg, intern)
 		if err != nil {
 			return NoType, err
 		}
-		genericArgs[i] = typeID
+		genericArgs[index] = typeID
 	}
-	key := "foreign:" + typ.Target + ":" + typ.Namespace + ":" + typ.Qualifier + ":" + typ.Name + typeIDsKey(genericArgs)
-	if typ.Pointer {
-		key += ":pointer"
-	}
-	if id, ok := l.typeByKey[key]; ok {
-		return id, nil
-	}
-	id := TypeID(len(l.program.Types) + 1)
-	info := TypeInfo{
-		ID:                id,
+	key := foreignNominalKey(typ, genericArgs)
+	seed := TypeInfo{
 		Kind:              TypeForeignType,
 		Name:              typ.String(),
 		ForeignTarget:     typ.Target,
@@ -1148,9 +1145,11 @@ func (l *lowerer) internForeignApplicationWithInterner(typ *checker.ForeignType,
 		GenericArgs:       genericArgs,
 		GenericComparable: typ.ComparableTypeArgs(),
 	}
-	// Reserve the ID before interning recursive shape metadata.
-	l.typeByKey[key] = id
-	l.program.Types = append(l.program.Types, info)
+	id, build, err := l.typeInterner.reserveNominal(key, seed)
+	if err != nil || !build {
+		return id, err
+	}
+	info := seed
 	shape := typ
 	if typ.Pointer {
 		if value := typ.ValueForm(); value != nil {
@@ -1158,181 +1157,156 @@ func (l *lowerer) internForeignApplicationWithInterner(typ *checker.ForeignType,
 		}
 	}
 	if shape.Underlying != nil {
-		underlying, err := l.internGenericArgument(shape.Underlying, intern)
-		if err != nil {
-			return NoType, err
+		underlying, shapeErr := l.internGenericArgument(shape.Underlying, intern)
+		if shapeErr != nil {
+			return NoType, l.typeInterner.failNominal(key, shapeErr)
 		}
 		info.Value = underlying
 	}
 	if shape.MapKey != nil {
-		mapKey, err := l.internGenericArgument(shape.MapKey, intern)
-		if err != nil {
-			return NoType, err
+		mapKey, shapeErr := l.internGenericArgument(shape.MapKey, intern)
+		if shapeErr != nil {
+			return NoType, l.typeInterner.failNominal(key, shapeErr)
 		}
 		info.Key = mapKey
 	}
 	if shape.MapValue != nil {
-		mapValue, err := l.internGenericArgument(shape.MapValue, intern)
-		if err != nil {
-			return NoType, err
+		mapValue, shapeErr := l.internGenericArgument(shape.MapValue, intern)
+		if shapeErr != nil {
+			return NoType, l.typeInterner.failNominal(key, shapeErr)
 		}
 		info.Value = mapValue
 	}
 	if shape.Elem != nil {
-		elem, err := l.internGenericArgument(shape.Elem, intern)
-		if err != nil {
-			return NoType, err
+		elem, shapeErr := l.internGenericArgument(shape.Elem, intern)
+		if shapeErr != nil {
+			return NoType, l.typeInterner.failNominal(key, shapeErr)
 		}
 		info.Elem = elem
 	}
-	l.program.Types[id-1] = info
-	return id, nil
+	return l.typeInterner.completeNominal(key, info)
 }
 
 func (l *lowerer) internStructApplicationWithInterner(typ *checker.StructDef, intern func(checker.Type) (TypeID, error)) (TypeID, error) {
 	genericArgs := make([]TypeID, len(typ.TypeArgs))
-	for i, typeArg := range typ.TypeArgs {
+	for index, typeArg := range typ.TypeArgs {
 		typeID, err := l.internGenericArgument(typeArg, intern)
 		if err != nil {
 			return NoType, err
 		}
-		genericArgs[i] = typeID
+		genericArgs[index] = typeID
 	}
-	key := nominalStructApplicationKey(typ.ModulePath, typ.Name, genericArgs)
-	if id, ok := l.typeByKey[key]; ok {
-		return id, nil
+
+	definition := l.lookupGenericStructDef(typ.ModulePath, typ.Name)
+	if definition == nil {
+		return NoType, fmt.Errorf("generic struct definition not found for %s", typ.Name)
 	}
-	defID, ok := l.genericStructDefs[genericStructDefKey(typ.ModulePath, typ.Name)]
+	defID, ok := l.genericStructDefs[genericStructDefKey(definition.ModulePath, definition.Name)]
 	if !ok {
-		genDef := l.lookupGenericStructDef(typ.ModulePath, typ.Name)
-		if genDef == nil {
-			return NoType, fmt.Errorf("generic struct definition not found for %s", typ.Name)
-		}
-		interned, err := l.internGenericStructDef(genDef)
+		interned, err := l.internGenericStructDef(definition)
 		if err != nil {
 			return NoType, err
 		}
 		defID = interned
 	}
+
+	key := applicationNominalKey(TypeStruct, defID, genericArgs)
 	parts := make([]string, len(genericArgs))
-	for i, typeID := range genericArgs {
-		parts[i] = l.typeName(typeID)
+	for index, typeID := range genericArgs {
+		parts[index] = l.typeName(typeID)
 	}
-	info := TypeInfo{
+	seed := TypeInfo{
 		Kind:        TypeStruct,
-		Name:        typ.Name + "<" + strings.Join(parts, ",") + ">",
-		ModulePath:  typ.ModulePath,
-		Private:     typ.Private,
+		Name:        definition.Name + "<" + strings.Join(parts, ",") + ">",
+		ModulePath:  definition.ModulePath,
+		Private:     definition.Private,
 		Generic:     defID,
 		GenericArgs: append([]TypeID(nil), genericArgs...),
 	}
-	id := TypeID(len(l.program.Types) + 1)
-	info.ID = id
-	idx := len(l.program.Types)
-	l.typeByKey[key] = id
-	l.program.Types = append(l.program.Types, info)
+	id, build, err := l.typeInterner.reserveNominal(key, seed)
+	if err != nil {
+		return NoType, err
+	}
+	if !build {
+		return id, nil
+	}
 
 	structFields := checker.StructFields(typ)
 	fields := sortedFieldNames(structFields)
+	info := seed
 	info.Fields = make([]FieldInfo, len(fields))
-	for i, fieldName := range fields {
-		fieldType, err := l.internStructFieldType(structFields[fieldName], intern)
-		if err != nil {
-			return NoType, err
+	for index, fieldName := range fields {
+		fieldType, fieldErr := l.internStructFieldType(structFields[fieldName], intern)
+		if fieldErr != nil {
+			return NoType, l.typeInterner.failNominal(key, fieldErr)
 		}
-		info.Fields[i] = lowerStructFieldInfo(typ, fieldName, fieldType, i)
+		info.Fields[index] = lowerStructFieldInfo(typ, fieldName, fieldType, index)
 	}
-	l.program.Types[idx] = info
-	return id, nil
+	return l.typeInterner.completeNominal(key, info)
 }
 
 func (fl *functionLowerer) internStructTypeWithInterner(typ *checker.StructDef, intern func(checker.Type) (TypeID, error)) (TypeID, error) {
 	if len(typ.TypeArgs) > 0 {
 		return fl.l.internStructApplicationWithInterner(typ, intern)
 	}
+	if len(typ.GenericParams) == 0 {
+		return fl.l.internType(typ)
+	}
+
 	genericArgs := make([]TypeID, 0, len(typ.GenericParams))
-	if len(typ.TypeArgs) > 0 {
-		for _, typeArg := range typ.TypeArgs {
-			typeID, err := intern(typeArg)
-			if err != nil {
-				return NoType, err
-			}
-			genericArgs = append(genericArgs, typeID)
-		}
-	} else if len(typ.GenericParams) > 0 {
-		// The checker represents an inferred generic self type (for example,
-		// `let box = self` inside `impl Box<$T>`) with generic parameters but
-		// no explicit type arguments. Recover the contextual self-instantiation
-		// from the function's type variables instead of interning `Box[]`.
-		for _, param := range typ.GenericParams {
-			typeID, ok := fl.typeVars[param]
-			if !ok {
-				return NoType, fmt.Errorf("cannot resolve generic argument %s for %s", param, typ.Name)
-			}
-			genericArgs = append(genericArgs, typeID)
-		}
-	}
-	name := typ.Name
-	if len(genericArgs) > 0 {
-		parts := make([]string, len(genericArgs))
-		for i, typeID := range genericArgs {
-			parts[i] = fl.l.typeName(typeID)
-		}
-		name += "<" + strings.Join(parts, ",") + ">"
-	}
-	key := "struct " + typ.ModulePath + "::" + typ.Name
-	if len(genericArgs) > 0 {
-		// Generic identity follows the ordered AIR argument IDs, not their
-		// display names; distinct types can legitimately render the same name.
-		key += typeIDsKey(genericArgs)
-	}
-	if id, ok := fl.l.typeByKey[key]; ok {
-		return id, nil
-	}
-
-	info := TypeInfo{Kind: TypeStruct, ModulePath: typ.ModulePath, Private: typ.Private}
-	// Resolve the generic definition before reserving the application. During
-	// definition lowering the definition ID is already registered, so a
-	// recursive application can safely reserve itself below.
-	if len(typ.GenericParams) > 0 {
-		defID, ok := fl.l.genericStructDefs[genericStructDefKey(typ.ModulePath, typ.Name)]
+	for _, param := range typ.GenericParams {
+		typeID, ok := fl.typeVars[param]
 		if !ok {
-			if genDef := fl.l.lookupGenericStructDef(typ.ModulePath, typ.Name); genDef != nil {
-				if interned, err := fl.l.internGenericStructDef(genDef); err == nil {
-					defID, ok = interned, true
-				} else {
-					return NoType, err
-				}
-			}
+			return NoType, fmt.Errorf("cannot resolve generic argument %s for %s", param, typ.Name)
 		}
-		if ok && len(genericArgs) > 0 {
-			info.Generic = defID
-			info.GenericArgs = append([]TypeID(nil), genericArgs...)
-		}
+		genericArgs = append(genericArgs, typeID)
 	}
-
-	// Reserve the nominal application before interning its fields. Recursive
-	// callback or method signatures then resolve to this placeholder instead of
-	// expanding the same application indefinitely.
-	id := TypeID(len(fl.l.program.Types) + 1)
-	info.ID = id
-	info.Name = name
-	idx := len(fl.l.program.Types)
-	fl.l.typeByKey[key] = id
-	fl.l.program.Types = append(fl.l.program.Types, info)
-
-	structFields := checker.StructFields(typ)
-	fields := sortedFieldNames(structFields)
-	info.Fields = make([]FieldInfo, len(fields))
-	for i, fieldName := range fields {
-		fieldType, err := fl.l.internStructFieldType(structFields[fieldName], intern)
+	definition := fl.l.lookupGenericStructDef(typ.ModulePath, typ.Name)
+	if definition == nil {
+		return NoType, fmt.Errorf("generic struct definition not found for %s", typ.Name)
+	}
+	defID, ok := fl.l.genericStructDefs[genericStructDefKey(definition.ModulePath, definition.Name)]
+	if !ok {
+		interned, err := fl.l.internGenericStructDef(definition)
 		if err != nil {
 			return NoType, err
 		}
-		info.Fields[i] = lowerStructFieldInfo(typ, fieldName, fieldType, i)
+		defID = interned
 	}
-	fl.l.program.Types[idx] = info
-	return id, nil
+
+	parts := make([]string, len(genericArgs))
+	for index, typeID := range genericArgs {
+		parts[index] = fl.l.typeName(typeID)
+	}
+	key := applicationNominalKey(TypeStruct, defID, genericArgs)
+	seed := TypeInfo{
+		Kind:        TypeStruct,
+		Name:        definition.Name + "<" + strings.Join(parts, ",") + ">",
+		ModulePath:  definition.ModulePath,
+		Private:     definition.Private,
+		Generic:     defID,
+		GenericArgs: append([]TypeID(nil), genericArgs...),
+	}
+	id, build, err := fl.l.typeInterner.reserveNominal(key, seed)
+	if err != nil {
+		return NoType, err
+	}
+	if !build {
+		return id, nil
+	}
+
+	structFields := checker.StructFields(typ)
+	fields := sortedFieldNames(structFields)
+	info := seed
+	info.Fields = make([]FieldInfo, len(fields))
+	for index, fieldName := range fields {
+		fieldType, fieldErr := fl.l.internStructFieldType(structFields[fieldName], intern)
+		if fieldErr != nil {
+			return NoType, fl.l.typeInterner.failNominal(key, fieldErr)
+		}
+		info.Fields[index] = lowerStructFieldInfo(typ, fieldName, fieldType, index)
+	}
+	return fl.l.typeInterner.completeNominal(key, info)
 }
 
 func (fl *functionLowerer) internResolvedCompositeType(t checker.Type) (TypeID, error) {
@@ -2063,13 +2037,8 @@ func (l *lowerer) genericSelfInstance(defID TypeID) (TypeID, error) {
 		}
 		args[i] = tp
 	}
-	key := nominalStructApplicationKey(def.ModulePath, def.Name, args)
-	if id, ok := l.typeByKey[key]; ok {
-		return id, nil
-	}
-	id := TypeID(len(l.program.Types) + 1)
+	key := applicationNominalKey(TypeStruct, defID, args)
 	info := TypeInfo{
-		ID:          id,
 		Kind:        TypeStruct,
 		Name:        def.Name + "<self>",
 		ModulePath:  def.ModulePath,
@@ -2078,9 +2047,11 @@ func (l *lowerer) genericSelfInstance(defID TypeID) (TypeID, error) {
 		Generic:     defID,
 		GenericArgs: args,
 	}
-	l.typeByKey[key] = id
-	l.program.Types = append(l.program.Types, info)
-	return id, nil
+	id, build, err := l.typeInterner.reserveNominal(key, info)
+	if err != nil || !build {
+		return id, err
+	}
+	return l.typeInterner.completeNominal(key, info)
 }
 
 // declareGenericInstanceMethodFunction lowers a method on a generic struct once
@@ -2319,13 +2290,13 @@ func goifyTypeParamName(name string) string {
 }
 
 func (l *lowerer) internTypeParam(owner, name string, idx int) (TypeID, error) {
-	key := fmt.Sprintf("typeparam:%s:%d", owner, idx)
-	if id, ok := l.typeByKey[key]; ok {
+	key := typeParamKey{owner: owner, index: idx}
+	if id, ok := l.typeInterner.typeParams[key]; ok {
 		return id, nil
 	}
 	id := TypeID(len(l.program.Types) + 1)
-	l.typeByKey[key] = id
-	l.program.Types = append(l.program.Types, TypeInfo{ID: id, Kind: TypeParam, Name: goifyTypeParamName(name), ParamIndex: idx})
+	l.typeInterner.typeParams[key] = id
+	l.program.Types = append(l.program.Types, TypeInfo{ID: id, Kind: TypeParam, Name: goifyTypeParamName(name), ParamOwner: owner, ParamIndex: idx})
 	return id, nil
 }
 
@@ -2334,12 +2305,12 @@ func (l *lowerer) internTypeParam(owner, name string, idx int) (TypeID, error) {
 // its declaring module so the backend emits and qualifies it (ADR 0031).
 func (l *lowerer) internGenericStructDef(typ *checker.StructDef) (TypeID, error) {
 	key := genericStructDefKey(typ.ModulePath, typ.Name)
-	if id, ok := l.genericStructDefs[key]; ok {
-		return id, nil
+	nominalKey := declarationNominalKey(TypeStruct, typ.ModulePath, typ.Name)
+	seed := TypeInfo{Kind: TypeStruct, Name: typ.Name, ModulePath: typ.ModulePath, Private: typ.Private}
+	id, build, err := l.typeInterner.reserveNominal(nominalKey, seed)
+	if err != nil || !build {
+		return id, err
 	}
-	id := TypeID(len(l.program.Types) + 1)
-	idx := len(l.program.Types)
-	l.program.Types = append(l.program.Types, TypeInfo{ID: id, Name: typ.Name})
 	l.genericStructDefs[key] = id
 	goParams := make([]string, len(typ.GenericParams))
 	params := map[string]int{}
@@ -2360,13 +2331,15 @@ func (l *lowerer) internGenericStructDef(typ *checker.StructDef) (TypeID, error)
 		if err != nil {
 			l.defParams = prev
 			l.defParamOwner = prevOwner
-			return NoType, err
+			return NoType, l.typeInterner.failNominal(nominalKey, err)
 		}
 		info.Fields[i] = lowerStructFieldInfo(typ, name, ftid, i)
 	}
 	l.defParams = prev
 	l.defParamOwner = prevOwner
-	l.program.Types[idx] = info
+	if _, err := l.typeInterner.completeNominal(nominalKey, info); err != nil {
+		return NoType, err
+	}
 	if modID, ok := l.moduleByPath[typ.ModulePath]; ok {
 		l.program.Modules[modID].Types = appendUniqueType(l.program.Modules[modID].Types, id)
 	}
@@ -2460,10 +2433,25 @@ func (l *lowerer) internType(t checker.Type) (TypeID, error) {
 		}
 		return l.internSyntheticType("mut "+l.typeName(elem), TypeInfo{Kind: TypeReference, Elem: elem})
 	}
-	if typ, ok := t.(*checker.StructDef); ok && len(typ.TypeArgs) > 0 {
-		return l.internStructApplicationWithInterner(typ, l.internType)
+	if typ, ok := t.(*checker.StructDef); ok {
+		if len(typ.TypeArgs) > 0 {
+			return l.internStructApplicationWithInterner(typ, l.internType)
+		}
+		if len(typ.GenericParams) == 0 {
+			if canonical := l.lookupStructDef(typ.ModulePath, typ.Name, false); canonical != nil {
+				typ = canonical
+			}
+			return l.internNominalStruct(typ, l.internType)
+		}
+		return l.internGenericStructDef(typ)
 	}
-	if typ, ok := t.(*checker.ForeignType); ok && len(typ.TypeArgs) > 0 {
+	if typ, ok := t.(*checker.Enum); ok {
+		return l.internNominalEnum(typ)
+	}
+	if typ, ok := t.(*checker.Union); ok {
+		return l.internNominalUnion(typ, l.internType)
+	}
+	if typ, ok := t.(*checker.ForeignType); ok {
 		return l.internForeignApplicationWithInterner(typ, l.internType)
 	}
 	if id, structural, err := l.internCheckerStructuralType(t); structural {
@@ -2497,114 +2485,6 @@ func (l *lowerer) internType(t checker.Type) (TypeID, error) {
 	info := TypeInfo{ID: id, Name: name}
 
 	switch typ := t.(type) {
-	case *checker.StructDef:
-		info.Private = typ.Private
-		info.Kind = TypeStruct
-		structFields := checker.StructFields(typ)
-		fields := sortedFieldNames(structFields)
-		info.Fields = make([]FieldInfo, len(fields))
-		for i, name := range fields {
-			fieldType, err := l.internStructFieldType(structFields[name], l.internType)
-			if err != nil {
-				return NoType, err
-			}
-			info.Fields[i] = lowerStructFieldInfo(typ, name, fieldType, i)
-		}
-		// Tag concrete instantiations of a generic struct (ADR 0031). The
-		// generic definition is interned lazily from the checker module scope,
-		// since the declaring module's type loop may not have run.
-		if len(typ.GenericParams) > 0 {
-			defID, ok := l.genericStructDefs[genericStructDefKey(typ.ModulePath, typ.Name)]
-			if !ok {
-				if genDef := l.lookupGenericStructDef(typ.ModulePath, typ.Name); genDef != nil {
-					interned, err := l.internGenericStructDef(genDef)
-					if err != nil {
-						return NoType, err
-					}
-					defID, ok = interned, true
-				}
-			}
-			if ok {
-				info.Generic = defID
-				info.GenericArgs = make([]TypeID, 0, len(typ.TypeArgs))
-				for _, arg := range typ.TypeArgs {
-					argID, err := l.internType(arg)
-					if err != nil {
-						return NoType, err
-					}
-					info.GenericArgs = append(info.GenericArgs, argID)
-				}
-			}
-		}
-	case *checker.Enum:
-		info.Kind = TypeEnum
-		info.Private = typ.Private
-		info.EnumOpen = typ.Open
-		info.Variants = make([]VariantInfo, len(typ.Values))
-		for i, variant := range typ.Values {
-			info.Variants[i] = VariantInfo{Name: variant.Name, Discriminant: variant.Value}
-		}
-	case *checker.Union:
-		info.Kind = TypeUnion
-		info.Private = typ.Private
-		info.Members = make([]UnionMember, len(typ.Types))
-		for i, member := range typ.Types {
-			memberID, err := l.internType(member)
-			if err != nil {
-				return NoType, err
-			}
-			info.Members[i] = UnionMember{Type: memberID, Tag: uint32(i), Name: member.String()}
-		}
-	case *checker.ForeignType:
-		info.Kind = TypeForeignType
-		info.Name = typ.String()
-		info.ForeignTarget = typ.Target
-		info.ForeignNamespace = typ.Namespace
-		info.ForeignQualifier = typ.Qualifier
-		info.ForeignSymbol = typ.Name
-		info.ForeignPointer = typ.Pointer
-		info.ForeignInterface = typ.Interface
-		shape := typ
-		if typ.Pointer {
-			if value := typ.ValueForm(); value != nil {
-				shape = value
-			}
-		}
-		for _, arg := range typ.TypeArgs {
-			argID, err := l.internType(arg)
-			if err != nil {
-				return NoType, err
-			}
-			info.GenericArgs = append(info.GenericArgs, argID)
-		}
-		if shape.Underlying != nil {
-			underlying, err := l.internType(shape.Underlying)
-			if err != nil {
-				return NoType, err
-			}
-			info.Value = underlying
-		}
-		if shape.MapKey != nil {
-			key, err := l.internType(shape.MapKey)
-			if err != nil {
-				return NoType, err
-			}
-			info.Key = key
-		}
-		if shape.Elem != nil {
-			elem, err := l.internType(shape.Elem)
-			if err != nil {
-				return NoType, err
-			}
-			info.Elem = elem
-		}
-		if shape.MapValue != nil {
-			value, err := l.internType(shape.MapValue)
-			if err != nil {
-				return NoType, err
-			}
-			info.Value = value
-		}
 	case *checker.Trait:
 		traitID, err := l.internTrait(typ)
 		if err != nil {
@@ -2691,11 +2571,12 @@ func (l *lowerer) typeOwnerPath(t checker.Type) string {
 }
 
 func (l *lowerer) typeName(id TypeID) string {
-	info, ok := l.typeInfo(id)
-	if !ok {
+	if !validTypeID(&l.program, id) {
 		return fmt.Sprintf("<invalid:%d>", id)
 	}
-	return info.Name
+	// Names are presentation metadata seeded at reservation time. Reading the
+	// seed does not expose incomplete semantic shape metadata.
+	return l.program.Types[id-1].Name
 }
 
 func (l *lowerer) internTrait(trait *checker.Trait) (TraitID, error) {
@@ -6423,7 +6304,7 @@ func (l *lowerer) moduleForInstanceMethod(method *checker.InstanceMethod, fallba
 }
 
 func (l *lowerer) typeInfo(id TypeID) (TypeInfo, bool) {
-	if id <= 0 || int(id) > len(l.program.Types) {
+	if id <= 0 || int(id) > len(l.program.Types) || (l.typeInterner != nil && !l.typeInterner.nominalAvailable(id)) {
 		return TypeInfo{}, false
 	}
 	return l.program.Types[id-1], true

@@ -2,6 +2,7 @@ package air
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 
 	"github.com/akonwi/ard/checker"
@@ -23,16 +24,119 @@ type structuralTypeKey struct {
 	Variadic bool
 }
 
+type nominalTypeKey struct {
+	Kind       TypeKind
+	ModulePath string
+	Name       string
+	Definition TypeID
+	Target     string
+	Namespace  string
+	Symbol     string
+	Pointer    bool
+	Args       string
+}
+
+type nominalEntryState uint8
+
+const (
+	nominalBuilding nominalEntryState = iota
+	nominalComplete
+	nominalFailed
+)
+
+type nominalEntry struct {
+	id    TypeID
+	state nominalEntryState
+	err   error
+}
+
+type typeParamKey struct {
+	owner string
+	index int
+}
+
 type typeInterner struct {
 	program    *Program
 	structural map[structuralTypeKey]TypeID
+	nominal    map[nominalTypeKey]*nominalEntry
+	typeParams map[typeParamKey]TypeID
 }
 
 func newTypeInterner(program *Program) *typeInterner {
 	return &typeInterner{
 		program:    program,
 		structural: map[structuralTypeKey]TypeID{},
+		nominal:    map[nominalTypeKey]*nominalEntry{},
+		typeParams: map[typeParamKey]TypeID{},
 	}
+}
+
+func (i *typeInterner) reserveNominal(key nominalTypeKey, seed TypeInfo) (TypeID, bool, error) {
+	if entry, ok := i.nominal[key]; ok {
+		switch entry.state {
+		case nominalFailed:
+			return NoType, false, entry.err
+		case nominalBuilding, nominalComplete:
+			return entry.id, false, nil
+		}
+	}
+	id := TypeID(len(i.program.Types) + 1)
+	seed.ID = id
+	i.program.Types = append(i.program.Types, seed)
+	i.nominal[key] = &nominalEntry{id: id, state: nominalBuilding}
+	return id, true, nil
+}
+
+func (i *typeInterner) completeNominal(key nominalTypeKey, info TypeInfo) (TypeID, error) {
+	entry, ok := i.nominal[key]
+	if !ok {
+		return NoType, fmt.Errorf("nominal AIR type was not reserved: %+v", key)
+	}
+	if entry.state == nominalFailed {
+		return NoType, entry.err
+	}
+	info.ID = entry.id
+	if entry.state == nominalComplete {
+		existing := i.program.Types[entry.id-1]
+		if !reflect.DeepEqual(existing, info) {
+			return NoType, fmt.Errorf("conflicting AIR metadata for nominal type %s", info.Name)
+		}
+		return entry.id, nil
+	}
+	i.program.Types[entry.id-1] = info
+	entry.state = nominalComplete
+	return entry.id, nil
+}
+
+func (i *typeInterner) failNominal(key nominalTypeKey, err error) error {
+	entry, ok := i.nominal[key]
+	if !ok {
+		return err
+	}
+	entry.state = nominalFailed
+	entry.err = err
+	return err
+}
+
+func (i *typeInterner) nominalAvailable(id TypeID) bool {
+	for _, entry := range i.nominal {
+		if entry.id == id {
+			return entry.state == nominalComplete
+		}
+	}
+	return true
+}
+
+func (i *typeInterner) validateComplete() error {
+	for key, entry := range i.nominal {
+		switch entry.state {
+		case nominalBuilding:
+			return fmt.Errorf("nominal AIR type remained incomplete: %+v", key)
+		case nominalFailed:
+			return entry.err
+		}
+	}
+	return nil
 }
 
 func structuralIdentity(info TypeInfo) (structuralTypeKey, bool) {
