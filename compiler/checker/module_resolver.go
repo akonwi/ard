@@ -1606,7 +1606,7 @@ func (mr *ModuleResolver) resolveGoImportPath(importerModulePath string, importP
 	if pkg.Name != "" && (importPath == ffiRoot || strings.HasPrefix(importPath, ffiRoot+"/")) {
 		modulePath, err := readGoModulePath(pkg.RootPath)
 		if os.IsNotExist(err) {
-			return importPath, nil
+			return "", fmt.Errorf("project-local Go FFI requires a go.mod; run `go mod init %s` in %s", pkg.Name, pkg.RootPath)
 		}
 		if err != nil {
 			return "", fmt.Errorf("read Go module for Ard package %q: %w", pkg.Name, err)
