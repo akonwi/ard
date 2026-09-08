@@ -60,6 +60,7 @@ Project import paths are absolute from the package root. The package root is det
 ```
 my_calculator/
 ├── ard.toml
+├── my_calculator.ard
 ├── main.ard
 ├── utils.ard
 └── math/
@@ -108,7 +109,13 @@ fn divide(a: Int, b: Int) Int!Str {
 }
 ```
 
-A dependency can expose a root module whose filename matches its manifest name. If a dependency named `decode` contains `decode.ard`, consumers can load that root module without repeating its name:
+A package can expose a root module whose filename matches its manifest name. Other modules in `my_calculator` can load `my_calculator.ard` without repeating its name:
+
+```ard
+use my_calculator
+```
+
+The same shorthand works for dependencies. If a dependency named `decode` contains `decode.ard`, consumers can write:
 
 ```ard
 use decode
@@ -116,7 +123,7 @@ use decode
 let value = decode::run(input, decoder)
 ```
 
-Nested dependency modules still use their full path, such as `use decode/path`. For dependency declarations, aliases, root modules, and lockfile behavior, see the [Dependencies](/guide/dependencies/) guide.
+Nested modules still use their full path, such as `use my_calculator/math/operations` or `use decode/path`. For dependency declarations, aliases, root modules, and lockfile behavior, see the [Dependencies](/guide/dependencies/) guide.
 
 ## Public and Private Declarations
 
