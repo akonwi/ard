@@ -1510,10 +1510,10 @@ func (mr *ModuleResolver) ResolveImport(importerModulePath string, importPath st
 	pkg := mr.packageInfo(importerPackageID)
 	rootName := parts[0]
 	if rootName == pkg.Name {
-		if len(parts) == 1 {
-			return ResolvedImport{}, fmt.Errorf("invalid import path: %s (missing module name)", importPath)
-		}
 		modulePath := strings.Join(parts[1:], "/")
+		if modulePath == "" {
+			modulePath = pkg.Name
+		}
 		return mr.resolvePackageModule(pkg.ID, modulePath)
 	}
 	if pkg.ID == mr.project.RootPackageID {

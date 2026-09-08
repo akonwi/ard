@@ -216,6 +216,12 @@ func TestResolveImportPath(t *testing.T) {
 	}
 
 	// Create module files
+	rootModulePath := filepath.Join(tempDir, "my_calculator.ard")
+	err = os.WriteFile(rootModulePath, []byte("// root module"), 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	utilsPath := filepath.Join(tempDir, "utils.ard")
 	err = os.WriteFile(utilsPath, []byte("// utils module"), 0644)
 	if err != nil {
@@ -246,6 +252,12 @@ func TestResolveImportPath(t *testing.T) {
 		expected   string
 		shouldErr  bool
 	}{
+		{
+			name:       "bare self-package root module",
+			importPath: "my_calculator",
+			expected:   rootModulePath,
+			shouldErr:  false,
+		},
 		{
 			name:       "simple module",
 			importPath: "my_calculator/utils",
@@ -298,6 +310,64 @@ func TestResolveImportPath(t *testing.T) {
 				t.Errorf("Expected path '%s', got '%s'", tt.expected, resolved)
 			}
 		})
+	}
+}
+
+func TestBareSelfPackageRootImportChecksAndDetectsCycles(t *testing.T) {
+	projectDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"cooper\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "cooper.ard"), []byte("trait Widget {\n  fn render() Int\n}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	inputPath := filepath.Join(projectDir, "input.ard")
+	inputSource := "use cooper\n\nstruct Input {}\n\nimpl cooper::Widget for Input {\n  fn render() Int { 1 }\n}\n"
+	if err := os.WriteFile(inputPath, []byte(inputSource), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result := parse.Parse([]byte(inputSource), inputPath)
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	resolver, err := checker.NewModuleResolver(projectDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := checker.New(inputPath, result.Program, resolver)
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
+	}
+
+	rootPath := filepath.Join(projectDir, "cooper.ard")
+	rootSource := "use cooper\n"
+	if err := os.WriteFile(rootPath, []byte(rootSource), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	result = parse.Parse([]byte(rootSource), rootPath)
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	resolver, err = checker.NewModuleResolver(projectDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c = checker.New(rootPath, result.Program, resolver)
+	c.Check()
+	if !c.HasErrors() {
+		t.Fatal("self-importing root module should report a circular import")
+	}
+	foundCycle := false
+	for _, diagnostic := range c.Diagnostics() {
+		if diagnostic.Code == checker.DiagnosticCodeCircularImport {
+			foundCycle = true
+			break
+		}
+	}
+	if !foundCycle {
+		t.Fatalf("diagnostics = %v, want circular import", c.Diagnostics())
 	}
 }
 
