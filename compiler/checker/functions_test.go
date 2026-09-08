@@ -236,6 +236,158 @@ func TestGenericMaybeCoercionBindsInnerTypeBeforeWrapping(t *testing.T) {
 	}
 }
 
+func TestDirectlyAnnotatedResultConstructorCarriesResolvedTypeIntoCheckedProgram(t *testing.T) {
+	result := parse.Parse([]byte(`
+		fn main() {
+			let ok_value: Void!Error = Result::ok(())
+			let err_value: Int!Void = Result::err(())
+		}
+	`), "test.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	c := checker.New("test.ard", result.Program, nil)
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
+	}
+
+	main, ok := c.Module().Program().Statements[0].Expr.(*checker.FunctionDef)
+	if !ok {
+		t.Fatalf("main declaration = %T", c.Module().Program().Statements[0].Expr)
+	}
+	want := []string{"Void!Error", "Int!Void"}
+	for index, wantType := range want {
+		definition, ok := main.Body.Stmts[index].Stmt.(*checker.VariableDef)
+		if !ok {
+			t.Fatalf("statement %d = %T, want variable definition", index, main.Body.Stmts[index].Stmt)
+		}
+		call, ok := definition.Value.(*checker.ModuleFunctionCall)
+		if !ok {
+			t.Fatalf("initializer %d = %T, want Result constructor call", index, definition.Value)
+		}
+		if got := definition.Type().String(); got != wantType {
+			t.Fatalf("binding %d type = %q, want %q", index, got, wantType)
+		}
+		if got := call.Type().String(); got != wantType {
+			t.Fatalf("constructor %d type = %q, want resolved %q", index, got, wantType)
+		}
+		resultType, ok := call.Type().(*checker.Result)
+		if !ok {
+			t.Fatalf("constructor %d type = %T, want Result", index, call.Type())
+		}
+		if _, unresolved := resultType.Val().(*checker.TypeVar); unresolved {
+			t.Fatalf("constructor %d success type remains an inference variable", index)
+		}
+		if _, unresolved := resultType.Err().(*checker.TypeVar); unresolved {
+			t.Fatalf("constructor %d error type remains an inference variable", index)
+		}
+	}
+}
+
+func TestCheckedProgramTypeBoundaryCharacterization(t *testing.T) {
+	t.Run("joined Result branches retain resolved bindings", func(t *testing.T) {
+		result := parse.Parse([]byte(`
+			fn pick(flag: Bool) Int!Str {
+				let value = match flag {
+					true => Result::ok(1),
+					false => Result::err("bad"),
+				}
+				value
+			}
+		`), "test.ard")
+		if len(result.Errors) > 0 {
+			t.Fatalf("parse errors: %v", result.Errors)
+		}
+		c := checker.New("test.ard", result.Program, nil)
+		c.Check()
+		if c.HasErrors() {
+			t.Fatalf("checker diagnostics: %v", c.Diagnostics())
+		}
+
+		pick := c.Module().Program().Statements[0].Expr.(*checker.FunctionDef)
+		definition := pick.Body.Stmts[0].Stmt.(*checker.VariableDef)
+		match := definition.Value.(*checker.BoolMatch)
+		if got := match.Type().String(); got != "Int!Str" {
+			t.Fatalf("match type = %q, want Int!Str", got)
+		}
+		branches := []*checker.Block{match.True, match.False}
+		for index, branch := range branches {
+			call := branch.Stmts[0].Expr.(*checker.ModuleFunctionCall)
+			resultType := call.Type().(*checker.Result)
+			if got := resolvedCheckerType(resultType.Val()).String(); got != "Int" {
+				t.Fatalf("branch %d resolved success type = %q, want Int", index, got)
+			}
+			if got := resolvedCheckerType(resultType.Err()).String(); got != "Str" {
+				t.Fatalf("branch %d resolved error type = %q, want Str", index, got)
+			}
+		}
+	})
+
+	t.Run("generic definitions retain declaration parameters", func(t *testing.T) {
+		result := parse.Parse([]byte(`fn identity(value: $T) $T { value }`), "test.ard")
+		if len(result.Errors) > 0 {
+			t.Fatalf("parse errors: %v", result.Errors)
+		}
+		c := checker.New("test.ard", result.Program, nil)
+		c.Check()
+		if c.HasErrors() {
+			t.Fatalf("checker diagnostics: %v", c.Diagnostics())
+		}
+		identity := c.Module().Program().Statements[0].Expr.(*checker.FunctionDef)
+		parameter, ok := identity.Parameters[0].Type.(*checker.TypeVar)
+		if !ok || parameter.Name() != "T" || parameter.Actual() != nil {
+			t.Fatalf("generic parameter = %#v, want unresolved declaration-owned $T", identity.Parameters[0].Type)
+		}
+	})
+
+	t.Run("discarded final value keeps expression type", func(t *testing.T) {
+		result := parse.Parse([]byte(`fn main() { 1 }`), "test.ard")
+		if len(result.Errors) > 0 {
+			t.Fatalf("parse errors: %v", result.Errors)
+		}
+		c := checker.New("test.ard", result.Program, nil)
+		c.Check()
+		if c.HasErrors() {
+			t.Fatalf("checker diagnostics: %v", c.Diagnostics())
+		}
+		main := c.Module().Program().Statements[0].Expr.(*checker.FunctionDef)
+		if !main.Body.DiscardFinalValue || main.Body.Type() != checker.Void {
+			t.Fatalf("main body = %#v, want discarded Void block", main.Body)
+		}
+		if got := main.Body.Stmts[0].Expr.Type().String(); got != "Int" {
+			t.Fatalf("discarded expression type = %q, want Int", got)
+		}
+	})
+
+	t.Run("panic currently uses Unreachable sentinel", func(t *testing.T) {
+		result := parse.Parse([]byte(`fn fail() Int { panic("stop") }`), "test.ard")
+		if len(result.Errors) > 0 {
+			t.Fatalf("parse errors: %v", result.Errors)
+		}
+		c := checker.New("test.ard", result.Program, nil)
+		c.Check()
+		if c.HasErrors() {
+			t.Fatalf("checker diagnostics: %v", c.Diagnostics())
+		}
+		fail := c.Module().Program().Statements[0].Expr.(*checker.FunctionDef)
+		unreachable, ok := fail.Body.Stmts[0].Expr.Type().(*checker.TypeVar)
+		if !ok || unreachable.Name() != "Unreachable" || unreachable.Actual() != nil {
+			t.Fatalf("panic type = %#v, want unresolved Unreachable sentinel", fail.Body.Stmts[0].Expr.Type())
+		}
+	})
+}
+
+func resolvedCheckerType(t checker.Type) checker.Type {
+	for {
+		typeVar, ok := t.(*checker.TypeVar)
+		if !ok || typeVar.Actual() == nil {
+			return t
+		}
+		t = typeVar.Actual()
+	}
+}
+
 func TestIncompleteBuiltinConstructorsAreRejected(t *testing.T) {
 	for _, source := range []string{
 		`let value = Maybe::new()`,

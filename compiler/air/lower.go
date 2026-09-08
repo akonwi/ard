@@ -58,6 +58,7 @@ type lowerer struct {
 	moduleByPath map[string]ModuleID
 	moduleByName map[string]checker.Module
 	typeByKey    map[string]TypeID
+	typeInterner *typeInterner
 	traits       map[string]TraitID
 	impls        map[string]ImplID
 	functions    map[string]FunctionID
@@ -131,6 +132,7 @@ func newLowerer(options LowerOptions, rootCount int) *lowerer {
 		localNamedFunctions: map[*checker.FunctionDef]FunctionID{},
 		includeTests:        options.IncludeTests,
 	}
+	l.typeInterner = newTypeInterner(&l.program)
 	if l.cacheMethodLookups {
 		l.structMethodsByOwner = map[checker.MethodOwner]map[string]*checker.FunctionDef{}
 		l.traitMethodsByOwner = map[checker.TraitMethodOwner]map[string]*checker.FunctionDef{}
@@ -2558,6 +2560,9 @@ func (l *lowerer) internType(t checker.Type) (TypeID, error) {
 	if typ, ok := t.(*checker.ForeignType); ok && len(typ.TypeArgs) > 0 {
 		return l.internForeignApplicationWithInterner(typ, l.internType)
 	}
+	if id, structural, err := l.internCheckerStructuralType(t); structural {
+		return id, err
+	}
 	// Generic checker copies can contain distinct, temporarily incomplete
 	// representations of an otherwise ordinary named struct. Resolve those
 	// copies back to the declaration owned by the checked module before
@@ -2586,80 +2591,6 @@ func (l *lowerer) internType(t checker.Type) (TypeID, error) {
 	info := TypeInfo{ID: id, Name: name}
 
 	switch typ := t.(type) {
-	case *checker.List:
-		elem, err := l.internType(typ.Of())
-		if err != nil {
-			return NoType, err
-		}
-		info.Kind = TypeList
-		info.Elem = elem
-	case *checker.Slice:
-		elem, err := l.internType(typ.Of())
-		if err != nil {
-			return NoType, err
-		}
-		info.Kind = TypeSlice
-		info.Elem = elem
-	case *checker.FixedArray:
-		elem, err := l.internType(typ.Of())
-		if err != nil {
-			return NoType, err
-		}
-		info.Kind = TypeFixedArray
-		info.Elem = elem
-		info.Length = typ.Len()
-	case *checker.Chan:
-		elem, err := l.internType(typ.Of())
-		if err != nil {
-			return NoType, err
-		}
-		info.Kind = TypeChannel
-		info.Elem = elem
-	case *checker.Receiver:
-		elem, err := l.internType(typ.Of())
-		if err != nil {
-			return NoType, err
-		}
-		info.Kind = TypeReceiver
-		info.Elem = elem
-	case *checker.Sender:
-		elem, err := l.internType(typ.Of())
-		if err != nil {
-			return NoType, err
-		}
-		info.Kind = TypeSender
-		info.Elem = elem
-	case *checker.Map:
-		key, err := l.internType(typ.Key())
-		if err != nil {
-			return NoType, err
-		}
-		value, err := l.internType(typ.Value())
-		if err != nil {
-			return NoType, err
-		}
-		info.Kind = TypeMap
-		info.Key = key
-		info.Value = value
-	case *checker.Maybe:
-		elem, err := l.internType(typ.Of())
-		if err != nil {
-			return NoType, err
-		}
-		info.Kind = TypeMaybe
-		info.Elem = elem
-	case *checker.Result:
-		value, err := l.internType(typ.Val())
-		if err != nil {
-			return NoType, err
-		}
-		errType, err := l.internType(typ.Err())
-		if err != nil {
-			return NoType, err
-		}
-		info.Kind = TypeResult
-		info.Value = value
-		info.Error = errType
 	case *checker.StructDef:
 		info.Private = typ.Private
 		info.Kind = TypeStruct
@@ -2768,21 +2699,6 @@ func (l *lowerer) internType(t checker.Type) (TypeID, error) {
 			}
 			info.Value = value
 		}
-	case *checker.FunctionDef:
-		info.Kind = TypeFunction
-		info.Variadic = len(typ.Parameters) > 0 && typ.Parameters[len(typ.Parameters)-1].Variadic
-		for _, param := range typ.Parameters {
-			paramType, err := l.internFunctionParamType(param, l.internType)
-			if err != nil {
-				return NoType, err
-			}
-			info.Params = append(info.Params, paramType)
-		}
-		returnType, err := l.internType(typ.ReturnType)
-		if err != nil {
-			return NoType, err
-		}
-		info.Return = returnType
 	case *checker.Trait:
 		traitID, err := l.internTrait(typ)
 		if err != nil {
@@ -2832,49 +2748,7 @@ func (l *lowerer) methodReceiverType(owner TypeID, mutates bool) (TypeID, error)
 }
 
 func (l *lowerer) internSyntheticType(name string, info TypeInfo) (TypeID, error) {
-	key := syntheticTypeKey(name, info)
-	if id, ok := l.typeByKey[key]; ok {
-		return id, nil
-	}
-	id := TypeID(len(l.program.Types) + 1)
-	info.ID = id
-	info.Name = name
-	l.typeByKey[key] = id
-	l.program.Types = append(l.program.Types, info)
-	return id, nil
-}
-
-func syntheticTypeKey(name string, info TypeInfo) string {
-	switch info.Kind {
-	case TypeList:
-		return fmt.Sprintf("list:%d", info.Elem)
-	case TypeSlice:
-		return fmt.Sprintf("slice:%d", info.Elem)
-	case TypeReference:
-		return fmt.Sprintf("reference:%d", info.Elem)
-	case TypeFixedArray:
-		return fmt.Sprintf("fixed-array:%d:%d", info.Elem, info.Length)
-	case TypeChannel:
-		return fmt.Sprintf("channel:%d", info.Elem)
-	case TypeReceiver:
-		return fmt.Sprintf("receiver:%d", info.Elem)
-	case TypeSender:
-		return fmt.Sprintf("sender:%d", info.Elem)
-	case TypeMap:
-		return fmt.Sprintf("map:%d:%d", info.Key, info.Value)
-	case TypeMaybe:
-		return fmt.Sprintf("maybe:%d", info.Elem)
-	case TypeResult:
-		return fmt.Sprintf("result:%d:%d", info.Value, info.Error)
-	case TypeFunction:
-		parts := make([]string, len(info.Params))
-		for i, param := range info.Params {
-			parts[i] = fmt.Sprintf("%d", param)
-		}
-		return fmt.Sprintf("fn:%t:(%s)->%d", info.Variadic, strings.Join(parts, ","), info.Return)
-	default:
-		return "synthetic:" + name
-	}
+	return l.typeInterner.internStructural(name, info)
 }
 
 func (l *lowerer) typeOwnerPath(t checker.Type) string {

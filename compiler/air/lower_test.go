@@ -747,6 +747,187 @@ func TestLowerEnums(t *testing.T) {
 		t.Fatalf("right case = %#v, want discriminant 3", matchPayload.Cases[3])
 	}
 }
+
+func TestLowerMaybeOfVoidResultUsesCanonicalTypeIdentity(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+	}{
+		{
+			name: "Void success",
+			source: `
+				fn main() {
+					let value: Void!Error = Result::ok(())
+					let wrapped: (Void!Error)? = Maybe::new<Void!Error>(value)
+				}
+			`,
+		},
+		{
+			name: "Void error",
+			source: `
+				fn main() {
+					let value: Int!Void = Result::err(())
+					let wrapped: (Int!Void)? = Maybe::new<Int!Void>(value)
+				}
+			`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			program := lowerSource(t, tt.source)
+			main := findFunction(t, program, "main")
+			constructor := main.Body.Stmts[1].Value
+			maybeType := testTypeInfo(t, program, constructor.Type)
+			if got, want := constructor.Target.Type, maybeType.Elem; got != want {
+				t.Fatalf("Maybe payload type = %d, want canonical element type %d", got, want)
+			}
+			resultInfo := testTypeInfo(t, program, maybeType.Elem)
+			matching := 0
+			for _, info := range program.Types {
+				if info.Kind == TypeResult && info.Value == resultInfo.Value && info.Error == resultInfo.Error {
+					matching++
+				}
+			}
+			if matching != 1 {
+				t.Fatalf("canonical Result shape occurs %d times, want exactly once", matching)
+			}
+		})
+	}
+}
+
+func TestStructuralTypeInterningIsOriginIndependent(t *testing.T) {
+	types := []struct {
+		name      string
+		checker   checker.Type
+		synthetic func(*lowerer) TypeInfo
+	}{
+		{name: "list", checker: checker.MakeList(checker.Int), synthetic: func(l *lowerer) TypeInfo {
+			return TypeInfo{Kind: TypeList, Elem: l.mustIntern(checker.Int)}
+		}},
+		{name: "slice", checker: checker.MakeSlice(checker.Int), synthetic: func(l *lowerer) TypeInfo {
+			return TypeInfo{Kind: TypeSlice, Elem: l.mustIntern(checker.Int)}
+		}},
+		{name: "fixed array", checker: checker.MakeFixedArray(checker.Int, 3), synthetic: func(l *lowerer) TypeInfo {
+			return TypeInfo{Kind: TypeFixedArray, Elem: l.mustIntern(checker.Int), Length: 3}
+		}},
+		{name: "map", checker: checker.MakeMap(checker.Str, checker.Int), synthetic: func(l *lowerer) TypeInfo {
+			return TypeInfo{Kind: TypeMap, Key: l.mustIntern(checker.Str), Value: l.mustIntern(checker.Int)}
+		}},
+		{name: "maybe", checker: checker.MakeMaybe(checker.Int), synthetic: func(l *lowerer) TypeInfo {
+			return TypeInfo{Kind: TypeMaybe, Elem: l.mustIntern(checker.Int)}
+		}},
+		{name: "result", checker: checker.MakeResult(checker.Void, checker.BuiltinError), synthetic: func(l *lowerer) TypeInfo {
+			return TypeInfo{Kind: TypeResult, Value: l.mustIntern(checker.Void), Error: l.mustIntern(checker.BuiltinError)}
+		}},
+		{name: "channel", checker: checker.MakeChan(checker.Int), synthetic: func(l *lowerer) TypeInfo {
+			return TypeInfo{Kind: TypeChannel, Elem: l.mustIntern(checker.Int)}
+		}},
+		{name: "receiver", checker: checker.MakeReceiver(checker.Int), synthetic: func(l *lowerer) TypeInfo {
+			return TypeInfo{Kind: TypeReceiver, Elem: l.mustIntern(checker.Int)}
+		}},
+		{name: "sender", checker: checker.MakeSender(checker.Int), synthetic: func(l *lowerer) TypeInfo {
+			return TypeInfo{Kind: TypeSender, Elem: l.mustIntern(checker.Int)}
+		}},
+		{name: "reference", checker: checker.MakeMutableRef(checker.Int), synthetic: func(l *lowerer) TypeInfo {
+			return TypeInfo{Kind: TypeReference, Elem: l.mustIntern(checker.Int)}
+		}},
+		{name: "function", checker: &checker.FunctionDef{Parameters: []checker.Parameter{{Type: checker.Int}}, ReturnType: checker.Str}, synthetic: func(l *lowerer) TypeInfo {
+			return TypeInfo{Kind: TypeFunction, Params: []TypeID{l.mustIntern(checker.Int)}, Return: l.mustIntern(checker.Str)}
+		}},
+	}
+	for _, typ := range types {
+		for _, checkerFirst := range []bool{true, false} {
+			order := "synthetic first"
+			if checkerFirst {
+				order = "checker first"
+			}
+			t.Run(typ.name+"/"+order, func(t *testing.T) {
+				lowerer := newLowerer(LowerOptions{}, 1)
+				info := typ.synthetic(lowerer)
+				checkerIntern := func() (TypeID, error) { return lowerer.internType(typ.checker) }
+				syntheticIntern := func() (TypeID, error) {
+					return lowerer.internSyntheticType("different display name", info)
+				}
+				first, second := syntheticIntern, checkerIntern
+				if checkerFirst {
+					first, second = checkerIntern, syntheticIntern
+				}
+				firstID, err := first()
+				if err != nil {
+					t.Fatal(err)
+				}
+				secondID, err := second()
+				if err != nil {
+					t.Fatal(err)
+				}
+				if firstID != secondID {
+					t.Fatalf("equivalent %s IDs = %d and %d, want one canonical identity", typ.name, firstID, secondID)
+				}
+			})
+		}
+	}
+}
+
+func TestStructuralTypeIdentityIncludesEverySemanticComponent(t *testing.T) {
+	lowerer := newLowerer(LowerOptions{}, 1)
+	intID := lowerer.mustIntern(checker.Int)
+	strID := lowerer.mustIntern(checker.Str)
+	assertDifferent := func(t *testing.T, left, right TypeInfo) {
+		t.Helper()
+		leftID, err := lowerer.internSyntheticType("ignored left name", left)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rightID, err := lowerer.internSyntheticType("ignored right name", right)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if leftID == rightID {
+			t.Fatalf("distinct structural types share ID %d: %#v and %#v", leftID, left, right)
+		}
+	}
+
+	t.Run("element", func(t *testing.T) {
+		assertDifferent(t, TypeInfo{Kind: TypeMaybe, Elem: intID}, TypeInfo{Kind: TypeMaybe, Elem: strID})
+	})
+	t.Run("fixed array length", func(t *testing.T) {
+		assertDifferent(t,
+			TypeInfo{Kind: TypeFixedArray, Elem: intID, Length: 2},
+			TypeInfo{Kind: TypeFixedArray, Elem: intID, Length: 3},
+		)
+	})
+	t.Run("map key and value order", func(t *testing.T) {
+		assertDifferent(t,
+			TypeInfo{Kind: TypeMap, Key: intID, Value: strID},
+			TypeInfo{Kind: TypeMap, Key: strID, Value: intID},
+		)
+	})
+	t.Run("Result success and error order", func(t *testing.T) {
+		assertDifferent(t,
+			TypeInfo{Kind: TypeResult, Value: intID, Error: strID},
+			TypeInfo{Kind: TypeResult, Value: strID, Error: intID},
+		)
+	})
+	t.Run("function parameter order", func(t *testing.T) {
+		assertDifferent(t,
+			TypeInfo{Kind: TypeFunction, Params: []TypeID{intID, strID}, Return: intID},
+			TypeInfo{Kind: TypeFunction, Params: []TypeID{strID, intID}, Return: intID},
+		)
+	})
+	t.Run("function return", func(t *testing.T) {
+		assertDifferent(t,
+			TypeInfo{Kind: TypeFunction, Params: []TypeID{intID}, Return: intID},
+			TypeInfo{Kind: TypeFunction, Params: []TypeID{intID}, Return: strID},
+		)
+	})
+	t.Run("function variadicity", func(t *testing.T) {
+		assertDifferent(t,
+			TypeInfo{Kind: TypeFunction, Params: []TypeID{intID}, Return: strID},
+			TypeInfo{Kind: TypeFunction, Params: []TypeID{intID}, Return: strID, Variadic: true},
+		)
+	})
+}
+
 func TestLowerMaybes(t *testing.T) {
 	program := lowerSource(t, `
 
