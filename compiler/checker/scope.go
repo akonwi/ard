@@ -739,6 +739,17 @@ func typeContainsTypeVar(t Type, target *TypeVar) bool {
 	return visit(t, map[Type]bool{})
 }
 
+func bindDirectUnresolvedCallTypeVar(t Type, fallback Type) {
+	typeVar, ok := t.(*TypeVar)
+	if !ok || typeVar.actual != nil {
+		return
+	}
+	if typeVar.owner != 0 || typeVar.provisional {
+		typeVar.actual = fallback
+		typeVar.bound = true
+	}
+}
+
 func bindUnresolvedCallTypeVars(t Type, fallback Type) {
 	seen := map[Type]bool{}
 	var visit func(Type)

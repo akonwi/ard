@@ -667,6 +667,7 @@ type Checker struct {
 	spans                             *SpanIndex
 	nextCallInferenceID               uint64
 	expectedCallExpectation           *typeExpectation
+	deferReceiverTypeCompleteness     bool
 	foreignABIParameters              map[*parse.FunctionDeclaration][]ForeignParameterABI
 	moduleFiles                       map[string]string
 	constraintFunctionStack           []*FunctionDef
@@ -2573,6 +2574,9 @@ func typeMismatch(expected, got Type) string {
 }
 
 func (c *Checker) areCompatible(expected Type, actual Type) bool {
+	if IsNever(actual) {
+		return true
+	}
 	if _, ok := expected.(*anyType); ok {
 		return true
 	}
@@ -3300,6 +3304,9 @@ func (c *Checker) checkDefer(s *parse.Defer) *Statement {
 }
 
 func (c *Checker) rejectUnresolvedCallType(t Type, location parse.Location) bool {
+	if c.deferReceiverTypeCompleteness {
+		return false
+	}
 	if unresolved := firstUnresolvedCallTypeVar(t); unresolved != nil {
 		c.addDiagnostic(unresolvedGenericDiagnostic{Generic: unresolved.String(), Span: c.sourceSpan(location)}.build())
 		return true
@@ -3896,7 +3903,16 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				return nil
 			}
 
+			if expressionContainsNever(val) {
+				finalizeErasedResultExpression(val)
+			}
 			__type := val.Type()
+			if s.Type == nil && IsNever(__type) {
+				// An inferred binding after a non-returning initializer has no
+				// observable value. Give its unreachable storage the concrete unit
+				// representation rather than leaking checker-only Never into AIR.
+				__type = Void
+			}
 
 			if s.Type != nil {
 				if expected := c.resolveType(s.Type); expected != nil {
@@ -4185,7 +4201,9 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				return nil
 			}
 
-			// Condition must be a boolean expression
+			// Condition must be a boolean expression. Non-returning conditions
+			// remain rejected until loop-condition setup is representable by all
+			// backends.
 			if condition.Type() != Bool {
 				c.addDiagnostic(nonBooleanLoopConditionDiagnostic{Loop: "while", Actual: condition.Type(), Span: c.sourceSpan(s.Condition.GetLocation()), LegacyMessage: "While loop condition must be a boolean expression"}.build())
 				return nil
@@ -4232,7 +4250,8 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				return nil
 			}
 
-			// Condition must be a boolean expression
+			// Condition must be a boolean expression. See the while-loop case
+			// for the non-returning-condition backend limitation.
 			if condition.Type() != Bool {
 				c.addDiagnostic(nonBooleanLoopConditionDiagnostic{Loop: "for", Actual: condition.Type(), Span: c.sourceSpan(s.Condition.GetLocation()), LegacyMessage: "For loop condition must be a boolean expression"}.build())
 				return nil
@@ -4737,6 +4756,9 @@ func (c *Checker) checkList(declaredType Type, expr *parse.ListLiteral) *ListLit
 	if hasError || elementType == nil {
 		return nil
 	}
+	if IsNever(elementType) {
+		elementType = Void
+	}
 
 	listType := MakeList(elementType)
 	return &ListLiteral{
@@ -4800,6 +4822,7 @@ func (c *Checker) checkBlockWithExpected(stmts []parse.Statement, setup func(), 
 			expr := c.checkExprAs(stmts[i].(parse.Expression), expectedFinal)
 			if expr != nil {
 				if expectedFinal == Void {
+					finalizeErasedResultExpression(expr)
 					bindUnresolvedCallTypeVars(expr.Type(), Void)
 				}
 				block.Stmts[i] = Statement{Expr: expr}
@@ -5922,6 +5945,16 @@ func (c *Checker) checkMap(declaredType Type, expr *parse.MapLiteral) *MapLitera
 			continue
 		}
 		values[i] = value
+	}
+
+	// A map whose key or value expressions never return is itself never
+	// constructed. Use unit for those otherwise unconstrained representation
+	// slots so checker-only Never cannot enter AIR.
+	if IsNever(keyType) {
+		keyType = Void
+	}
+	if IsNever(valueType) {
+		valueType = Void
 	}
 
 	// Create and return the map
@@ -7351,6 +7384,44 @@ func (c *Checker) createMapMethod(subject Expression, methodName string, args []
 	}
 }
 
+func builtinMaybeConstructor(expr Expression) *ModuleFunctionCall {
+	switch current := expr.(type) {
+	case *ModuleFunctionCall:
+		if current.Module == "builtin/Maybe" && current.Call != nil && (current.Call.Name == "none" || current.Call.Name == "some" || current.Call.Name == "new") {
+			return current
+		}
+	case *Block:
+		for index := len(current.Stmts) - 1; index >= 0; index-- {
+			if current.Stmts[index].Expr != nil {
+				return builtinMaybeConstructor(current.Stmts[index].Expr)
+			}
+		}
+	case *NeverCoercion:
+		return builtinMaybeConstructor(current.Value)
+	}
+	return nil
+}
+
+func setMaybeConstructorElementType(expr Expression, elem Type) {
+	call := builtinMaybeConstructor(expr)
+	if call == nil {
+		return
+	}
+	maybeType, ok := call.Type().(*Maybe)
+	if !ok {
+		maybeType = MakeMaybe(elem)
+	} else {
+		maybeType.of = elem
+	}
+	call.Call.ReturnType = maybeType
+	if signature := call.Call.Signature(); signature != nil {
+		signature.ReturnType = maybeType
+		if len(signature.Parameters) == 1 {
+			signature.Parameters[0].Type = elem
+		}
+	}
+}
+
 func (c *Checker) createMaybeMethod(subject Expression, methodName string, args []Expression, fnDef *FunctionDef, loc parse.Location) Expression {
 	var kind MaybeMethodKind
 	switch methodName {
@@ -7385,12 +7456,602 @@ func (c *Checker) createMaybeMethod(subject Expression, methodName string, args 
 		}.build())
 		return nil
 	}
+	// Any call-owned component still unresolved after method checking is
+	// unobservable in the method result and has the concrete unit fallback.
+	// `or` instead gets concrete evidence from its fallback value.
+	constructor := builtinMaybeConstructor(subject)
+	var orType Type
+	if maybeType, ok := subject.Type().(*Maybe); ok {
+		fallback := Type(Void)
+		if kind == MaybeOr && len(args) == 1 {
+			orType = derefType(args[0].Type())
+			fallback = orType
+		}
+		bindDirectUnresolvedCallTypeVar(maybeType.Of(), fallback)
+		if constructor != nil && kind == MaybeOr {
+			setMaybeConstructorElementType(subject, fallback)
+		}
+	}
+	returnType := fnDef.ReturnType
+	if kind == MaybeOr && orType != nil {
+		returnType = orType
+	}
+	if constructor != nil && kind == MaybeExpect && (constructor.Call.Name == "none" || (len(constructor.Call.Args) == 1 && IsNever(constructor.Call.Args[0].Type()))) {
+		returnType = neverType
+	}
 	return &MaybeMethod{
 		Subject:    subject,
 		Kind:       kind,
 		Args:       args,
-		ReturnType: fnDef.ReturnType,
+		ReturnType: returnType,
 	}
+}
+
+func builtinResultConstructor(expr Expression) *ModuleFunctionCall {
+	switch current := expr.(type) {
+	case *ModuleFunctionCall:
+		if current.Module == "ard/result" && current.Call != nil && (current.Call.Name == "ok" || current.Call.Name == "err") {
+			return current
+		}
+	case *Block:
+		for index := len(current.Stmts) - 1; index >= 0; index-- {
+			if current.Stmts[index].Expr != nil {
+				return builtinResultConstructor(current.Stmts[index].Expr)
+			}
+		}
+	case *NeverCoercion:
+		return builtinResultConstructor(current.Value)
+	}
+	return nil
+}
+
+func setResultConstructorValueType(expr Expression, value Type) {
+	call := builtinResultConstructor(expr)
+	if call == nil {
+		return
+	}
+	current, ok := call.Type().(*Result)
+	if !ok {
+		return
+	}
+	current.val = value
+	call.Call.ReturnType = current
+	if signature := call.Call.Signature(); signature != nil {
+		signature.ReturnType = current
+		if call.Call.Name == "ok" && len(signature.Parameters) == 1 {
+			signature.Parameters[0].Type = value
+		}
+	}
+}
+
+func finalizeErasedResultConstructor(expr Expression) {
+	call := builtinResultConstructor(expr)
+	if call == nil || len(call.Call.Args) != 1 {
+		return
+	}
+	current, ok := call.Type().(*Result)
+	if !ok {
+		return
+	}
+	resolvedOrVoid := func(t Type) Type {
+		resolved := derefType(t)
+		if resolved == nil || IsNever(resolved) {
+			return Void
+		}
+		if typeVar, unresolved := resolved.(*TypeVar); unresolved && typeVar.Actual() == nil {
+			return Void
+		}
+		return resolved
+	}
+	payload := derefType(call.Call.Args[0].Type())
+	if payload == nil || IsNever(payload) {
+		payload = Void
+	}
+	value, errType := resolvedOrVoid(current.Val()), resolvedOrVoid(current.Err())
+	if call.Call.Name == "ok" {
+		value = payload
+	} else {
+		errType = payload
+	}
+	current.val = value
+	current.err = errType
+	call.Call.ReturnType = current
+	if signature := call.Call.Signature(); signature != nil {
+		signature.ReturnType = current
+		if len(signature.Parameters) == 1 {
+			signature.Parameters[0].Type = payload
+		}
+	}
+}
+
+func expressionContainsNever(expr Expression) bool {
+	var contains func(Expression) bool
+	blockContains := func(block *Block) bool {
+		if block == nil {
+			return false
+		}
+		for index := len(block.Stmts) - 1; index >= 0; index-- {
+			if block.Stmts[index].Expr != nil {
+				return contains(block.Stmts[index].Expr)
+			}
+		}
+		return false
+	}
+	contains = func(expr Expression) bool {
+		if expr == nil {
+			return false
+		}
+		if IsNever(expr.Type()) {
+			return true
+		}
+		switch current := expr.(type) {
+		case *NeverCoercion:
+			return contains(current.Value)
+		case *ModuleFunctionCall:
+			for _, arg := range current.Call.Args {
+				if contains(arg) {
+					return true
+				}
+			}
+		case *Block:
+			return blockContains(current)
+		case *BoolMatch:
+			return blockContains(current.True) || blockContains(current.False)
+		case *If:
+			for _, branch := range current.Branches {
+				if blockContains(branch.Body) {
+					return true
+				}
+			}
+			return blockContains(current.Else)
+		case *OptionMatch:
+			return blockContains(current.Some.Body) || blockContains(current.None)
+		case *ResultMatch:
+			return blockContains(current.Ok.Body) || blockContains(current.Err.Body)
+		case *IntMatch:
+			for _, block := range current.IntCases {
+				if blockContains(block) {
+					return true
+				}
+			}
+			for _, block := range current.RangeCases {
+				if blockContains(block) {
+					return true
+				}
+			}
+			return blockContains(current.CatchAll)
+		case *StrMatch:
+			for _, block := range current.Cases {
+				if blockContains(block) {
+					return true
+				}
+			}
+			return blockContains(current.CatchAll)
+		case *EnumMatch:
+			for _, block := range current.Cases {
+				if blockContains(block) {
+					return true
+				}
+			}
+			return blockContains(current.CatchAll)
+		case *UnionMatch:
+			for _, match := range current.TypeCasesByIndex {
+				if match != nil && blockContains(match.Body) {
+					return true
+				}
+			}
+			return blockContains(current.CatchAll)
+		case *ForeignTypeMatch:
+			for _, matchCase := range current.Cases {
+				if blockContains(matchCase.Body) {
+					return true
+				}
+			}
+			return blockContains(current.CatchAll)
+		case *ConditionalMatch:
+			for _, matchCase := range current.Cases {
+				if blockContains(matchCase.Body) {
+					return true
+				}
+			}
+			return blockContains(current.CatchAll)
+		case *UnsafeBlock:
+			return blockContains(current.Body)
+		case *ListLiteral:
+			for _, element := range current.Elements {
+				if contains(element) {
+					return true
+				}
+			}
+		case *MapLiteral:
+			for _, value := range current.Values {
+				if contains(value) {
+					return true
+				}
+			}
+		case *StructInstance:
+			for _, field := range current.Fields {
+				if contains(field) {
+					return true
+				}
+			}
+		case *ModuleStructInstance:
+			return contains(current.Property)
+		case *FunctionDef:
+			return blockContains(current.Body)
+		case *MaybeMethod:
+			if contains(current.Subject) {
+				return true
+			}
+			for _, arg := range current.Args {
+				if contains(arg) {
+					return true
+				}
+			}
+		case *ResultMethod:
+			if contains(current.Subject) {
+				return true
+			}
+			for _, arg := range current.Args {
+				if contains(arg) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	return contains(expr)
+}
+
+func finalizeErasedResultExpression(expr Expression) Type {
+	finalizeChild := func(child Expression) {
+		if expressionContainsNever(child) {
+			finalizeErasedResultExpression(child)
+		}
+	}
+	// Complete nested expression boundaries independently before collecting a
+	// Result shape for this expression. Unrelated Result arguments must not be
+	// merged merely because they occur in one outer call.
+	switch current := expr.(type) {
+	case *ModuleFunctionCall:
+		for _, arg := range current.Call.Args {
+			finalizeChild(arg)
+		}
+		if constructor := builtinMaybeConstructor(current); constructor != nil && len(constructor.Call.Args) == 1 {
+			elem := constructor.Call.Args[0].Type()
+			if IsNever(elem) {
+				elem = Void
+			}
+			setMaybeConstructorElementType(current, elem)
+		}
+	case *MaybeMethod:
+		finalizeChild(current.Subject)
+		for _, arg := range current.Args {
+			finalizeChild(arg)
+		}
+		if current.Kind == MaybeOr && len(current.Args) == 1 {
+			current.ReturnType = current.Args[0].Type()
+			setMaybeConstructorElementType(current.Subject, current.ReturnType)
+		}
+	case *ResultMethod:
+		finalizeChild(current.Subject)
+		for _, arg := range current.Args {
+			finalizeChild(arg)
+		}
+		if current.Kind == ResultOr && len(current.Args) == 1 {
+			current.ReturnType = current.Args[0].Type()
+			setResultConstructorValueType(current.Subject, current.ReturnType)
+		}
+	case *StructInstance:
+		for _, field := range current.Fields {
+			finalizeChild(field)
+		}
+	case *ModuleStructInstance:
+		finalizeChild(current.Property)
+	case *FunctionDef:
+		if current.Body != nil {
+			for index := len(current.Body.Stmts) - 1; index >= 0; index-- {
+				if current.Body.Stmts[index].Expr != nil {
+					finalizeChild(current.Body.Stmts[index].Expr)
+					break
+				}
+			}
+		}
+	}
+
+	var constructors []*ModuleFunctionCall
+	resultProducing := map[Expression]bool{}
+	var visit func(Expression)
+	visitBlock := func(block *Block) {
+		if block == nil {
+			return
+		}
+		for index := len(block.Stmts) - 1; index >= 0; index-- {
+			if block.Stmts[index].Expr != nil {
+				visit(block.Stmts[index].Expr)
+				return
+			}
+		}
+	}
+	visit = func(current Expression) {
+		if _, ok := derefType(current.Type()).(*Result); ok {
+			resultProducing[current] = true
+		}
+		switch current := current.(type) {
+		case *ModuleFunctionCall:
+			if call := builtinResultConstructor(current); call != nil {
+				constructors = append(constructors, call)
+			}
+		case *Block:
+			visitBlock(current)
+		case *BoolMatch:
+			visitBlock(current.True)
+			visitBlock(current.False)
+		case *If:
+			for _, branch := range current.Branches {
+				visitBlock(branch.Body)
+			}
+			visitBlock(current.Else)
+		case *OptionMatch:
+			visitBlock(current.Some.Body)
+			visitBlock(current.None)
+		case *ResultMatch:
+			visitBlock(current.Ok.Body)
+			visitBlock(current.Err.Body)
+		case *IntMatch:
+			for _, block := range current.IntCases {
+				visitBlock(block)
+			}
+			for _, block := range current.RangeCases {
+				visitBlock(block)
+			}
+			visitBlock(current.CatchAll)
+		case *StrMatch:
+			for _, block := range current.Cases {
+				visitBlock(block)
+			}
+			visitBlock(current.CatchAll)
+		case *EnumMatch:
+			for _, block := range current.Cases {
+				visitBlock(block)
+			}
+			visitBlock(current.CatchAll)
+		case *UnionMatch:
+			for _, match := range current.TypeCasesByIndex {
+				if match != nil {
+					visitBlock(match.Body)
+				}
+			}
+			visitBlock(current.CatchAll)
+		case *ForeignTypeMatch:
+			for _, matchCase := range current.Cases {
+				visitBlock(matchCase.Body)
+			}
+			visitBlock(current.CatchAll)
+		case *ConditionalMatch:
+			for _, matchCase := range current.Cases {
+				visitBlock(matchCase.Body)
+			}
+			visitBlock(current.CatchAll)
+		case *UnsafeBlock:
+			visitBlock(current.Body)
+		case *ListLiteral:
+			for _, element := range current.Elements {
+				visit(element)
+			}
+		case *MapLiteral:
+			for _, key := range current.Keys {
+				visit(key)
+			}
+			for _, value := range current.Values {
+				visit(value)
+			}
+		}
+	}
+	visit(expr)
+	if len(constructors) == 0 {
+		return expr.Type()
+	}
+
+	var valueEvidence, errorEvidence Type
+	mergeEvidence := func(current *Type, candidate Type) {
+		candidate = derefType(candidate)
+		if candidate == nil || IsNever(candidate) || candidate == Void {
+			return
+		}
+		if typeVar, unresolved := candidate.(*TypeVar); unresolved && typeVar.Actual() == nil {
+			return
+		}
+		if *current == nil {
+			*current = candidate
+			return
+		}
+		if merged, ok := commonResultType(*current, candidate); ok {
+			*current = merged
+		}
+	}
+	mergePayload := func(current *Type, candidate Type) {
+		candidate = derefType(candidate)
+		if candidate == nil || IsNever(candidate) {
+			return
+		}
+		if *current == nil {
+			*current = candidate
+			return
+		}
+		if merged, ok := commonResultType(*current, candidate); ok {
+			*current = merged
+		}
+	}
+	for _, constructor := range constructors {
+		if len(constructor.Call.Args) != 1 {
+			continue
+		}
+		current, _ := constructor.Type().(*Result)
+		payload := constructor.Call.Args[0].Type()
+		if constructor.Call.Name == "ok" {
+			mergePayload(&valueEvidence, payload)
+			if current != nil {
+				mergeEvidence(&errorEvidence, current.Err())
+			}
+		} else {
+			mergePayload(&errorEvidence, payload)
+			if current != nil {
+				mergeEvidence(&valueEvidence, current.Val())
+			}
+		}
+	}
+	if valueEvidence == nil {
+		valueEvidence = Void
+	}
+	if errorEvidence == nil {
+		errorEvidence = Void
+	}
+	result := MakeResult(valueEvidence, errorEvidence)
+	for _, constructor := range constructors {
+		current, ok := constructor.Call.ReturnType.(*Result)
+		if !ok {
+			current = MakeResult(valueEvidence, errorEvidence)
+		} else {
+			current.val = valueEvidence
+			current.err = errorEvidence
+		}
+		constructor.Call.ReturnType = current
+		if signature := constructor.Call.Signature(); signature != nil {
+			signature.ReturnType = current
+			if len(signature.Parameters) == 1 {
+				if constructor.Call.Name == "ok" {
+					signature.Parameters[0].Type = valueEvidence
+				} else {
+					signature.Parameters[0].Type = errorEvidence
+				}
+			}
+		}
+	}
+
+	var apply func(Expression)
+	applyBlock := func(block *Block) {
+		if block == nil {
+			return
+		}
+		for index := len(block.Stmts) - 1; index >= 0; index-- {
+			if block.Stmts[index].Expr != nil {
+				apply(block.Stmts[index].Expr)
+				return
+			}
+		}
+	}
+	apply = func(current Expression) {
+		switch current := current.(type) {
+		case *Block:
+			applyBlock(current)
+		case *BoolMatch:
+			applyBlock(current.True)
+			applyBlock(current.False)
+			if resultProducing[current] {
+				current.ResultType = result
+			}
+		case *If:
+			for _, branch := range current.Branches {
+				applyBlock(branch.Body)
+			}
+			applyBlock(current.Else)
+			if resultProducing[current] {
+				current.ResultType = result
+			}
+		case *OptionMatch:
+			applyBlock(current.Some.Body)
+			applyBlock(current.None)
+			if resultProducing[current] {
+				current.ResultType = result
+			}
+		case *ResultMatch:
+			applyBlock(current.Ok.Body)
+			applyBlock(current.Err.Body)
+			if resultProducing[current] {
+				current.ResultType = result
+			}
+		case *IntMatch:
+			for _, block := range current.IntCases {
+				applyBlock(block)
+			}
+			for _, block := range current.RangeCases {
+				applyBlock(block)
+			}
+			applyBlock(current.CatchAll)
+			if resultProducing[current] {
+				current.ResultType = result
+			}
+		case *StrMatch:
+			for _, block := range current.Cases {
+				applyBlock(block)
+			}
+			applyBlock(current.CatchAll)
+			if resultProducing[current] {
+				current.ResultType = result
+			}
+		case *EnumMatch:
+			for _, block := range current.Cases {
+				applyBlock(block)
+			}
+			applyBlock(current.CatchAll)
+			if resultProducing[current] {
+				current.ResultType = result
+			}
+		case *UnionMatch:
+			for _, match := range current.TypeCasesByIndex {
+				if match != nil {
+					applyBlock(match.Body)
+				}
+			}
+			applyBlock(current.CatchAll)
+			if resultProducing[current] {
+				current.ResultType = result
+			}
+		case *ForeignTypeMatch:
+			for _, matchCase := range current.Cases {
+				applyBlock(matchCase.Body)
+			}
+			applyBlock(current.CatchAll)
+			if resultProducing[current] {
+				current.ResultType = result
+			}
+		case *ConditionalMatch:
+			for _, matchCase := range current.Cases {
+				applyBlock(matchCase.Body)
+			}
+			applyBlock(current.CatchAll)
+			if resultProducing[current] {
+				current.ResultType = result
+			}
+		case *UnsafeBlock:
+			applyBlock(current.Body)
+			current.ValueType = result
+			current.ResultType = MakeResult(result, Str)
+		case *ListLiteral:
+			for _, element := range current.Elements {
+				apply(element)
+			}
+			if len(current.Elements) > 0 {
+				current._type = MakeList(current.Elements[0].Type())
+				current.ListType = current._type
+			}
+		case *MapLiteral:
+			for _, key := range current.Keys {
+				apply(key)
+			}
+			for _, value := range current.Values {
+				apply(value)
+			}
+			if len(current.Keys) > 0 && len(current.Values) > 0 {
+				current.KeyType = current.Keys[0].Type()
+				current.ValueType = current.Values[0].Type()
+				current._type = MakeMap(current.KeyType, current.ValueType)
+			}
+		}
+	}
+	apply(expr)
+	return expr.Type()
 }
 
 func (c *Checker) createResultMethod(subject Expression, methodName string, args []Expression, fnDef *FunctionDef) Expression {
@@ -7413,11 +8074,35 @@ func (c *Checker) createResultMethod(subject Expression, methodName string, args
 	default:
 		panic(fmt.Sprintf("Unknown Result method: %s", methodName))
 	}
+	// Constructors determine only one Result arm. If method checking did not
+	// constrain the other arm, it is unobservable and concretely defaults to
+	// Void before the checked expression crosses into AIR.
+	constructor := builtinResultConstructor(subject)
+	constructorNever := constructor != nil && len(constructor.Call.Args) == 1 && IsNever(constructor.Call.Args[0].Type())
+	finalizeErasedResultExpression(subject)
+	var orType Type
+	if kind == ResultOr && len(args) == 1 {
+		orType = derefType(args[0].Type())
+		setResultConstructorValueType(subject, orType)
+	}
+	resultType, hasResult := subject.Type().(*Result)
+	if hasResult && constructor == nil {
+		bindDirectUnresolvedCallTypeVar(resultType.Val(), Void)
+		bindDirectUnresolvedCallTypeVar(resultType.Err(), Void)
+	}
+	returnType := fnDef.ReturnType
+	if kind == ResultExpect && (constructorNever || (constructor != nil && constructor.Call.Name == "err")) {
+		returnType = neverType
+	} else if kind == ResultOr && orType != nil {
+		returnType = orType
+	} else if hasResult && kind == ResultExpect {
+		returnType = resultType.Val()
+	}
 	return &ResultMethod{
 		Subject:    subject,
 		Kind:       kind,
 		Args:       args,
-		ReturnType: fnDef.ReturnType,
+		ReturnType: returnType,
 	}
 }
 
@@ -7598,6 +8283,9 @@ func (c *Checker) checkIfChain(s *parse.IfStatement) Expression {
 		condition := observeReference(c.checkExpr(current.Condition))
 		if condition == nil {
 			return nil
+		}
+		if IsNever(condition.Type()) {
+			condition = &NeverCoercion{Value: condition, TargetType: Bool}
 		}
 		if condition.Type() != Bool {
 			c.addDiagnostic(nonBooleanIfConditionDiagnostic{Actual: condition.Type(), Span: c.sourceSpan(current.Condition.GetLocation())}.build())
@@ -8202,13 +8890,23 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 		}
 	case *parse.InstanceMethod:
 		{
+			previousDeferredCompleteness := c.deferReceiverTypeCompleteness
+			c.deferReceiverTypeCompleteness = true
 			subj := c.checkExpr(s.Target)
+			c.deferReceiverTypeCompleteness = previousDeferredCompleteness
 			if subj == nil {
 				return nil
 			}
 
 			if subj.Type() == nil {
 				panic(fmt.Errorf("Cannot access %+v on nil: %s", subj.(*Variable).sym, s.Target))
+			}
+			// Complete complementary Result constructors across a receiver's
+			// terminal control flow before method lookup needs the joined shape.
+			// A direct constructor remains deferred so methods such as `expect`
+			// can receive their result context first.
+			if builtinResultConstructor(subj) == nil {
+				finalizeErasedResultExpression(subj)
 			}
 			var sig Type
 			// A reference-valued subject resolves members through its referent:
@@ -8434,6 +9132,9 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 				return &Negation{value}
 			}
 
+			if IsNever(value.Type()) {
+				value = &NeverCoercion{Value: value, TargetType: Bool}
+			}
 			if value.Type() != Bool {
 				c.addDiagnostic(invalidUnaryOperatorDiagnostic{Operator: "not", Operand: value.Type(), Span: c.sourceSpan(s.Operand.GetLocation()), LegacyMessage: "Only booleans can be negated with 'not'"}.build())
 				return nil
@@ -8722,6 +9423,12 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 						return nil
 					}
 
+					if IsNever(left.Type()) {
+						left = &NeverCoercion{Value: left, TargetType: Bool}
+					}
+					if IsNever(right.Type()) {
+						right = &NeverCoercion{Value: right, TargetType: Bool}
+					}
 					if left.Type() != Bool || right.Type() != Bool {
 						c.addDiagnostic(invalidBooleanOperationDiagnostic{Operator: "and", LeftType: left.Type(), RightType: right.Type(), LeftSpan: c.sourceSpan(s.Left.GetLocation()), RightSpan: c.sourceSpan(s.Right.GetLocation()), LegacyMessage: "The 'and' operator can only be used between Bools"}.build())
 						return nil
@@ -8736,6 +9443,12 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 						return nil
 					}
 
+					if IsNever(left.Type()) {
+						left = &NeverCoercion{Value: left, TargetType: Bool}
+					}
+					if IsNever(right.Type()) {
+						right = &NeverCoercion{Value: right, TargetType: Bool}
+					}
 					if left.Type() != Bool || right.Type() != Bool {
 						c.addDiagnostic(invalidBooleanOperationDiagnostic{Operator: "or", LeftType: left.Type(), RightType: right.Type(), LeftSpan: c.sourceSpan(s.Left.GetLocation()), RightSpan: c.sourceSpan(s.Right.GetLocation()), LegacyMessage: "The 'or' operator can only be used with Boolean values"}.build())
 						return nil
@@ -9367,6 +10080,11 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 				return nil
 			}
 
+			// A constructor subject may leave an unobserved payload component
+			// unconstrained. Resolve it to concrete Void before producing the
+			// checked match expression.
+			bindDirectUnresolvedCallTypeVar(maybeType.Of(), Void)
+
 			// Create the OptionMatch
 			return &OptionMatch{
 				Subject:   subject,
@@ -9856,6 +10574,12 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 			if !ok {
 				return nil
 			}
+			finalizeErasedResultExpression(subject)
+			if builtinResultConstructor(subject) == nil {
+				bindDirectUnresolvedCallTypeVar(resultType.Val(), Void)
+				bindDirectUnresolvedCallTypeVar(resultType.Err(), Void)
+			}
+			resultType = subject.Type().(*Result)
 			return &ResultMatch{
 				Subject:    subject,
 				Ok:         okCase,
@@ -10139,6 +10863,9 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 			} else {
 				// Regular condition case
 				if condition := observeReference(c.checkExpr(matchCase.Condition)); condition != nil {
+					if IsNever(condition.Type()) {
+						condition = &NeverCoercion{Value: condition, TargetType: Bool}
+					}
 					// Ensure condition is boolean
 					if condition.Type() != Bool {
 						c.addDiagnostic(nonBooleanMatchConditionDiagnostic{Actual: condition.Type(), Span: c.sourceSpan(matchCase.Condition.GetLocation())}.build())
@@ -11058,6 +11785,15 @@ func isUntypedNumLiteral(expr parse.Expression) bool {
 // untyped numeric literal adopt the other operand's scalar type.
 func (c *Checker) checkScalarOperands(leftExpr, rightExpr parse.Expression) (Expression, Expression) {
 	left, right := c.checkScalarOperandExprs(leftExpr, rightExpr)
+	if left == nil || right == nil {
+		return left, right
+	}
+	if IsNever(left.Type()) && !IsNever(right.Type()) {
+		left = &NeverCoercion{Value: left, TargetType: right.Type()}
+	}
+	if IsNever(right.Type()) && !IsNever(left.Type()) {
+		right = &NeverCoercion{Value: right, TargetType: left.Type()}
+	}
 	return observeReference(left), observeReference(right)
 }
 
@@ -11449,7 +12185,16 @@ func (c *Checker) checkExprAsInner(expr parse.Expression, expectedType Type, exp
 			return fn
 		}
 	case *parse.InstanceMethod:
-		return c.checkExprWithExpectedCall(s, expectedType)
+		checked := c.checkExprWithExpectedCall(s, expectedType)
+		if method, ok := checked.(*ResultMethod); ok && method.Kind == ResultExpect && IsNever(method.ReturnType) && expectedType != nil && !IsNever(expectedType) {
+			setResultConstructorValueType(method.Subject, expectedType)
+			method.ReturnType = expectedType
+		}
+		if method, ok := checked.(*MaybeMethod); ok && method.Kind == MaybeExpect && IsNever(method.ReturnType) && expectedType != nil && !IsNever(expectedType) {
+			setMaybeConstructorElementType(method.Subject, expectedType)
+			method.ReturnType = expectedType
+		}
+		return checked
 	case *parse.StaticFunction:
 		{
 			resultType, expectResult := expectedType.(*Result)
@@ -11554,6 +12299,12 @@ func (c *Checker) checkExprAsInner(expr parse.Expression, expectedType Type, exp
 func (c *Checker) finishCheckExprAs(expr parse.Expression, expectedType Type, expectation *typeExpectation, argumentParameter *Parameter, checked Expression) Expression {
 	if checked == nil {
 		return nil
+	}
+	resolvedExpected := derefType(expectedType)
+	if IsNever(checked.Type()) && resolvedExpected != nil && !IsNever(resolvedExpected) {
+		if typeVar, unresolved := resolvedExpected.(*TypeVar); !unresolved || typeVar.Actual() != nil {
+			return &NeverCoercion{Value: checked, TargetType: resolvedExpected}
+		}
 	}
 	checked = coerceDiscardingFunction(expectedType, checked)
 
@@ -12296,7 +13047,11 @@ func (c *Checker) checkMaybeNewStatic(s *parse.StaticFunction, mod Module, expec
 			return nil
 		}
 	}
-	maybeType = MakeMaybe(value.Type())
+	valueType := value.Type()
+	if IsNever(valueType) {
+		valueType = Void
+	}
+	maybeType = MakeMaybe(valueType)
 	call := &FunctionCall{
 		Name:     "some",
 		Args:     []Expression{value},
@@ -12304,7 +13059,7 @@ func (c *Checker) checkMaybeNewStatic(s *parse.StaticFunction, mod Module, expec
 		signature: &FunctionDef{
 			Name:          "new",
 			GenericParams: []string{"T"},
-			Parameters:    []Parameter{{Name: "value", Type: value.Type()}},
+			Parameters:    []Parameter{{Name: "value", Type: valueType}},
 			ReturnType:    maybeType,
 		},
 		ReturnType: maybeType,
@@ -13212,6 +13967,12 @@ func (c *Checker) addUnificationArgumentMismatch(err error, expected, actual Typ
 func (c *Checker) unifyTypes(expected Type, actual Type, genericScope *SymbolTable) error {
 	expected = deref(expected)
 	actual = deref(actual)
+	// A non-returning expression never produces a value and therefore provides
+	// no evidence for generic inference. Other arguments or return context may
+	// still bind the expected generic.
+	if IsNever(actual) {
+		return nil
+	}
 
 	switch expectedType := expected.(type) {
 	case *TypeVar:

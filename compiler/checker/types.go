@@ -7,6 +7,9 @@ import (
 
 // todo: this can return an error with more detailed messaging for the scenario
 func areCompatible(expected Type, actual Type) bool {
+	if IsNever(actual) {
+		return true
+	}
 	if union, ok := expected.(*Union); ok {
 		if validationEqualTypes(union, actual) {
 			return true
@@ -27,6 +30,12 @@ func areCompatible(expected Type, actual Type) bool {
 func commonResultType(a Type, b Type) (Type, bool) {
 	if a == nil || b == nil {
 		return nil, false
+	}
+	if IsNever(a) {
+		return b, true
+	}
+	if IsNever(b) {
+		return a, true
 	}
 	if validationEqualTypes(a, b) {
 		return a, true
@@ -533,6 +542,22 @@ func (b *_bool) hasTrait(trait *Trait) bool {
 }
 
 var Bool = &_bool{}
+
+// never is the checker-only type of expressions that do not return, such as
+// panic. It is not an Ard value type and must be replaced by the surrounding
+// expected type before executable AIR is produced.
+type never struct{}
+
+func (n never) String() string       { return "Never" }
+func (n never) get(name string) Type { return nil }
+func (n *never) equal(other Type) bool {
+	return IsNever(other)
+}
+func (n *never) hasTrait(trait *Trait) bool { return false }
+
+var neverType = &never{}
+
+func IsNever(t Type) bool { return t == neverType }
 
 type void struct{}
 

@@ -2,6 +2,7 @@ package air
 
 import (
 	"fmt"
+	"reflect"
 
 	"github.com/akonwi/ard/checker"
 )
@@ -42,6 +43,12 @@ func Validate(program *Program) error {
 			return err
 		}
 	}
+	if err := validateCanonicalStructuralIdentities(program); err != nil {
+		return err
+	}
+	if err := validateCanonicalNominalIdentities(program); err != nil {
+		return err
+	}
 	for i, trait := range program.Traits {
 		if trait.ID != TraitID(i) {
 			return fmt.Errorf("trait table entry %d has id %d", i, trait.ID)
@@ -66,6 +73,9 @@ func Validate(program *Program) error {
 			return err
 		}
 	}
+	if err := validateTypeParameterOwners(program); err != nil {
+		return err
+	}
 	for i, impl := range program.Impls {
 		if impl.ID != ImplID(i) {
 			return fmt.Errorf("impl table entry %d has id %d", i, impl.ID)
@@ -83,6 +93,264 @@ func Validate(program *Program) error {
 	for _, test := range program.Tests {
 		if !validFunctionID(program, test.Function) {
 			return fmt.Errorf("test %s references invalid function %d", test.Name, test.Function)
+		}
+	}
+	return nil
+}
+
+func validateCanonicalStructuralIdentities(program *Program) error {
+	seen := map[structuralTypeKey]TypeID{}
+	atomic := map[string]TypeID{}
+	for _, typ := range program.Types {
+		key, structural := structuralIdentity(typ)
+		if structural {
+			if previous, ok := seen[key]; ok {
+				return fmt.Errorf("structural types %d and %d have duplicate identity", previous, typ.ID)
+			}
+			seen[key] = typ.ID
+		}
+		var atomicKey string
+		switch typ.Kind {
+		case TypeVoid, TypeInt, TypeFloat64, TypeBool, TypeByte, TypeRune, TypeStr, TypeAny:
+			atomicKey = fmt.Sprintf("%d", typ.Kind)
+		case TypeScalar:
+			atomicKey = fmt.Sprintf("%d:%s", typ.Kind, typ.Name)
+		case TypeTraitObject:
+			atomicKey = fmt.Sprintf("%d:%d", typ.Kind, typ.Trait)
+		}
+		if atomicKey != "" {
+			if previous, ok := atomic[atomicKey]; ok {
+				return fmt.Errorf("atomic types %d and %d have duplicate identity", previous, typ.ID)
+			}
+			atomic[atomicKey] = typ.ID
+		}
+	}
+	return nil
+}
+
+func validateCanonicalNominalIdentities(program *Program) error {
+	seen := map[nominalTypeKey]TypeID{}
+	params := map[typeParamKey]TypeID{}
+	for _, typ := range program.Types {
+		var key nominalTypeKey
+		var nominal bool
+		switch {
+		case typ.Kind == TypeStruct && typ.Generic != NoType:
+			key = applicationNominalKey(TypeStruct, typ.Generic, typ.GenericArgs)
+			nominal = true
+		case typ.Kind == TypeStruct:
+			key = declarationNominalKey(TypeStruct, typ.ModulePath, typ.Name)
+			nominal = true
+		case typ.Kind == TypeEnum:
+			key = declarationNominalKey(TypeEnum, typ.ModulePath, typ.Name)
+			nominal = true
+		case typ.Kind == TypeUnion:
+			key = declarationNominalKey(TypeUnion, typ.ModulePath, typ.Name)
+			nominal = true
+		case typ.Kind == TypeForeignType:
+			key = nominalTypeKey{Kind: TypeForeignType, Target: typ.ForeignTarget, Namespace: typ.ForeignNamespace, Symbol: typ.ForeignSymbol, Pointer: typ.ForeignPointer, Args: typeIDsKey(typ.GenericArgs)}
+			nominal = true
+		case typ.Kind == TypeParam:
+			param := typeParamKey{owner: typ.ParamOwner, index: typ.ParamIndex}
+			if previous, ok := params[param]; ok {
+				return fmt.Errorf("type parameters %d and %d duplicate owner %q index %d", previous, typ.ID, typ.ParamOwner, typ.ParamIndex)
+			}
+			params[param] = typ.ID
+		}
+		if nominal {
+			if previous, ok := seen[key]; ok {
+				return fmt.Errorf("nominal types %d and %d have duplicate identity", previous, typ.ID)
+			}
+			seen[key] = typ.ID
+		}
+	}
+	return nil
+}
+
+func validateTypeParameterOwners(program *Program) error {
+	owners := map[string][]string{}
+	validateNames := func(owner string, names []string) error {
+		seen := map[string]bool{}
+		for _, name := range names {
+			if name == "" {
+				return fmt.Errorf("type parameter owner %q has an empty parameter name", owner)
+			}
+			if seen[name] {
+				return fmt.Errorf("type parameter owner %q has duplicate parameter %q", owner, name)
+			}
+			seen[name] = true
+		}
+		return nil
+	}
+	for _, typ := range program.Types {
+		if typ.Kind != TypeStruct || typ.Generic != NoType || len(typ.TypeParams) == 0 {
+			continue
+		}
+		owner := genericStructDefKey(typ.ModulePath, typ.Name)
+		if err := validateNames(owner, typ.TypeParams); err != nil {
+			return err
+		}
+		owners[owner] = typ.TypeParams
+	}
+	for _, fn := range program.Functions {
+		if len(fn.TypeParams) == 0 {
+			continue
+		}
+		if fn.TypeParamOwner == "" {
+			return fmt.Errorf("generic function %s has no type parameter owner", fn.Name)
+		}
+		if err := validateNames(fn.TypeParamOwner, fn.TypeParams); err != nil {
+			return err
+		}
+		if existing, ok := owners[fn.TypeParamOwner]; ok && !equalStrings(existing, fn.TypeParams) {
+			return fmt.Errorf("type parameter owner %q has conflicting declarations", fn.TypeParamOwner)
+		}
+		owners[fn.TypeParamOwner] = fn.TypeParams
+	}
+	for _, typ := range program.Types {
+		if typ.Kind != TypeParam {
+			continue
+		}
+		if typ.ParamOwner == "" {
+			return fmt.Errorf("type parameter %d has no owner", typ.ID)
+		}
+		params, ok := owners[typ.ParamOwner]
+		if !ok {
+			return fmt.Errorf("type parameter %d references unknown owner %q", typ.ID, typ.ParamOwner)
+		}
+		if typ.ParamIndex < 0 || typ.ParamIndex >= len(params) {
+			return fmt.Errorf("type parameter %d has invalid index %d for owner %q", typ.ID, typ.ParamIndex, typ.ParamOwner)
+		}
+		if typ.Name != params[typ.ParamIndex] {
+			return fmt.Errorf("type parameter %d name %q does not match owner parameter %q", typ.ID, typ.Name, params[typ.ParamIndex])
+		}
+	}
+	return nil
+}
+
+func equalStrings(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
+}
+
+func substitutedGenericType(program *Program, id TypeID, owner string, args []TypeID, seen map[TypeID]bool) (TypeID, error) {
+	if !validTypeID(program, id) {
+		return NoType, fmt.Errorf("invalid generic definition field type %d", id)
+	}
+	if seen[id] {
+		return id, nil
+	}
+	seen[id] = true
+	defer delete(seen, id)
+	info := program.Types[id-1]
+	if info.Kind == TypeParam {
+		if info.ParamOwner != owner {
+			return id, nil
+		}
+		if info.ParamIndex < 0 || info.ParamIndex >= len(args) {
+			return NoType, fmt.Errorf("type parameter %d has invalid substitution index %d", id, info.ParamIndex)
+		}
+		return args[info.ParamIndex], nil
+	}
+	if key, structural := structuralIdentity(info); structural {
+		substitute := func(child TypeID) (TypeID, error) {
+			return substitutedGenericType(program, child, owner, args, seen)
+		}
+		var err error
+		switch info.Kind {
+		case TypeList, TypeSlice, TypeFixedArray, TypeMaybe, TypeChannel, TypeReceiver, TypeSender, TypeReference:
+			key.Elem, err = substitute(info.Elem)
+		case TypeMap:
+			key.Key, err = substitute(info.Key)
+			if err == nil {
+				key.Value, err = substitute(info.Value)
+			}
+		case TypeResult:
+			key.Value, err = substitute(info.Value)
+			if err == nil {
+				key.Error, err = substitute(info.Error)
+			}
+		case TypeFunction:
+			params := make([]TypeID, len(info.Params))
+			for index, param := range info.Params {
+				params[index], err = substitute(param)
+				if err != nil {
+					break
+				}
+			}
+			key.Params = typeIDsKey(params)
+			if err == nil {
+				key.Return, err = substitute(info.Return)
+			}
+		}
+		if err != nil {
+			return NoType, err
+		}
+		for _, candidate := range program.Types {
+			if candidateKey, ok := structuralIdentity(candidate); ok && candidateKey == key {
+				return candidate.ID, nil
+			}
+		}
+		return NoType, fmt.Errorf("missing canonical substituted structural type for %s", info.Name)
+	}
+	if info.Kind == TypeStruct && info.Generic != NoType {
+		substitutedArgs := make([]TypeID, len(info.GenericArgs))
+		for index, argument := range info.GenericArgs {
+			var err error
+			substitutedArgs[index], err = substitutedGenericType(program, argument, owner, args, seen)
+			if err != nil {
+				return NoType, err
+			}
+		}
+		key := applicationNominalKey(TypeStruct, info.Generic, substitutedArgs)
+		for _, candidate := range program.Types {
+			if candidate.Kind == TypeStruct && candidate.Generic != NoType && applicationNominalKey(TypeStruct, candidate.Generic, candidate.GenericArgs) == key {
+				return candidate.ID, nil
+			}
+		}
+		return NoType, fmt.Errorf("missing canonical substituted application for %s", info.Name)
+	}
+	if info.Kind == TypeForeignType && len(info.GenericArgs) > 0 {
+		substitutedArgs := make([]TypeID, len(info.GenericArgs))
+		for index, argument := range info.GenericArgs {
+			var err error
+			substitutedArgs[index], err = substitutedGenericType(program, argument, owner, args, seen)
+			if err != nil {
+				return NoType, err
+			}
+		}
+		for _, candidate := range program.Types {
+			if candidate.Kind == TypeForeignType && candidate.ForeignTarget == info.ForeignTarget && candidate.ForeignNamespace == info.ForeignNamespace && candidate.ForeignSymbol == info.ForeignSymbol && candidate.ForeignPointer == info.ForeignPointer && typeIDsKey(candidate.GenericArgs) == typeIDsKey(substitutedArgs) {
+				return candidate.ID, nil
+			}
+		}
+		return NoType, fmt.Errorf("missing canonical substituted foreign type for %s", info.Name)
+	}
+	return id, nil
+}
+
+func fieldsMatchGenericApplication(program *Program, application, definition TypeInfo) error {
+	if len(application.Fields) != len(definition.Fields) {
+		return fmt.Errorf("generic struct application %s has %d fields, definition has %d", application.Name, len(application.Fields), len(definition.Fields))
+	}
+	owner := genericStructDefKey(definition.ModulePath, definition.Name)
+	for index, definitionField := range definition.Fields {
+		applicationField := application.Fields[index]
+		expectedType, err := substitutedGenericType(program, definitionField.Type, owner, application.GenericArgs, map[TypeID]bool{})
+		if err != nil {
+			return fmt.Errorf("generic struct application %s field %s: %w", application.Name, definitionField.Name, err)
+		}
+		expectedMetadata := definitionField
+		expectedMetadata.Type = expectedType
+		if !reflect.DeepEqual(applicationField, expectedMetadata) {
+			return fmt.Errorf("generic struct application %s field %s does not match substituted definition", application.Name, definitionField.Name)
 		}
 	}
 	return nil
@@ -162,11 +430,57 @@ func validateTypeInfo(program *Program, typ TypeInfo) error {
 		if len(typ.Fields) > 0 && jsonRepresentableFields == 0 {
 			return fmt.Errorf("type %s has no JSON-representable fields", typ.Name)
 		}
+		if typ.Generic != NoType {
+			if count := len(typ.TypeParams); count != 0 {
+				return fmt.Errorf("generic struct application %s declares %d type parameters", typ.Name, count)
+			}
+			if !validTypeID(program, typ.Generic) {
+				return fmt.Errorf("generic struct application %s has invalid definition %d", typ.Name, typ.Generic)
+			}
+			definition := program.Types[typ.Generic-1]
+			if definition.Kind != TypeStruct || definition.Generic != NoType || len(definition.TypeParams) == 0 {
+				return fmt.Errorf("generic struct application %s references non-definition type %d", typ.Name, typ.Generic)
+			}
+			if len(typ.GenericArgs) != len(definition.TypeParams) {
+				return fmt.Errorf("generic struct application %s has %d arguments, definition requires %d", typ.Name, len(typ.GenericArgs), len(definition.TypeParams))
+			}
+			for _, argument := range typ.GenericArgs {
+				if !validTypeID(program, argument) {
+					return fmt.Errorf("generic struct application %s has invalid argument %d", typ.Name, argument)
+				}
+			}
+			if typ.ModulePath != definition.ModulePath || typ.Private != definition.Private {
+				return fmt.Errorf("generic struct application %s metadata does not match definition %s", typ.Name, definition.Name)
+			}
+			if err := fieldsMatchGenericApplication(program, typ, definition); err != nil {
+				return err
+			}
+		} else if len(typ.GenericArgs) != 0 {
+			return fmt.Errorf("non-generic struct %s has generic arguments", typ.Name)
+		}
 	case TypeUnion:
 		for _, member := range typ.Members {
 			if !validTypeID(program, member.Type) {
 				return fmt.Errorf("type %s union member %s has invalid type %d", typ.Name, member.Name, member.Type)
 			}
+		}
+	case TypeForeignType:
+		if typ.ForeignTarget == "" || typ.ForeignNamespace == "" || typ.ForeignSymbol == "" {
+			return fmt.Errorf("foreign type %s is missing canonical identity metadata", typ.Name)
+		}
+		if len(typ.GenericComparable) != 0 && len(typ.GenericComparable) != len(typ.GenericArgs) {
+			return fmt.Errorf("foreign type %s comparable mask has %d entries for %d arguments", typ.Name, len(typ.GenericComparable), len(typ.GenericArgs))
+		}
+		for _, referenced := range append(append([]TypeID(nil), typ.GenericArgs...), typ.Elem, typ.Key, typ.Value) {
+			if referenced != NoType && !validTypeID(program, referenced) {
+				return fmt.Errorf("foreign type %s references invalid type %d", typ.Name, referenced)
+			}
+		}
+		if typ.Key != NoType && typ.Value == NoType {
+			return fmt.Errorf("foreign type %s has map key without value", typ.Name)
+		}
+		if typ.Elem != NoType && (typ.Key != NoType || typ.Value != NoType) {
+			return fmt.Errorf("foreign type %s has contradictory element and underlying/map shapes", typ.Name)
 		}
 	case TypeFunction:
 		if typ.Variadic && len(typ.Params) == 0 {
@@ -832,6 +1146,11 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 				argTypes = functionType.Params
 			}
 		}
+		for _, typeArg := range payload.TypeArgs {
+			if !validTypeID(program, typeArg) {
+				return fmt.Errorf("foreign expression has invalid type argument %d", typeArg)
+			}
+		}
 		if len(payload.ArgABI) != argCount {
 			return fmt.Errorf("foreign expression has %d ABI parameter modes for %d args", len(payload.ArgABI), argCount)
 		}
@@ -899,6 +1218,15 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 		}
 		if !validFunctionID(program, payload.Function) {
 			return fmt.Errorf("function expression kind %d has invalid function %d", expr.Kind, payload.Function)
+		}
+		function := program.Functions[payload.Function]
+		if len(payload.TypeArgs) != len(function.TypeParams) {
+			return fmt.Errorf("function expression kind %d has %d type arguments for %s with %d parameters", expr.Kind, len(payload.TypeArgs), function.Name, len(function.TypeParams))
+		}
+		for _, argument := range payload.TypeArgs {
+			if !validTypeID(program, argument) {
+				return fmt.Errorf("function expression kind %d has invalid type argument %d", expr.Kind, argument)
+			}
 		}
 	}
 	if expr.Kind == ExprCallClosure {
@@ -1562,7 +1890,7 @@ func typesStructurallyEquivalent(program *Program, leftID TypeID, rightID TypeID
 	case TypeScalar:
 		return left.Name == right.Name
 	case TypeParam:
-		return left.ParamIndex == right.ParamIndex && left.Name == right.Name
+		return left.ParamOwner == right.ParamOwner && left.ParamIndex == right.ParamIndex
 	case TypeList, TypeSlice, TypeMaybe, TypeChannel, TypeReceiver, TypeSender, TypeReference:
 		return equivalent(left.Elem, right.Elem)
 	case TypeFixedArray:

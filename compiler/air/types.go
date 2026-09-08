@@ -66,7 +66,8 @@ type Function struct {
 	// (ADR 0031). When set, the function is emitted as `func Name[T any](...)`
 	// and its body/signature reference TypeParam-kind types. Call sites carry
 	// concrete type arguments (Expr.TypeArgs).
-	TypeParams []string
+	TypeParams     []string
+	TypeParamOwner string
 
 	// Receiver and MethodName are set for Ard impl methods. They let targets
 	// optionally expose a host-language method shape while preserving the
@@ -212,6 +213,7 @@ type TypeInfo struct {
 	// records Generic (the definition's TypeID) and GenericArgs (the type
 	// arguments), so the backend can emit it as `Def[args...]`.
 	TypeParams        []string
+	ParamOwner        string
 	ParamIndex        int
 	Generic           TypeID
 	GenericArgs       []TypeID

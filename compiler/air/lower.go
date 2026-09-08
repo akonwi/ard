@@ -43,6 +43,9 @@ func LowerModulesWithOptions(modules []checker.Module, options LowerOptions) (*P
 	if err := l.lowerAllModuleGlobals(); err != nil {
 		return nil, err
 	}
+	if err := l.typeInterner.validateComplete(); err != nil {
+		return nil, err
+	}
 	if err := Validate(&l.program); err != nil {
 		return nil, err
 	}
@@ -57,7 +60,7 @@ type lowerer struct {
 
 	moduleByPath map[string]ModuleID
 	moduleByName map[string]checker.Module
-	typeByKey    map[string]TypeID
+	typeInterner *typeInterner
 	traits       map[string]TraitID
 	impls        map[string]ImplID
 	functions    map[string]FunctionID
@@ -109,7 +112,6 @@ func newLowerer(options LowerOptions, rootCount int) *lowerer {
 		},
 		moduleByPath: map[string]ModuleID{},
 		moduleByName: map[string]checker.Module{},
-		typeByKey:    map[string]TypeID{},
 		traits:       map[string]TraitID{},
 		impls:        map[string]ImplID{},
 		functions:    map[string]FunctionID{},
@@ -131,6 +133,7 @@ func newLowerer(options LowerOptions, rootCount int) *lowerer {
 		localNamedFunctions: map[*checker.FunctionDef]FunctionID{},
 		includeTests:        options.IncludeTests,
 	}
+	l.typeInterner = newTypeInterner(&l.program)
 	if l.cacheMethodLookups {
 		l.structMethodsByOwner = map[checker.MethodOwner]map[string]*checker.FunctionDef{}
 		l.traitMethodsByOwner = map[checker.TraitMethodOwner]map[string]*checker.FunctionDef{}
@@ -488,11 +491,7 @@ func (l *lowerer) lowerGlobalByID(id GlobalID, def *checker.VariableDef) error {
 	global := l.program.Globals[id]
 	fn := Function{Module: global.Module, Name: "<global>"}
 	fl := l.newFunctionLowerer(&fn, nil, nil)
-	contextType, err := fl.contextualType(global.Type)
-	if err != nil {
-		return err
-	}
-	value, actualType, err := fl.lowerContextualExpr(def.Value, contextType)
+	value, actualType, err := fl.lowerContextualExpr(def.Value, global.Type)
 	if err != nil {
 		return err
 	}
@@ -644,13 +643,14 @@ func (l *lowerer) declareGenericFunctionDef(module ModuleID, declaration *checke
 	l.functions[concreteFunctionKey(module, declaration.Name, signature, "genericdef")] = id
 	l.genericFunctionDefs[key] = id
 	l.program.Functions = append(l.program.Functions, Function{
-		ID:         id,
-		Module:     module,
-		Name:       declaration.Name,
-		Signature:  signature,
-		TypeParams: goParams,
-		IsTest:     declaration.IsTest,
-		Private:    declaration.Private,
+		ID:             id,
+		Module:         module,
+		Name:           declaration.Name,
+		Signature:      signature,
+		TypeParams:     goParams,
+		TypeParamOwner: paramOwner,
+		IsTest:         declaration.IsTest,
+		Private:        declaration.Private,
 	})
 	l.program.Modules[module].Functions = appendUniqueFunction(l.program.Modules[module].Functions, id)
 	typeVars := make(map[string]TypeID, len(params))
@@ -1003,7 +1003,10 @@ func (fl *functionLowerer) internType(t checker.Type) (TypeID, error) {
 		if tv.Actual() != nil {
 			return fl.internType(tv.Actual())
 		}
-		return fl.l.internType(checker.Void)
+		return NoType, fmt.Errorf("unresolved generic type variable $%s", tv.Name())
+	}
+	if typ, ok := t.(*checker.StructDef); ok && len(typ.GenericParams) > 0 {
+		return fl.internStructType(typ)
 	}
 	if !typeContainsTypeVar(t) {
 		return fl.l.internType(t)
@@ -1024,100 +1027,13 @@ func (fl *functionLowerer) internResolvedType(t checker.Type) (TypeID, error) {
 		}
 		return NoType, fmt.Errorf("unresolved generic type variable $%s", tv.Name())
 	}
+	if typ, ok := t.(*checker.StructDef); ok && len(typ.GenericParams) > 0 {
+		return fl.internResolvedStructType(typ)
+	}
 	if !typeContainsTypeVar(t) {
 		return fl.l.internType(t)
 	}
 	return fl.internResolvedCompositeType(t)
-}
-
-func (fl *functionLowerer) internContextualCheckerType(t checker.Type) (TypeID, error) {
-	typeID, err := fl.internType(t)
-	if err == nil {
-		return fl.contextualType(typeID)
-	}
-	if !fl.l.typeHasUnresolvedTypeVar(t) {
-		return NoType, err
-	}
-	return fl.internWeakContextType(t)
-}
-
-func (fl *functionLowerer) internWeakContextType(t checker.Type) (TypeID, error) {
-	switch typ := t.(type) {
-	case *checker.TypeVar:
-		if id, ok := fl.typeVars[typ.Name()]; ok {
-			return id, nil
-		}
-		if typ.Actual() != nil {
-			return fl.internWeakContextType(typ.Actual())
-		}
-		return fl.l.internType(checker.Void)
-	case *checker.Maybe:
-		elem, err := fl.internWeakContextPart(typ.Of())
-		if err != nil {
-			return NoType, err
-		}
-		return fl.internMaybeType(elem), nil
-	case *checker.Result:
-		value, err := fl.internWeakContextPart(typ.Val())
-		if err != nil {
-			return NoType, err
-		}
-		errType, err := fl.internWeakContextPart(typ.Err())
-		if err != nil {
-			return NoType, err
-		}
-		return fl.internResultType(value, errType), nil
-	default:
-		return NoType, fmt.Errorf("unresolved generic type variable in contextual type %s", t.String())
-	}
-}
-
-func (fl *functionLowerer) internWeakContextPart(t checker.Type) (TypeID, error) {
-	typeID, err := fl.internType(t)
-	if err == nil {
-		return typeID, nil
-	}
-	if !fl.l.typeHasUnresolvedTypeVar(t) {
-		return NoType, err
-	}
-	return fl.l.internType(checker.Void)
-}
-
-func (fl *functionLowerer) contextualType(typeID TypeID) (TypeID, error) {
-	if !validTypeID(&fl.l.program, typeID) {
-		return typeID, nil
-	}
-	info, _ := fl.l.typeInfo(typeID)
-	switch info.Kind {
-	case TypeMaybe:
-		if validTypeID(&fl.l.program, info.Elem) {
-			return typeID, nil
-		}
-		voidID, err := fl.l.internType(checker.Void)
-		if err != nil {
-			return NoType, err
-		}
-		return fl.internMaybeType(voidID), nil
-	case TypeResult:
-		if validTypeID(&fl.l.program, info.Value) && validTypeID(&fl.l.program, info.Error) {
-			return typeID, nil
-		}
-		voidID, err := fl.l.internType(checker.Void)
-		if err != nil {
-			return NoType, err
-		}
-		value := info.Value
-		if !validTypeID(&fl.l.program, value) {
-			value = voidID
-		}
-		errType := info.Error
-		if !validTypeID(&fl.l.program, errType) {
-			errType = voidID
-		}
-		return fl.internResultType(value, errType), nil
-	default:
-		return typeID, nil
-	}
 }
 
 func (fl *functionLowerer) internStructType(typ *checker.StructDef) (TypeID, error) {
@@ -1136,10 +1052,6 @@ func (l *lowerer) internFunctionParamType(param checker.Parameter, intern func(c
 
 func (l *lowerer) internStructFieldType(fieldTypeValue checker.Type, intern func(checker.Type) (TypeID, error)) (TypeID, error) {
 	return intern(fieldTypeValue)
-}
-
-func nominalStructApplicationKey(modulePath, name string, args []TypeID) string {
-	return "struct " + modulePath + "::" + name + typeIDsKey(args)
 }
 
 func (l *lowerer) internGenericArgument(t checker.Type, intern func(checker.Type) (TypeID, error)) (TypeID, error) {
@@ -1212,23 +1124,15 @@ func (l *lowerer) internGenericArgument(t checker.Type, intern func(checker.Type
 
 func (l *lowerer) internForeignApplicationWithInterner(typ *checker.ForeignType, intern func(checker.Type) (TypeID, error)) (TypeID, error) {
 	genericArgs := make([]TypeID, len(typ.TypeArgs))
-	for i, typeArg := range typ.TypeArgs {
+	for index, typeArg := range typ.TypeArgs {
 		typeID, err := l.internGenericArgument(typeArg, intern)
 		if err != nil {
 			return NoType, err
 		}
-		genericArgs[i] = typeID
+		genericArgs[index] = typeID
 	}
-	key := "foreign:" + typ.Target + ":" + typ.Namespace + ":" + typ.Qualifier + ":" + typ.Name + typeIDsKey(genericArgs)
-	if typ.Pointer {
-		key += ":pointer"
-	}
-	if id, ok := l.typeByKey[key]; ok {
-		return id, nil
-	}
-	id := TypeID(len(l.program.Types) + 1)
-	info := TypeInfo{
-		ID:                id,
+	key := foreignNominalKey(typ, genericArgs)
+	seed := TypeInfo{
 		Kind:              TypeForeignType,
 		Name:              typ.String(),
 		ForeignTarget:     typ.Target,
@@ -1240,9 +1144,11 @@ func (l *lowerer) internForeignApplicationWithInterner(typ *checker.ForeignType,
 		GenericArgs:       genericArgs,
 		GenericComparable: typ.ComparableTypeArgs(),
 	}
-	// Reserve the ID before interning recursive shape metadata.
-	l.typeByKey[key] = id
-	l.program.Types = append(l.program.Types, info)
+	id, build, err := l.typeInterner.reserveNominal(key, seed)
+	if err != nil || !build {
+		return id, err
+	}
+	info := seed
 	shape := typ
 	if typ.Pointer {
 		if value := typ.ValueForm(); value != nil {
@@ -1250,181 +1156,156 @@ func (l *lowerer) internForeignApplicationWithInterner(typ *checker.ForeignType,
 		}
 	}
 	if shape.Underlying != nil {
-		underlying, err := l.internGenericArgument(shape.Underlying, intern)
-		if err != nil {
-			return NoType, err
+		underlying, shapeErr := l.internGenericArgument(shape.Underlying, intern)
+		if shapeErr != nil {
+			return NoType, l.typeInterner.failNominal(key, shapeErr)
 		}
 		info.Value = underlying
 	}
 	if shape.MapKey != nil {
-		mapKey, err := l.internGenericArgument(shape.MapKey, intern)
-		if err != nil {
-			return NoType, err
+		mapKey, shapeErr := l.internGenericArgument(shape.MapKey, intern)
+		if shapeErr != nil {
+			return NoType, l.typeInterner.failNominal(key, shapeErr)
 		}
 		info.Key = mapKey
 	}
 	if shape.MapValue != nil {
-		mapValue, err := l.internGenericArgument(shape.MapValue, intern)
-		if err != nil {
-			return NoType, err
+		mapValue, shapeErr := l.internGenericArgument(shape.MapValue, intern)
+		if shapeErr != nil {
+			return NoType, l.typeInterner.failNominal(key, shapeErr)
 		}
 		info.Value = mapValue
 	}
 	if shape.Elem != nil {
-		elem, err := l.internGenericArgument(shape.Elem, intern)
-		if err != nil {
-			return NoType, err
+		elem, shapeErr := l.internGenericArgument(shape.Elem, intern)
+		if shapeErr != nil {
+			return NoType, l.typeInterner.failNominal(key, shapeErr)
 		}
 		info.Elem = elem
 	}
-	l.program.Types[id-1] = info
-	return id, nil
+	return l.typeInterner.completeNominal(key, info)
 }
 
 func (l *lowerer) internStructApplicationWithInterner(typ *checker.StructDef, intern func(checker.Type) (TypeID, error)) (TypeID, error) {
 	genericArgs := make([]TypeID, len(typ.TypeArgs))
-	for i, typeArg := range typ.TypeArgs {
+	for index, typeArg := range typ.TypeArgs {
 		typeID, err := l.internGenericArgument(typeArg, intern)
 		if err != nil {
 			return NoType, err
 		}
-		genericArgs[i] = typeID
+		genericArgs[index] = typeID
 	}
-	key := nominalStructApplicationKey(typ.ModulePath, typ.Name, genericArgs)
-	if id, ok := l.typeByKey[key]; ok {
-		return id, nil
+
+	definition := l.lookupGenericStructDef(typ.ModulePath, typ.Name)
+	if definition == nil {
+		return NoType, fmt.Errorf("generic struct definition not found for %s", typ.Name)
 	}
-	defID, ok := l.genericStructDefs[genericStructDefKey(typ.ModulePath, typ.Name)]
+	defID, ok := l.genericStructDefs[genericStructDefKey(definition.ModulePath, definition.Name)]
 	if !ok {
-		genDef := l.lookupGenericStructDef(typ.ModulePath, typ.Name)
-		if genDef == nil {
-			return NoType, fmt.Errorf("generic struct definition not found for %s", typ.Name)
-		}
-		interned, err := l.internGenericStructDef(genDef)
+		interned, err := l.internGenericStructDef(definition)
 		if err != nil {
 			return NoType, err
 		}
 		defID = interned
 	}
+
+	key := applicationNominalKey(TypeStruct, defID, genericArgs)
 	parts := make([]string, len(genericArgs))
-	for i, typeID := range genericArgs {
-		parts[i] = l.typeName(typeID)
+	for index, typeID := range genericArgs {
+		parts[index] = l.typeName(typeID)
 	}
-	info := TypeInfo{
+	seed := TypeInfo{
 		Kind:        TypeStruct,
-		Name:        typ.Name + "<" + strings.Join(parts, ",") + ">",
-		ModulePath:  typ.ModulePath,
-		Private:     typ.Private,
+		Name:        definition.Name + "<" + strings.Join(parts, ",") + ">",
+		ModulePath:  definition.ModulePath,
+		Private:     definition.Private,
 		Generic:     defID,
 		GenericArgs: append([]TypeID(nil), genericArgs...),
 	}
-	id := TypeID(len(l.program.Types) + 1)
-	info.ID = id
-	idx := len(l.program.Types)
-	l.typeByKey[key] = id
-	l.program.Types = append(l.program.Types, info)
+	id, build, err := l.typeInterner.reserveNominal(key, seed)
+	if err != nil {
+		return NoType, err
+	}
+	if !build {
+		return id, nil
+	}
 
 	structFields := checker.StructFields(typ)
 	fields := sortedFieldNames(structFields)
+	info := seed
 	info.Fields = make([]FieldInfo, len(fields))
-	for i, fieldName := range fields {
-		fieldType, err := l.internStructFieldType(structFields[fieldName], intern)
-		if err != nil {
-			return NoType, err
+	for index, fieldName := range fields {
+		fieldType, fieldErr := l.internStructFieldType(structFields[fieldName], intern)
+		if fieldErr != nil {
+			return NoType, l.typeInterner.failNominal(key, fieldErr)
 		}
-		info.Fields[i] = lowerStructFieldInfo(typ, fieldName, fieldType, i)
+		info.Fields[index] = lowerStructFieldInfo(typ, fieldName, fieldType, index)
 	}
-	l.program.Types[idx] = info
-	return id, nil
+	return l.typeInterner.completeNominal(key, info)
 }
 
 func (fl *functionLowerer) internStructTypeWithInterner(typ *checker.StructDef, intern func(checker.Type) (TypeID, error)) (TypeID, error) {
 	if len(typ.TypeArgs) > 0 {
 		return fl.l.internStructApplicationWithInterner(typ, intern)
 	}
+	if len(typ.GenericParams) == 0 {
+		return fl.l.internType(typ)
+	}
+
 	genericArgs := make([]TypeID, 0, len(typ.GenericParams))
-	if len(typ.TypeArgs) > 0 {
-		for _, typeArg := range typ.TypeArgs {
-			typeID, err := intern(typeArg)
-			if err != nil {
-				return NoType, err
-			}
-			genericArgs = append(genericArgs, typeID)
-		}
-	} else if len(typ.GenericParams) > 0 {
-		// The checker represents an inferred generic self type (for example,
-		// `let box = self` inside `impl Box<$T>`) with generic parameters but
-		// no explicit type arguments. Recover the contextual self-instantiation
-		// from the function's type variables instead of interning `Box[]`.
-		for _, param := range typ.GenericParams {
-			typeID, ok := fl.typeVars[param]
-			if !ok {
-				return NoType, fmt.Errorf("cannot resolve generic argument %s for %s", param, typ.Name)
-			}
-			genericArgs = append(genericArgs, typeID)
-		}
-	}
-	name := typ.Name
-	if len(genericArgs) > 0 {
-		parts := make([]string, len(genericArgs))
-		for i, typeID := range genericArgs {
-			parts[i] = fl.l.typeName(typeID)
-		}
-		name += "<" + strings.Join(parts, ",") + ">"
-	}
-	key := "struct " + typ.ModulePath + "::" + typ.Name
-	if len(genericArgs) > 0 {
-		// Generic identity follows the ordered AIR argument IDs, not their
-		// display names; distinct types can legitimately render the same name.
-		key += typeIDsKey(genericArgs)
-	}
-	if id, ok := fl.l.typeByKey[key]; ok {
-		return id, nil
-	}
-
-	info := TypeInfo{Kind: TypeStruct, ModulePath: typ.ModulePath, Private: typ.Private}
-	// Resolve the generic definition before reserving the application. During
-	// definition lowering the definition ID is already registered, so a
-	// recursive application can safely reserve itself below.
-	if len(typ.GenericParams) > 0 {
-		defID, ok := fl.l.genericStructDefs[genericStructDefKey(typ.ModulePath, typ.Name)]
+	for _, param := range typ.GenericParams {
+		typeID, ok := fl.typeVars[param]
 		if !ok {
-			if genDef := fl.l.lookupGenericStructDef(typ.ModulePath, typ.Name); genDef != nil {
-				if interned, err := fl.l.internGenericStructDef(genDef); err == nil {
-					defID, ok = interned, true
-				} else {
-					return NoType, err
-				}
-			}
+			return NoType, fmt.Errorf("cannot resolve generic argument %s for %s", param, typ.Name)
 		}
-		if ok && len(genericArgs) > 0 {
-			info.Generic = defID
-			info.GenericArgs = append([]TypeID(nil), genericArgs...)
-		}
+		genericArgs = append(genericArgs, typeID)
 	}
-
-	// Reserve the nominal application before interning its fields. Recursive
-	// callback or method signatures then resolve to this placeholder instead of
-	// expanding the same application indefinitely.
-	id := TypeID(len(fl.l.program.Types) + 1)
-	info.ID = id
-	info.Name = name
-	idx := len(fl.l.program.Types)
-	fl.l.typeByKey[key] = id
-	fl.l.program.Types = append(fl.l.program.Types, info)
-
-	structFields := checker.StructFields(typ)
-	fields := sortedFieldNames(structFields)
-	info.Fields = make([]FieldInfo, len(fields))
-	for i, fieldName := range fields {
-		fieldType, err := fl.l.internStructFieldType(structFields[fieldName], intern)
+	definition := fl.l.lookupGenericStructDef(typ.ModulePath, typ.Name)
+	if definition == nil {
+		return NoType, fmt.Errorf("generic struct definition not found for %s", typ.Name)
+	}
+	defID, ok := fl.l.genericStructDefs[genericStructDefKey(definition.ModulePath, definition.Name)]
+	if !ok {
+		interned, err := fl.l.internGenericStructDef(definition)
 		if err != nil {
 			return NoType, err
 		}
-		info.Fields[i] = lowerStructFieldInfo(typ, fieldName, fieldType, i)
+		defID = interned
 	}
-	fl.l.program.Types[idx] = info
-	return id, nil
+
+	parts := make([]string, len(genericArgs))
+	for index, typeID := range genericArgs {
+		parts[index] = fl.l.typeName(typeID)
+	}
+	key := applicationNominalKey(TypeStruct, defID, genericArgs)
+	seed := TypeInfo{
+		Kind:        TypeStruct,
+		Name:        definition.Name + "<" + strings.Join(parts, ",") + ">",
+		ModulePath:  definition.ModulePath,
+		Private:     definition.Private,
+		Generic:     defID,
+		GenericArgs: append([]TypeID(nil), genericArgs...),
+	}
+	id, build, err := fl.l.typeInterner.reserveNominal(key, seed)
+	if err != nil {
+		return NoType, err
+	}
+	if !build {
+		return id, nil
+	}
+
+	structFields := checker.StructFields(typ)
+	fields := sortedFieldNames(structFields)
+	info := seed
+	info.Fields = make([]FieldInfo, len(fields))
+	for index, fieldName := range fields {
+		fieldType, fieldErr := fl.l.internStructFieldType(structFields[fieldName], intern)
+		if fieldErr != nil {
+			return NoType, fl.l.typeInterner.failNominal(key, fieldErr)
+		}
+		info.Fields[index] = lowerStructFieldInfo(typ, fieldName, fieldType, index)
+	}
+	return fl.l.typeInterner.completeNominal(key, info)
 }
 
 func (fl *functionLowerer) internResolvedCompositeType(t checker.Type) (TypeID, error) {
@@ -2142,10 +2023,10 @@ func (l *lowerer) lowerInstanceMethodFunction(id FunctionID, def *checker.Functi
 // own type parameters (e.g. `Chan[T]`), used as the receiver type of a
 // generic method definition (ADR 0031).
 func (l *lowerer) genericSelfInstance(defID TypeID) (TypeID, error) {
-	if !validTypeID(&l.program, defID) {
-		return NoType, fmt.Errorf("invalid generic struct definition %d", defID)
+	def, ok := l.typeInfo(defID)
+	if !ok {
+		return NoType, fmt.Errorf("generic struct definition %d is invalid or incomplete", defID)
 	}
-	def := l.program.Types[defID-1]
 	paramOwner := genericStructDefKey(def.ModulePath, def.Name)
 	args := make([]TypeID, len(def.TypeParams))
 	for i, name := range def.TypeParams {
@@ -2155,13 +2036,8 @@ func (l *lowerer) genericSelfInstance(defID TypeID) (TypeID, error) {
 		}
 		args[i] = tp
 	}
-	key := nominalStructApplicationKey(def.ModulePath, def.Name, args)
-	if id, ok := l.typeByKey[key]; ok {
-		return id, nil
-	}
-	id := TypeID(len(l.program.Types) + 1)
+	key := applicationNominalKey(TypeStruct, defID, args)
 	info := TypeInfo{
-		ID:          id,
 		Kind:        TypeStruct,
 		Name:        def.Name + "<self>",
 		ModulePath:  def.ModulePath,
@@ -2170,9 +2046,11 @@ func (l *lowerer) genericSelfInstance(defID TypeID) (TypeID, error) {
 		Generic:     defID,
 		GenericArgs: args,
 	}
-	l.typeByKey[key] = id
-	l.program.Types = append(l.program.Types, info)
-	return id, nil
+	id, build, err := l.typeInterner.reserveNominal(key, info)
+	if err != nil || !build {
+		return id, err
+	}
+	return l.typeInterner.completeNominal(key, info)
 }
 
 // declareGenericInstanceMethodFunction lowers a method on a generic struct once
@@ -2234,7 +2112,10 @@ func (fl *functionLowerer) declareGenericMethodFunction(module ModuleID, instanc
 		return NoFunction, nil, fmt.Errorf("generic method receiver %d is not a generic instantiation", instanceType)
 	}
 	defID := info.Generic
-	structDef := fl.l.program.Types[defID-1]
+	structDef, ok := fl.l.typeInfo(defID)
+	if !ok {
+		return NoFunction, nil, fmt.Errorf("generic method definition %d is invalid or incomplete", defID)
+	}
 	paramNames := structDef.TypeParams
 	typeArgs := info.GenericArgs
 	if id, ok := fl.l.genericMethodDefs[key]; ok {
@@ -2296,6 +2177,7 @@ func (fl *functionLowerer) declareGenericMethodFunction(module ModuleID, instanc
 		RequiredGoMethodName: method.RequiredGoMethodName,
 		Signature:            signature,
 		TypeParams:           paramNames,
+		TypeParamOwner:       paramOwner,
 	})
 	fl.l.program.Modules[module].Functions = appendUniqueFunction(fl.l.program.Modules[module].Functions, id)
 	typeVars := make(map[string]TypeID, len(paramNames))
@@ -2331,7 +2213,7 @@ func (fl *functionLowerer) spreadElementTypeForCall(call *checker.FunctionCall) 
 	if definition == nil || len(definition.Parameters) == 0 || !definition.Parameters[len(definition.Parameters)-1].Variadic {
 		return NoType, fmt.Errorf("spread call is missing a variadic parameter")
 	}
-	return fl.internContextualCheckerType(definition.Parameters[len(definition.Parameters)-1].Type)
+	return fl.internResolvedType(definition.Parameters[len(definition.Parameters)-1].Type)
 }
 
 func (fl *functionLowerer) spreadCallableTypeForCall(call *checker.FunctionCall) (TypeID, error) {
@@ -2342,7 +2224,7 @@ func (fl *functionLowerer) spreadCallableTypeForCall(call *checker.FunctionCall)
 	if definition == nil {
 		return NoType, fmt.Errorf("spread call is missing its callable definition")
 	}
-	return fl.internContextualCheckerType(definition)
+	return fl.internResolvedType(definition)
 }
 
 func typeArgsForCallWithInterner(call *checker.FunctionCall, intern func(checker.Type) (TypeID, error)) ([]TypeID, error) {
@@ -2411,14 +2293,9 @@ func goifyTypeParamName(name string) string {
 }
 
 func (l *lowerer) internTypeParam(owner, name string, idx int) (TypeID, error) {
-	key := fmt.Sprintf("typeparam:%s:%d", owner, idx)
-	if id, ok := l.typeByKey[key]; ok {
-		return id, nil
-	}
-	id := TypeID(len(l.program.Types) + 1)
-	l.typeByKey[key] = id
-	l.program.Types = append(l.program.Types, TypeInfo{ID: id, Kind: TypeParam, Name: goifyTypeParamName(name), ParamIndex: idx})
-	return id, nil
+	key := typeParamKey{owner: owner, index: idx}
+	info := TypeInfo{Kind: TypeParam, Name: goifyTypeParamName(name), ParamOwner: owner, ParamIndex: idx}
+	return l.typeInterner.internTypeParam(key, info)
 }
 
 // internGenericStructDef interns the generic definition of a struct (fields
@@ -2426,12 +2303,12 @@ func (l *lowerer) internTypeParam(owner, name string, idx int) (TypeID, error) {
 // its declaring module so the backend emits and qualifies it (ADR 0031).
 func (l *lowerer) internGenericStructDef(typ *checker.StructDef) (TypeID, error) {
 	key := genericStructDefKey(typ.ModulePath, typ.Name)
-	if id, ok := l.genericStructDefs[key]; ok {
-		return id, nil
+	nominalKey := declarationNominalKey(TypeStruct, typ.ModulePath, typ.Name)
+	seed := TypeInfo{Kind: TypeStruct, Name: typ.Name, ModulePath: typ.ModulePath, Private: typ.Private}
+	id, build, err := l.typeInterner.reserveNominal(nominalKey, seed)
+	if err != nil || !build {
+		return id, err
 	}
-	id := TypeID(len(l.program.Types) + 1)
-	idx := len(l.program.Types)
-	l.program.Types = append(l.program.Types, TypeInfo{ID: id, Name: typ.Name})
 	l.genericStructDefs[key] = id
 	goParams := make([]string, len(typ.GenericParams))
 	params := map[string]int{}
@@ -2452,13 +2329,15 @@ func (l *lowerer) internGenericStructDef(typ *checker.StructDef) (TypeID, error)
 		if err != nil {
 			l.defParams = prev
 			l.defParamOwner = prevOwner
-			return NoType, err
+			return NoType, l.typeInterner.failNominal(nominalKey, err)
 		}
 		info.Fields[i] = lowerStructFieldInfo(typ, name, ftid, i)
 	}
 	l.defParams = prev
 	l.defParamOwner = prevOwner
-	l.program.Types[idx] = info
+	if _, err := l.typeInterner.completeNominal(nominalKey, info); err != nil {
+		return NoType, err
+	}
 	if modID, ok := l.moduleByPath[typ.ModulePath]; ok {
 		l.program.Modules[modID].Types = appendUniqueType(l.program.Modules[modID].Types, id)
 	}
@@ -2552,273 +2431,66 @@ func (l *lowerer) internType(t checker.Type) (TypeID, error) {
 		}
 		return l.internSyntheticType("mut "+l.typeName(elem), TypeInfo{Kind: TypeReference, Elem: elem})
 	}
-	if typ, ok := t.(*checker.StructDef); ok && len(typ.TypeArgs) > 0 {
-		return l.internStructApplicationWithInterner(typ, l.internType)
+	if typ, ok := t.(*checker.StructDef); ok {
+		if len(typ.TypeArgs) > 0 {
+			return l.internStructApplicationWithInterner(typ, l.internType)
+		}
+		if len(typ.GenericParams) == 0 {
+			if canonical := l.lookupStructDef(typ.ModulePath, typ.Name, false); canonical != nil {
+				typ = canonical
+			}
+			return l.internNominalStruct(typ, l.internType)
+		}
+		return l.internGenericStructDef(typ)
 	}
-	if typ, ok := t.(*checker.ForeignType); ok && len(typ.TypeArgs) > 0 {
+	if typ, ok := t.(*checker.Enum); ok {
+		return l.internNominalEnum(typ)
+	}
+	if typ, ok := t.(*checker.Union); ok {
+		return l.internNominalUnion(typ, l.internType)
+	}
+	if typ, ok := t.(*checker.ForeignType); ok {
 		return l.internForeignApplicationWithInterner(typ, l.internType)
 	}
-	// Generic checker copies can contain distinct, temporarily incomplete
-	// representations of an otherwise ordinary named struct. Resolve those
-	// copies back to the declaration owned by the checked module before
-	// interning so one Ard nominal type cannot become multiple AIR identities.
-	if typ, ok := t.(*checker.StructDef); ok && len(typ.GenericParams) == 0 && len(typ.TypeArgs) == 0 {
-		if canonical := l.lookupStructDef(typ.ModulePath, typ.Name, false); canonical != nil {
-			t = canonical
-		}
+	if id, structural, err := l.internCheckerStructuralType(t); structural {
+		return id, err
 	}
-	key := airTypeKey(t)
-	// Within a generic definition, only types that actually reference a type
-	// parameter need a distinct key; non-generic types (e.g. a plain struct used
-	// in the body) must continue to share their concrete interned entry.
-	if l.defParams != nil && typeContainsTypeVar(t) {
-		key = "gdef:" + l.defParamOwner + ":" + key
-	}
-	name := airTypeName(t)
-	if id, ok := l.typeByKey[key]; ok {
-		return id, nil
-	}
+	return l.internAtomicOrTraitType(t)
+}
 
-	id := TypeID(len(l.program.Types) + 1)
-	l.typeByKey[key] = id
-	l.program.Types = append(l.program.Types, TypeInfo{ID: id, Name: name})
-	idx := len(l.program.Types) - 1
-	info := TypeInfo{ID: id, Name: name}
-
-	switch typ := t.(type) {
-	case *checker.List:
-		elem, err := l.internType(typ.Of())
+func (l *lowerer) internAtomicOrTraitType(t checker.Type) (TypeID, error) {
+	if trait, ok := t.(*checker.Trait); ok {
+		traitID, err := l.internTrait(trait)
 		if err != nil {
 			return NoType, err
 		}
-		info.Kind = TypeList
-		info.Elem = elem
-	case *checker.Slice:
-		elem, err := l.internType(typ.Of())
-		if err != nil {
-			return NoType, err
-		}
-		info.Kind = TypeSlice
-		info.Elem = elem
-	case *checker.FixedArray:
-		elem, err := l.internType(typ.Of())
-		if err != nil {
-			return NoType, err
-		}
-		info.Kind = TypeFixedArray
-		info.Elem = elem
-		info.Length = typ.Len()
-	case *checker.Chan:
-		elem, err := l.internType(typ.Of())
-		if err != nil {
-			return NoType, err
-		}
-		info.Kind = TypeChannel
-		info.Elem = elem
-	case *checker.Receiver:
-		elem, err := l.internType(typ.Of())
-		if err != nil {
-			return NoType, err
-		}
-		info.Kind = TypeReceiver
-		info.Elem = elem
-	case *checker.Sender:
-		elem, err := l.internType(typ.Of())
-		if err != nil {
-			return NoType, err
-		}
-		info.Kind = TypeSender
-		info.Elem = elem
-	case *checker.Map:
-		key, err := l.internType(typ.Key())
-		if err != nil {
-			return NoType, err
-		}
-		value, err := l.internType(typ.Value())
-		if err != nil {
-			return NoType, err
-		}
-		info.Kind = TypeMap
-		info.Key = key
-		info.Value = value
-	case *checker.Maybe:
-		elem, err := l.internType(typ.Of())
-		if err != nil {
-			return NoType, err
-		}
-		info.Kind = TypeMaybe
-		info.Elem = elem
-	case *checker.Result:
-		value, err := l.internType(typ.Val())
-		if err != nil {
-			return NoType, err
-		}
-		errType, err := l.internType(typ.Err())
-		if err != nil {
-			return NoType, err
-		}
-		info.Kind = TypeResult
-		info.Value = value
-		info.Error = errType
-	case *checker.StructDef:
-		info.Private = typ.Private
-		info.Kind = TypeStruct
-		structFields := checker.StructFields(typ)
-		fields := sortedFieldNames(structFields)
-		info.Fields = make([]FieldInfo, len(fields))
-		for i, name := range fields {
-			fieldType, err := l.internStructFieldType(structFields[name], l.internType)
-			if err != nil {
-				return NoType, err
-			}
-			info.Fields[i] = lowerStructFieldInfo(typ, name, fieldType, i)
-		}
-		// Tag concrete instantiations of a generic struct (ADR 0031). The
-		// generic definition is interned lazily from the checker module scope,
-		// since the declaring module's type loop may not have run.
-		if len(typ.GenericParams) > 0 {
-			defID, ok := l.genericStructDefs[genericStructDefKey(typ.ModulePath, typ.Name)]
-			if !ok {
-				if genDef := l.lookupGenericStructDef(typ.ModulePath, typ.Name); genDef != nil {
-					interned, err := l.internGenericStructDef(genDef)
-					if err != nil {
-						return NoType, err
-					}
-					defID, ok = interned, true
-				}
-			}
-			if ok {
-				info.Generic = defID
-				info.GenericArgs = make([]TypeID, 0, len(typ.TypeArgs))
-				for _, arg := range typ.TypeArgs {
-					argID, err := l.internType(arg)
-					if err != nil {
-						return NoType, err
-					}
-					info.GenericArgs = append(info.GenericArgs, argID)
-				}
-			}
-		}
-	case *checker.Enum:
-		info.Kind = TypeEnum
-		info.Private = typ.Private
-		info.EnumOpen = typ.Open
-		info.Variants = make([]VariantInfo, len(typ.Values))
-		for i, variant := range typ.Values {
-			info.Variants[i] = VariantInfo{Name: variant.Name, Discriminant: variant.Value}
-		}
-	case *checker.Union:
-		info.Kind = TypeUnion
-		info.Private = typ.Private
-		info.Members = make([]UnionMember, len(typ.Types))
-		for i, member := range typ.Types {
-			memberID, err := l.internType(member)
-			if err != nil {
-				return NoType, err
-			}
-			info.Members[i] = UnionMember{Type: memberID, Tag: uint32(i), Name: member.String()}
-		}
-	case *checker.ForeignType:
-		info.Kind = TypeForeignType
-		info.Name = typ.String()
-		info.ForeignTarget = typ.Target
-		info.ForeignNamespace = typ.Namespace
-		info.ForeignQualifier = typ.Qualifier
-		info.ForeignSymbol = typ.Name
-		info.ForeignPointer = typ.Pointer
-		info.ForeignInterface = typ.Interface
-		shape := typ
-		if typ.Pointer {
-			if value := typ.ValueForm(); value != nil {
-				shape = value
-			}
-		}
-		for _, arg := range typ.TypeArgs {
-			argID, err := l.internType(arg)
-			if err != nil {
-				return NoType, err
-			}
-			info.GenericArgs = append(info.GenericArgs, argID)
-		}
-		if shape.Underlying != nil {
-			underlying, err := l.internType(shape.Underlying)
-			if err != nil {
-				return NoType, err
-			}
-			info.Value = underlying
-		}
-		if shape.MapKey != nil {
-			key, err := l.internType(shape.MapKey)
-			if err != nil {
-				return NoType, err
-			}
-			info.Key = key
-		}
-		if shape.Elem != nil {
-			elem, err := l.internType(shape.Elem)
-			if err != nil {
-				return NoType, err
-			}
-			info.Elem = elem
-		}
-		if shape.MapValue != nil {
-			value, err := l.internType(shape.MapValue)
-			if err != nil {
-				return NoType, err
-			}
-			info.Value = value
-		}
-	case *checker.FunctionDef:
-		info.Kind = TypeFunction
-		info.Variadic = len(typ.Parameters) > 0 && typ.Parameters[len(typ.Parameters)-1].Variadic
-		for _, param := range typ.Parameters {
-			paramType, err := l.internFunctionParamType(param, l.internType)
-			if err != nil {
-				return NoType, err
-			}
-			info.Params = append(info.Params, paramType)
-		}
-		returnType, err := l.internType(typ.ReturnType)
-		if err != nil {
-			return NoType, err
-		}
-		info.Return = returnType
-	case *checker.Trait:
-		traitID, err := l.internTrait(typ)
-		if err != nil {
-			return NoType, err
-		}
-		info.Kind = TypeTraitObject
-		info.Trait = traitID
+		info := TypeInfo{Kind: TypeTraitObject, Name: trait.String(), Trait: traitID}
+		return l.typeInterner.internTraitObject(traitID, info)
+	}
+	info := TypeInfo{Name: airTypeName(t)}
+	switch t {
+	case checker.Void:
+		info.Kind = TypeVoid
+	case checker.Int:
+		info.Kind = TypeInt
+	case checker.Int8, checker.Int16, checker.Int32, checker.Int64, checker.Uint, checker.Uint8, checker.Uint16, checker.Uint32, checker.Uint64, checker.Uintptr, checker.Float32:
+		info.Kind = TypeScalar
+	case checker.Float64:
+		info.Kind = TypeFloat64
+	case checker.Bool:
+		info.Kind = TypeBool
+	case checker.Byte:
+		info.Kind = TypeByte
+	case checker.Rune:
+		info.Kind = TypeRune
+	case checker.Str:
+		info.Kind = TypeStr
+	case checker.Any:
+		info.Kind = TypeAny
 	default:
-		switch t {
-		case checker.Void:
-			info.Kind = TypeVoid
-		case checker.Int:
-			info.Kind = TypeInt
-		case checker.Int8, checker.Int16, checker.Int32, checker.Int64, checker.Uint, checker.Uint8, checker.Uint16, checker.Uint32, checker.Uint64, checker.Uintptr, checker.Float32:
-			info.Kind = TypeScalar
-			info.Name = t.String()
-		case checker.Float64:
-			info.Kind = TypeFloat64
-		case checker.Bool:
-			info.Kind = TypeBool
-		case checker.Byte:
-			info.Kind = TypeByte
-		case checker.Rune:
-			info.Kind = TypeRune
-		case checker.Str:
-			info.Kind = TypeStr
-		case checker.Any:
-			info.Kind = TypeAny
-		default:
-			return NoType, fmt.Errorf("unsupported AIR type %T (%s)", t, t.String())
-		}
+		return NoType, fmt.Errorf("unsupported AIR type %T (%s)", t, t.String())
 	}
-
-	info.ModulePath = l.typeOwnerPath(t)
-	l.program.Types[idx] = info
-	return id, nil
+	return l.typeInterner.internAtomic(t, info)
 }
 
 func (l *lowerer) methodReceiverType(owner TypeID, mutates bool) (TypeID, error) {
@@ -2831,91 +2503,25 @@ func (l *lowerer) methodReceiverType(owner TypeID, mutates bool) (TypeID, error)
 	return l.internSyntheticType("mut "+l.typeName(owner), TypeInfo{Kind: TypeReference, Elem: owner})
 }
 
-func (l *lowerer) internSyntheticType(name string, info TypeInfo) (TypeID, error) {
-	key := syntheticTypeKey(name, info)
-	if id, ok := l.typeByKey[key]; ok {
-		return id, nil
-	}
-	id := TypeID(len(l.program.Types) + 1)
-	info.ID = id
-	info.Name = name
-	l.typeByKey[key] = id
-	l.program.Types = append(l.program.Types, info)
-	return id, nil
-}
-
-func syntheticTypeKey(name string, info TypeInfo) string {
-	switch info.Kind {
-	case TypeList:
-		return fmt.Sprintf("list:%d", info.Elem)
-	case TypeSlice:
-		return fmt.Sprintf("slice:%d", info.Elem)
-	case TypeReference:
-		return fmt.Sprintf("reference:%d", info.Elem)
-	case TypeFixedArray:
-		return fmt.Sprintf("fixed-array:%d:%d", info.Elem, info.Length)
-	case TypeChannel:
-		return fmt.Sprintf("channel:%d", info.Elem)
-	case TypeReceiver:
-		return fmt.Sprintf("receiver:%d", info.Elem)
-	case TypeSender:
-		return fmt.Sprintf("sender:%d", info.Elem)
-	case TypeMap:
-		return fmt.Sprintf("map:%d:%d", info.Key, info.Value)
-	case TypeMaybe:
-		return fmt.Sprintf("maybe:%d", info.Elem)
-	case TypeResult:
-		return fmt.Sprintf("result:%d:%d", info.Value, info.Error)
-	case TypeFunction:
-		parts := make([]string, len(info.Params))
-		for i, param := range info.Params {
-			parts[i] = fmt.Sprintf("%d", param)
-		}
-		return fmt.Sprintf("fn:%t:(%s)->%d", info.Variadic, strings.Join(parts, ","), info.Return)
-	default:
-		return "synthetic:" + name
-	}
-}
-
-func (l *lowerer) typeOwnerPath(t checker.Type) string {
-	if ref, ok := t.(*checker.MutableRef); ok {
-		return l.typeOwnerPath(ref.Of())
-	}
-	var name string
-	switch typ := t.(type) {
-	case *checker.StructDef:
-		if typ.ModulePath != "" {
-			return typ.ModulePath
-		}
-		name = typ.Name
-	case *checker.Enum:
-		if typ.ModulePath != "" {
-			return typ.ModulePath
-		}
-		name = typ.Name
-	case *checker.Union:
-		if typ.ModulePath != "" {
-			return typ.ModulePath
-		}
-		name = typ.Name
-	default:
-		return ""
-	}
-	for _, module := range sortedModules(l.moduleByName) {
-		sym := module.Get(name)
-		if sym.Type == t {
-			return module.Path()
-		}
-	}
-	return ""
+func (l *lowerer) internSyntheticType(_ string, info TypeInfo) (TypeID, error) {
+	return l.typeInterner.internStructural(info)
 }
 
 func (l *lowerer) typeName(id TypeID) string {
-	info, ok := l.typeInfo(id)
-	if !ok {
+	if l.typeInterner == nil {
+		// Some isolated package tests construct finalized lowerer fixtures without
+		// lowering lifecycle state. Such fixtures cannot contain reservations.
+		info, ok := l.typeInfo(id)
+		if !ok {
+			return fmt.Sprintf("<invalid:%d>", id)
+		}
+		return info.Name
+	}
+	name, err := l.typeInterner.displayName(id)
+	if err != nil {
 		return fmt.Sprintf("<invalid:%d>", id)
 	}
-	return info.Name
+	return name
 }
 
 func (l *lowerer) internTrait(trait *checker.Trait) (TraitID, error) {
@@ -3176,129 +2782,6 @@ func airTypeName(t checker.Type) string {
 	return t.String()
 }
 
-func airTypeKey(t checker.Type) string {
-	return airTypeKeySeen(t, map[checker.Type]struct{}{})
-}
-
-func airTypeKeySeen(t checker.Type, seen map[checker.Type]struct{}) string {
-	if t == nil {
-		return "<nil>"
-	}
-	if tv, ok := t.(*checker.TypeVar); ok && tv.Actual() != nil {
-		return airTypeKeySeen(tv.Actual(), seen)
-	}
-	if _, ok := seen[t]; ok {
-		return t.String()
-	}
-	seen[t] = struct{}{}
-	switch typ := t.(type) {
-	case *checker.List:
-		return "list<" + airTypeKeySeen(typ.Of(), seen) + ">"
-	case *checker.Slice:
-		return "slice<" + airTypeKeySeen(typ.Of(), seen) + ">"
-	case *checker.FixedArray:
-		return fmt.Sprintf("fixed-array<%s;%d>", airTypeKeySeen(typ.Of(), seen), typ.Len())
-	case *checker.Chan:
-		return "channel<" + airTypeKeySeen(typ.Of(), seen) + ">"
-	case *checker.Receiver:
-		return "receiver<" + airTypeKeySeen(typ.Of(), seen) + ">"
-	case *checker.Sender:
-		return "sender<" + airTypeKeySeen(typ.Of(), seen) + ">"
-	case *checker.Map:
-		return "map<" + airTypeKeySeen(typ.Key(), seen) + "," + airTypeKeySeen(typ.Value(), seen) + ">"
-	case *checker.Maybe:
-		return "maybe<" + airTypeKeySeen(typ.Of(), seen) + ">"
-	case *checker.Result:
-		return "result<" + airTypeKeySeen(typ.Val(), seen) + "," + airTypeKeySeen(typ.Err(), seen) + ">"
-	case *checker.MutableRef:
-		return "mut<" + airTypeKeySeen(typ.Of(), seen) + ">"
-	case *checker.StructDef:
-		return airStructKeySeen(typ, seen)
-	case *checker.Enum:
-		return airEnumKey(typ)
-	case *checker.Union:
-		return airUnionKeySeen(typ, seen)
-	case *checker.FunctionDef:
-		return airFunctionTypeKeySeen(typ.Parameters, typ.ReturnType, seen)
-	case *checker.Trait:
-		return "trait " + checkerTraitKey(typ)
-	default:
-		return t.String()
-	}
-}
-
-func airStructKey(typ *checker.StructDef) string {
-	return airStructKeySeen(typ, map[checker.Type]struct{}{})
-}
-
-func airStructKeySeen(typ *checker.StructDef, seen map[checker.Type]struct{}) string {
-	definition := checker.StructDefinition(typ)
-	key := "struct " + definition.ModulePath + "::" + definition.Name
-	if len(typ.TypeArgs) > 0 {
-		key += "<"
-		for i, typeArg := range typ.TypeArgs {
-			if i > 0 {
-				key += ","
-			}
-			key += airTypeKeySeen(typeArg, seen)
-		}
-		key += ">"
-	}
-	return key
-}
-
-func airEnumKey(typ *checker.Enum) string {
-	key := "enum " + typ.ModulePath + "::" + typ.Name + "{"
-	for i, variant := range typ.Values {
-		if i > 0 {
-			key += ","
-		}
-		key += variant.Name
-	}
-	key += "}"
-	return key
-}
-
-func airUnionKey(typ *checker.Union) string {
-	return airUnionKeySeen(typ, map[checker.Type]struct{}{})
-}
-
-func airUnionKeySeen(typ *checker.Union, seen map[checker.Type]struct{}) string {
-	parts := make([]string, len(typ.Types))
-	for i, member := range typ.Types {
-		parts[i] = airTypeKeySeen(member, seen)
-	}
-	sort.Strings(parts)
-	key := "union " + typ.ModulePath + "::" + typ.Name + "{"
-	for i, part := range parts {
-		if i > 0 {
-			key += "|"
-		}
-		key += part
-	}
-	key += "}"
-	return key
-}
-
-func airFunctionTypeKey(params []checker.Parameter, returnType checker.Type) string {
-	return airFunctionTypeKeySeen(params, returnType, map[checker.Type]struct{}{})
-}
-
-func airFunctionTypeKeySeen(params []checker.Parameter, returnType checker.Type, seen map[checker.Type]struct{}) string {
-	key := "fn("
-	for i, param := range params {
-		if i > 0 {
-			key += ","
-		}
-		if param.Variadic {
-			key += "..."
-		}
-		key += airTypeKeySeen(param.Type, seen)
-	}
-	key += ")->" + airTypeKeySeen(returnType, seen)
-	return key
-}
-
 func (fl *functionLowerer) lowerBlock(stmts []checker.Statement) (Block, error) {
 	return fl.lowerBlockWithDefault(stmts, fl.fn.Signature.Return)
 }
@@ -3317,20 +2800,30 @@ func (fl *functionLowerer) lowerBlockWithDefault(stmts []checker.Statement, defa
 			continue
 		}
 		if i == last && stmt.Expr != nil {
+			expected := defaultType
+			if fl.isVoidType(defaultType) && !checker.IsNever(stmt.Expr.Type()) {
+				checkedType, err := fl.internResolvedType(stmt.Expr.Type())
+				if err != nil {
+					return block, err
+				}
+				if !fl.isVoidType(checkedType) {
+					expected = checkedType
+				}
+			}
 			if def := localNamedFunctionDeclaration(stmt.Expr); def != nil {
 				binding, _, err := fl.lowerLocalNamedFunction(def)
 				if err != nil {
 					return block, err
 				}
 				block.Stmts = append(block.Stmts, *binding)
-				expr, _, err := fl.lowerContextualExpr(stmt.Expr, defaultType)
+				expr, _, err := fl.lowerContextualExpr(stmt.Expr, expected)
 				if err != nil {
 					return block, err
 				}
 				block.Result = expr
 				continue
 			}
-			expr, _, err := fl.lowerContextualExpr(stmt.Expr, defaultType)
+			expr, _, err := fl.lowerContextualExpr(stmt.Expr, expected)
 			if err != nil {
 				return block, err
 			}
@@ -3351,13 +2844,6 @@ func (fl *functionLowerer) lowerContextualExpr(expr checker.Expression, expected
 	if err != nil {
 		return nil, expected, err
 	}
-	if normalized := fl.normalizeContextualType(lowered, expected); normalized != NoType && normalized != expected {
-		lowered, err = fl.lowerExprWithExpectedRaw(expr, normalized)
-		if err != nil {
-			return nil, normalized, err
-		}
-		return lowered, normalized, nil
-	}
 	return lowered, expected, nil
 }
 
@@ -3367,6 +2853,12 @@ func (fl *functionLowerer) lowerExprWithExpected(expr checker.Expression, expect
 }
 
 func (fl *functionLowerer) lowerExprWithExpectedRaw(expr checker.Expression, expected TypeID) (*Expr, error) {
+	if coercion, ok := expr.(*checker.NeverCoercion); ok && validTypeID(&fl.l.program, expected) {
+		return fl.lowerExprWithExpected(coercion.Value, expected)
+	}
+	if method, ok := expr.(*checker.ResultMethod); ok && checker.IsNever(expr.Type()) && validTypeID(&fl.l.program, expected) {
+		return fl.lowerResultMethod(expected, method)
+	}
 	if blockExpr, ok := expr.(*checker.Block); ok && validTypeID(&fl.l.program, expected) {
 		body, err := fl.lowerBlockWithDefault(blockExpr.Stmts, expected)
 		if err != nil {
@@ -3485,313 +2977,12 @@ func (fl *functionLowerer) lowerExprWithExpectedRaw(expr checker.Expression, exp
 	return fl.lowerExpr(expr)
 }
 
-func (fl *functionLowerer) normalizeContextualType(expr *Expr, expected TypeID) TypeID {
-	if expr == nil || !validTypeID(&fl.l.program, expected) || !fl.isWeakContextType(expected) {
-		return NoType
-	}
-	expectedInfo, _ := fl.l.typeInfo(expected)
-	switch expectedInfo.Kind {
-	case TypeMaybe:
-		return fl.inferMaybeType(expr)
-	case TypeResult:
-		return fl.inferResultType(expr, expected)
-	case TypeVoid:
-		if inferred := fl.inferValueType(expr); inferred != NoType {
-			return inferred
-		}
-		if inferred := fl.inferMaybeType(expr); inferred != NoType {
-			return inferred
-		}
-		return fl.inferResultType(expr, expected)
-	default:
-		return NoType
-	}
-}
-
-func (fl *functionLowerer) inferValueType(expr *Expr) TypeID {
-	if expr == nil {
-		return NoType
-	}
-	switch expr.Kind {
-	case ExprTryMaybe:
-		if expr.Target != nil {
-			if targetInfo, ok := fl.l.typeInfo(expr.Target.Type); ok && targetInfo.Kind == TypeMaybe {
-				return targetInfo.Elem
-			}
-		}
-	case ExprTryResult:
-		if expr.Target != nil {
-			if targetInfo, ok := fl.l.typeInfo(expr.Target.Type); ok && targetInfo.Kind == TypeResult {
-				return targetInfo.Value
-			}
-		}
-	case ExprBlock:
-		return fl.inferValueType(exprPayloadAs[*BlockExprPayload](expr).Body.Result)
-	case ExprIf:
-		return fl.mergeValueTypes(fl.inferValueType(exprPayloadAs[*IfExprPayload](expr).Then.Result), fl.inferValueType(exprPayloadAs[*IfExprPayload](expr).Else.Result))
-	case ExprMatchInt:
-		return fl.inferValueTypeFromCases(exprPayloadAs[*IntMatchExprPayload](expr).Cases, exprPayloadAs[*IntMatchExprPayload](expr).RangeCases, exprPayloadAs[*IntMatchExprPayload](expr).CatchAll)
-	case ExprMatchStr:
-		return fl.inferValueTypeFromStrCases(exprPayloadAs[*StrMatchExprPayload](expr).Cases, exprPayloadAs[*StrMatchExprPayload](expr).CatchAll)
-	case ExprMatchMaybe:
-		return fl.mergeValueTypes(fl.inferValueType(exprPayloadAs[*MaybeMatchExprPayload](expr).Some.Result), fl.inferValueType(exprPayloadAs[*MaybeMatchExprPayload](expr).None.Result))
-	case ExprMatchResult:
-		return fl.mergeValueTypes(fl.inferValueType(exprPayloadAs[*ResultMatchExprPayload](expr).Ok.Result), fl.inferValueType(exprPayloadAs[*ResultMatchExprPayload](expr).Err.Result))
-	case ExprMatchEnum:
-		value := NoType
-		for _, c := range exprPayloadAs[*EnumMatchExprPayload](expr).Cases {
-			value = fl.mergeValueTypes(value, fl.inferValueType(c.Body.Result))
-		}
-		return fl.mergeValueTypes(value, fl.inferValueType(exprPayloadAs[*EnumMatchExprPayload](expr).CatchAll.Result))
-	case ExprMatchUnion:
-		value := NoType
-		for _, c := range exprPayloadAs[*UnionMatchExprPayload](expr).Cases {
-			value = fl.mergeValueTypes(value, fl.inferValueType(c.Body.Result))
-		}
-		return fl.mergeValueTypes(value, fl.inferValueType(exprPayloadAs[*UnionMatchExprPayload](expr).CatchAll.Result))
-	}
-	return NoType
-}
-
-func (fl *functionLowerer) inferMaybeType(expr *Expr) TypeID {
-	if expr == nil {
-		return NoType
-	}
-	if info, ok := fl.l.typeInfo(expr.Type); ok && info.Kind == TypeMaybe && !fl.isWeakContextType(expr.Type) {
-		return expr.Type
-	}
-	switch expr.Kind {
-	case ExprMakeMaybeSome:
-		if expr.Target != nil {
-			return fl.internMaybeType(expr.Target.Type)
-		}
-	case ExprBlock:
-		return fl.inferMaybeType(exprPayloadAs[*BlockExprPayload](expr).Body.Result)
-	case ExprIf:
-		return fl.mergeValueTypes(fl.inferMaybeType(exprPayloadAs[*IfExprPayload](expr).Then.Result), fl.inferMaybeType(exprPayloadAs[*IfExprPayload](expr).Else.Result))
-	case ExprMatchInt:
-		return fl.inferMaybeTypeFromCases(exprPayloadAs[*IntMatchExprPayload](expr).Cases, exprPayloadAs[*IntMatchExprPayload](expr).RangeCases, exprPayloadAs[*IntMatchExprPayload](expr).CatchAll)
-	case ExprMatchStr:
-		return fl.inferMaybeTypeFromStrCases(exprPayloadAs[*StrMatchExprPayload](expr).Cases, exprPayloadAs[*StrMatchExprPayload](expr).CatchAll)
-	case ExprMatchMaybe:
-		return fl.mergeValueTypes(fl.inferMaybeType(exprPayloadAs[*MaybeMatchExprPayload](expr).Some.Result), fl.inferMaybeType(exprPayloadAs[*MaybeMatchExprPayload](expr).None.Result))
-	case ExprMatchResult:
-		return fl.mergeValueTypes(fl.inferMaybeType(exprPayloadAs[*ResultMatchExprPayload](expr).Ok.Result), fl.inferMaybeType(exprPayloadAs[*ResultMatchExprPayload](expr).Err.Result))
-	case ExprMatchEnum:
-		value := NoType
-		for _, c := range exprPayloadAs[*EnumMatchExprPayload](expr).Cases {
-			value = fl.mergeValueTypes(value, fl.inferMaybeType(c.Body.Result))
-		}
-		return fl.mergeValueTypes(value, fl.inferMaybeType(exprPayloadAs[*EnumMatchExprPayload](expr).CatchAll.Result))
-	case ExprMatchUnion:
-		value := NoType
-		for _, c := range exprPayloadAs[*UnionMatchExprPayload](expr).Cases {
-			value = fl.mergeValueTypes(value, fl.inferMaybeType(c.Body.Result))
-		}
-		return fl.mergeValueTypes(value, fl.inferMaybeType(exprPayloadAs[*UnionMatchExprPayload](expr).CatchAll.Result))
-	}
-	return NoType
-}
-
-func (fl *functionLowerer) inferResultType(expr *Expr, fallback TypeID) TypeID {
-	valueType, errType := fl.inferResultParts(expr)
-	if info, ok := fl.l.typeInfo(fallback); ok && info.Kind == TypeResult {
-		if valueType == NoType && validTypeID(&fl.l.program, info.Value) && !fl.isVoidType(info.Value) {
-			valueType = info.Value
-		}
-		if errType == NoType && validTypeID(&fl.l.program, info.Error) && !fl.isVoidType(info.Error) {
-			errType = info.Error
-		}
-	}
-	if valueType == NoType || errType == NoType {
-		return NoType
-	}
-	return fl.internResultType(valueType, errType)
-}
-
-func (fl *functionLowerer) inferResultParts(expr *Expr) (TypeID, TypeID) {
-	if expr == nil {
-		return NoType, NoType
-	}
-	if info, ok := fl.l.typeInfo(expr.Type); ok && info.Kind == TypeResult && !fl.isWeakContextType(expr.Type) {
-		return info.Value, info.Error
-	}
-	switch expr.Kind {
-	case ExprMakeResultOk:
-		if expr.Target != nil {
-			return expr.Target.Type, NoType
-		}
-	case ExprMakeResultErr:
-		if expr.Target != nil {
-			return NoType, expr.Target.Type
-		}
-	case ExprBlock:
-		return fl.inferResultParts(exprPayloadAs[*BlockExprPayload](expr).Body.Result)
-	case ExprIf:
-		leftValue, leftErr := fl.inferResultParts(exprPayloadAs[*IfExprPayload](expr).Then.Result)
-		rightValue, rightErr := fl.inferResultParts(exprPayloadAs[*IfExprPayload](expr).Else.Result)
-		return fl.mergeResultParts(leftValue, leftErr, rightValue, rightErr)
-	case ExprMatchInt:
-		return fl.inferResultPartsFromCases(exprPayloadAs[*IntMatchExprPayload](expr).Cases, exprPayloadAs[*IntMatchExprPayload](expr).RangeCases, exprPayloadAs[*IntMatchExprPayload](expr).CatchAll)
-	case ExprMatchStr:
-		return fl.inferResultPartsFromStrCases(exprPayloadAs[*StrMatchExprPayload](expr).Cases, exprPayloadAs[*StrMatchExprPayload](expr).CatchAll)
-	case ExprMatchMaybe:
-		leftValue, leftErr := fl.inferResultParts(exprPayloadAs[*MaybeMatchExprPayload](expr).Some.Result)
-		rightValue, rightErr := fl.inferResultParts(exprPayloadAs[*MaybeMatchExprPayload](expr).None.Result)
-		return fl.mergeResultParts(leftValue, leftErr, rightValue, rightErr)
-	case ExprMatchResult:
-		leftValue, leftErr := fl.inferResultParts(exprPayloadAs[*ResultMatchExprPayload](expr).Ok.Result)
-		rightValue, rightErr := fl.inferResultParts(exprPayloadAs[*ResultMatchExprPayload](expr).Err.Result)
-		return fl.mergeResultParts(leftValue, leftErr, rightValue, rightErr)
-	case ExprMatchEnum:
-		valueType, errType := NoType, NoType
-		for _, c := range exprPayloadAs[*EnumMatchExprPayload](expr).Cases {
-			rightValue, rightErr := fl.inferResultParts(c.Body.Result)
-			valueType, errType = fl.mergeResultParts(valueType, errType, rightValue, rightErr)
-		}
-		rightValue, rightErr := fl.inferResultParts(exprPayloadAs[*EnumMatchExprPayload](expr).CatchAll.Result)
-		return fl.mergeResultParts(valueType, errType, rightValue, rightErr)
-	case ExprMatchUnion:
-		valueType, errType := NoType, NoType
-		for _, c := range exprPayloadAs[*UnionMatchExprPayload](expr).Cases {
-			rightValue, rightErr := fl.inferResultParts(c.Body.Result)
-			valueType, errType = fl.mergeResultParts(valueType, errType, rightValue, rightErr)
-		}
-		rightValue, rightErr := fl.inferResultParts(exprPayloadAs[*UnionMatchExprPayload](expr).CatchAll.Result)
-		return fl.mergeResultParts(valueType, errType, rightValue, rightErr)
-	}
-	return NoType, NoType
-}
-
-func (fl *functionLowerer) inferValueTypeFromCases(intCases []IntMatchCase, rangeCases []IntRangeMatchCase, catchAll Block) TypeID {
-	value := NoType
-	for _, c := range intCases {
-		value = fl.mergeValueTypes(value, fl.inferValueType(c.Body.Result))
-	}
-	for _, c := range rangeCases {
-		value = fl.mergeValueTypes(value, fl.inferValueType(c.Body.Result))
-	}
-	return fl.mergeValueTypes(value, fl.inferValueType(catchAll.Result))
-}
-
-func (fl *functionLowerer) inferValueTypeFromStrCases(strCases []StrMatchCase, catchAll Block) TypeID {
-	value := NoType
-	for _, c := range strCases {
-		value = fl.mergeValueTypes(value, fl.inferValueType(c.Body.Result))
-	}
-	return fl.mergeValueTypes(value, fl.inferValueType(catchAll.Result))
-}
-
-func (fl *functionLowerer) inferMaybeTypeFromCases(intCases []IntMatchCase, rangeCases []IntRangeMatchCase, catchAll Block) TypeID {
-	value := NoType
-	for _, c := range intCases {
-		value = fl.mergeValueTypes(value, fl.inferMaybeType(c.Body.Result))
-	}
-	for _, c := range rangeCases {
-		value = fl.mergeValueTypes(value, fl.inferMaybeType(c.Body.Result))
-	}
-	return fl.mergeValueTypes(value, fl.inferMaybeType(catchAll.Result))
-}
-
-func (fl *functionLowerer) inferMaybeTypeFromStrCases(strCases []StrMatchCase, catchAll Block) TypeID {
-	value := NoType
-	for _, c := range strCases {
-		value = fl.mergeValueTypes(value, fl.inferMaybeType(c.Body.Result))
-	}
-	return fl.mergeValueTypes(value, fl.inferMaybeType(catchAll.Result))
-}
-
-func (fl *functionLowerer) inferResultPartsFromStrCases(strCases []StrMatchCase, catchAll Block) (TypeID, TypeID) {
-	valueType, errType := NoType, NoType
-	for _, c := range strCases {
-		rightValue, rightErr := fl.inferResultParts(c.Body.Result)
-		valueType, errType = fl.mergeResultParts(valueType, errType, rightValue, rightErr)
-	}
-	rightValue, rightErr := fl.inferResultParts(catchAll.Result)
-	return fl.mergeResultParts(valueType, errType, rightValue, rightErr)
-}
-
-func (fl *functionLowerer) inferResultPartsFromCases(intCases []IntMatchCase, rangeCases []IntRangeMatchCase, catchAll Block) (TypeID, TypeID) {
-	valueType, errType := NoType, NoType
-	for _, c := range intCases {
-		rightValue, rightErr := fl.inferResultParts(c.Body.Result)
-		valueType, errType = fl.mergeResultParts(valueType, errType, rightValue, rightErr)
-	}
-	for _, c := range rangeCases {
-		rightValue, rightErr := fl.inferResultParts(c.Body.Result)
-		valueType, errType = fl.mergeResultParts(valueType, errType, rightValue, rightErr)
-	}
-	rightValue, rightErr := fl.inferResultParts(catchAll.Result)
-	return fl.mergeResultParts(valueType, errType, rightValue, rightErr)
-}
-
-func (fl *functionLowerer) mergeValueTypes(left TypeID, right TypeID) TypeID {
-	if left == NoType {
-		return right
-	}
-	if right == NoType || left == right {
-		return left
-	}
-	return NoType
-}
-
-func (fl *functionLowerer) mergeResultParts(leftValue TypeID, leftErr TypeID, rightValue TypeID, rightErr TypeID) (TypeID, TypeID) {
-	valueType := fl.mergeValueTypes(leftValue, rightValue)
-	if valueType == NoType && leftValue != NoType && rightValue != NoType {
-		return NoType, NoType
-	}
-	errType := fl.mergeValueTypes(leftErr, rightErr)
-	if errType == NoType && leftErr != NoType && rightErr != NoType {
-		return NoType, NoType
-	}
-	return valueType, errType
-}
-
-func (fl *functionLowerer) internMaybeType(elem TypeID) TypeID {
-	if !validTypeID(&fl.l.program, elem) {
-		return NoType
-	}
-	id, err := fl.l.internSyntheticType(fl.l.typeName(elem)+"?", TypeInfo{Kind: TypeMaybe, Elem: elem})
-	if err != nil {
-		return NoType
-	}
-	return id
-}
-
-func (fl *functionLowerer) internResultType(value TypeID, errType TypeID) TypeID {
-	if !validTypeID(&fl.l.program, value) || !validTypeID(&fl.l.program, errType) {
-		return NoType
-	}
-	id, err := fl.l.internSyntheticType(fl.l.typeName(value)+"!"+fl.l.typeName(errType), TypeInfo{Kind: TypeResult, Value: value, Error: errType})
-	if err != nil {
-		return NoType
-	}
-	return id
-}
-
 func (fl *functionLowerer) isVoidType(typeID TypeID) bool {
 	if !validTypeID(&fl.l.program, typeID) {
 		return false
 	}
 	info, _ := fl.l.typeInfo(typeID)
 	return info.Kind == TypeVoid
-}
-
-func (fl *functionLowerer) isWeakContextType(typeID TypeID) bool {
-	if !validTypeID(&fl.l.program, typeID) {
-		return false
-	}
-	info, _ := fl.l.typeInfo(typeID)
-	switch info.Kind {
-	case TypeVoid:
-		return true
-	case TypeMaybe:
-		return !validTypeID(&fl.l.program, info.Elem) || fl.isVoidType(info.Elem)
-	case TypeResult:
-		return !validTypeID(&fl.l.program, info.Value) || !validTypeID(&fl.l.program, info.Error) || fl.isVoidType(info.Value) || fl.isVoidType(info.Error)
-	default:
-		return false
-	}
 }
 
 // lowerForeignScalarNarrowIfNeeded converts a foreign named scalar value to
@@ -3858,11 +3049,8 @@ func (fl *functionLowerer) lowerAnyWrapIfNeeded(expr checker.Expression, expecte
 	if !ok || expectedInfo.Kind != TypeAny {
 		return nil, false, nil
 	}
-	actual, err := fl.internType(expr.Type())
+	actual, err := fl.internResolvedType(expr.Type())
 	if err != nil {
-		if fl.l.typeHasUnresolvedTypeVar(expr.Type()) {
-			return nil, false, nil
-		}
 		return nil, false, err
 	}
 	if actual == expected {
@@ -4102,7 +3290,7 @@ func (fl *functionLowerer) lowerStmt(stmt checker.Statement) (*Stmt, error) {
 	}
 	switch s := stmt.Stmt.(type) {
 	case *checker.VariableDef:
-		typeID, err := fl.internContextualCheckerType(s.Type())
+		typeID, err := fl.internResolvedType(s.Type())
 		if err != nil {
 			return nil, err
 		}
@@ -4716,7 +3904,13 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 	if prop, ok := expr.(*checker.InstanceProperty); ok {
 		return fl.lowerInstanceProperty(NoType, prop)
 	}
-	typeID, err := fl.internType(expr.Type())
+	var typeID TypeID
+	var err error
+	if checker.IsNever(expr.Type()) {
+		typeID, err = fl.l.internType(checker.Void)
+	} else {
+		typeID, err = fl.internResolvedType(expr.Type())
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -4737,6 +3931,8 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		return &Expr{Kind: ExprConstStr, Type: typeID, Payload: &TextExprPayload{Value: e.Value}}, nil
 	case *checker.RuneLiteral:
 		return &Expr{Kind: ExprConstInt, Type: typeID, Payload: &TextExprPayload{Value: strconv.Itoa(int(e.Value))}}, nil
+	case *checker.NeverCoercion:
+		return fl.lowerExprWithExpected(e.Value, typeID)
 	case *checker.Panic:
 		message, err := fl.lowerExprWithExpected(e.Message, fl.l.mustIntern(checker.Str))
 		if err != nil {
@@ -4972,7 +4168,7 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 				lowered, err = fl.lowerExpr(arg)
 			} else {
 				var paramType TypeID
-				paramType, err = fl.internContextualCheckerType(fnDef.Parameters[i].Type)
+				paramType, err = fl.internResolvedType(fnDef.Parameters[i].Type)
 				if err == nil {
 					lowered, err = fl.lowerExprWithExpected(arg, paramType)
 				}
@@ -4984,7 +4180,7 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		}
 		var typeArgs []TypeID
 		for _, typeArg := range e.TypeArgs {
-			argID, err := fl.internContextualCheckerType(typeArg)
+			argID, err := fl.internResolvedType(typeArg)
 			if err != nil {
 				return nil, err
 			}
@@ -5960,13 +5156,11 @@ func (fl *functionLowerer) lowerResultMatch(typeID TypeID, match *checker.Result
 }
 
 func (fl *functionLowerer) lowerResultMethod(typeID TypeID, method *checker.ResultMethod) (*Expr, error) {
-	var target *Expr
-	var err error
-	if subjectType, ok := fl.resultMethodSubjectType(method); ok {
-		target, err = fl.lowerExprWithExpected(method.Subject, subjectType)
-	} else {
-		target, err = fl.lowerExpr(method.Subject)
+	subjectType, err := fl.resultMethodSubjectType(method)
+	if err != nil {
+		return nil, err
 	}
+	target, err := fl.lowerExprWithExpected(method.Subject, subjectType)
 	if err != nil {
 		return nil, err
 	}
@@ -5997,26 +5191,12 @@ func (fl *functionLowerer) lowerResultMethod(typeID TypeID, method *checker.Resu
 	return &Expr{Kind: kind, Type: typeID, Target: target, Args: args}, nil
 }
 
-func (fl *functionLowerer) resultMethodSubjectType(method *checker.ResultMethod) (TypeID, bool) {
+func (fl *functionLowerer) resultMethodSubjectType(method *checker.ResultMethod) (TypeID, error) {
 	subjectType, ok := method.Subject.Type().(*checker.Result)
 	if !ok {
-		return NoType, false
+		return NoType, fmt.Errorf("Result method subject has type %T", method.Subject.Type())
 	}
-	valueType := subjectType.Val()
-	errType := subjectType.Err()
-	if returnType, ok := method.ReturnType.(*checker.Result); ok {
-		if fl.l.typeHasUnresolvedTypeVar(valueType) {
-			valueType = returnType.Val()
-		}
-		if fl.l.typeHasUnresolvedTypeVar(errType) {
-			errType = returnType.Err()
-		}
-	}
-	typeID, err := fl.internContextualCheckerType(checker.MakeResult(valueType, errType))
-	if err != nil {
-		return NoType, false
-	}
-	return typeID, true
+	return fl.internResolvedType(subjectType)
 }
 
 func (fl *functionLowerer) lowerTryOp(typeID TypeID, op *checker.TryOp) (*Expr, error) {
@@ -6173,11 +5353,44 @@ func (fl *functionLowerer) lowerArgsWithTypeIDs(args []checker.Expression, expec
 }
 
 func (fl *functionLowerer) lowerBinary(kind ExprKind, typeID TypeID, leftExpr, rightExpr checker.Expression) (*Expr, error) {
-	left, err := fl.lowerExpr(leftExpr)
+	leftExpected, rightExpected := NoType, NoType
+	if checker.IsNever(leftExpr.Type()) {
+		var expected checker.Type = checker.Void
+		if !checker.IsNever(rightExpr.Type()) {
+			expected = rightExpr.Type()
+		}
+		var err error
+		leftExpected, err = fl.internResolvedType(expected)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if checker.IsNever(rightExpr.Type()) {
+		var expected checker.Type = checker.Void
+		if !checker.IsNever(leftExpr.Type()) {
+			expected = leftExpr.Type()
+		}
+		var err error
+		rightExpected, err = fl.internResolvedType(expected)
+		if err != nil {
+			return nil, err
+		}
+	}
+	var left, right *Expr
+	var err error
+	if leftExpected != NoType {
+		left, err = fl.lowerExprWithExpected(leftExpr, leftExpected)
+	} else {
+		left, err = fl.lowerExpr(leftExpr)
+	}
 	if err != nil {
 		return nil, err
 	}
-	right, err := fl.lowerExpr(rightExpr)
+	if rightExpected != NoType {
+		right, err = fl.lowerExprWithExpected(rightExpr, rightExpected)
+	} else {
+		right, err = fl.lowerExpr(rightExpr)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -6185,7 +5398,7 @@ func (fl *functionLowerer) lowerBinary(kind ExprKind, typeID TypeID, leftExpr, r
 }
 
 func (fl *functionLowerer) lowerUnary(kind ExprKind, typeID TypeID, valueExpr checker.Expression) (*Expr, error) {
-	value, err := fl.lowerExpr(valueExpr)
+	value, err := fl.lowerExprWithExpected(valueExpr, typeID)
 	if err != nil {
 		return nil, err
 	}
@@ -6260,7 +5473,7 @@ func (fl *functionLowerer) lowerForeignFieldAssignment(prop *checker.ForeignFiel
 	if err != nil {
 		return nil, err
 	}
-	fieldType, err := fl.internContextualCheckerType(prop.Type())
+	fieldType, err := fl.internResolvedType(prop.Type())
 	if err != nil {
 		return nil, err
 	}
@@ -6275,7 +5488,7 @@ func (fl *functionLowerer) lowerForeignValueAssignment(prop *checker.ForeignValu
 	if !prop.Assignable {
 		return nil, fmt.Errorf("assignment to non-assignable foreign value %s::%s", prop.Namespace, prop.Symbol)
 	}
-	valueType, err := fl.internContextualCheckerType(prop.Type())
+	valueType, err := fl.internResolvedType(prop.Type())
 	if err != nil {
 		return nil, err
 	}
@@ -6324,6 +5537,7 @@ func (fl *functionLowerer) lowerClosureWithSelf(typeID TypeID, def *checker.Func
 	// inherit them and be instantiated with them at its creation site (ADR 0031).
 	if len(fl.fn.TypeParams) > 0 {
 		fl.l.program.Functions[id].TypeParams = fl.fn.TypeParams
+		fl.l.program.Functions[id].TypeParamOwner = fl.fn.TypeParamOwner
 	}
 	fn := fl.l.program.Functions[id]
 	// Closure function declarations are keyed by their concrete signature and can be
@@ -6358,6 +5572,17 @@ func (fl *functionLowerer) lowerClosureWithSelf(typeID TypeID, def *checker.Func
 		}
 	}
 	fl.l.program.Functions[id] = fn
+	var typeArgs []TypeID
+	if len(fn.TypeParams) > 0 {
+		typeArgs = make([]TypeID, len(fn.TypeParams))
+	}
+	for index, name := range fn.TypeParams {
+		typeArg, ok := fl.typeVars[name]
+		if !ok {
+			return nil, false, fmt.Errorf("closure %s cannot resolve inherited type parameter %s", def.Name, name)
+		}
+		typeArgs[index] = typeArg
+	}
 	for index, capture := range fn.Captures {
 		if capture.Mode == CaptureSlot && index < len(child.captureLocals) {
 			// A nested slot capture must propagate through every enclosing
@@ -6366,7 +5591,7 @@ func (fl *functionLowerer) lowerClosureWithSelf(typeID TypeID, def *checker.Func
 		}
 	}
 
-	return &Expr{Kind: ExprMakeClosure, Type: typeID, Payload: &CallExprPayload{Function: id, CaptureLocals: child.captureLocals}}, recursive, nil
+	return &Expr{Kind: ExprMakeClosure, Type: typeID, Payload: &CallExprPayload{Function: id, TypeArgs: typeArgs, CaptureLocals: child.captureLocals}}, recursive, nil
 }
 
 func (fl *functionLowerer) lowerModuleSymbol(typeID TypeID, symbol *checker.ModuleSymbol) (*Expr, error) {
@@ -6574,7 +5799,15 @@ func (fl *functionLowerer) lowerUserDefinedInstanceMethod(typeID TypeID, target 
 	// express them. The call references the definition with the receiver's
 	// concrete type arguments and lowers its arguments against their concrete
 	// types.
-	if typeInfo.Generic != NoType && methodUsesOnlyStructTypeParams(def, fl.l.program.Types[typeInfo.Generic-1].TypeParams) {
+	usesOnlyStructTypeParams := false
+	if typeInfo.Generic != NoType {
+		definition, ok := fl.l.typeInfo(typeInfo.Generic)
+		if !ok {
+			return nil, fmt.Errorf("generic method definition %d is invalid or incomplete", typeInfo.Generic)
+		}
+		usesOnlyStructTypeParams = methodUsesOnlyStructTypeParams(def, definition.TypeParams)
+	}
+	if typeInfo.Generic != NoType && usesOnlyStructTypeParams {
 		id, typeArgs, err := fl.declareGenericInstanceMethodFunction(module, typeInfo.ID, method.StructType, def)
 		if err != nil {
 			return nil, err
@@ -6913,7 +6146,7 @@ func (l *lowerer) moduleForInstanceMethod(method *checker.InstanceMethod, fallba
 }
 
 func (l *lowerer) typeInfo(id TypeID) (TypeInfo, bool) {
-	if id <= 0 || int(id) > len(l.program.Types) {
+	if id <= 0 || int(id) > len(l.program.Types) || (l.typeInterner != nil && !l.typeInterner.nominalAvailable(id)) {
 		return TypeInfo{}, false
 	}
 	return l.program.Types[id-1], true
