@@ -931,7 +931,20 @@ func (c *Checker) Check() {
 		seenImportAliases[imp.Name] = imp.PathLocation
 
 		if imp.Kind == parse.ImportKindGo {
-			pkg, err := c.options.GoResolver.ResolveGoPackage(imp.Path)
+			goImportPath := imp.Path
+			if c.moduleResolver != nil {
+				var err error
+				goImportPath, err = c.moduleResolver.resolveGoImportPath(c.modulePath, imp.Path)
+				if err != nil {
+					c.addDiagnostic(goImportResolutionDiagnostic{
+						Path:  imp.Path,
+						Cause: err.Error(),
+						Span:  c.sourceSpan(imp.PathLocation),
+					}.build())
+					continue
+				}
+			}
+			pkg, err := c.options.GoResolver.ResolveGoPackage(goImportPath)
 			if err != nil {
 				c.addDiagnostic(goImportResolutionDiagnostic{
 					Path:  imp.Path,

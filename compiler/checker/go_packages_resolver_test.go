@@ -76,6 +76,89 @@ func Greet(name string) string { return "hello " + name }
 	}
 }
 
+func TestCheckerCanonicalizesProjectFFIImportShorthand(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/owner/app\n\ngo 1.21\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ffiDir := filepath.Join(root, "ffi", "nested")
+	if err := os.MkdirAll(ffiDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ffiDir, "ffi.go"), []byte("package nested\n\nfunc Greet() string { return \"hello\" }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	mainPath := filepath.Join(root, "main.ard")
+	result := parse.Parse([]byte("use go:app/ffi/nested\n\nfn main() Str { nested::Greet() }\n"), mainPath)
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	moduleResolver, err := checker.NewModuleResolver(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checked := checker.New(mainPath, result.Program, moduleResolver)
+	checked.Check()
+	if checked.HasErrors() {
+		t.Fatalf("checker diagnostics: %v", checked.Diagnostics())
+	}
+	pkg := checked.Module().Program().GoImports["nested"]
+	if pkg == nil {
+		t.Fatal("nested FFI package missing from checked imports")
+	}
+	if got, want := pkg.Path, "example.com/owner/app/ffi/nested"; got != want {
+		t.Fatalf("resolved package path = %q, want %q", got, want)
+	}
+	if pkg.Functions["Greet"] == nil {
+		t.Fatal("Greet missing from resolved project FFI package")
+	}
+}
+
+func TestCheckerCanonicalizesDependencyFFIImportShorthand(t *testing.T) {
+	workspace := t.TempDir()
+	appRoot := filepath.Join(workspace, "app")
+	depRoot := filepath.Join(workspace, "dep")
+	for _, dir := range []string{appRoot, depRoot, filepath.Join(depRoot, "ffi")} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(appRoot, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n\n[dependencies]\ndep = { path = \"../dep\" }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(depRoot, "ard.toml"), []byte("name = \"dep\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(depRoot, "go.mod"), []byte("module example.com/owner/dep\n\ngo 1.21\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(depRoot, "ffi", "ffi.go"), []byte("package ffi\n\nfunc Answer() int { return 42 }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(depRoot, "dep.ard"), []byte("use go:dep/ffi\n\nfn answer() Int { ffi::Answer() }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	mainPath := filepath.Join(appRoot, "main.ard")
+	result := parse.Parse([]byte("use dep\n\nfn main() Int { dep::answer() }\n"), mainPath)
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	moduleResolver, err := checker.NewModuleResolver(appRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checked := checker.New(mainPath, result.Program, moduleResolver)
+	checked.Check()
+	if checked.HasErrors() {
+		t.Fatalf("checker diagnostics: %v", checked.Diagnostics())
+	}
+}
+
 func TestCheckerDefaultsToProjectGoPackagesResolver(t *testing.T) {
 	root := t.TempDir()
 	manifest := "name = \"app\"\nard = \">= 0.1.0\"\n\n[go]\nbuild_tags = [\"special\"]\n"

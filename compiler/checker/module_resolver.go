@@ -1587,6 +1587,26 @@ func (mr *ModuleResolver) packageIDForModule(modulePath string) string {
 	return "root"
 }
 
+func (mr *ModuleResolver) resolveGoImportPath(importerModulePath string, importPath string) (string, error) {
+	packageID := mr.packageIDForModule(importerModulePath)
+	pkg := mr.packageInfo(packageID)
+	ffiRoot := pkg.Name + "/ffi"
+	if pkg.Name == "" || importPath != ffiRoot && !strings.HasPrefix(importPath, ffiRoot+"/") {
+		return importPath, nil
+	}
+	modulePath, err := readGoModulePath(pkg.RootPath)
+	if os.IsNotExist(err) {
+		return importPath, nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("read Go module for Ard package %q: %w", pkg.Name, err)
+	}
+	if modulePath == "" {
+		return importPath, nil
+	}
+	return modulePath + strings.TrimPrefix(importPath, pkg.Name), nil
+}
+
 func (mr *ModuleResolver) packageInfo(packageID string) PackageInfo {
 	if mr != nil && mr.project != nil {
 		if pkg, ok := mr.project.Packages[packageID]; ok {
