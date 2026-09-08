@@ -37,7 +37,15 @@ func CollectGoImportPaths(resolver *ModuleResolver, entries ...GoImportScanEntry
 		}
 		for _, imp := range entry.Program.Imports {
 			if imp.Kind == parse.ImportKindGo {
-				goPaths[imp.Path] = true
+				path := imp.Path
+				if resolver != nil {
+					canonicalPath, err := resolver.resolveGoImportPath(entry.ModulePath, path)
+					if err != nil {
+						continue
+					}
+					path = canonicalPath
+				}
+				goPaths[path] = true
 				continue
 			}
 			if strings.HasPrefix(imp.Path, "ard/") || resolver == nil {

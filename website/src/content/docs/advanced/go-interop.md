@@ -22,7 +22,7 @@ A project that imports Go packages relies on the project's `go.mod`. Add Go depe
 
 ## Project FFI Bindings
 
-When a Go API needs adaptation before it is pleasant or safe to use from Ard, put a small Go package under your project's `ffi/` directory and import that package with `use go:`. The import path uses your Go module path, or the Ard project name when the compiler generates a minimal Go module.
+When a Go API needs adaptation before it is pleasant or safe to use from Ard, put a small Go package under your project's `ffi/` directory and import it with `use go:<project-name>/ffi`. Ard maps this stable project-name shorthand to the package's Go module path, including when the Ard package is consumed as a dependency. Nested FFI packages use the same form, such as `use go:my_app/ffi/env`.
 
 ```
 my_app/
