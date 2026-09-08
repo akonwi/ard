@@ -654,14 +654,39 @@ func (s *Snapshot) signature(filePath string, content []byte, program *parse.Pro
 	h.Write([]byte{0})
 
 	seen := map[string]bool{filePath: true}
+	seenPackageManifests := map[string]bool{}
+	projectInfo := moduleResolver.GetProjectInfo()
+	if projectInfo != nil {
+		seenPackageManifests[projectInfo.RootPackageID] = true
+	}
+	hashPackageManifest := func(packageID string) {
+		if projectInfo == nil || packageID == "" || seenPackageManifests[packageID] {
+			return
+		}
+		seenPackageManifests[packageID] = true
+		pkg, ok := projectInfo.Packages[packageID]
+		if !ok || pkg.RootPath == "" {
+			return
+		}
+		manifestPath := filepath.Join(pkg.RootPath, "ard.toml")
+		h.Write([]byte(manifestPath))
+		h.Write([]byte{0})
+		if data, err := os.ReadFile(manifestPath); err == nil {
+			h.Write(data)
+		} else {
+			h.Write([]byte(":missing"))
+		}
+		h.Write([]byte{0})
+	}
 	var visit func(prog *parse.Program, importerModulePath string, importerFilePath string)
 	visit = func(prog *parse.Program, importerModulePath string, importerFilePath string) {
 		if prog == nil {
 			return
 		}
 		type dep struct {
-			file   string
-			module string
+			file      string
+			module    string
+			packageID string
 		}
 		deps := make([]dep, 0, len(prog.Imports))
 		known := true
@@ -679,7 +704,7 @@ func (s *Snapshot) signature(filePath string, content []byte, program *parse.Pro
 				h.Write([]byte{0})
 				continue
 			}
-			deps = append(deps, dep{file: resolved.FilePath, module: resolved.ModulePath})
+			deps = append(deps, dep{file: resolved.FilePath, module: resolved.ModulePath, packageID: resolved.PackageID})
 		}
 		sort.Slice(deps, func(a, b int) bool { return deps[a].file < deps[b].file })
 		if trackDependencies {
@@ -690,6 +715,7 @@ func (s *Snapshot) signature(filePath string, content []byte, program *parse.Pro
 			s.engine.updateDependencies(importerFilePath, imports, s.revision, known)
 		}
 		for _, d := range deps {
+			hashPackageManifest(d.packageID)
 			if seen[d.file] {
 				continue
 			}

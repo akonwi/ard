@@ -61,6 +61,28 @@ fn home_dir() Str!Error {
 
 Project-local Go packages exposed to Ard should live under `ffi/`. Keep these packages small and use them to translate Go-specific shapes into Ard-facing APIs when direct imports are not enough.
 
+## Go Import Aliases
+
+Long or frequently used Go import paths can be given stable aliases in `ard.toml`:
+
+```toml
+[go.imports]
+vaxis = "go.rockorager.dev/vaxis"
+lipgloss = "github.com/charmbracelet/lipgloss"
+```
+
+Use an alias as the first segment of a Go import. It expands to the configured path, including for nested packages:
+
+```ard
+use go:vaxis
+use go:vaxis/widgets
+use go:lipgloss as style
+```
+
+These resolve to `go.rockorager.dev/vaxis`, `go.rockorager.dev/vaxis/widgets`, and `github.com/charmbracelet/lipgloss`. The optional `as` clause still controls the namespace used in that Ard file; the manifest alias only abbreviates the import path.
+
+Aliases are scoped to the Ard package that declares them. Dependencies therefore use aliases from their own manifests. A package's own project name is reserved for its `go:<project-name>/ffi` shorthand and cannot also be declared as an alias. Existing absolute Go import paths and standard-library imports continue to work. `go.mod` remains authoritative for module versions, replacements, and downloads.
+
 ## Go Struct Tags on Ard Structs
 
 Reflection-based Go libraries often configure fields through struct tags. Attach an opaque tag to an Ard-owned struct field with `#go:<key>("<value>")`:

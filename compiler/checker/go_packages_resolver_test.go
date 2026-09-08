@@ -76,9 +76,9 @@ func Greet(name string) string { return "hello " + name }
 	}
 }
 
-func TestCheckerCanonicalizesProjectFFIImportShorthand(t *testing.T) {
+func TestCheckerCanonicalizesProjectGoImportShorthands(t *testing.T) {
 	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n\n[go.imports]\nappgo = \"example.com/owner/app\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/owner/app\n\ngo 1.21\n"), 0o644); err != nil {
@@ -116,9 +116,27 @@ func TestCheckerCanonicalizesProjectFFIImportShorthand(t *testing.T) {
 	if pkg.Functions["Greet"] == nil {
 		t.Fatal("Greet missing from resolved project FFI package")
 	}
+
+	result = parse.Parse([]byte("use go:appgo/ffi/nested as bridge\n\nfn main() Str { bridge::Greet() }\n"), mainPath)
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse alias errors: %v", result.Errors)
+	}
+	moduleResolver, err = checker.NewModuleResolver(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checked = checker.New(mainPath, result.Program, moduleResolver)
+	checked.Check()
+	if checked.HasErrors() {
+		t.Fatalf("alias checker diagnostics: %v", checked.Diagnostics())
+	}
+	pkg = checked.Module().Program().GoImports["bridge"]
+	if pkg == nil || pkg.Path != "example.com/owner/app/ffi/nested" {
+		t.Fatalf("aliased Go import = %#v", pkg)
+	}
 }
 
-func TestCheckerCanonicalizesDependencyFFIImportShorthand(t *testing.T) {
+func TestCheckerCanonicalizesDependencyGoImportShorthands(t *testing.T) {
 	workspace := t.TempDir()
 	appRoot := filepath.Join(workspace, "app")
 	depRoot := filepath.Join(workspace, "dep")
@@ -130,7 +148,7 @@ func TestCheckerCanonicalizesDependencyFFIImportShorthand(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(appRoot, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n\n[dependencies]\ndep = { path = \"../dep\" }\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(depRoot, "ard.toml"), []byte("name = \"dep\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(depRoot, "ard.toml"), []byte("name = \"dep\"\nard = \">= 0.1.0\"\n\n[go.imports]\nbridge = \"example.com/owner/dep/ffi\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(depRoot, "go.mod"), []byte("module example.com/owner/dep\n\ngo 1.21\n"), 0o644); err != nil {
@@ -139,7 +157,7 @@ func TestCheckerCanonicalizesDependencyFFIImportShorthand(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(depRoot, "ffi", "ffi.go"), []byte("package ffi\n\nfunc Answer() int { return 42 }\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(depRoot, "dep.ard"), []byte("use go:dep/ffi\n\nfn answer() Int { ffi::Answer() }\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(depRoot, "dep.ard"), []byte("use go:dep/ffi as ffi\nuse go:bridge\n\nfn answer() Int { ffi::Answer() + bridge::Answer() }\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 

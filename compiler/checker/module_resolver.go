@@ -36,6 +36,7 @@ type ProjectInfo struct {
 
 type GoProjectConfig struct {
 	BuildTags []string
+	Imports   map[string]string
 }
 
 type DependencyInfo struct {
@@ -82,13 +83,19 @@ type LockedPackage struct {
 
 // ModuleResolver handles finding and loading user modules
 type ModuleResolver struct {
-	project        *ProjectInfo
-	moduleCache    map[string]Module         // cache loaded modules by file path
-	astCache       map[string]*parse.Program // cache parsed ASTs by file path
-	overlays       map[string]string         // unsaved source text by resolved file path
-	loadingChain   []string                  // track canonical module paths currently being loaded for circular dependency detection
-	modulePackages map[string]string         // canonical module path -> package ID
-	buildModule    Module
+	project         *ProjectInfo
+	moduleCache     map[string]Module         // cache loaded modules by file path
+	astCache        map[string]*parse.Program // cache parsed ASTs by file path
+	overlays        map[string]string         // unsaved source text by resolved file path
+	loadingChain    []string                  // track canonical module paths currently being loaded for circular dependency detection
+	modulePackages  map[string]string         // canonical module path -> package ID
+	goImportAliases map[string]goImportAliasesResult
+	buildModule     Module
+}
+
+type goImportAliasesResult struct {
+	aliases map[string]string
+	err     error
 }
 
 type ResolvedImport struct {
@@ -133,7 +140,7 @@ func FindProjectRoot(startPath string) (*ProjectInfo, error) {
 			}
 
 			dependencies := projectDependencies(document.Dependencies, current)
-			goConfig := GoProjectConfig{BuildTags: append([]string(nil), document.Go.BuildTags...)}
+			goConfig := GoProjectConfig{BuildTags: append([]string(nil), document.Go.BuildTags...), Imports: copyStringMap(document.Go.Imports)}
 			rootPackageID := "root"
 			packages := map[string]PackageInfo{
 				rootPackageID: {
@@ -1175,13 +1182,14 @@ func NewModuleResolverWithOptions(workingDir string, options BuildOptions) (*Mod
 	}
 
 	return &ModuleResolver{
-		project:        project,
-		moduleCache:    make(map[string]Module),
-		astCache:       make(map[string]*parse.Program),
-		overlays:       make(map[string]string),
-		loadingChain:   make([]string, 0),
-		modulePackages: make(map[string]string),
-		buildModule:    newBuildModule(values),
+		project:         project,
+		moduleCache:     make(map[string]Module),
+		astCache:        make(map[string]*parse.Program),
+		overlays:        make(map[string]string),
+		loadingChain:    make([]string, 0),
+		modulePackages:  make(map[string]string),
+		goImportAliases: make(map[string]goImportAliasesResult),
+		buildModule:     newBuildModule(values),
 	}, nil
 }
 
@@ -1590,21 +1598,52 @@ func (mr *ModuleResolver) packageIDForModule(modulePath string) string {
 func (mr *ModuleResolver) resolveGoImportPath(importerModulePath string, importPath string) (string, error) {
 	packageID := mr.packageIDForModule(importerModulePath)
 	pkg := mr.packageInfo(packageID)
-	ffiRoot := pkg.Name + "/ffi"
-	if pkg.Name == "" || importPath != ffiRoot && !strings.HasPrefix(importPath, ffiRoot+"/") {
-		return importPath, nil
-	}
-	modulePath, err := readGoModulePath(pkg.RootPath)
-	if os.IsNotExist(err) {
-		return importPath, nil
-	}
+	aliases, err := mr.goImportAliasesForPackage(packageID, pkg)
 	if err != nil {
-		return "", fmt.Errorf("read Go module for Ard package %q: %w", pkg.Name, err)
+		return "", err
 	}
-	if modulePath == "" {
+	ffiRoot := pkg.Name + "/ffi"
+	if pkg.Name != "" && (importPath == ffiRoot || strings.HasPrefix(importPath, ffiRoot+"/")) {
+		modulePath, err := readGoModulePath(pkg.RootPath)
+		if os.IsNotExist(err) {
+			return importPath, nil
+		}
+		if err != nil {
+			return "", fmt.Errorf("read Go module for Ard package %q: %w", pkg.Name, err)
+		}
+		if modulePath != "" {
+			return modulePath + strings.TrimPrefix(importPath, pkg.Name), nil
+		}
+	}
+
+	alias, suffix, _ := strings.Cut(importPath, "/")
+	target := aliases[alias]
+	if target == "" {
 		return importPath, nil
 	}
-	return modulePath + strings.TrimPrefix(importPath, pkg.Name), nil
+	if suffix == "" {
+		return target, nil
+	}
+	return target + "/" + suffix, nil
+}
+
+func (mr *ModuleResolver) goImportAliasesForPackage(packageID string, pkg PackageInfo) (map[string]string, error) {
+	if packageID == mr.project.RootPackageID {
+		return mr.project.Go.Imports, nil
+	}
+	if cached, ok := mr.goImportAliases[packageID]; ok {
+		return cached.aliases, cached.err
+	}
+	document, err := manifest.ParseFile(filepath.Join(pkg.RootPath, "ard.toml"))
+	if err != nil {
+		err = fmt.Errorf("read Go import aliases for Ard package %q: %w", pkg.Name, err)
+	}
+	result := goImportAliasesResult{err: err}
+	if document != nil {
+		result.aliases = document.Go.Imports
+	}
+	mr.goImportAliases[packageID] = result
+	return result.aliases, result.err
 }
 
 func (mr *ModuleResolver) packageInfo(packageID string) PackageInfo {

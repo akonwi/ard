@@ -383,6 +383,48 @@ func TestManifestChangeInvalidatesAnalysis(t *testing.T) {
 	}
 }
 
+func TestPathDependencyManifestChangeInvalidatesAnalysis(t *testing.T) {
+	workspace := t.TempDir()
+	root := filepath.Join(workspace, "app")
+	dep := filepath.Join(workspace, "dep")
+	for _, dir := range []string{root, dep} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n\n[dependencies]\ndep = { path = \"../dep\" }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "main.ard"), []byte("use dep\n\nfn main() Int { dep::answer() }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	depManifestPath := filepath.Join(dep, "ard.toml")
+	if err := os.WriteFile(depManifestPath, []byte("name = \"dep\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dep, "dep.ard"), []byte("fn answer() Int { 42 }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	engine := NewEngine(root)
+	ws := NewWorkspace(engine)
+	mainPath := filepath.Join(root, "main.ard")
+	fa1, err := ws.Snapshot().Analyze(mainPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(depManifestPath, []byte("name = \"dep\"\nard = \">= 0.1.0\"\n\n[go.imports]\nbridge = \"example.com/dep/ffi\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fa2, err := ws.Snapshot().Analyze(mainPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fa1 == fa2 {
+		t.Fatal("path dependency manifest change did not invalidate analysis")
+	}
+}
+
 func TestConcurrentAnalyzeIsPointerStable(t *testing.T) {
 	root := writeProject(t, map[string]string{
 		"main.ard": "fn main() {\n  let x = 1\n}\n",
