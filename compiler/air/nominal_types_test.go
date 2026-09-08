@@ -170,6 +170,139 @@ func TestForeignNominalIdentityUsesCanonicalNamespaceNotQualifier(t *testing.T) 
 	}
 }
 
+func TestValidateRejectsDuplicateStructuralIdentity(t *testing.T) {
+	program := &Program{Types: []TypeInfo{
+		{ID: 1, Kind: TypeInt, Name: "Int"},
+		{ID: 2, Kind: TypeList, Name: "[Int]", Elem: 1},
+		{ID: 3, Kind: TypeList, Name: "list alias", Elem: 1},
+	}}
+	if err := Validate(program); err == nil || !strings.Contains(err.Error(), "duplicate identity") {
+		t.Fatalf("Validate error = %v, want duplicate structural identity", err)
+	}
+}
+
+func TestValidateRejectsDuplicateAtomicIdentity(t *testing.T) {
+	program := &Program{Types: []TypeInfo{
+		{ID: 1, Kind: TypeInt, Name: "Int"},
+		{ID: 2, Kind: TypeInt, Name: "integer alias"},
+	}}
+	if err := Validate(program); err == nil || !strings.Contains(err.Error(), "duplicate identity") {
+		t.Fatalf("Validate error = %v, want duplicate atomic identity", err)
+	}
+}
+
+func TestValidateRejectsApplicationOwnedTypeParameters(t *testing.T) {
+	program := &Program{Types: []TypeInfo{
+		{ID: 1, Kind: TypeInt, Name: "Int"},
+		{ID: 2, Kind: TypeStruct, Name: "Box", ModulePath: "example", TypeParams: []string{"T"}},
+		{ID: 3, Kind: TypeStruct, Name: "Box<Int>", ModulePath: "example", Generic: 2, GenericArgs: []TypeID{1}, TypeParams: []string{"U"}},
+	}}
+	if err := Validate(program); err == nil || !strings.Contains(err.Error(), "declares 1 type parameters") {
+		t.Fatalf("Validate error = %v, want application type parameter rejection", err)
+	}
+}
+
+func TestValidateRejectsGenericApplicationFieldMismatch(t *testing.T) {
+	program := &Program{Types: []TypeInfo{
+		{ID: 1, Kind: TypeInt, Name: "Int"},
+		{ID: 2, Kind: TypeStr, Name: "Str"},
+		{ID: 3, Kind: TypeParam, Name: "T", ParamOwner: "genericdef:m:Box", ParamIndex: 0},
+		{ID: 4, Kind: TypeStruct, Name: "Box", ModulePath: "m", TypeParams: []string{"T"}, Fields: []FieldInfo{{Name: "value", Type: 3, Index: 0}}},
+		{ID: 5, Kind: TypeStruct, Name: "Box<Int>", ModulePath: "m", Generic: 4, GenericArgs: []TypeID{1}, Fields: []FieldInfo{{Name: "value", Type: 2, Index: 0}}},
+	}}
+	if err := Validate(program); err == nil || !strings.Contains(err.Error(), "does not match substituted definition") {
+		t.Fatalf("Validate error = %v, want generic field substitution rejection", err)
+	}
+}
+
+func TestValidateRejectsMalformedGenericApplication(t *testing.T) {
+	program := &Program{Types: []TypeInfo{
+		{ID: 1, Kind: TypeStruct, Name: "Box", ModulePath: "example", TypeParams: []string{"T"}},
+		{ID: 2, Kind: TypeStruct, Name: "Box<Int,Str>", ModulePath: "example", Generic: 1, GenericArgs: []TypeID{1, 1}},
+	}}
+	if err := Validate(program); err == nil || !strings.Contains(err.Error(), "definition requires 1") {
+		t.Fatalf("Validate error = %v, want generic arity rejection", err)
+	}
+}
+
+func TestValidateRejectsGenericCallArityMismatch(t *testing.T) {
+	intType := TypeInfo{ID: 1, Kind: TypeInt, Name: "Int"}
+	constant := &Expr{Kind: ExprConstInt, Type: 1, Payload: &TextExprPayload{Value: "1"}}
+	program := &Program{
+		Types:   []TypeInfo{intType},
+		Modules: []Module{{ID: 0, Path: "example"}},
+		Functions: []Function{
+			{ID: 0, Module: 0, Name: "generic", Signature: Signature{Return: 1}, TypeParams: []string{"T"}, TypeParamOwner: "genericfunction:0:generic", Body: Block{Result: constant}},
+			{ID: 1, Module: 0, Name: "caller", Signature: Signature{Return: 1}, Body: Block{Result: &Expr{Kind: ExprCall, Type: 1, Payload: &CallExprPayload{Function: 0}}}},
+		},
+	}
+	if err := Validate(program); err == nil || !strings.Contains(err.Error(), "0 type arguments") {
+		t.Fatalf("Validate error = %v, want generic call arity rejection", err)
+	}
+}
+
+func TestValidateRejectsInvalidForeignCallTypeArgument(t *testing.T) {
+	program := &Program{
+		Types:   []TypeInfo{{ID: 1, Kind: TypeInt, Name: "Int"}},
+		Modules: []Module{{ID: 0, Path: "example"}},
+		Functions: []Function{{
+			ID: 0, Module: 0, Name: "caller", Signature: Signature{Return: 1},
+			Body: Block{Result: &Expr{Kind: ExprForeignCall, Type: 1, Payload: &ForeignExprPayload{Target: "go", Namespace: "example/pkg", Symbol: "Call", TypeArgs: []TypeID{99}}}},
+		}},
+	}
+	if err := Validate(program); err == nil || !strings.Contains(err.Error(), "invalid type argument 99") {
+		t.Fatalf("Validate error = %v, want foreign call type argument rejection", err)
+	}
+}
+
+func TestValidateRejectsDuplicateOwnerParameterNames(t *testing.T) {
+	program := &Program{
+		Types:   []TypeInfo{{ID: 1, Kind: TypeInt, Name: "Int"}},
+		Modules: []Module{{ID: 0, Path: "example"}},
+		Functions: []Function{{
+			ID: 0, Module: 0, Name: "generic", Signature: Signature{Return: 1},
+			TypeParams: []string{"T", "T"}, TypeParamOwner: "genericfunction:0:generic",
+			Body: Block{Result: &Expr{Kind: ExprConstInt, Type: 1, Payload: &TextExprPayload{Value: "1"}}},
+		}},
+	}
+	if err := Validate(program); err == nil || !strings.Contains(err.Error(), "duplicate parameter") {
+		t.Fatalf("Validate error = %v, want duplicate owner parameter rejection", err)
+	}
+}
+
+func TestValidateRejectsMalformedForeignMetadata(t *testing.T) {
+	program := &Program{Types: []TypeInfo{{
+		ID:                1,
+		Kind:              TypeForeignType,
+		Name:              "pkg::Token",
+		ForeignTarget:     "go",
+		ForeignNamespace:  "example/pkg",
+		ForeignSymbol:     "Token",
+		GenericArgs:       []TypeID{99},
+		GenericComparable: []bool{true, false},
+	}}}
+	if err := Validate(program); err == nil || !strings.Contains(err.Error(), "comparable mask") {
+		t.Fatalf("Validate error = %v, want foreign metadata rejection", err)
+	}
+}
+
+func TestValidateRejectsContradictoryForeignShape(t *testing.T) {
+	program := &Program{Types: []TypeInfo{
+		{ID: 1, Kind: TypeInt, Name: "Int"},
+		{ID: 2, Kind: TypeForeignType, Name: "pkg::Hybrid", ForeignTarget: "go", ForeignNamespace: "example/pkg", ForeignSymbol: "Hybrid", Elem: 1, Key: 1, Value: 1},
+	}}
+	if err := Validate(program); err == nil || !strings.Contains(err.Error(), "contradictory") {
+		t.Fatalf("Validate error = %v, want contradictory foreign shape rejection", err)
+	}
+}
+
+func TestValidateRejectsUnknownTypeParameterOwner(t *testing.T) {
+	program := &Program{Types: []TypeInfo{{ID: 1, Kind: TypeParam, Name: "T", ParamOwner: "missing", ParamIndex: 0}}}
+	if err := Validate(program); err == nil || !strings.Contains(err.Error(), "unknown owner") {
+		t.Fatalf("Validate error = %v, want unknown owner rejection", err)
+	}
+}
+
 func TestValidateRejectsDuplicateNominalAndTypeParameterIdentity(t *testing.T) {
 	tests := []struct {
 		name  string

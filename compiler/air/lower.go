@@ -58,14 +58,15 @@ func LowerModulesWithOptions(modules []checker.Module, options LowerOptions) (*P
 type lowerer struct {
 	program Program
 
-	moduleByPath map[string]ModuleID
-	moduleByName map[string]checker.Module
-	typeByKey    map[string]TypeID
-	typeInterner *typeInterner
-	traits       map[string]TraitID
-	impls        map[string]ImplID
-	functions    map[string]FunctionID
-	globals      map[string]GlobalID
+	moduleByPath     map[string]ModuleID
+	moduleByName     map[string]checker.Module
+	atomicTypes      map[checker.Type]TypeID
+	traitObjectTypes map[TraitID]TypeID
+	typeInterner     *typeInterner
+	traits           map[string]TraitID
+	impls            map[string]ImplID
+	functions        map[string]FunctionID
+	globals          map[string]GlobalID
 
 	cacheMethodLookups       bool
 	structMethodsByOwner     map[checker.MethodOwner]map[string]*checker.FunctionDef
@@ -111,13 +112,14 @@ func newLowerer(options LowerOptions, rootCount int) *lowerer {
 			Entry:  NoFunction,
 			Script: NoFunction,
 		},
-		moduleByPath: map[string]ModuleID{},
-		moduleByName: map[string]checker.Module{},
-		typeByKey:    map[string]TypeID{},
-		traits:       map[string]TraitID{},
-		impls:        map[string]ImplID{},
-		functions:    map[string]FunctionID{},
-		globals:      map[string]GlobalID{},
+		moduleByPath:     map[string]ModuleID{},
+		moduleByName:     map[string]checker.Module{},
+		atomicTypes:      map[checker.Type]TypeID{},
+		traitObjectTypes: map[TraitID]TypeID{},
+		traits:           map[string]TraitID{},
+		impls:            map[string]ImplID{},
+		functions:        map[string]FunctionID{},
+		globals:          map[string]GlobalID{},
 
 		cacheMethodLookups:      rootCount == 1,
 		unresolvedTypeVarByType: map[checker.Type]bool{},
@@ -645,13 +647,14 @@ func (l *lowerer) declareGenericFunctionDef(module ModuleID, declaration *checke
 	l.functions[concreteFunctionKey(module, declaration.Name, signature, "genericdef")] = id
 	l.genericFunctionDefs[key] = id
 	l.program.Functions = append(l.program.Functions, Function{
-		ID:         id,
-		Module:     module,
-		Name:       declaration.Name,
-		Signature:  signature,
-		TypeParams: goParams,
-		IsTest:     declaration.IsTest,
-		Private:    declaration.Private,
+		ID:             id,
+		Module:         module,
+		Name:           declaration.Name,
+		Signature:      signature,
+		TypeParams:     goParams,
+		TypeParamOwner: paramOwner,
+		IsTest:         declaration.IsTest,
+		Private:        declaration.Private,
 	})
 	l.program.Modules[module].Functions = appendUniqueFunction(l.program.Modules[module].Functions, id)
 	typeVars := make(map[string]TypeID, len(params))
@@ -2175,6 +2178,7 @@ func (fl *functionLowerer) declareGenericMethodFunction(module ModuleID, instanc
 		RequiredGoMethodName: method.RequiredGoMethodName,
 		Signature:            signature,
 		TypeParams:           paramNames,
+		TypeParamOwner:       paramOwner,
 	})
 	fl.l.program.Modules[module].Functions = appendUniqueFunction(fl.l.program.Modules[module].Functions, id)
 	typeVars := make(map[string]TypeID, len(paramNames))
@@ -2457,69 +2461,53 @@ func (l *lowerer) internType(t checker.Type) (TypeID, error) {
 	if id, structural, err := l.internCheckerStructuralType(t); structural {
 		return id, err
 	}
-	// Generic checker copies can contain distinct, temporarily incomplete
-	// representations of an otherwise ordinary named struct. Resolve those
-	// copies back to the declaration owned by the checked module before
-	// interning so one Ard nominal type cannot become multiple AIR identities.
-	if typ, ok := t.(*checker.StructDef); ok && len(typ.GenericParams) == 0 && len(typ.TypeArgs) == 0 {
-		if canonical := l.lookupStructDef(typ.ModulePath, typ.Name, false); canonical != nil {
-			t = canonical
-		}
-	}
-	key := airTypeKey(t)
-	// Within a generic definition, only types that actually reference a type
-	// parameter need a distinct key; non-generic types (e.g. a plain struct used
-	// in the body) must continue to share their concrete interned entry.
-	if l.defParams != nil && typeContainsTypeVar(t) {
-		key = "gdef:" + l.defParamOwner + ":" + key
-	}
-	name := airTypeName(t)
-	if id, ok := l.typeByKey[key]; ok {
-		return id, nil
-	}
+	return l.internAtomicOrTraitType(t)
+}
 
-	id := TypeID(len(l.program.Types) + 1)
-	l.typeByKey[key] = id
-	l.program.Types = append(l.program.Types, TypeInfo{ID: id, Name: name})
-	idx := len(l.program.Types) - 1
-	info := TypeInfo{ID: id, Name: name}
-
-	switch typ := t.(type) {
-	case *checker.Trait:
-		traitID, err := l.internTrait(typ)
+func (l *lowerer) internAtomicOrTraitType(t checker.Type) (TypeID, error) {
+	if trait, ok := t.(*checker.Trait); ok {
+		traitID, err := l.internTrait(trait)
 		if err != nil {
 			return NoType, err
 		}
-		info.Kind = TypeTraitObject
-		info.Trait = traitID
-	default:
-		switch t {
-		case checker.Void:
-			info.Kind = TypeVoid
-		case checker.Int:
-			info.Kind = TypeInt
-		case checker.Int8, checker.Int16, checker.Int32, checker.Int64, checker.Uint, checker.Uint8, checker.Uint16, checker.Uint32, checker.Uint64, checker.Uintptr, checker.Float32:
-			info.Kind = TypeScalar
-			info.Name = t.String()
-		case checker.Float64:
-			info.Kind = TypeFloat64
-		case checker.Bool:
-			info.Kind = TypeBool
-		case checker.Byte:
-			info.Kind = TypeByte
-		case checker.Rune:
-			info.Kind = TypeRune
-		case checker.Str:
-			info.Kind = TypeStr
-		case checker.Any:
-			info.Kind = TypeAny
-		default:
-			return NoType, fmt.Errorf("unsupported AIR type %T (%s)", t, t.String())
+		if id, exists := l.traitObjectTypes[traitID]; exists {
+			return id, nil
 		}
+		id := TypeID(len(l.program.Types) + 1)
+		l.traitObjectTypes[traitID] = id
+		l.program.Types = append(l.program.Types, TypeInfo{ID: id, Kind: TypeTraitObject, Name: trait.String(), Trait: traitID})
+		return id, nil
 	}
-
-	info.ModulePath = l.typeOwnerPath(t)
-	l.program.Types[idx] = info
+	if id, ok := l.atomicTypes[t]; ok {
+		return id, nil
+	}
+	info := TypeInfo{Name: airTypeName(t)}
+	switch t {
+	case checker.Void:
+		info.Kind = TypeVoid
+	case checker.Int:
+		info.Kind = TypeInt
+	case checker.Int8, checker.Int16, checker.Int32, checker.Int64, checker.Uint, checker.Uint8, checker.Uint16, checker.Uint32, checker.Uint64, checker.Uintptr, checker.Float32:
+		info.Kind = TypeScalar
+	case checker.Float64:
+		info.Kind = TypeFloat64
+	case checker.Bool:
+		info.Kind = TypeBool
+	case checker.Byte:
+		info.Kind = TypeByte
+	case checker.Rune:
+		info.Kind = TypeRune
+	case checker.Str:
+		info.Kind = TypeStr
+	case checker.Any:
+		info.Kind = TypeAny
+	default:
+		return NoType, fmt.Errorf("unsupported AIR type %T (%s)", t, t.String())
+	}
+	id := TypeID(len(l.program.Types) + 1)
+	info.ID = id
+	l.atomicTypes[t] = id
+	l.program.Types = append(l.program.Types, info)
 	return id, nil
 }
 
@@ -2533,41 +2521,8 @@ func (l *lowerer) methodReceiverType(owner TypeID, mutates bool) (TypeID, error)
 	return l.internSyntheticType("mut "+l.typeName(owner), TypeInfo{Kind: TypeReference, Elem: owner})
 }
 
-func (l *lowerer) internSyntheticType(name string, info TypeInfo) (TypeID, error) {
-	return l.typeInterner.internStructural(name, info)
-}
-
-func (l *lowerer) typeOwnerPath(t checker.Type) string {
-	if ref, ok := t.(*checker.MutableRef); ok {
-		return l.typeOwnerPath(ref.Of())
-	}
-	var name string
-	switch typ := t.(type) {
-	case *checker.StructDef:
-		if typ.ModulePath != "" {
-			return typ.ModulePath
-		}
-		name = typ.Name
-	case *checker.Enum:
-		if typ.ModulePath != "" {
-			return typ.ModulePath
-		}
-		name = typ.Name
-	case *checker.Union:
-		if typ.ModulePath != "" {
-			return typ.ModulePath
-		}
-		name = typ.Name
-	default:
-		return ""
-	}
-	for _, module := range sortedModules(l.moduleByName) {
-		sym := module.Get(name)
-		if sym.Type == t {
-			return module.Path()
-		}
-	}
-	return ""
+func (l *lowerer) internSyntheticType(_ string, info TypeInfo) (TypeID, error) {
+	return l.typeInterner.internStructural(info)
 }
 
 func (l *lowerer) typeName(id TypeID) string {
@@ -2835,129 +2790,6 @@ func signaturesEqual(left, right Signature) bool {
 
 func airTypeName(t checker.Type) string {
 	return t.String()
-}
-
-func airTypeKey(t checker.Type) string {
-	return airTypeKeySeen(t, map[checker.Type]struct{}{})
-}
-
-func airTypeKeySeen(t checker.Type, seen map[checker.Type]struct{}) string {
-	if t == nil {
-		return "<nil>"
-	}
-	if tv, ok := t.(*checker.TypeVar); ok && tv.Actual() != nil {
-		return airTypeKeySeen(tv.Actual(), seen)
-	}
-	if _, ok := seen[t]; ok {
-		return t.String()
-	}
-	seen[t] = struct{}{}
-	switch typ := t.(type) {
-	case *checker.List:
-		return "list<" + airTypeKeySeen(typ.Of(), seen) + ">"
-	case *checker.Slice:
-		return "slice<" + airTypeKeySeen(typ.Of(), seen) + ">"
-	case *checker.FixedArray:
-		return fmt.Sprintf("fixed-array<%s;%d>", airTypeKeySeen(typ.Of(), seen), typ.Len())
-	case *checker.Chan:
-		return "channel<" + airTypeKeySeen(typ.Of(), seen) + ">"
-	case *checker.Receiver:
-		return "receiver<" + airTypeKeySeen(typ.Of(), seen) + ">"
-	case *checker.Sender:
-		return "sender<" + airTypeKeySeen(typ.Of(), seen) + ">"
-	case *checker.Map:
-		return "map<" + airTypeKeySeen(typ.Key(), seen) + "," + airTypeKeySeen(typ.Value(), seen) + ">"
-	case *checker.Maybe:
-		return "maybe<" + airTypeKeySeen(typ.Of(), seen) + ">"
-	case *checker.Result:
-		return "result<" + airTypeKeySeen(typ.Val(), seen) + "," + airTypeKeySeen(typ.Err(), seen) + ">"
-	case *checker.MutableRef:
-		return "mut<" + airTypeKeySeen(typ.Of(), seen) + ">"
-	case *checker.StructDef:
-		return airStructKeySeen(typ, seen)
-	case *checker.Enum:
-		return airEnumKey(typ)
-	case *checker.Union:
-		return airUnionKeySeen(typ, seen)
-	case *checker.FunctionDef:
-		return airFunctionTypeKeySeen(typ.Parameters, typ.ReturnType, seen)
-	case *checker.Trait:
-		return "trait " + checkerTraitKey(typ)
-	default:
-		return t.String()
-	}
-}
-
-func airStructKey(typ *checker.StructDef) string {
-	return airStructKeySeen(typ, map[checker.Type]struct{}{})
-}
-
-func airStructKeySeen(typ *checker.StructDef, seen map[checker.Type]struct{}) string {
-	definition := checker.StructDefinition(typ)
-	key := "struct " + definition.ModulePath + "::" + definition.Name
-	if len(typ.TypeArgs) > 0 {
-		key += "<"
-		for i, typeArg := range typ.TypeArgs {
-			if i > 0 {
-				key += ","
-			}
-			key += airTypeKeySeen(typeArg, seen)
-		}
-		key += ">"
-	}
-	return key
-}
-
-func airEnumKey(typ *checker.Enum) string {
-	key := "enum " + typ.ModulePath + "::" + typ.Name + "{"
-	for i, variant := range typ.Values {
-		if i > 0 {
-			key += ","
-		}
-		key += variant.Name
-	}
-	key += "}"
-	return key
-}
-
-func airUnionKey(typ *checker.Union) string {
-	return airUnionKeySeen(typ, map[checker.Type]struct{}{})
-}
-
-func airUnionKeySeen(typ *checker.Union, seen map[checker.Type]struct{}) string {
-	parts := make([]string, len(typ.Types))
-	for i, member := range typ.Types {
-		parts[i] = airTypeKeySeen(member, seen)
-	}
-	sort.Strings(parts)
-	key := "union " + typ.ModulePath + "::" + typ.Name + "{"
-	for i, part := range parts {
-		if i > 0 {
-			key += "|"
-		}
-		key += part
-	}
-	key += "}"
-	return key
-}
-
-func airFunctionTypeKey(params []checker.Parameter, returnType checker.Type) string {
-	return airFunctionTypeKeySeen(params, returnType, map[checker.Type]struct{}{})
-}
-
-func airFunctionTypeKeySeen(params []checker.Parameter, returnType checker.Type, seen map[checker.Type]struct{}) string {
-	key := "fn("
-	for i, param := range params {
-		if i > 0 {
-			key += ","
-		}
-		if param.Variadic {
-			key += "..."
-		}
-		key += airTypeKeySeen(param.Type, seen)
-	}
-	key += ")->" + airTypeKeySeen(returnType, seen)
-	return key
 }
 
 func (fl *functionLowerer) lowerBlock(stmts []checker.Statement) (Block, error) {
@@ -5715,6 +5547,7 @@ func (fl *functionLowerer) lowerClosureWithSelf(typeID TypeID, def *checker.Func
 	// inherit them and be instantiated with them at its creation site (ADR 0031).
 	if len(fl.fn.TypeParams) > 0 {
 		fl.l.program.Functions[id].TypeParams = fl.fn.TypeParams
+		fl.l.program.Functions[id].TypeParamOwner = fl.fn.TypeParamOwner
 	}
 	fn := fl.l.program.Functions[id]
 	// Closure function declarations are keyed by their concrete signature and can be
@@ -5749,6 +5582,17 @@ func (fl *functionLowerer) lowerClosureWithSelf(typeID TypeID, def *checker.Func
 		}
 	}
 	fl.l.program.Functions[id] = fn
+	var typeArgs []TypeID
+	if len(fn.TypeParams) > 0 {
+		typeArgs = make([]TypeID, len(fn.TypeParams))
+	}
+	for index, name := range fn.TypeParams {
+		typeArg, ok := fl.typeVars[name]
+		if !ok {
+			return nil, false, fmt.Errorf("closure %s cannot resolve inherited type parameter %s", def.Name, name)
+		}
+		typeArgs[index] = typeArg
+	}
 	for index, capture := range fn.Captures {
 		if capture.Mode == CaptureSlot && index < len(child.captureLocals) {
 			// A nested slot capture must propagate through every enclosing
@@ -5757,7 +5601,7 @@ func (fl *functionLowerer) lowerClosureWithSelf(typeID TypeID, def *checker.Func
 		}
 	}
 
-	return &Expr{Kind: ExprMakeClosure, Type: typeID, Payload: &CallExprPayload{Function: id, CaptureLocals: child.captureLocals}}, recursive, nil
+	return &Expr{Kind: ExprMakeClosure, Type: typeID, Payload: &CallExprPayload{Function: id, TypeArgs: typeArgs, CaptureLocals: child.captureLocals}}, recursive, nil
 }
 
 func (fl *functionLowerer) lowerModuleSymbol(typeID TypeID, symbol *checker.ModuleSymbol) (*Expr, error) {

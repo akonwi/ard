@@ -3,6 +3,7 @@ package air
 import (
 	"fmt"
 	"reflect"
+	"sort"
 	"strings"
 
 	"github.com/akonwi/ard/checker"
@@ -56,18 +57,20 @@ type typeParamKey struct {
 }
 
 type typeInterner struct {
-	program    *Program
-	structural map[structuralTypeKey]TypeID
-	nominal    map[nominalTypeKey]*nominalEntry
-	typeParams map[typeParamKey]TypeID
+	program     *Program
+	structural  map[structuralTypeKey]TypeID
+	nominal     map[nominalTypeKey]*nominalEntry
+	nominalByID map[TypeID]*nominalEntry
+	typeParams  map[typeParamKey]TypeID
 }
 
 func newTypeInterner(program *Program) *typeInterner {
 	return &typeInterner{
-		program:    program,
-		structural: map[structuralTypeKey]TypeID{},
-		nominal:    map[nominalTypeKey]*nominalEntry{},
-		typeParams: map[typeParamKey]TypeID{},
+		program:     program,
+		structural:  map[structuralTypeKey]TypeID{},
+		nominal:     map[nominalTypeKey]*nominalEntry{},
+		nominalByID: map[TypeID]*nominalEntry{},
+		typeParams:  map[typeParamKey]TypeID{},
 	}
 }
 
@@ -83,7 +86,9 @@ func (i *typeInterner) reserveNominal(key nominalTypeKey, seed TypeInfo) (TypeID
 	id := TypeID(len(i.program.Types) + 1)
 	seed.ID = id
 	i.program.Types = append(i.program.Types, seed)
-	i.nominal[key] = &nominalEntry{id: id, state: nominalBuilding}
+	entry := &nominalEntry{id: id, state: nominalBuilding}
+	i.nominal[key] = entry
+	i.nominalByID[id] = entry
 	return id, true, nil
 }
 
@@ -119,24 +124,32 @@ func (i *typeInterner) failNominal(key nominalTypeKey, err error) error {
 }
 
 func (i *typeInterner) nominalAvailable(id TypeID) bool {
-	for _, entry := range i.nominal {
-		if entry.id == id {
-			return entry.state == nominalComplete
-		}
-	}
-	return true
+	entry, nominal := i.nominalByID[id]
+	return !nominal || entry.state == nominalComplete
 }
 
 func (i *typeInterner) validateComplete() error {
+	issues := map[string]error{}
+	keys := make([]string, 0)
 	for key, entry := range i.nominal {
+		var err error
 		switch entry.state {
 		case nominalBuilding:
-			return fmt.Errorf("nominal AIR type remained incomplete: %+v", key)
+			err = fmt.Errorf("nominal AIR type remained incomplete: %+v", key)
 		case nominalFailed:
-			return entry.err
+			err = entry.err
+		}
+		if err != nil {
+			description := fmt.Sprintf("%+v", key)
+			issues[description] = err
+			keys = append(keys, description)
 		}
 	}
-	return nil
+	if len(keys) == 0 {
+		return nil
+	}
+	sort.Strings(keys)
+	return issues[keys[0]]
 }
 
 func structuralIdentity(info TypeInfo) (structuralTypeKey, bool) {
@@ -163,7 +176,7 @@ func structuralIdentity(info TypeInfo) (structuralTypeKey, bool) {
 	return key, true
 }
 
-func (i *typeInterner) internStructural(_ string, info TypeInfo) (TypeID, error) {
+func (i *typeInterner) internStructural(info TypeInfo) (TypeID, error) {
 	key, ok := structuralIdentity(info)
 	if !ok {
 		return NoType, fmt.Errorf("AIR type kind %d is not structural", info.Kind)
@@ -260,7 +273,7 @@ func (l *lowerer) internCheckerStructuralType(t checker.Type) (TypeID, bool, err
 		if err != nil {
 			return NoType, true, err
 		}
-		id, err := l.typeInterner.internStructural(airTypeName(t), TypeInfo{Kind: kind, Elem: elemID})
+		id, err := l.typeInterner.internStructural(TypeInfo{Kind: kind, Elem: elemID})
 		return id, true, err
 	}
 
@@ -274,7 +287,7 @@ func (l *lowerer) internCheckerStructuralType(t checker.Type) (TypeID, bool, err
 		if err != nil {
 			return NoType, true, err
 		}
-		id, err := l.typeInterner.internStructural(airTypeName(t), TypeInfo{Kind: TypeFixedArray, Elem: elem, Length: typ.Len()})
+		id, err := l.typeInterner.internStructural(TypeInfo{Kind: TypeFixedArray, Elem: elem, Length: typ.Len()})
 		return id, true, err
 	case *checker.Chan:
 		return internElem(typ.Of(), TypeChannel)
@@ -291,7 +304,7 @@ func (l *lowerer) internCheckerStructuralType(t checker.Type) (TypeID, bool, err
 		if err != nil {
 			return NoType, true, err
 		}
-		id, err := l.typeInterner.internStructural(airTypeName(t), TypeInfo{Kind: TypeMap, Key: key, Value: value})
+		id, err := l.typeInterner.internStructural(TypeInfo{Kind: TypeMap, Key: key, Value: value})
 		return id, true, err
 	case *checker.Maybe:
 		return internElem(typ.Of(), TypeMaybe)
@@ -304,7 +317,7 @@ func (l *lowerer) internCheckerStructuralType(t checker.Type) (TypeID, bool, err
 		if err != nil {
 			return NoType, true, err
 		}
-		id, err := l.typeInterner.internStructural(airTypeName(t), TypeInfo{Kind: TypeResult, Value: value, Error: errType})
+		id, err := l.typeInterner.internStructural(TypeInfo{Kind: TypeResult, Value: value, Error: errType})
 		return id, true, err
 	case *checker.FunctionDef:
 		params := make([]TypeID, len(typ.Parameters))
@@ -320,7 +333,7 @@ func (l *lowerer) internCheckerStructuralType(t checker.Type) (TypeID, bool, err
 			return NoType, true, err
 		}
 		variadic := len(typ.Parameters) > 0 && typ.Parameters[len(typ.Parameters)-1].Variadic
-		id, err := l.typeInterner.internStructural(airTypeName(t), TypeInfo{Kind: TypeFunction, Params: params, Return: returnType, Variadic: variadic})
+		id, err := l.typeInterner.internStructural(TypeInfo{Kind: TypeFunction, Params: params, Return: returnType, Variadic: variadic})
 		return id, true, err
 	default:
 		return NoType, false, nil
