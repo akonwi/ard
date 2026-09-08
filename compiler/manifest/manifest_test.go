@@ -13,6 +13,9 @@ target = "go"
 [go]
 build_tags = ["sqlite"]
 
+[go.imports]
+vaxis = "go.rockorager.dev/vaxis"
+
 [dependencies]
 ui = { path = "../ui" }
 remote = { git = "https://example.com/remote.git", tag = "v1.2.3" }
@@ -33,6 +36,9 @@ experimental = { type = "Bool", default = false }
 	if len(got.Go.BuildTags) != 1 || got.Go.BuildTags[0] != "sqlite" {
 		t.Fatalf("build tags = %#v", got.Go.BuildTags)
 	}
+	if got.Go.Imports["vaxis"] != "go.rockorager.dev/vaxis" {
+		t.Fatalf("Go imports = %#v", got.Go.Imports)
+	}
 	if got.Dependencies["ui"].Path != "../ui" || got.Dependencies["remote"].Tag != "v1.2.3" {
 		t.Fatalf("dependencies = %#v", got.Dependencies)
 	}
@@ -44,6 +50,30 @@ experimental = { type = "Bool", default = false }
 	}
 	if value := got.Build.Values["experimental"]; value.Type != BuildValueBool || value.Default != false {
 		t.Fatalf("experimental = %#v", value)
+	}
+}
+
+func TestParseRejectsInvalidGoImports(t *testing.T) {
+	tests := []struct {
+		name    string
+		decl    string
+		wantErr string
+	}{
+		{name: "imports must be a table", decl: `imports = "example.com/pkg"`, wantErr: "[go].imports must be a table"},
+		{name: "alias must be an identifier", decl: "[go.imports]\nbad-alias = \"example.com/pkg\"", wantErr: `Go import alias "bad-alias" is not a valid Ard identifier`},
+		{name: "path must be a string", decl: "[go.imports]\npkg = 42", wantErr: `Go import alias "pkg" path must be a string`},
+		{name: "path cannot be empty", decl: "[go.imports]\npkg = \"\"", wantErr: `Go import alias "pkg" path must not be empty`},
+		{name: "path must be valid", decl: "[go.imports]\npkg = \"example.com/bad path\"", wantErr: `Go import alias "pkg" has invalid path`},
+		{name: "project name is reserved", decl: "[go.imports]\ndemo = \"example.com/other\"", wantErr: `Go import alias "demo" conflicts with the project name`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := []byte("name = \"demo\"\nard = \">= 0.40.0\"\n\n[go]\n" + tt.decl + "\n")
+			_, err := Parse(input)
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("Parse error = %v, want containing %q", err, tt.wantErr)
+			}
+		})
 	}
 }
 

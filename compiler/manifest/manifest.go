@@ -9,6 +9,7 @@ import (
 
 	"github.com/akonwi/ard/parse"
 	"github.com/pelletier/go-toml/v2"
+	"golang.org/x/mod/module"
 )
 
 type BuildValueType string
@@ -30,6 +31,7 @@ type Document struct {
 
 type GoConfig struct {
 	BuildTags []string
+	Imports   map[string]string
 }
 
 type Dependency struct {
@@ -78,6 +80,9 @@ func Parse(data []byte) (*Document, error) {
 		if doc.Go, err = parseGo(raw); err != nil {
 			return nil, err
 		}
+		if _, exists := doc.Go.Imports[doc.Name]; doc.Name != "" && exists {
+			return nil, fmt.Errorf("Go import alias %q conflicts with the project name", doc.Name)
+		}
 	}
 	if raw, ok := root["dependencies"]; ok {
 		if doc.Dependencies, err = parseDependencies(raw); err != nil {
@@ -97,25 +102,45 @@ func parseGo(raw any) (GoConfig, error) {
 	if !ok {
 		return GoConfig{}, fmt.Errorf("go must be a table")
 	}
-	config := GoConfig{}
-	value, ok := table["build_tags"]
-	if !ok {
-		return config, nil
-	}
-	items, ok := value.([]any)
-	if !ok {
-		return GoConfig{}, fmt.Errorf("[go].build_tags must be a list of quoted strings")
-	}
-	validTag := regexp.MustCompile(`^[A-Za-z0-9_.]+$`)
-	for _, item := range items {
-		tag, ok := item.(string)
+	config := GoConfig{Imports: map[string]string{}}
+	if value, ok := table["build_tags"]; ok {
+		items, ok := value.([]any)
 		if !ok {
 			return GoConfig{}, fmt.Errorf("[go].build_tags must be a list of quoted strings")
 		}
-		if tag == "" || !validTag.MatchString(tag) {
-			return GoConfig{}, fmt.Errorf("invalid Go build tag %q", tag)
+		validTag := regexp.MustCompile(`^[A-Za-z0-9_.]+$`)
+		for _, item := range items {
+			tag, ok := item.(string)
+			if !ok {
+				return GoConfig{}, fmt.Errorf("[go].build_tags must be a list of quoted strings")
+			}
+			if tag == "" || !validTag.MatchString(tag) {
+				return GoConfig{}, fmt.Errorf("invalid Go build tag %q", tag)
+			}
+			config.BuildTags = append(config.BuildTags, tag)
 		}
-		config.BuildTags = append(config.BuildTags, tag)
+	}
+	if value, ok := table["imports"]; ok {
+		imports, ok := value.(map[string]any)
+		if !ok {
+			return GoConfig{}, fmt.Errorf("[go].imports must be a table")
+		}
+		for _, alias := range sortedKeys(imports) {
+			if !parse.IsValidIdentifier(alias) {
+				return GoConfig{}, fmt.Errorf("Go import alias %q is not a valid Ard identifier", alias)
+			}
+			path, ok := imports[alias].(string)
+			if !ok {
+				return GoConfig{}, fmt.Errorf("Go import alias %q path must be a string", alias)
+			}
+			if path == "" {
+				return GoConfig{}, fmt.Errorf("Go import alias %q path must not be empty", alias)
+			}
+			if err := module.CheckImportPath(path); err != nil {
+				return GoConfig{}, fmt.Errorf("Go import alias %q has invalid path %q: %w", alias, path, err)
+			}
+			config.Imports[alias] = path
+		}
 	}
 	return config, nil
 }
