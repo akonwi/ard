@@ -235,6 +235,7 @@ export default defineConfig({
               label: "Modules",
               items: [
                 { label: "ard/async", slug: "stdlib/async" },
+                { label: "ard/embed", slug: "stdlib/embed" },
                 { label: "ard/list", slug: "stdlib/list" },
                 { label: "ard/map", slug: "stdlib/map" },
                 { label: "ard/testing", slug: "stdlib/testing" },
