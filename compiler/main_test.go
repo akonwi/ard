@@ -442,6 +442,7 @@ func assertTestPipelineProfile(t *testing.T, stderr string) {
 		"go.prepare_workspace",
 		"go.validate_lower_render",
 		"go.write_sources",
+		"go.write_embedded_resources",
 		"go.copy_ffi",
 		"go.write_runtime",
 		"go.write_module",

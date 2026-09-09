@@ -1,6 +1,8 @@
 package air
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"reflect"
 
@@ -48,6 +50,32 @@ func Validate(program *Program) error {
 	}
 	if err := validateCanonicalNominalIdentities(program); err != nil {
 		return err
+	}
+	if len(program.EmbeddedBlobs) > checker.MaxEmbeddedProgramFileCount {
+		return fmt.Errorf("embedded blobs exceed program limit of %d files", checker.MaxEmbeddedProgramFileCount)
+	}
+	embeddedBytes := 0
+	embeddedDigests := make(map[string]bool, len(program.EmbeddedBlobs))
+	for i, blob := range program.EmbeddedBlobs {
+		if blob.ID != EmbeddedBlobID(i) {
+			return fmt.Errorf("embedded blob table entry %d has id %d", i, blob.ID)
+		}
+		if len(blob.Data) > checker.MaxEmbeddedFileBytes {
+			return fmt.Errorf("embedded blob %d exceeds file limit of %d bytes", blob.ID, checker.MaxEmbeddedFileBytes)
+		}
+		embeddedBytes += len(blob.Data)
+		if embeddedBytes > checker.MaxEmbeddedProgramBytes {
+			return fmt.Errorf("embedded blobs exceed program limit of %d bytes", checker.MaxEmbeddedProgramBytes)
+		}
+		sum := sha256.Sum256(blob.Data)
+		digest := hex.EncodeToString(sum[:])
+		if blob.Digest != digest {
+			return fmt.Errorf("embedded blob %d has digest %q, want %q", blob.ID, blob.Digest, digest)
+		}
+		if embeddedDigests[digest] {
+			return fmt.Errorf("embedded blob %d duplicates digest %q", blob.ID, digest)
+		}
+		embeddedDigests[digest] = true
 	}
 	for i, trait := range program.Traits {
 		if trait.ID != TraitID(i) {
@@ -930,6 +958,8 @@ func validateExprPayload(expr Expr) error {
 		compatible = true
 	case *TextExprPayload:
 		compatible = expr.Kind == ExprConstInt || expr.Kind == ExprConstFloat || expr.Kind == ExprConstStr
+	case *EmbeddedBlobExprPayload:
+		compatible = expr.Kind == ExprEmbeddedText || expr.Kind == ExprEmbeddedBytes
 	case *BoolExprPayload:
 		compatible = expr.Kind == ExprConstBool
 	case *EnumExprPayload:
@@ -1033,6 +1063,7 @@ func exprPayloadRequired(kind ExprKind) bool {
 	}
 	switch kind {
 	case ExprConstInt, ExprConstFloat, ExprConstBool, ExprConstStr,
+		ExprEmbeddedText, ExprEmbeddedBytes,
 		ExprLoadLocal, ExprLoadGlobal, ExprFunctionRef, ExprCall,
 		ExprForeignCall, ExprForeignMethodCall, ExprForeignMethodValue,
 		ExprForeignFieldAccess, ExprForeignStructInstance, ExprForeignValue,
@@ -1054,6 +1085,24 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 	}
 	if !validTypeID(program, expr.Type) {
 		return fmt.Errorf("expression has invalid type %d", expr.Type)
+	}
+	if expr.Kind == ExprEmbeddedText || expr.Kind == ExprEmbeddedBytes {
+		payload := exprPayloadAs[*EmbeddedBlobExprPayload](&expr)
+		if payload == nil {
+			return fmt.Errorf("embedded expression is missing its blob payload")
+		}
+		if payload.Blob < 0 || int(payload.Blob) >= len(program.EmbeddedBlobs) {
+			return fmt.Errorf("embedded expression references invalid blob %d", payload.Blob)
+		}
+		typ := program.Types[expr.Type-1]
+		if expr.Kind == ExprEmbeddedText && typ.Kind != TypeStr {
+			return fmt.Errorf("embedded text expression has non-Str type %d", expr.Type)
+		}
+		if expr.Kind == ExprEmbeddedBytes {
+			if typ.Kind != TypeList || !validTypeID(program, typ.Elem) || program.Types[typ.Elem-1].Kind != TypeByte {
+				return fmt.Errorf("embedded bytes expression has non-[Byte] type %d", expr.Type)
+			}
+		}
 	}
 	if err := validateTailSpread(program, expr); err != nil {
 		return err

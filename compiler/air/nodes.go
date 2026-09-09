@@ -62,6 +62,8 @@ const (
 	ExprConstFloat
 	ExprConstBool
 	ExprConstStr
+	ExprEmbeddedText
+	ExprEmbeddedBytes
 	ExprPanic
 	ExprLoadLocal
 	ExprLoadGlobal

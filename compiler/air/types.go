@@ -7,6 +7,7 @@ type GlobalID int
 type LocalID int
 type TraitID int
 type ImplID int
+type EmbeddedBlobID int
 
 const (
 	NoType     TypeID     = 0
@@ -14,16 +15,23 @@ const (
 	NoGlobal   GlobalID   = -1
 )
 
+type EmbeddedBlob struct {
+	ID     EmbeddedBlobID
+	Data   []byte
+	Digest string
+}
+
 type Program struct {
-	Modules   []Module
-	Types     []TypeInfo
-	Traits    []Trait
-	Impls     []Impl
-	Globals   []Global
-	Tests     []Test
-	Functions []Function
-	Entry     FunctionID
-	Script    FunctionID
+	Modules       []Module
+	EmbeddedBlobs []EmbeddedBlob
+	Types         []TypeInfo
+	Traits        []Trait
+	Impls         []Impl
+	Globals       []Global
+	Tests         []Test
+	Functions     []Function
+	Entry         FunctionID
+	Script        FunctionID
 }
 
 type Module struct {

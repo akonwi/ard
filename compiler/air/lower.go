@@ -1,6 +1,9 @@
 package air
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"sort"
 	"strconv"
@@ -58,13 +61,14 @@ func LowerModulesWithOptions(modules []checker.Module, options LowerOptions) (*P
 type lowerer struct {
 	program Program
 
-	moduleByPath map[string]ModuleID
-	moduleByName map[string]checker.Module
-	typeInterner *typeInterner
-	traits       map[string]TraitID
-	impls        map[string]ImplID
-	functions    map[string]FunctionID
-	globals      map[string]GlobalID
+	moduleByPath  map[string]ModuleID
+	moduleByName  map[string]checker.Module
+	typeInterner  *typeInterner
+	traits        map[string]TraitID
+	impls         map[string]ImplID
+	functions     map[string]FunctionID
+	globals       map[string]GlobalID
+	embeddedBlobs map[string]EmbeddedBlobID
 
 	cacheMethodLookups       bool
 	structMethodsByOwner     map[checker.MethodOwner]map[string]*checker.FunctionDef
@@ -110,12 +114,13 @@ func newLowerer(options LowerOptions, rootCount int) *lowerer {
 			Entry:  NoFunction,
 			Script: NoFunction,
 		},
-		moduleByPath: map[string]ModuleID{},
-		moduleByName: map[string]checker.Module{},
-		traits:       map[string]TraitID{},
-		impls:        map[string]ImplID{},
-		functions:    map[string]FunctionID{},
-		globals:      map[string]GlobalID{},
+		moduleByPath:  map[string]ModuleID{},
+		moduleByName:  map[string]checker.Module{},
+		traits:        map[string]TraitID{},
+		impls:         map[string]ImplID{},
+		functions:     map[string]FunctionID{},
+		globals:       map[string]GlobalID{},
+		embeddedBlobs: map[string]EmbeddedBlobID{},
 
 		cacheMethodLookups:      rootCount == 1,
 		unresolvedTypeVarByType: map[checker.Type]bool{},
@@ -170,6 +175,25 @@ func (l *lowerer) functionHasUnresolvedTypeVar(def *checker.FunctionDef) bool {
 		}
 	}
 	return l.typeHasUnresolvedTypeVar(def)
+}
+
+func (l *lowerer) internEmbeddedBlob(data []byte) (EmbeddedBlobID, error) {
+	sum := sha256.Sum256(data)
+	digest := hex.EncodeToString(sum[:])
+	if id, ok := l.embeddedBlobs[digest]; ok {
+		if !bytes.Equal(l.program.EmbeddedBlobs[id].Data, data) {
+			return 0, fmt.Errorf("embedded resource digest collision for %s", digest)
+		}
+		return id, nil
+	}
+	id := EmbeddedBlobID(len(l.program.EmbeddedBlobs))
+	l.program.EmbeddedBlobs = append(l.program.EmbeddedBlobs, EmbeddedBlob{
+		ID:     id,
+		Data:   append([]byte(nil), data...),
+		Digest: digest,
+	})
+	l.embeddedBlobs[digest] = id
+	return id, nil
 }
 
 func (l *lowerer) mustIntern(t checker.Type) TypeID {
@@ -3929,6 +3953,18 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		return &Expr{Kind: ExprConstBool, Type: typeID, Payload: &BoolExprPayload{Value: e.Value}}, nil
 	case *checker.StrLiteral:
 		return &Expr{Kind: ExprConstStr, Type: typeID, Payload: &TextExprPayload{Value: e.Value}}, nil
+	case *checker.EmbeddedText:
+		blob, err := fl.l.internEmbeddedBlob(e.Resource.Data)
+		if err != nil {
+			return nil, err
+		}
+		return &Expr{Kind: ExprEmbeddedText, Type: typeID, Payload: &EmbeddedBlobExprPayload{Blob: blob}}, nil
+	case *checker.EmbeddedBytes:
+		blob, err := fl.l.internEmbeddedBlob(e.Resource.Data)
+		if err != nil {
+			return nil, err
+		}
+		return &Expr{Kind: ExprEmbeddedBytes, Type: typeID, Payload: &EmbeddedBlobExprPayload{Blob: blob}}, nil
 	case *checker.RuneLiteral:
 		return &Expr{Kind: ExprConstInt, Type: typeID, Payload: &TextExprPayload{Value: strconv.Itoa(int(e.Value))}}, nil
 	case *checker.NeverCoercion:

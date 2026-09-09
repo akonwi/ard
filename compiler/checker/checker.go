@@ -9593,15 +9593,22 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 
 			// find the function in a module or Go package namespace
 			modName, name := c.destructurePath(s)
-			if mod := c.resolveModule(modName); mod != nil && mod.Path() == "ard/unsafe" {
-				if c.rejectSpreadForFixedCall(s.Function.Args) {
-					return nil
-				}
-				switch name {
-				case "cast":
-					return c.checkUnsafeCast(s)
-				case "is_nil":
-					return c.checkUnsafeIsNil(s)
+			if mod := c.resolveModule(modName); mod != nil {
+				switch mod.Path() {
+				case EmbedModulePath:
+					if name == "text" || name == "bytes" {
+						return c.checkEmbedExactCall(s, name)
+					}
+				case "ard/unsafe":
+					if c.rejectSpreadForFixedCall(s.Function.Args) {
+						return nil
+					}
+					switch name {
+					case "cast":
+						return c.checkUnsafeCast(s)
+					case "is_nil":
+						return c.checkUnsafeIsNil(s)
+					}
 				}
 			}
 			if goPkg := c.program.GoImports[modName]; goPkg != nil {
@@ -10967,6 +10974,10 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 
 				// Check if this is accessing a module
 				if mod := c.resolveModule(id.Name); mod != nil {
+					if prop, ok := s.Property.(*parse.Identifier); ok && mod.Path() == EmbedModulePath && (prop.Name == "text" || prop.Name == "bytes") {
+						c.addEmbedDiagnostic(DiagnosticCodeEmbedStaticArgument, "Embed constructors are not function values", "call the constructor directly with a static path", prop.GetLocation())
+						return nil
+					}
 					switch prop := s.Property.(type) {
 					case *parse.StructInstance:
 						typeArgs, ok := c.resolveStructTypeArgs(prop)

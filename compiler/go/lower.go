@@ -2427,6 +2427,18 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 			return loweredExpr{expr: &ast.BasicLit{Kind: token.STRING, Value: fmt.Sprintf("%q", payload.Value)}}, nil
 		}
 		return loweredExpr{}, fmt.Errorf("string constant is missing its payload")
+	case air.ExprEmbeddedText, air.ExprEmbeddedBytes:
+		payload := expr.EmbeddedBlobPayload()
+		if payload == nil || payload.Blob < 0 || int(payload.Blob) >= len(l.program.EmbeddedBlobs) {
+			return loweredExpr{}, fmt.Errorf("embedded expression references invalid blob")
+		}
+		blob := l.program.EmbeddedBlobs[payload.Blob]
+		prefix := "Text"
+		if expr.Kind == air.ExprEmbeddedBytes {
+			prefix = "Bytes"
+		}
+		accessor := l.qualified("ardembed", path.Join(l.generatedModulePath, "internal", "ardembed"), prefix+blob.Digest)
+		return loweredExpr{expr: &ast.CallExpr{Fun: accessor}}, nil
 	case air.ExprPanic:
 		if expr.Target == nil {
 			return loweredExpr{}, fmt.Errorf("panic missing target")

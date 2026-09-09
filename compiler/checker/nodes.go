@@ -34,6 +34,24 @@ func (s *StrLiteral) Type() Type {
 	return Str
 }
 
+type EmbeddedResource struct {
+	OwnerPackageIdentity string
+	LogicalPath          string
+	Data                 []byte
+}
+
+type EmbeddedText struct {
+	Resource EmbeddedResource
+}
+
+func (e *EmbeddedText) Type() Type { return Str }
+
+type EmbeddedBytes struct {
+	Resource EmbeddedResource
+}
+
+func (e *EmbeddedBytes) Type() Type { return MakeList(Byte) }
+
 type RuneLiteral struct {
 	Value rune
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"go/format"
 	"go/token"
 	goversion "go/version"
 	"os"
@@ -66,7 +67,7 @@ func GenerateSources(program *air.Program, options Options) (map[string][]byte, 
 	if err != nil {
 		return nil, err
 	}
-	out := make(map[string][]byte, len(generated))
+	out := make(map[string][]byte, len(generated)+1)
 	for name, file := range generated {
 		source, err := renderFile(file)
 		if err != nil {
@@ -74,7 +75,30 @@ func GenerateSources(program *air.Program, options Options) (map[string][]byte, 
 		}
 		out[name] = source
 	}
+	if len(program.EmbeddedBlobs) > 0 {
+		source, err := generateEmbeddedResourceSource(program)
+		if err != nil {
+			return nil, err
+		}
+		out["internal/ardembed/embed.go"] = source
+	}
 	return out, nil
+}
+
+func generateEmbeddedResourceSource(program *air.Program) ([]byte, error) {
+	var source strings.Builder
+	source.WriteString("package ardembed\n\nimport _ \"embed\"\n\n")
+	for _, blob := range program.EmbeddedBlobs {
+		fmt.Fprintf(&source, "//go:embed data/%s\n", blob.Digest)
+		fmt.Fprintf(&source, "var blob%s string\n\n", blob.Digest)
+		fmt.Fprintf(&source, "func Text%s() string { return blob%s }\n\n", blob.Digest, blob.Digest)
+		fmt.Fprintf(&source, "func Bytes%s() []byte { return []byte(blob%s) }\n\n", blob.Digest, blob.Digest)
+	}
+	formatted, err := format.Source([]byte(source.String()))
+	if err != nil {
+		return nil, fmt.Errorf("format embedded resource package: %w", err)
+	}
+	return formatted, nil
 }
 
 func RunProgram(program *air.Program, args []string, projectInfo ...*checker.ProjectInfo) error {
@@ -404,6 +428,11 @@ func writeProgramWithStageObserver(dir string, program *air.Program, options Opt
 			}
 		}
 		return nil
+	}); err != nil {
+		return err
+	}
+	if err := observeStage(observer, "go.write_embedded_resources", func() error {
+		return writeEmbeddedResources(dir, program)
 	}); err != nil {
 		return err
 	}
@@ -1177,6 +1206,22 @@ func dependencyPackageForModulePath(modulePath string, projectInfo *checker.Proj
 		}
 	}
 	return "", "", false
+}
+
+func writeEmbeddedResources(outputDir string, program *air.Program) error {
+	if program == nil {
+		return nil
+	}
+	dataDir := filepath.Join(outputDir, "internal", "ardembed", "data")
+	for _, blob := range program.EmbeddedBlobs {
+		if err := os.MkdirAll(dataDir, 0o755); err != nil {
+			return fmt.Errorf("create embedded resource directory: %w", err)
+		}
+		if err := os.WriteFile(filepath.Join(dataDir, blob.Digest), blob.Data, 0o644); err != nil {
+			return fmt.Errorf("write embedded resource %s: %w", blob.Digest, err)
+		}
+	}
+	return nil
 }
 
 func copyProjectFFIDir(outputDir string, projectInfo *checker.ProjectInfo) error {
