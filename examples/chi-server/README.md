@@ -1,8 +1,9 @@
 # chi Graceful-Shutdown Server
 
 A pure-Ard port of chi's [graceful-shutdown example](https://github.com/go-chi/chi/blob/master/_examples/graceful/main.go):
-an HTTP server built on [chi](https://github.com/go-chi/chi) that finishes in-flight
-requests before exiting on `SIGINT` or `SIGTERM`.
+an HTTP server built on [chi](https://github.com/go-chi/chi) that serves embedded
+static assets and finishes in-flight requests before exiting on `SIGINT` or
+`SIGTERM`.
 
 There is no Go shim — everything is direct `use go:` interop:
 
@@ -18,6 +19,9 @@ There is no Go shim — everything is direct `use go:` interop:
   with `.sender()` for `signal::Notify`
 - `async::start` for the background serve goroutine
 - Go errors handled as identity-preserving Ard results (`Void!Error`)
+- `embed::fs(["public"])` packages static assets into the executable and passes
+  the resulting `embed::FS` directly through Go's `io/fs.FS`-compatible
+  `http.FS` adapter
 
 ## Adaptations from the Go original
 
@@ -37,9 +41,11 @@ ard run main.ard
 Then, in another terminal:
 
 ```sh
-curl http://localhost:3333/        # "sup"
-curl http://localhost:3333/slow &  # takes 5 seconds
-kill -INT <server pid>             # SIGTERM also shuts down gracefully
+curl http://localhost:3333/                  # "sup"
+curl http://localhost:3333/static/           # embedded HTML page
+curl http://localhost:3333/static/app.css    # embedded stylesheet
+curl http://localhost:3333/slow &            # takes 5 seconds
+kill -INT <server pid>                       # SIGTERM also shuts down gracefully
 ```
 
 The server logs `shutting down`, the in-flight `/slow` request finishes with

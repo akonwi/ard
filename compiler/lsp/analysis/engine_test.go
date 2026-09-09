@@ -9,6 +9,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/akonwi/ard/parse"
 )
 
 func writeProject(t *testing.T, files map[string]string) string {
@@ -831,5 +833,149 @@ func TestGoSessionRepricesForNewImports(t *testing.T) {
 	}
 	if !foundResolveError {
 		t.Error("expected a resolve diagnostic for the bogus import path")
+	}
+}
+
+func TestEmbeddedResourceChangeInvalidatesAnalysis(t *testing.T) {
+	root := writeProject(t, map[string]string{
+		"ard.toml":        "name = \"proj\"\nard = \">= 0.1.0\"\n",
+		"main.ard":        "use ard/embed\nlet page = embed::text(\"assets/page.txt\")\n",
+		"assets/page.txt": "first",
+	})
+	engine := NewEngine(root)
+	workspace := NewWorkspace(engine)
+	mainPath := filepath.Join(root, "main.ard")
+	resourcePath := filepath.Join(root, "assets", "page.txt")
+
+	first, err := workspace.Snapshot().Analyze(mainPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first.Diagnostics) != 0 {
+		t.Fatalf("initial diagnostics: %#v", first.Diagnostics)
+	}
+	if err := os.WriteFile(filepath.Join(root, "unrelated.txt"), []byte("unrelated"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	unchanged, err := workspace.Snapshot().Analyze(mainPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unchanged != first {
+		t.Fatal("unrelated file invalidated embedded-resource analysis")
+	}
+	if err := os.WriteFile(resourcePath, []byte("second"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	second, err := workspace.Snapshot().Analyze(mainPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first == second || first.Signature == second.Signature {
+		t.Fatal("embedded resource edit did not invalidate analysis")
+	}
+
+	if err := os.Remove(resourcePath); err != nil {
+		t.Fatal(err)
+	}
+	missing, err := workspace.Snapshot().Analyze(mainPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(missing.Diagnostics) == 0 {
+		t.Fatal("missing embedded resource did not produce diagnostics")
+	}
+	if err := os.WriteFile(resourcePath, []byte("restored"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	restored, err := workspace.Snapshot().Analyze(mainPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(restored.Diagnostics) != 0 || restored.Signature == missing.Signature {
+		t.Fatalf("recreated resource analysis = %#v", restored.Diagnostics)
+	}
+}
+
+func TestNewEmbeddedPatternMatchInvalidatesAnalysis(t *testing.T) {
+	root := writeProject(t, map[string]string{
+		"ard.toml":         "name = \"proj\"\nard = \">= 0.1.0\"\n",
+		"main.ard":         "use ard/embed\nlet files = embed::fs([\"assets/*.txt\"])\n",
+		"assets/first.txt": "first",
+	})
+	workspace := NewWorkspace(NewEngine(root))
+	mainPath := filepath.Join(root, "main.ard")
+	first, err := workspace.Snapshot().Analyze(mainPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "assets", "second.txt"), []byte("second"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	second, err := workspace.Snapshot().Analyze(mainPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Signature == second.Signature {
+		t.Fatal("new pattern match did not invalidate analysis")
+	}
+}
+
+func TestDependencyEmbeddedResourceInvalidatesAnalysis(t *testing.T) {
+	workspaceRoot := t.TempDir()
+	appRoot := filepath.Join(workspaceRoot, "app")
+	depRoot := filepath.Join(workspaceRoot, "dep")
+	for path, content := range map[string]string{
+		filepath.Join(appRoot, "ard.toml"):  "name = \"app\"\nard = \">= 0.1.0\"\n\n[dependencies]\ndep = { path = \"../dep\" }\n",
+		filepath.Join(appRoot, "main.ard"):  "use dep\nfn main() Str { dep::value() }\n",
+		filepath.Join(depRoot, "ard.toml"):  "name = \"dep\"\nard = \">= 0.1.0\"\n",
+		filepath.Join(depRoot, "dep.ard"):   "use ard/embed\nfn value() Str { embed::text(\"asset.txt\") }\n",
+		filepath.Join(depRoot, "asset.txt"): "first",
+	} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	workspace := NewWorkspace(NewEngine(appRoot))
+	mainPath := filepath.Join(appRoot, "main.ard")
+	first, err := workspace.Snapshot().Analyze(mainPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first.Diagnostics) != 0 {
+		t.Fatalf("initial diagnostics: %#v", first.Diagnostics)
+	}
+	if err := os.WriteFile(filepath.Join(depRoot, "asset.txt"), []byte("second"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	second, err := workspace.Snapshot().Analyze(mainPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Signature == second.Signature {
+		t.Fatal("dependency embedded resource did not invalidate analysis")
+	}
+}
+
+func TestCollectEmbeddedInputSpecHonorsAliasesAndStaticCalls(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "main.ard")
+	parsed := parse.Parse([]byte(`use ard/embed as resources
+let exact = resources::text("page.txt")
+let files = resources::fs(["assets", "templates/*.html"])
+let dynamic_path = "ignored.txt"
+let dynamic = resources::bytes(dynamic_path)
+`), path)
+	if len(parsed.Errors) != 0 {
+		t.Fatalf("parse errors: %v", parsed.Errors)
+	}
+	spec := collectEmbeddedInputSpec(parsed.Program)
+	if !slices.Equal(spec.ExactPaths, []string{"page.txt"}) {
+		t.Fatalf("exact paths = %#v", spec.ExactPaths)
+	}
+	if len(spec.PatternSets) != 1 || !slices.Equal(spec.PatternSets[0], []string{"assets", "templates/*.html"}) {
+		t.Fatalf("pattern sets = %#v", spec.PatternSets)
 	}
 }

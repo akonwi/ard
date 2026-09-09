@@ -1,4 +1,5 @@
 use ard/async
+use ard/embed
 
 use go:context
 use go:errors
@@ -24,6 +25,8 @@ use go:time
 
 fn service() mut chi::Mux {
   let router = chi::NewRouter()
+  let public = embed::fs(["public"]).sub("public").expect("embedded public directory")
+  let files = http::FileServer(http::FS(public))
 
   router.Use(middleware::RequestID)
   router.Use(middleware::Logger)
@@ -35,6 +38,8 @@ fn service() mut chi::Mux {
       w.Write(body)
     },
   )
+
+  router.Mount("/static", http::StripPrefix("/static", files))
 
   router.Get(
     "/slow",

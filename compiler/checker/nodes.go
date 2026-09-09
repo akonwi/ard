@@ -34,6 +34,59 @@ func (s *StrLiteral) Type() Type {
 	return Str
 }
 
+type EmbeddedResource struct {
+	OwnerPackageIdentity string
+	LogicalPath          string
+	Data                 []byte
+}
+
+type EmbeddedText struct {
+	Resource EmbeddedResource
+}
+
+func (e *EmbeddedText) Type() Type { return Str }
+
+type EmbeddedBytes struct {
+	Resource EmbeddedResource
+}
+
+func (e *EmbeddedBytes) Type() Type { return MakeList(Byte) }
+
+type EmbeddedSetEntry struct {
+	LogicalPath string
+	Data        []byte
+}
+
+type EmbeddedFileSet struct {
+	OwnerPackageIdentity string
+	Entries              []EmbeddedSetEntry
+}
+
+type EmbeddedFSValue struct {
+	Set EmbeddedFileSet
+}
+
+func (e *EmbeddedFSValue) Type() Type { return EmbeddedFS }
+
+type EmbeddedFSMethodKind uint8
+
+const (
+	EmbeddedFSReadFile EmbeddedFSMethodKind = iota
+	EmbeddedFSReadText
+	EmbeddedFSReadDir
+	EmbeddedFSStat
+	EmbeddedFSSub
+)
+
+type EmbeddedFSMethod struct {
+	Subject    Expression
+	Kind       EmbeddedFSMethodKind
+	Args       []Expression
+	ReturnType Type
+}
+
+func (e *EmbeddedFSMethod) Type() Type { return e.ReturnType }
+
 type RuneLiteral struct {
 	Value rune
 }

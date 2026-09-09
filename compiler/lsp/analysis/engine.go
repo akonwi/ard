@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime/debug"
 	"sort"
 	"strings"
@@ -644,8 +645,95 @@ func (s *Snapshot) check(filePath string, relPath string, program *parse.Program
 // aliases and package deps participate. Check results are reusable across
 // snapshots that did not touch any input of this file.
 //
-// Standard-library imports (ard/*) are skipped: the stdlib is embedded in the
-// compiler binary and immutable for the lifetime of the LSP process.
+// Standard-library imports (ard/*) are skipped because they are embedded in the
+// compiler binary. `ard/embed` is the exception: importing it adds the owning
+// package's resource tree to the signature.
+func collectEmbeddedInputSpec(program *parse.Program) checker.EmbeddedInputSpec {
+	spec := checker.EmbeddedInputSpec{}
+	if program == nil {
+		return spec
+	}
+	aliases := map[string]bool{}
+	for _, imported := range program.Imports {
+		if imported.Path == checker.EmbedModulePath {
+			aliases[imported.Alias()] = true
+		}
+	}
+	if len(aliases) == 0 {
+		return spec
+	}
+	exactSeen := map[string]bool{}
+	patternSetSeen := map[string]bool{}
+	seenPointers := map[uintptr]bool{}
+	var walk func(reflect.Value)
+	walk = func(value reflect.Value) {
+		if !value.IsValid() {
+			return
+		}
+		if value.Kind() == reflect.Interface || value.Kind() == reflect.Pointer {
+			if value.IsNil() {
+				return
+			}
+			if value.Kind() == reflect.Pointer {
+				pointer := value.Pointer()
+				if seenPointers[pointer] {
+					return
+				}
+				seenPointers[pointer] = true
+			}
+			if value.CanInterface() {
+				if call, ok := value.Interface().(*parse.StaticFunction); ok {
+					if target, ok := call.Target.(*parse.Identifier); ok && aliases[target.Name] && len(call.Function.TypeArgs) == 0 && len(call.Function.Args) == 1 && call.Function.Args[0].Name == "" && !call.Function.Args[0].Spread {
+						switch call.Function.Name {
+						case "text", "bytes":
+							if literal, ok := call.Function.Args[0].Value.(*parse.StrLiteral); ok && !exactSeen[literal.Value] {
+								exactSeen[literal.Value] = true
+								spec.ExactPaths = append(spec.ExactPaths, literal.Value)
+							}
+						case "fs":
+							if list, ok := call.Function.Args[0].Value.(*parse.ListLiteral); ok && len(list.Items) > 0 {
+								patterns := make([]string, 0, len(list.Items))
+								for _, item := range list.Items {
+									literal, ok := item.(*parse.StrLiteral)
+									if !ok {
+										patterns = nil
+										break
+									}
+									patterns = append(patterns, literal.Value)
+								}
+								patternKey := strings.Join(patterns, "\x00")
+								if patterns != nil && !patternSetSeen[patternKey] {
+									patternSetSeen[patternKey] = true
+									spec.PatternSets = append(spec.PatternSets, patterns)
+								}
+							}
+						}
+					}
+				}
+			}
+			walk(value.Elem())
+			return
+		}
+		switch value.Kind() {
+		case reflect.Struct:
+			for index := 0; index < value.NumField(); index++ {
+				walk(value.Field(index))
+			}
+		case reflect.Slice, reflect.Array:
+			for index := 0; index < value.Len(); index++ {
+				walk(value.Index(index))
+			}
+		case reflect.Map:
+			iterator := value.MapRange()
+			for iterator.Next() {
+				walk(iterator.Value())
+			}
+		}
+	}
+	walk(reflect.ValueOf(program))
+	return spec
+}
+
 func (s *Snapshot) signature(filePath string, content []byte, program *parse.Program, moduleResolver *checker.ModuleResolver, relPath string, trackDependencies bool) string {
 	h := sha256.New()
 	h.Write([]byte(filePath))
@@ -705,6 +793,11 @@ func (s *Snapshot) signature(filePath string, content []byte, program *parse.Pro
 				continue
 			}
 			deps = append(deps, dep{file: resolved.FilePath, module: resolved.ModulePath, packageID: resolved.PackageID})
+		}
+		embedSpec := collectEmbeddedInputSpec(prog)
+		if len(embedSpec.ExactPaths) > 0 || len(embedSpec.PatternSets) > 0 {
+			h.Write([]byte(moduleResolver.EmbeddedInputSignature(importerModulePath, embedSpec)))
+			h.Write([]byte{0})
 		}
 		sort.Slice(deps, func(a, b int) bool { return deps[a].file < deps[b].file })
 		if trackDependencies {

@@ -5,6 +5,16 @@ func (e Expr) TextPayload() *TextExprPayload {
 	return payload
 }
 
+func (e Expr) EmbeddedBlobPayload() *EmbeddedBlobExprPayload {
+	payload, _ := e.Payload.(*EmbeddedBlobExprPayload)
+	return payload
+}
+
+func (e Expr) EmbeddedSetPayload() *EmbeddedSetExprPayload {
+	payload, _ := e.Payload.(*EmbeddedSetExprPayload)
+	return payload
+}
+
 func (e Expr) BoolPayload() *BoolExprPayload {
 	payload, _ := e.Payload.(*BoolExprPayload)
 	return payload

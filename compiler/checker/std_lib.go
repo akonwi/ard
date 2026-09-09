@@ -19,6 +19,8 @@ func findInStdLib(path string) (Module, bool) {
 		return AsyncPkg{}, true
 	case "ard/unsafe":
 		return UnsafePkg{}, true
+	case EmbedModulePath:
+		return EmbedPkg{}, true
 	}
 
 	return FindEmbeddedModule(path)
@@ -193,6 +195,7 @@ var BuiltinPkgNames = map[string][]string{
 	"ard/result":    {"ok", "err"},
 	"ard/async":     {"start"},
 	"ard/unsafe":    {"cast", "is_nil"},
+	EmbedModulePath: {"text", "bytes", "fs", "FS", "DirEntry", "FileInfo"},
 	"builtin/Chan":  {"new"},
 }
 
@@ -213,6 +216,10 @@ func (pkg AsyncPkg) Symbols() map[string]Symbol {
 }
 
 func (pkg UnsafePkg) Symbols() map[string]Symbol {
+	return symbolsByName(pkg, BuiltinPkgNames[pkg.Path()]...)
+}
+
+func (pkg EmbedPkg) Symbols() map[string]Symbol {
 	return symbolsByName(pkg, BuiltinPkgNames[pkg.Path()]...)
 }
 

@@ -21,6 +21,18 @@ type TextExprPayload struct {
 
 func (*TextExprPayload) exprPayload() {}
 
+type EmbeddedBlobExprPayload struct {
+	Blob EmbeddedBlobID
+}
+
+func (*EmbeddedBlobExprPayload) exprPayload() {}
+
+type EmbeddedSetExprPayload struct {
+	Set EmbeddedSetID
+}
+
+func (*EmbeddedSetExprPayload) exprPayload() {}
+
 type BoolExprPayload struct {
 	Value bool
 }
@@ -241,6 +253,10 @@ func (*UnsafeCastExprPayload) exprPayload() {}
 func exprPayloadIsTypedNil(payload ExprPayload) bool {
 	switch payload := payload.(type) {
 	case *TextExprPayload:
+		return payload == nil
+	case *EmbeddedBlobExprPayload:
+		return payload == nil
+	case *EmbeddedSetExprPayload:
 		return payload == nil
 	case *BoolExprPayload:
 		return payload == nil

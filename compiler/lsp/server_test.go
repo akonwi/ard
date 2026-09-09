@@ -49,6 +49,7 @@ func TestServerInitializes(t *testing.T) {
 		"textDocument/didChange",
 		"textDocument/didSave",
 		"textDocument/didClose",
+		"workspace/didChangeWatchedFiles",
 		"textDocument/hover",
 		"textDocument/definition",
 		"textDocument/references",

@@ -2427,6 +2427,28 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 			return loweredExpr{expr: &ast.BasicLit{Kind: token.STRING, Value: fmt.Sprintf("%q", payload.Value)}}, nil
 		}
 		return loweredExpr{}, fmt.Errorf("string constant is missing its payload")
+	case air.ExprEmbeddedText, air.ExprEmbeddedBytes:
+		payload := expr.EmbeddedBlobPayload()
+		if payload == nil || payload.Blob < 0 || int(payload.Blob) >= len(l.program.EmbeddedBlobs) {
+			return loweredExpr{}, fmt.Errorf("embedded expression references invalid blob")
+		}
+		blob := l.program.EmbeddedBlobs[payload.Blob]
+		prefix := "Text"
+		if expr.Kind == air.ExprEmbeddedBytes {
+			prefix = "Bytes"
+		}
+		accessor := l.qualified("ardembed", path.Join(l.generatedModulePath, "internal", "ardembed"), prefix+blob.Digest)
+		return loweredExpr{expr: &ast.CallExpr{Fun: accessor}}, nil
+	case air.ExprMakeEmbeddedFS:
+		payload := expr.EmbeddedSetPayload()
+		if payload == nil || payload.Set < 0 || int(payload.Set) >= len(l.program.EmbeddedSets) {
+			return loweredExpr{}, fmt.Errorf("embedded filesystem expression references invalid set")
+		}
+		set := l.program.EmbeddedSets[payload.Set]
+		accessor := l.qualified("ardembed", path.Join(l.generatedModulePath, "internal", "ardembed"), "FS"+set.Digest)
+		return loweredExpr{expr: &ast.CallExpr{Fun: accessor}}, nil
+	case air.ExprEmbeddedFSReadFile, air.ExprEmbeddedFSReadText, air.ExprEmbeddedFSReadDir, air.ExprEmbeddedFSStat, air.ExprEmbeddedFSSub:
+		return l.lowerEmbeddedFSOperation(fn, expr)
 	case air.ExprPanic:
 		if expr.Target == nil {
 			return loweredExpr{}, fmt.Errorf("panic missing target")
@@ -4140,6 +4162,167 @@ func (l *lowerer) lowerForeignMethodCall(fn air.Function, expr air.Expr) (lowere
 	return loweredExpr{stmts: stmts, expr: call}, nil
 }
 
+func (l *lowerer) lowerEmbeddedFSOperation(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	if expr.Target == nil || len(expr.Args) != 1 {
+		return loweredExpr{}, fmt.Errorf("embedded filesystem operation has invalid operands")
+	}
+	target, err := l.lowerExpr(fn, *expr.Target)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	arg, err := l.lowerExpr(fn, expr.Args[0])
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	stmts := append(append([]ast.Stmt{}, target.stmts...), arg.stmts...)
+	var function ast.Expr
+	switch expr.Kind {
+	case air.ExprEmbeddedFSReadFile:
+		function = l.qualified("ardembed", path.Join(l.generatedModulePath, "internal", "ardembed"), "ReadFile")
+	case air.ExprEmbeddedFSReadText:
+		function = l.qualified("ardembed", path.Join(l.generatedModulePath, "internal", "ardembed"), "ReadText")
+	case air.ExprEmbeddedFSReadDir:
+		return l.lowerEmbeddedFSReadDir(expr, stmts, target.expr, arg.expr)
+	case air.ExprEmbeddedFSStat:
+		stmts, pathValue := l.materializeCallOperand(stmts, arg.expr)
+		return l.lowerEmbeddedFSStat(expr, stmts, target.expr, pathValue)
+	case air.ExprEmbeddedFSSub:
+		function = l.qualified("ardembed", path.Join(l.generatedModulePath, "internal", "ardembed"), "Sub")
+	default:
+		return loweredExpr{}, fmt.Errorf("unsupported embedded filesystem operation %d", expr.Kind)
+	}
+	call := &ast.CallExpr{Fun: function, Args: []ast.Expr{target.expr, arg.expr}}
+	result, ok := l.typeInfo(expr.Type)
+	if !ok || result.Kind != air.TypeResult {
+		return loweredExpr{}, fmt.Errorf("embedded filesystem operation has non-Result type %d", expr.Type)
+	}
+	return l.lowerGoValueErrorResultCall(expr, stmts, call, result)
+}
+
+func (l *lowerer) lowerEmbeddedFSReadDir(expr air.Expr, stmts []ast.Stmt, root ast.Expr, pathExpr ast.Expr) (loweredExpr, error) {
+	result, ok := l.typeInfo(expr.Type)
+	if !ok || result.Kind != air.TypeResult || !validTypeID(l.program, result.Value) {
+		return loweredExpr{}, fmt.Errorf("embedded read_dir has invalid Result type")
+	}
+	listInfo := l.program.Types[result.Value-1]
+	if listInfo.Kind != air.TypeList || !validTypeID(l.program, listInfo.Elem) {
+		return loweredExpr{}, fmt.Errorf("embedded read_dir has invalid list type")
+	}
+	resultName, rawName, errName, valueName := l.nextTemp(), l.nextTemp(), l.nextTemp(), l.nextTemp()
+	resultType, err := l.goType(expr.Type)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	valueType, err := l.goType(result.Value)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	entryType, err := l.goType(listInfo.Elem)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	fsDirEntry := l.qualified("fs", "io/fs", "DirEntry")
+	readDir := l.qualified("fs", "io/fs", "ReadDir")
+	stmts = append(stmts,
+		&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{l.ident(resultName)}, Type: resultType}}}},
+		&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{l.ident(rawName)}, Type: &ast.ArrayType{Elt: fsDirEntry}}}}},
+		&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{l.ident(errName)}, Type: l.ident("error")}}}},
+		&ast.AssignStmt{Lhs: []ast.Expr{l.ident(rawName), l.ident(errName)}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.CallExpr{Fun: readDir, Args: []ast.Expr{root, pathExpr}}}},
+	)
+	errResult := &ast.CompositeLit{Type: resultType, Elts: []ast.Expr{&ast.KeyValueExpr{Key: l.ident("Err"), Value: l.ident(errName)}}}
+	successResult := &ast.CompositeLit{Type: resultType, Elts: []ast.Expr{
+		&ast.KeyValueExpr{Key: l.ident("Value"), Value: l.ident(valueName)},
+		&ast.KeyValueExpr{Key: l.ident("Ok"), Value: l.ident("true")},
+	}}
+	indexName, entryName := l.nextTemp(), l.nextTemp()
+	entryValue := &ast.CompositeLit{Type: entryType, Elts: []ast.Expr{
+		&ast.KeyValueExpr{Key: l.ident("Name"), Value: &ast.CallExpr{Fun: &ast.SelectorExpr{X: l.ident(entryName), Sel: l.ident("Name")}}},
+		&ast.KeyValueExpr{Key: l.ident("IsDir"), Value: &ast.CallExpr{Fun: &ast.SelectorExpr{X: l.ident(entryName), Sel: l.ident("IsDir")}}},
+	}}
+	successBody := []ast.Stmt{
+		&ast.AssignStmt{Lhs: []ast.Expr{l.ident(valueName)}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.CallExpr{Fun: l.ident("make"), Args: []ast.Expr{valueType, &ast.CallExpr{Fun: l.ident("len"), Args: []ast.Expr{l.ident(rawName)}}}}}},
+		&ast.RangeStmt{Key: l.ident(indexName), Value: l.ident(entryName), Tok: token.DEFINE, X: l.ident(rawName), Body: &ast.BlockStmt{List: []ast.Stmt{
+			&ast.AssignStmt{Lhs: []ast.Expr{&ast.IndexExpr{X: l.ident(valueName), Index: l.ident(indexName)}}, Tok: token.ASSIGN, Rhs: []ast.Expr{entryValue}},
+		}}},
+		&ast.AssignStmt{Lhs: []ast.Expr{l.ident(resultName)}, Tok: token.ASSIGN, Rhs: []ast.Expr{successResult}},
+	}
+	stmts = append(stmts, &ast.IfStmt{
+		Cond: &ast.BinaryExpr{X: l.ident(errName), Op: token.NEQ, Y: l.ident("nil")},
+		Body: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{l.ident(resultName)}, Tok: token.ASSIGN, Rhs: []ast.Expr{errResult}}}},
+		Else: &ast.BlockStmt{List: successBody},
+	})
+	return loweredExpr{stmts: stmts, expr: l.ident(resultName)}, nil
+}
+
+func (l *lowerer) lowerEmbeddedFSStat(expr air.Expr, stmts []ast.Stmt, root ast.Expr, pathExpr ast.Expr) (loweredExpr, error) {
+	result, ok := l.typeInfo(expr.Type)
+	if !ok || result.Kind != air.TypeResult || !validTypeID(l.program, result.Value) {
+		return loweredExpr{}, fmt.Errorf("embedded stat has invalid Result type")
+	}
+	resultName, rawName, errName, valueName, sizeName, nameName := l.nextTemp(), l.nextTemp(), l.nextTemp(), l.nextTemp(), l.nextTemp(), l.nextTemp()
+	resultType, err := l.goType(expr.Type)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	valueType, err := l.goType(result.Value)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	fileInfo := l.qualified("fs", "io/fs", "FileInfo")
+	stat := l.qualified("fs", "io/fs", "Stat")
+	valueInfo := l.program.Types[result.Value-1]
+	var sizeTypeID air.TypeID
+	for _, field := range valueInfo.Fields {
+		if field.Name == "size" {
+			sizeTypeID = field.Type
+			break
+		}
+	}
+	if !validTypeID(l.program, sizeTypeID) {
+		return loweredExpr{}, fmt.Errorf("embedded stat FileInfo has no size field")
+	}
+	maybeInt, err := l.goType(sizeTypeID)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	stmts = append(stmts,
+		&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{l.ident(resultName)}, Type: resultType}}}},
+		&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{l.ident(rawName)}, Type: fileInfo}}}},
+		&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{l.ident(errName)}, Type: l.ident("error")}}}},
+		&ast.AssignStmt{Lhs: []ast.Expr{l.ident(rawName), l.ident(errName)}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.CallExpr{Fun: stat, Args: []ast.Expr{root, pathExpr}}}},
+	)
+	errResult := &ast.CompositeLit{Type: resultType, Elts: []ast.Expr{&ast.KeyValueExpr{Key: l.ident("Err"), Value: l.ident(errName)}}}
+	isDirCall := func() ast.Expr {
+		return &ast.CallExpr{Fun: &ast.SelectorExpr{X: l.ident(rawName), Sel: l.ident("IsDir")}}
+	}
+	successResult := &ast.CompositeLit{Type: resultType, Elts: []ast.Expr{
+		&ast.KeyValueExpr{Key: l.ident("Value"), Value: l.ident(valueName)},
+		&ast.KeyValueExpr{Key: l.ident("Ok"), Value: l.ident("true")},
+	}}
+	successBody := []ast.Stmt{
+		&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{l.ident(sizeName)}, Type: maybeInt}}}},
+		&ast.AssignStmt{Lhs: []ast.Expr{l.ident(nameName)}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.CallExpr{Fun: &ast.SelectorExpr{X: l.ident(rawName), Sel: l.ident("Name")}}}},
+		&ast.IfStmt{Cond: &ast.BinaryExpr{X: pathExpr, Op: token.EQL, Y: &ast.BasicLit{Kind: token.STRING, Value: `"."`}}, Body: &ast.BlockStmt{List: []ast.Stmt{
+			&ast.AssignStmt{Lhs: []ast.Expr{l.ident(nameName)}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.BasicLit{Kind: token.STRING, Value: `"."`}}},
+		}}},
+		&ast.IfStmt{Cond: &ast.UnaryExpr{Op: token.NOT, X: isDirCall()}, Body: &ast.BlockStmt{List: []ast.Stmt{
+			&ast.AssignStmt{Lhs: []ast.Expr{l.ident(sizeName)}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.CallExpr{Fun: l.runtimeQualified("Some"), Args: []ast.Expr{&ast.CallExpr{Fun: l.ident("int"), Args: []ast.Expr{&ast.CallExpr{Fun: &ast.SelectorExpr{X: l.ident(rawName), Sel: l.ident("Size")}}}}}}}},
+		}}},
+		&ast.AssignStmt{Lhs: []ast.Expr{l.ident(valueName)}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.CompositeLit{Type: valueType, Elts: []ast.Expr{
+			&ast.KeyValueExpr{Key: l.ident("Name"), Value: l.ident(nameName)},
+			&ast.KeyValueExpr{Key: l.ident("IsDir"), Value: isDirCall()},
+			&ast.KeyValueExpr{Key: l.ident("Size"), Value: l.ident(sizeName)},
+		}}}},
+		&ast.AssignStmt{Lhs: []ast.Expr{l.ident(resultName)}, Tok: token.ASSIGN, Rhs: []ast.Expr{successResult}},
+	}
+	stmts = append(stmts, &ast.IfStmt{
+		Cond: &ast.BinaryExpr{X: l.ident(errName), Op: token.NEQ, Y: l.ident("nil")},
+		Body: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{l.ident(resultName)}, Tok: token.ASSIGN, Rhs: []ast.Expr{errResult}}}},
+		Else: &ast.BlockStmt{List: successBody},
+	})
+	return loweredExpr{stmts: stmts, expr: l.ident(resultName)}, nil
+}
+
 func (l *lowerer) lowerGoValueErrorResultCall(expr air.Expr, stmts []ast.Stmt, call *ast.CallExpr, result air.TypeInfo) (loweredExpr, error) {
 	resultTemp := l.nextTemp()
 	valueTemp := l.nextTemp()
@@ -4306,7 +4489,7 @@ func (l *lowerer) zeroValueExpr(typeID air.TypeID) (ast.Expr, error) {
 		return l.ident("false"), nil
 	case air.TypeStr:
 		return &ast.BasicLit{Kind: token.STRING, Value: "\"\""}, nil
-	case air.TypeAny, air.TypeFunction, air.TypeTraitObject, air.TypeReference:
+	case air.TypeAny, air.TypeFunction, air.TypeTraitObject, air.TypeReference, air.TypeEmbeddedFS:
 		return l.ident("nil"), nil
 	case air.TypeParam:
 		// A composite literal T{} is illegal for a type parameter; *new(T)
@@ -4654,6 +4837,8 @@ func (l *lowerer) buildGoType(typeID air.TypeID) (ast.Expr, error) {
 		return l.ident("bool"), nil
 	case air.TypeStr:
 		return l.ident("string"), nil
+	case air.TypeEmbeddedFS:
+		return l.qualified("fs", "io/fs", "FS"), nil
 	case air.TypeMaybe:
 		elem, err := l.goType(info.Elem)
 		if err != nil {
