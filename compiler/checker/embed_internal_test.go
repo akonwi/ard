@@ -47,10 +47,12 @@ func TestEmbeddedExactFileEnforcesProgramFileLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < MaxEmbeddedProgramFileCount; i++ {
-		resolver.embeddedResources[string(rune(i))+"\x00"] = EmbeddedResource{}
+	resolver.embeddedProgramFileCount = MaxEmbeddedProgramFileCount
+	resource, err := resolver.resolveEmbeddedExactFile("app/main", "asset.txt")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, err := resolver.resolveEmbeddedExactFile("app/main", "asset.txt"); err == nil {
+	if err := resolver.accountEmbeddedExact(resource); err == nil {
 		t.Fatal("expected program file limit error")
 	}
 }
@@ -73,5 +75,33 @@ func TestEmbeddedExactFileAllowsReservedNameWhenItIsAFile(t *testing.T) {
 	}
 	if string(resource.Data) != "file" {
 		t.Fatalf("resource data = %q", resource.Data)
+	}
+}
+
+func TestEmbeddedExactAccountingDeduplicatesIdenticalBlobs(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"first.txt", "second.txt"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte("same"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	resolver, err := NewModuleResolver(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"first.txt", "second.txt"} {
+		resource, err := resolver.resolveEmbeddedExactFile("app/main", name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := resolver.accountEmbeddedExact(resource); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if resolver.embeddedProgramFileCount != 1 || resolver.embeddedProgramBytes != len("same") {
+		t.Fatalf("embedded accounting = %d files, %d bytes", resolver.embeddedProgramFileCount, resolver.embeddedProgramBytes)
 	}
 }

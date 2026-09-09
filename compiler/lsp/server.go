@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
 
+	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/lsp/analysis"
 )
 
@@ -43,10 +45,11 @@ type diagnosticJob struct {
 
 // Server is the Ard LSP server.
 type Server struct {
-	cache       *DocumentCache
-	handlers    map[string]jsonrpc2.Handler
-	conn        jsonrpc2.Conn
-	projectRoot string
+	cache                    *DocumentCache
+	handlers                 map[string]jsonrpc2.Handler
+	conn                     jsonrpc2.Conn
+	projectRoot              string
+	watchFilesDynamicSupport bool
 
 	// documentStateMu makes DocumentCache metadata and analysis workspace
 	// overlays transition as one state for concurrent snapshot capture.
@@ -232,7 +235,8 @@ func handleRequestInline(method string) bool {
 		protocol.MethodTextDocumentDidOpen,
 		protocol.MethodTextDocumentDidChange,
 		protocol.MethodTextDocumentDidSave,
-		protocol.MethodTextDocumentDidClose:
+		protocol.MethodTextDocumentDidClose,
+		protocol.MethodWorkspaceDidChangeWatchedFiles:
 		return true
 	default:
 		return false
@@ -287,6 +291,7 @@ func (s *Server) registerHandlers() {
 	s.handlers[protocol.MethodTextDocumentDidChange] = s.handleDidChange
 	s.handlers[protocol.MethodTextDocumentDidSave] = s.handleDidSave
 	s.handlers[protocol.MethodTextDocumentDidClose] = s.handleDidClose
+	s.handlers[protocol.MethodWorkspaceDidChangeWatchedFiles] = s.handleDidChangeWatchedFiles
 
 	// Language features
 	s.handlers[protocol.MethodTextDocumentHover] = s.handleHover
@@ -320,6 +325,7 @@ func (s *Server) handleInitialize(ctx context.Context, reply jsonrpc2.Replier, r
 	} else if params.RootURI != "" {
 		s.projectRoot = string(params.RootURI)
 	}
+	s.watchFilesDynamicSupport = params.Capabilities.Workspace != nil && params.Capabilities.Workspace.DidChangeWatchedFiles != nil && params.Capabilities.Workspace.DidChangeWatchedFiles.DynamicRegistration
 	s.engineMu.Unlock()
 
 	result := &protocol.InitializeResult{
@@ -351,6 +357,33 @@ func (s *Server) handleInitialize(ctx context.Context, reply jsonrpc2.Replier, r
 }
 
 func (s *Server) handleInitialized(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
+	if s.watchFilesDynamicSupport && s.conn != nil {
+		watchers := []protocol.FileSystemWatcher{{GlobPattern: "**/*"}}
+		if root := s.projectRootPath(); root != "" {
+			if project, err := checker.FindProjectRoot(root); err == nil {
+				dependencyRoots := make([]string, 0, len(project.Packages))
+				for _, pkg := range project.Packages {
+					if pkg.RootPath != "" && filepath.Clean(pkg.RootPath) != filepath.Clean(project.RootPath) {
+						dependencyRoots = append(dependencyRoots, pkg.RootPath)
+					}
+				}
+				sort.Strings(dependencyRoots)
+				for _, dependencyRoot := range dependencyRoots {
+					watchers = append(watchers, protocol.FileSystemWatcher{GlobPattern: filepath.ToSlash(filepath.Join(dependencyRoot, "**", "*"))})
+				}
+			}
+		}
+		options := protocol.DidChangeWatchedFilesRegistrationOptions{Watchers: watchers}
+		params := protocol.RegistrationParams{Registrations: []protocol.Registration{{
+			ID:              "ard-embedded-resources",
+			Method:          protocol.MethodWorkspaceDidChangeWatchedFiles,
+			RegisterOptions: options,
+		}}}
+		var result any
+		if _, err := s.conn.Call(ctx, protocol.MethodClientRegisterCapability, params, &result); err != nil {
+			fmt.Fprintf(os.Stderr, "ard-lsp: could not register embedded resource watcher: %v\n", err)
+		}
+	}
 	return reply(ctx, nil, nil)
 }
 
@@ -516,6 +549,17 @@ func (s *Server) handleDidChange(ctx context.Context, reply jsonrpc2.Replier, re
 }
 
 func (s *Server) handleDidSave(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
+	return reply(ctx, nil, nil)
+}
+
+func (s *Server) handleDidChangeWatchedFiles(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
+	var params protocol.DidChangeWatchedFilesParams
+	if err := json.Unmarshal(req.Params(), &params); err != nil {
+		return reply(ctx, nil, fmt.Errorf("%s: %w", jsonrpc2.ErrParse, err))
+	}
+	if len(params.Changes) > 0 {
+		s.scheduleDiagnosticsForOpenDocuments()
+	}
 	return reply(ctx, nil, nil)
 }
 

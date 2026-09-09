@@ -1686,7 +1686,7 @@ func isValidMapKeyTypeSeen(t Type, context *mapKeyTypeContext) bool {
 			return true
 		}
 		return ty.GoType == nil || gotypes.Comparable(ty.GoType)
-	case *Maybe, *List, *Slice, *Map, *Result, *Union, *FunctionDef, *Trait, *anyType:
+	case *Maybe, *List, *Slice, *Map, *Result, *Union, *FunctionDef, *Trait, *anyType, *embeddedFSType:
 		return false
 	default:
 		return true
@@ -2635,6 +2635,9 @@ func (c *Checker) areCompatible(expected Type, actual Type) bool {
 			}
 		}
 		actualBase, actualIsReference := mutableRefBase(actual)
+		if _, ok := actualBase.(*embeddedFSType); ok && !actualIsReference && iface.Target == "go" && iface.Namespace == "io/fs" && iface.Name == "FS" {
+			return true
+		}
 		if actualForeign, ok := actualBase.(*ForeignType); ok {
 			return validationEqualTypes(actualForeign, iface) || foreignGoAssignableTo(actualForeign, iface)
 		}
@@ -7014,6 +7017,9 @@ func (c *Checker) createPrimitiveMethodNode(subject Expression, methodName strin
 	if _, isResult := subjectType.(*Result); isResult {
 		return c.createResultMethod(subject, methodName, args, fnDef)
 	}
+	if _, isEmbeddedFS := subjectType.(*embeddedFSType); isEmbeddedFS {
+		return c.createEmbeddedFSMethod(subject, methodName, args, fnDef)
+	}
 
 	// For user-defined types (structs, enums), use generic InstanceMethod
 	receiverKind := ReceiverUnknown
@@ -9599,6 +9605,9 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 					if name == "text" || name == "bytes" {
 						return c.checkEmbedExactCall(s, name)
 					}
+					if name == "fs" {
+						return c.checkEmbedFSCall(s)
+					}
 				case "ard/unsafe":
 					if c.rejectSpreadForFixedCall(s.Function.Args) {
 						return nil
@@ -10974,7 +10983,7 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 
 				// Check if this is accessing a module
 				if mod := c.resolveModule(id.Name); mod != nil {
-					if prop, ok := s.Property.(*parse.Identifier); ok && mod.Path() == EmbedModulePath && (prop.Name == "text" || prop.Name == "bytes") {
+					if prop, ok := s.Property.(*parse.Identifier); ok && mod.Path() == EmbedModulePath && (prop.Name == "text" || prop.Name == "bytes" || prop.Name == "fs") {
 						c.addEmbedDiagnostic(DiagnosticCodeEmbedStaticArgument, "Embed constructors are not function values", "call the constructor directly with a static path", prop.GetLocation())
 						return nil
 					}

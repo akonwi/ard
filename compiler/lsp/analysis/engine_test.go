@@ -833,3 +833,44 @@ func TestGoSessionRepricesForNewImports(t *testing.T) {
 		t.Error("expected a resolve diagnostic for the bogus import path")
 	}
 }
+
+func TestEmbeddedResourceChangeInvalidatesAnalysis(t *testing.T) {
+	root := writeProject(t, map[string]string{
+		"ard.toml":        "name = \"proj\"\nard = \">= 0.1.0\"\n",
+		"main.ard":        "use ard/embed\nlet page = embed::text(\"assets/page.txt\")\n",
+		"assets/page.txt": "first",
+	})
+	engine := NewEngine(root)
+	workspace := NewWorkspace(engine)
+	mainPath := filepath.Join(root, "main.ard")
+	resourcePath := filepath.Join(root, "assets", "page.txt")
+
+	first, err := workspace.Snapshot().Analyze(mainPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first.Diagnostics) != 0 {
+		t.Fatalf("initial diagnostics: %#v", first.Diagnostics)
+	}
+	if err := os.WriteFile(resourcePath, []byte("second"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	second, err := workspace.Snapshot().Analyze(mainPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first == second || first.Signature == second.Signature {
+		t.Fatal("embedded resource edit did not invalidate analysis")
+	}
+
+	if err := os.Remove(resourcePath); err != nil {
+		t.Fatal(err)
+	}
+	missing, err := workspace.Snapshot().Analyze(mainPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(missing.Diagnostics) == 0 {
+		t.Fatal("missing embedded resource did not produce diagnostics")
+	}
+}

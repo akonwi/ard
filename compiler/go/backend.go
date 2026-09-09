@@ -87,12 +87,55 @@ func GenerateSources(program *air.Program, options Options) (map[string][]byte, 
 
 func generateEmbeddedResourceSource(program *air.Program) ([]byte, error) {
 	var source strings.Builder
-	source.WriteString("package ardembed\n\nimport _ \"embed\"\n\n")
+	source.WriteString("package ardembed\n\n")
+	if len(program.EmbeddedSets) > 0 {
+		source.WriteString("import (\n\t\"embed\"\n\t\"fmt\"\n\t\"io/fs\"\n\t\"unicode/utf8\"\n)\n\n")
+	} else {
+		source.WriteString("import _ \"embed\"\n\n")
+	}
 	for _, blob := range program.EmbeddedBlobs {
+		if !blob.Direct {
+			continue
+		}
 		fmt.Fprintf(&source, "//go:embed data/%s\n", blob.Digest)
 		fmt.Fprintf(&source, "var blob%s string\n\n", blob.Digest)
 		fmt.Fprintf(&source, "func Text%s() string { return blob%s }\n\n", blob.Digest, blob.Digest)
 		fmt.Fprintf(&source, "func Bytes%s() []byte { return []byte(blob%s) }\n\n", blob.Digest, blob.Digest)
+	}
+	for _, set := range program.EmbeddedSets {
+		fmt.Fprintf(&source, "//go:embed all:sets/%s\n", set.Digest)
+		fmt.Fprintf(&source, "var raw%s embed.FS\n\n", set.Digest)
+		fmt.Fprintf(&source, "var set%s fs.FS = mustSub(raw%s, \"sets/%s\")\n\n", set.Digest, set.Digest, set.Digest)
+		fmt.Fprintf(&source, "func FS%s() fs.FS { return set%s }\n\n", set.Digest, set.Digest)
+	}
+	if len(program.EmbeddedSets) > 0 {
+		source.WriteString(`func mustSub(root fs.FS, path string) fs.FS {
+	value, err := fs.Sub(root, path)
+	if err != nil { panic(err) }
+	return value
+}
+
+func ReadFile(root fs.FS, path string) ([]byte, error) {
+	data, err := fs.ReadFile(root, path)
+	if err != nil { return nil, err }
+	return append([]byte(nil), data...), nil
+}
+
+func ReadText(root fs.FS, path string) (string, error) {
+	data, err := fs.ReadFile(root, path)
+	if err != nil { return "", err }
+	if !utf8.Valid(data) { return "", &fs.PathError{Op: "read_text", Path: path, Err: fs.ErrInvalid} }
+	return string(data), nil
+}
+
+func Sub(root fs.FS, path string) (fs.FS, error) {
+	info, err := fs.Stat(root, path)
+	if err != nil { return nil, err }
+	if !info.IsDir() { return nil, &fs.PathError{Op: "sub", Path: path, Err: fmt.Errorf("%w: not a directory", fs.ErrInvalid)} }
+	return fs.Sub(root, path)
+}
+
+`)
 	}
 	formatted, err := format.Source([]byte(source.String()))
 	if err != nil {
@@ -1214,11 +1257,33 @@ func writeEmbeddedResources(outputDir string, program *air.Program) error {
 	}
 	dataDir := filepath.Join(outputDir, "internal", "ardembed", "data")
 	for _, blob := range program.EmbeddedBlobs {
+		if !blob.Direct {
+			continue
+		}
 		if err := os.MkdirAll(dataDir, 0o755); err != nil {
 			return fmt.Errorf("create embedded resource directory: %w", err)
 		}
 		if err := os.WriteFile(filepath.Join(dataDir, blob.Digest), blob.Data, 0o644); err != nil {
 			return fmt.Errorf("write embedded resource %s: %w", blob.Digest, err)
+		}
+	}
+	for _, set := range program.EmbeddedSets {
+		setRoot := filepath.Join(outputDir, "internal", "ardembed", "sets", set.Digest)
+		for _, entry := range set.Entries {
+			if entry.Blob < 0 || int(entry.Blob) >= len(program.EmbeddedBlobs) {
+				return fmt.Errorf("embedded set %s references invalid blob %d", set.Digest, entry.Blob)
+			}
+			resourcePath := filepath.Join(setRoot, filepath.FromSlash(entry.Path))
+			rel, err := filepath.Rel(setRoot, resourcePath)
+			if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+				return fmt.Errorf("embedded set resource escapes staging root: %q", entry.Path)
+			}
+			if err := os.MkdirAll(filepath.Dir(resourcePath), 0o755); err != nil {
+				return fmt.Errorf("create embedded set directory: %w", err)
+			}
+			if err := os.WriteFile(resourcePath, program.EmbeddedBlobs[entry.Blob].Data, 0o644); err != nil {
+				return fmt.Errorf("write embedded set resource %s: %w", entry.Path, err)
+			}
 		}
 	}
 	return nil

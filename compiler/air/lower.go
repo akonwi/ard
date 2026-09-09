@@ -69,6 +69,7 @@ type lowerer struct {
 	functions     map[string]FunctionID
 	globals       map[string]GlobalID
 	embeddedBlobs map[string]EmbeddedBlobID
+	embeddedSets  map[string]EmbeddedSetID
 
 	cacheMethodLookups       bool
 	structMethodsByOwner     map[checker.MethodOwner]map[string]*checker.FunctionDef
@@ -121,6 +122,7 @@ func newLowerer(options LowerOptions, rootCount int) *lowerer {
 		functions:     map[string]FunctionID{},
 		globals:       map[string]GlobalID{},
 		embeddedBlobs: map[string]EmbeddedBlobID{},
+		embeddedSets:  map[string]EmbeddedSetID{},
 
 		cacheMethodLookups:      rootCount == 1,
 		unresolvedTypeVarByType: map[checker.Type]bool{},
@@ -177,12 +179,15 @@ func (l *lowerer) functionHasUnresolvedTypeVar(def *checker.FunctionDef) bool {
 	return l.typeHasUnresolvedTypeVar(def)
 }
 
-func (l *lowerer) internEmbeddedBlob(data []byte) (EmbeddedBlobID, error) {
+func (l *lowerer) internEmbeddedBlob(data []byte, direct bool) (EmbeddedBlobID, error) {
 	sum := sha256.Sum256(data)
 	digest := hex.EncodeToString(sum[:])
 	if id, ok := l.embeddedBlobs[digest]; ok {
 		if !bytes.Equal(l.program.EmbeddedBlobs[id].Data, data) {
 			return 0, fmt.Errorf("embedded resource digest collision for %s", digest)
+		}
+		if direct {
+			l.program.EmbeddedBlobs[id].Direct = true
 		}
 		return id, nil
 	}
@@ -191,8 +196,40 @@ func (l *lowerer) internEmbeddedBlob(data []byte) (EmbeddedBlobID, error) {
 		ID:     id,
 		Data:   append([]byte(nil), data...),
 		Digest: digest,
+		Direct: direct,
 	})
 	l.embeddedBlobs[digest] = id
+	return id, nil
+}
+
+func (l *lowerer) internEmbeddedSet(set checker.EmbeddedFileSet) (EmbeddedSetID, error) {
+	entries := make([]EmbeddedEntry, len(set.Entries))
+	hash := sha256.New()
+	_, _ = hash.Write([]byte(set.OwnerPackageIdentity))
+	_, _ = hash.Write([]byte{0})
+	for index, entry := range set.Entries {
+		blob, err := l.internEmbeddedBlob(entry.Data, false)
+		if err != nil {
+			return 0, err
+		}
+		entries[index] = EmbeddedEntry{Path: entry.LogicalPath, Blob: blob}
+		_, _ = hash.Write([]byte(entry.LogicalPath))
+		_, _ = hash.Write([]byte{0})
+		_, _ = hash.Write([]byte(l.program.EmbeddedBlobs[blob].Digest))
+		_, _ = hash.Write([]byte{0})
+	}
+	digest := hex.EncodeToString(hash.Sum(nil))
+	if id, ok := l.embeddedSets[digest]; ok {
+		return id, nil
+	}
+	id := EmbeddedSetID(len(l.program.EmbeddedSets))
+	l.program.EmbeddedSets = append(l.program.EmbeddedSets, EmbeddedSet{
+		ID:                   id,
+		OwnerPackageIdentity: set.OwnerPackageIdentity,
+		Entries:              entries,
+		Digest:               digest,
+	})
+	l.embeddedSets[digest] = id
 	return id, nil
 }
 
@@ -2509,6 +2546,8 @@ func (l *lowerer) internAtomicOrTraitType(t checker.Type) (TypeID, error) {
 		info.Kind = TypeRune
 	case checker.Str:
 		info.Kind = TypeStr
+	case checker.EmbeddedFS:
+		info.Kind = TypeEmbeddedFS
 	case checker.Any:
 		info.Kind = TypeAny
 	default:
@@ -3954,17 +3993,23 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 	case *checker.StrLiteral:
 		return &Expr{Kind: ExprConstStr, Type: typeID, Payload: &TextExprPayload{Value: e.Value}}, nil
 	case *checker.EmbeddedText:
-		blob, err := fl.l.internEmbeddedBlob(e.Resource.Data)
+		blob, err := fl.l.internEmbeddedBlob(e.Resource.Data, true)
 		if err != nil {
 			return nil, err
 		}
 		return &Expr{Kind: ExprEmbeddedText, Type: typeID, Payload: &EmbeddedBlobExprPayload{Blob: blob}}, nil
 	case *checker.EmbeddedBytes:
-		blob, err := fl.l.internEmbeddedBlob(e.Resource.Data)
+		blob, err := fl.l.internEmbeddedBlob(e.Resource.Data, true)
 		if err != nil {
 			return nil, err
 		}
 		return &Expr{Kind: ExprEmbeddedBytes, Type: typeID, Payload: &EmbeddedBlobExprPayload{Blob: blob}}, nil
+	case *checker.EmbeddedFSValue:
+		set, err := fl.l.internEmbeddedSet(e.Set)
+		if err != nil {
+			return nil, err
+		}
+		return &Expr{Kind: ExprMakeEmbeddedFS, Type: typeID, Payload: &EmbeddedSetExprPayload{Set: set}}, nil
 	case *checker.RuneLiteral:
 		return &Expr{Kind: ExprConstInt, Type: typeID, Payload: &TextExprPayload{Value: strconv.Itoa(int(e.Value))}}, nil
 	case *checker.NeverCoercion:
@@ -4306,6 +4351,27 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		return fl.lowerInstanceMethod(typeID, e)
 	case *checker.StrMethod:
 		return fl.lowerStrMethod(typeID, e)
+	case *checker.EmbeddedFSMethod:
+		target, err := fl.lowerExpr(e.Subject)
+		if err != nil {
+			return nil, err
+		}
+		args, err := fl.lowerArgs(e.Args)
+		if err != nil {
+			return nil, err
+		}
+		kind := ExprEmbeddedFSReadFile
+		switch e.Kind {
+		case checker.EmbeddedFSReadText:
+			kind = ExprEmbeddedFSReadText
+		case checker.EmbeddedFSReadDir:
+			kind = ExprEmbeddedFSReadDir
+		case checker.EmbeddedFSStat:
+			kind = ExprEmbeddedFSStat
+		case checker.EmbeddedFSSub:
+			kind = ExprEmbeddedFSSub
+		}
+		return &Expr{Kind: kind, Type: typeID, Target: target, Args: args}, nil
 	case *checker.ByteMethod:
 		if e.Kind == checker.ByteToInt {
 			return fl.lowerUnary(ExprToInt, typeID, e.Subject)

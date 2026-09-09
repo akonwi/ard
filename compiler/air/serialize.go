@@ -13,6 +13,7 @@ import (
 func init() {
 	gob.Register(&TextExprPayload{})
 	gob.Register(&EmbeddedBlobExprPayload{})
+	gob.Register(&EmbeddedSetExprPayload{})
 	gob.Register(&BoolExprPayload{})
 	gob.Register(&EnumExprPayload{})
 	gob.Register(&LocalExprPayload{})

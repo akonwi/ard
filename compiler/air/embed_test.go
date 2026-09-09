@@ -20,7 +20,7 @@ func TestLowerEmbeddedExactFilesIntoBlobReferences(t *testing.T) {
 		t.Fatal(err)
 	}
 	mainPath := filepath.Join(root, "main.ard")
-	parsed := parse.Parse([]byte("use ard/embed\nlet page = embed::text(\"asset.txt\")\nlet raw = embed::bytes(\"asset.txt\")\n"), mainPath)
+	parsed := parse.Parse([]byte("use ard/embed\nlet page = embed::text(\"asset.txt\")\nlet raw = embed::bytes(\"asset.txt\")\nlet files = embed::fs([\"asset.txt\"])\n"), mainPath)
 	if len(parsed.Errors) > 0 {
 		t.Fatalf("parse errors: %v", parsed.Errors)
 	}
@@ -47,8 +47,8 @@ func TestLowerEmbeddedExactFilesIntoBlobReferences(t *testing.T) {
 	if string(program.EmbeddedBlobs[0].Data) != string(content) {
 		t.Fatalf("blob data = %q", program.EmbeddedBlobs[0].Data)
 	}
-	if len(program.Globals) != 2 {
-		t.Fatalf("globals = %d, want 2", len(program.Globals))
+	if len(program.Globals) != 3 {
+		t.Fatalf("globals = %d, want 3", len(program.Globals))
 	}
 	text := program.Globals[0].Initializer.Value
 	bytes := program.Globals[1].Initializer.Value
@@ -57,6 +57,13 @@ func TestLowerEmbeddedExactFilesIntoBlobReferences(t *testing.T) {
 	}
 	if text.EmbeddedBlobPayload().Blob != 0 || bytes.EmbeddedBlobPayload().Blob != 0 {
 		t.Fatalf("embedded blob refs = %d, %d", text.EmbeddedBlobPayload().Blob, bytes.EmbeddedBlobPayload().Blob)
+	}
+	files := program.Globals[2].Initializer.Value
+	if files.Kind != ExprMakeEmbeddedFS || files.EmbeddedSetPayload().Set != 0 {
+		t.Fatalf("embedded filesystem expression = %#v", files)
+	}
+	if len(program.EmbeddedSets) != 1 || len(program.EmbeddedSets[0].Entries) != 1 || program.EmbeddedSets[0].Entries[0].Path != "asset.txt" {
+		t.Fatalf("embedded sets = %#v", program.EmbeddedSets)
 	}
 
 	encoded, err := SerializeProgram(program)
@@ -70,6 +77,9 @@ func TestLowerEmbeddedExactFilesIntoBlobReferences(t *testing.T) {
 	if len(roundTrip.EmbeddedBlobs) != 1 || string(roundTrip.EmbeddedBlobs[0].Data) != string(content) {
 		t.Fatalf("round-trip embedded blobs = %#v", roundTrip.EmbeddedBlobs)
 	}
+	if len(roundTrip.EmbeddedSets) != 1 || roundTrip.EmbeddedSets[0].Digest != program.EmbeddedSets[0].Digest {
+		t.Fatalf("round-trip embedded sets = %#v", roundTrip.EmbeddedSets)
+	}
 
 	malformed := *program
 	duplicate := program.EmbeddedBlobs[0]
@@ -77,5 +87,13 @@ func TestLowerEmbeddedExactFilesIntoBlobReferences(t *testing.T) {
 	malformed.EmbeddedBlobs = append(append([]EmbeddedBlob(nil), program.EmbeddedBlobs...), duplicate)
 	if err := Validate(&malformed); err == nil || !strings.Contains(err.Error(), "duplicates digest") {
 		t.Fatalf("duplicate embedded blob validation error = %v", err)
+	}
+
+	invalidPath := *program
+	invalidPath.EmbeddedSets = append([]EmbeddedSet(nil), program.EmbeddedSets...)
+	invalidPath.EmbeddedSets[0].Entries = append([]EmbeddedEntry(nil), program.EmbeddedSets[0].Entries...)
+	invalidPath.EmbeddedSets[0].Entries[0].Path = "../escape"
+	if err := Validate(&invalidPath); err == nil || !strings.Contains(err.Error(), "invalid path") {
+		t.Fatalf("invalid embedded set path validation error = %v", err)
 	}
 }

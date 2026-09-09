@@ -10,6 +10,11 @@ func (e Expr) EmbeddedBlobPayload() *EmbeddedBlobExprPayload {
 	return payload
 }
 
+func (e Expr) EmbeddedSetPayload() *EmbeddedSetExprPayload {
+	payload, _ := e.Payload.(*EmbeddedSetExprPayload)
+	return payload
+}
+
 func (e Expr) BoolPayload() *BoolExprPayload {
 	payload, _ := e.Payload.(*BoolExprPayload)
 	return payload

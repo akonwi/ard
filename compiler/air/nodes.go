@@ -64,6 +64,12 @@ const (
 	ExprConstStr
 	ExprEmbeddedText
 	ExprEmbeddedBytes
+	ExprMakeEmbeddedFS
+	ExprEmbeddedFSReadFile
+	ExprEmbeddedFSReadText
+	ExprEmbeddedFSReadDir
+	ExprEmbeddedFSStat
+	ExprEmbeddedFSSub
 	ExprPanic
 	ExprLoadLocal
 	ExprLoadGlobal

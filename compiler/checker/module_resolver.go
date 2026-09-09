@@ -93,9 +93,13 @@ type ModuleResolver struct {
 	goImportAliases map[string]goImportAliasesResult
 	buildModule     Module
 
-	embedMu               sync.Mutex
-	embeddedResources     map[string]EmbeddedResource
-	embeddedResourceBytes int
+	embedMu                  sync.Mutex
+	embeddedResources        map[string]EmbeddedResource
+	embeddedPatternSets      map[string]EmbeddedFileSet
+	embeddedExactReferences  map[string]bool
+	embeddedSetIdentities    map[string]bool
+	embeddedProgramBytes     int
+	embeddedProgramFileCount int
 }
 
 type goImportAliasesResult struct {
@@ -1187,15 +1191,18 @@ func NewModuleResolverWithOptions(workingDir string, options BuildOptions) (*Mod
 	}
 
 	return &ModuleResolver{
-		project:           project,
-		moduleCache:       make(map[string]Module),
-		astCache:          make(map[string]*parse.Program),
-		overlays:          make(map[string]string),
-		loadingChain:      make([]string, 0),
-		modulePackages:    make(map[string]string),
-		goImportAliases:   make(map[string]goImportAliasesResult),
-		buildModule:       newBuildModule(values),
-		embeddedResources: make(map[string]EmbeddedResource),
+		project:                 project,
+		moduleCache:             make(map[string]Module),
+		astCache:                make(map[string]*parse.Program),
+		overlays:                make(map[string]string),
+		loadingChain:            make([]string, 0),
+		modulePackages:          make(map[string]string),
+		goImportAliases:         make(map[string]goImportAliasesResult),
+		buildModule:             newBuildModule(values),
+		embeddedResources:       make(map[string]EmbeddedResource),
+		embeddedPatternSets:     make(map[string]EmbeddedFileSet),
+		embeddedExactReferences: make(map[string]bool),
+		embeddedSetIdentities:   make(map[string]bool),
 	}, nil
 }
 

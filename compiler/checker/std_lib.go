@@ -195,7 +195,7 @@ var BuiltinPkgNames = map[string][]string{
 	"ard/result":    {"ok", "err"},
 	"ard/async":     {"start"},
 	"ard/unsafe":    {"cast", "is_nil"},
-	EmbedModulePath: {"text", "bytes"},
+	EmbedModulePath: {"text", "bytes", "fs", "FS", "DirEntry", "FileInfo"},
 	"builtin/Chan":  {"new"},
 }
 

@@ -5,9 +5,22 @@ import (
 	"encoding/hex"
 	"fmt"
 	"reflect"
+	"strings"
 
 	"github.com/akonwi/ard/checker"
 )
+
+func airTypeIsBuiltinError(program *Program, id TypeID) bool {
+	if !validTypeID(program, id) {
+		return false
+	}
+	info := program.Types[id-1]
+	return info.Kind == TypeTraitObject && info.Trait >= 0 && int(info.Trait) < len(program.Traits) && program.Traits[info.Trait].BuiltinError
+}
+
+func airTypeIsEmbedStruct(info TypeInfo, name string) bool {
+	return info.Kind == TypeStruct && info.ModulePath == checker.EmbedModulePath && info.Name == name
+}
 
 func validGoStructTagKey(key string) bool {
 	prefixed := false
@@ -51,10 +64,8 @@ func Validate(program *Program) error {
 	if err := validateCanonicalNominalIdentities(program); err != nil {
 		return err
 	}
-	if len(program.EmbeddedBlobs) > checker.MaxEmbeddedProgramFileCount {
-		return fmt.Errorf("embedded blobs exceed program limit of %d files", checker.MaxEmbeddedProgramFileCount)
-	}
 	embeddedBytes := 0
+	embeddedFiles := 0
 	embeddedDigests := make(map[string]bool, len(program.EmbeddedBlobs))
 	for i, blob := range program.EmbeddedBlobs {
 		if blob.ID != EmbeddedBlobID(i) {
@@ -63,9 +74,9 @@ func Validate(program *Program) error {
 		if len(blob.Data) > checker.MaxEmbeddedFileBytes {
 			return fmt.Errorf("embedded blob %d exceeds file limit of %d bytes", blob.ID, checker.MaxEmbeddedFileBytes)
 		}
-		embeddedBytes += len(blob.Data)
-		if embeddedBytes > checker.MaxEmbeddedProgramBytes {
-			return fmt.Errorf("embedded blobs exceed program limit of %d bytes", checker.MaxEmbeddedProgramBytes)
+		if blob.Direct {
+			embeddedBytes += len(blob.Data)
+			embeddedFiles++
 		}
 		sum := sha256.Sum256(blob.Data)
 		digest := hex.EncodeToString(sum[:])
@@ -76,6 +87,69 @@ func Validate(program *Program) error {
 			return fmt.Errorf("embedded blob %d duplicates digest %q", blob.ID, digest)
 		}
 		embeddedDigests[digest] = true
+	}
+	embeddedSetDigests := make(map[string]bool, len(program.EmbeddedSets))
+	for i, set := range program.EmbeddedSets {
+		if set.ID != EmbeddedSetID(i) {
+			return fmt.Errorf("embedded set table entry %d has id %d", i, set.ID)
+		}
+		if set.OwnerPackageIdentity == "" {
+			return fmt.Errorf("embedded set %d has no owner package identity", set.ID)
+		}
+		hash := sha256.New()
+		_, _ = hash.Write([]byte(set.OwnerPackageIdentity))
+		_, _ = hash.Write([]byte{0})
+		setBytes := 0
+		lastPath := ""
+		for entryIndex, entry := range set.Entries {
+			if err := checker.ValidateEmbeddedLogicalFilePath(entry.Path); err != nil {
+				return fmt.Errorf("embedded set %d has invalid path %q: %w", set.ID, entry.Path, err)
+			}
+			for _, component := range strings.Split(entry.Path, "/") {
+				switch component {
+				case ".bzr", ".git", ".hg", ".svn":
+					return fmt.Errorf("embedded set %d contains reserved path %q", set.ID, component)
+				}
+			}
+			if entryIndex > 0 && entry.Path <= lastPath {
+				return fmt.Errorf("embedded set %d entries are not sorted and unique", set.ID)
+			}
+			if lastPath != "" && strings.HasPrefix(entry.Path, lastPath+"/") {
+				return fmt.Errorf("embedded set %d path %q conflicts with file %q", set.ID, entry.Path, lastPath)
+			}
+			if entry.Blob < 0 || int(entry.Blob) >= len(program.EmbeddedBlobs) {
+				return fmt.Errorf("embedded set %d entry %q references invalid blob %d", set.ID, entry.Path, entry.Blob)
+			}
+			blob := program.EmbeddedBlobs[entry.Blob]
+			setBytes += len(blob.Data)
+			_, _ = hash.Write([]byte(entry.Path))
+			_, _ = hash.Write([]byte{0})
+			_, _ = hash.Write([]byte(blob.Digest))
+			_, _ = hash.Write([]byte{0})
+			lastPath = entry.Path
+		}
+		if len(set.Entries) == 0 {
+			return fmt.Errorf("embedded set %d is empty", set.ID)
+		}
+		if setBytes > checker.MaxEmbeddedSetBytes {
+			return fmt.Errorf("embedded set %d exceeds limit of %d bytes", set.ID, checker.MaxEmbeddedSetBytes)
+		}
+		embeddedBytes += setBytes
+		embeddedFiles += len(set.Entries)
+		digest := hex.EncodeToString(hash.Sum(nil))
+		if set.Digest != digest {
+			return fmt.Errorf("embedded set %d has digest %q, want %q", set.ID, set.Digest, digest)
+		}
+		if embeddedSetDigests[digest] {
+			return fmt.Errorf("embedded set %d duplicates digest %q", set.ID, digest)
+		}
+		embeddedSetDigests[digest] = true
+	}
+	if embeddedFiles > checker.MaxEmbeddedProgramFileCount {
+		return fmt.Errorf("embedded resources exceed program limit of %d files", checker.MaxEmbeddedProgramFileCount)
+	}
+	if embeddedBytes > checker.MaxEmbeddedProgramBytes {
+		return fmt.Errorf("embedded resources exceed program limit of %d bytes", checker.MaxEmbeddedProgramBytes)
 	}
 	for i, trait := range program.Traits {
 		if trait.ID != TraitID(i) {
@@ -960,6 +1034,8 @@ func validateExprPayload(expr Expr) error {
 		compatible = expr.Kind == ExprConstInt || expr.Kind == ExprConstFloat || expr.Kind == ExprConstStr
 	case *EmbeddedBlobExprPayload:
 		compatible = expr.Kind == ExprEmbeddedText || expr.Kind == ExprEmbeddedBytes
+	case *EmbeddedSetExprPayload:
+		compatible = expr.Kind == ExprMakeEmbeddedFS
 	case *BoolExprPayload:
 		compatible = expr.Kind == ExprConstBool
 	case *EnumExprPayload:
@@ -1063,7 +1139,7 @@ func exprPayloadRequired(kind ExprKind) bool {
 	}
 	switch kind {
 	case ExprConstInt, ExprConstFloat, ExprConstBool, ExprConstStr,
-		ExprEmbeddedText, ExprEmbeddedBytes,
+		ExprEmbeddedText, ExprEmbeddedBytes, ExprMakeEmbeddedFS,
 		ExprLoadLocal, ExprLoadGlobal, ExprFunctionRef, ExprCall,
 		ExprForeignCall, ExprForeignMethodCall, ExprForeignMethodValue,
 		ExprForeignFieldAccess, ExprForeignStructInstance, ExprForeignValue,
@@ -1094,6 +1170,9 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 		if payload.Blob < 0 || int(payload.Blob) >= len(program.EmbeddedBlobs) {
 			return fmt.Errorf("embedded expression references invalid blob %d", payload.Blob)
 		}
+		if !program.EmbeddedBlobs[payload.Blob].Direct {
+			return fmt.Errorf("embedded exact-file expression references non-direct blob %d", payload.Blob)
+		}
 		typ := program.Types[expr.Type-1]
 		if expr.Kind == ExprEmbeddedText && typ.Kind != TypeStr {
 			return fmt.Errorf("embedded text expression has non-Str type %d", expr.Type)
@@ -1102,6 +1181,44 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 			if typ.Kind != TypeList || !validTypeID(program, typ.Elem) || program.Types[typ.Elem-1].Kind != TypeByte {
 				return fmt.Errorf("embedded bytes expression has non-[Byte] type %d", expr.Type)
 			}
+		}
+	}
+	if expr.Kind == ExprMakeEmbeddedFS {
+		payload := exprPayloadAs[*EmbeddedSetExprPayload](&expr)
+		if payload == nil || payload.Set < 0 || int(payload.Set) >= len(program.EmbeddedSets) {
+			return fmt.Errorf("embedded filesystem expression references invalid set")
+		}
+		if program.Types[expr.Type-1].Kind != TypeEmbeddedFS {
+			return fmt.Errorf("embedded filesystem expression has invalid type %d", expr.Type)
+		}
+	}
+	if expr.Kind >= ExprEmbeddedFSReadFile && expr.Kind <= ExprEmbeddedFSSub {
+		if expr.Target == nil || !validTypeID(program, expr.Target.Type) || program.Types[expr.Target.Type-1].Kind != TypeEmbeddedFS {
+			return fmt.Errorf("embedded filesystem operation has invalid target")
+		}
+		if len(expr.Args) != 1 || !validTypeID(program, expr.Args[0].Type) || program.Types[expr.Args[0].Type-1].Kind != TypeStr {
+			return fmt.Errorf("embedded filesystem operation requires one Str argument")
+		}
+		result := program.Types[expr.Type-1]
+		if result.Kind != TypeResult || !validTypeID(program, result.Value) || !airTypeIsBuiltinError(program, result.Error) {
+			return fmt.Errorf("embedded filesystem operation has invalid Result type")
+		}
+		value := program.Types[result.Value-1]
+		validValue := false
+		switch expr.Kind {
+		case ExprEmbeddedFSReadFile:
+			validValue = value.Kind == TypeList && validTypeID(program, value.Elem) && program.Types[value.Elem-1].Kind == TypeByte
+		case ExprEmbeddedFSReadText:
+			validValue = value.Kind == TypeStr
+		case ExprEmbeddedFSReadDir:
+			validValue = value.Kind == TypeList && validTypeID(program, value.Elem) && airTypeIsEmbedStruct(program.Types[value.Elem-1], "DirEntry")
+		case ExprEmbeddedFSStat:
+			validValue = airTypeIsEmbedStruct(value, "FileInfo")
+		case ExprEmbeddedFSSub:
+			validValue = value.Kind == TypeEmbeddedFS
+		}
+		if !validValue {
+			return fmt.Errorf("embedded filesystem operation kind %d has invalid result value type", expr.Kind)
 		}
 	}
 	if err := validateTailSpread(program, expr); err != nil {

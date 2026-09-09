@@ -18,6 +18,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"hash"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime/debug"
@@ -644,8 +646,67 @@ func (s *Snapshot) check(filePath string, relPath string, program *parse.Program
 // aliases and package deps participate. Check results are reusable across
 // snapshots that did not touch any input of this file.
 //
-// Standard-library imports (ard/*) are skipped: the stdlib is embedded in the
-// compiler binary and immutable for the lifetime of the LSP process.
+// Standard-library imports (ard/*) are skipped because they are embedded in the
+// compiler binary. `ard/embed` is the exception: importing it adds the owning
+// package's resource tree to the signature.
+func hashEmbeddedPackageTree(h hash.Hash, root string) {
+	if root == "" {
+		return
+	}
+	_ = filepath.WalkDir(root, func(filePath string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			h.Write([]byte(filePath))
+			h.Write([]byte(":unreadable\x00"))
+			return nil
+		}
+		if filePath == root {
+			return nil
+		}
+		if entry.IsDir() {
+			switch entry.Name() {
+			case ".bzr", ".git", ".hg", ".svn", "ard-out", "vendor":
+				return filepath.SkipDir
+			}
+			if _, err := os.Stat(filepath.Join(filePath, "ard.toml")); err == nil {
+				return filepath.SkipDir
+			}
+			if _, err := os.Stat(filepath.Join(filePath, "go.mod")); err == nil {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		rel, err := filepath.Rel(root, filePath)
+		if err != nil {
+			return nil
+		}
+		h.Write([]byte(filepath.ToSlash(rel)))
+		h.Write([]byte{0})
+		if entry.Type()&os.ModeSymlink != 0 {
+			if target, err := os.Readlink(filePath); err == nil {
+				h.Write([]byte("symlink:" + target))
+			}
+			h.Write([]byte{0})
+			return nil
+		}
+		if !entry.Type().IsRegular() {
+			h.Write([]byte(":irregular\x00"))
+			return nil
+		}
+		file, err := os.Open(filePath)
+		if err != nil {
+			h.Write([]byte(":unreadable\x00"))
+			return nil
+		}
+		_, copyErr := io.Copy(h, io.LimitReader(file, checker.MaxEmbeddedFileBytes+1))
+		closeErr := file.Close()
+		if copyErr != nil || closeErr != nil {
+			h.Write([]byte(":read-error"))
+		}
+		h.Write([]byte{0})
+		return nil
+	})
+}
+
 func (s *Snapshot) signature(filePath string, content []byte, program *parse.Program, moduleResolver *checker.ModuleResolver, relPath string, trackDependencies bool) string {
 	h := sha256.New()
 	h.Write([]byte(filePath))
@@ -655,6 +716,7 @@ func (s *Snapshot) signature(filePath string, content []byte, program *parse.Pro
 
 	seen := map[string]bool{filePath: true}
 	seenPackageManifests := map[string]bool{}
+	seenEmbedPackages := map[string]bool{}
 	projectInfo := moduleResolver.GetProjectInfo()
 	if projectInfo != nil {
 		seenPackageManifests[projectInfo.RootPackageID] = true
@@ -678,8 +740,8 @@ func (s *Snapshot) signature(filePath string, content []byte, program *parse.Pro
 		}
 		h.Write([]byte{0})
 	}
-	var visit func(prog *parse.Program, importerModulePath string, importerFilePath string)
-	visit = func(prog *parse.Program, importerModulePath string, importerFilePath string) {
+	var visit func(prog *parse.Program, importerModulePath string, importerFilePath string, importerPackageID string)
+	visit = func(prog *parse.Program, importerModulePath string, importerFilePath string, importerPackageID string) {
 		if prog == nil {
 			return
 		}
@@ -690,7 +752,11 @@ func (s *Snapshot) signature(filePath string, content []byte, program *parse.Pro
 		}
 		deps := make([]dep, 0, len(prog.Imports))
 		known := true
+		usesEmbed := false
 		for _, imp := range prog.Imports {
+			if imp.Path == checker.EmbedModulePath {
+				usesEmbed = true
+			}
 			if imp.Kind == parse.ImportKindGo || strings.HasPrefix(imp.Path, "ard/") {
 				continue
 			}
@@ -705,6 +771,12 @@ func (s *Snapshot) signature(filePath string, content []byte, program *parse.Pro
 				continue
 			}
 			deps = append(deps, dep{file: resolved.FilePath, module: resolved.ModulePath, packageID: resolved.PackageID})
+		}
+		if usesEmbed && projectInfo != nil && !seenEmbedPackages[importerPackageID] {
+			seenEmbedPackages[importerPackageID] = true
+			if pkg, ok := projectInfo.Packages[importerPackageID]; ok {
+				hashEmbeddedPackageTree(h, pkg.RootPath)
+			}
 		}
 		sort.Slice(deps, func(a, b int) bool { return deps[a].file < deps[b].file })
 		if trackDependencies {
@@ -741,10 +813,14 @@ func (s *Snapshot) signature(filePath string, content []byte, program *parse.Pro
 				}
 				continue
 			}
-			visit(entry.program, d.module, d.file)
+			visit(entry.program, d.module, d.file, d.packageID)
 		}
 	}
-	visit(program, strings.TrimSuffix(relPath, ".ard"), filePath)
+	rootPackageID := ""
+	if projectInfo != nil {
+		rootPackageID = projectInfo.RootPackageID
+	}
+	visit(program, strings.TrimSuffix(relPath, ".ard"), filePath, rootPackageID)
 
 	// Project manifest and Go module metadata participate so dependency and
 	// FFI configuration changes invalidate checks.

@@ -8,6 +8,7 @@ type LocalID int
 type TraitID int
 type ImplID int
 type EmbeddedBlobID int
+type EmbeddedSetID int
 
 const (
 	NoType     TypeID     = 0
@@ -19,11 +20,25 @@ type EmbeddedBlob struct {
 	ID     EmbeddedBlobID
 	Data   []byte
 	Digest string
+	Direct bool
+}
+
+type EmbeddedEntry struct {
+	Path string
+	Blob EmbeddedBlobID
+}
+
+type EmbeddedSet struct {
+	ID                   EmbeddedSetID
+	OwnerPackageIdentity string
+	Entries              []EmbeddedEntry
+	Digest               string
 }
 
 type Program struct {
 	Modules       []Module
 	EmbeddedBlobs []EmbeddedBlob
+	EmbeddedSets  []EmbeddedSet
 	Types         []TypeInfo
 	Traits        []Trait
 	Impls         []Impl
@@ -158,6 +173,7 @@ const (
 	TypeByte
 	TypeRune
 	TypeStr
+	TypeEmbeddedFS
 	TypeList
 	TypeSlice
 	TypeFixedArray

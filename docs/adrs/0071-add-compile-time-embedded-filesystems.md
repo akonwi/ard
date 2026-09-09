@@ -165,8 +165,10 @@ Patterns have these rules:
   directory. A `go.mod` at the owning package root does not block selection, but
   a selected logical file named `go.mod` at any depth is rejected because its
   generated copy would create a nested Go module boundary.
-- Version-control directories `.bzr`, `.git`, `.hg`, and `.svn` are not
-  selectable.
+- Embedded filesystem paths cannot contain the version-control names `.bzr`,
+  `.git`, `.hg`, or `.svn`; the compiler-managed `ard-out` directory is also not
+  selectable. Exact `text` and `bytes` constructors stage content under encoded
+  names and may select a regular hidden file when the other path rules permit it.
 - Every selected path element must be valid UTF-8. Allowed characters are
   Unicode letters, ASCII digits, ASCII space, and the ASCII punctuation
   `!#$%&()+,-.=@[]^_{}~`. An element cannot consist only of dots or end in a
@@ -386,10 +388,12 @@ EmbeddedEntry {
 }
 ```
 
-`OwnerPackageIdentity` is the canonical root/dependency package identity
-supplied by project loading and used for ownership and interning; it is not a
-filesystem root or process-local checker pointer. Pattern spelling, source
-module identity, and call-site attribution remain on checked expressions and AIR
+`OwnerPackageIdentity` is a location-independent identity supplied by project
+loading: the manifest package name for root and path packages, and the locked
+source identity for Git packages. Resource paths and content also participate in
+set identity, so equal package names cannot merge different filesystems. The
+identity is never a filesystem root or process-local checker pointer. Pattern
+spelling, source module identity, and call-site attribution remain on checked expressions and AIR
 source locations rather than on interned sets, so different constructors that
 select identical contents can share one set deterministically. Project loading
 and checking are solely responsible for proving filesystem containment before
