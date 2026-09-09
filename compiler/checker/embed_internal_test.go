@@ -105,3 +105,74 @@ func TestEmbeddedExactAccountingDeduplicatesIdenticalBlobs(t *testing.T) {
 		t.Fatalf("embedded accounting = %d files, %d bytes", resolver.embeddedProgramFileCount, resolver.embeddedProgramBytes)
 	}
 }
+
+func TestEmbeddedSetAccountingDeduplicatesEquivalentSets(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "assets"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "assets", "value.txt"), []byte("value"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	resolver, err := NewModuleResolver(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := resolver.resolveEmbeddedFileSet("app/main", []string{"assets"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := resolver.resolveEmbeddedFileSet("app/main", []string{"assets/*.txt"}); err != nil {
+		t.Fatal(err)
+	}
+	if resolver.embeddedProgramFileCount != 1 || resolver.embeddedProgramBytes != len("value") {
+		t.Fatalf("embedded set accounting = %d files, %d bytes", resolver.embeddedProgramFileCount, resolver.embeddedProgramBytes)
+	}
+}
+
+func TestEmbeddedSetEnforcesProgramByteLimit(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "asset.txt"), []byte("asset"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	resolver, err := NewModuleResolver(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolver.embeddedProgramBytes = MaxEmbeddedProgramBytes
+	if _, err := resolver.resolveEmbeddedFileSet("app/main", []string{"asset.txt"}); err == nil {
+		t.Fatal("expected embedded set program-byte limit error")
+	}
+}
+
+func TestEmbeddedInputSignatureDoesNotConsumeResourceBudget(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "asset.txt"), []byte("asset"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	resolver, err := NewModuleResolver(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signature := resolver.EmbeddedInputSignature("app/main", EmbeddedInputSpec{PatternSets: [][]string{{"asset.txt"}}})
+	if signature == "" {
+		t.Fatal("empty embedded input signature")
+	}
+	if resolver.embeddedProgramFileCount != 0 || resolver.embeddedProgramBytes != 0 {
+		t.Fatalf("signature consumed resource budget: %d files, %d bytes", resolver.embeddedProgramFileCount, resolver.embeddedProgramBytes)
+	}
+	if _, err := resolver.resolveEmbeddedFileSet("app/main", []string{"asset.txt"}); err != nil {
+		t.Fatal(err)
+	}
+	if resolver.embeddedProgramFileCount != 1 || resolver.embeddedProgramBytes != len("asset") {
+		t.Fatalf("checked set accounting = %d files, %d bytes", resolver.embeddedProgramFileCount, resolver.embeddedProgramBytes)
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -167,11 +168,15 @@ func TestEmbeddedFSReadsFilesAndSubdirectories(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "public", "binary.bin"), []byte{0xff, 1}, 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(root, "public", ".metadata"), []byte("hidden"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	mainPath := filepath.Join(root, "main.ard")
 	source := `use ard/embed
+use go:errors
 use go:io/fs as gofs
 
-let assets = embed::fs(["public"])
+let assets = embed::fs(["all:public"])
 
 fn main() {
   let text = assets.read_text("public/index.html").expect("read text")
@@ -182,12 +187,18 @@ fn main() {
   changed.set(0, Byte::from(0))
   if assets.read_file("public/index.html").expect("fresh bytes").at(0).or(Byte::from(0)) != 60 { panic("read bytes shared storage") }
   if gofs::ReadFile(assets, "public/index.html").expect("direct io/fs").size() != 15 { panic("bad io/fs bridge") }
-  if not assets.read_file("missing").is_err() { panic("missing file succeeded") }
+  match assets.read_file("missing") {
+    ok(_) => panic("missing file succeeded"),
+    err(error) => {
+      if not errors::Is(error, gofs::ErrNotExist) { panic("missing error identity") }
+    },
+  }
   if not assets.read_text("public/binary.bin").is_err() { panic("invalid UTF-8 succeeded") }
   if not assets.sub("public/index.html").is_err() { panic("file sub succeeded") }
+  if assets.read_text("public/.metadata").expect("hidden file") != "hidden" { panic("bad hidden file") }
   let entries = assets.read_dir("public").expect("read dir")
-  if entries.size() != 2 { panic("bad directory size") }
-  let entry = entries.at(1).expect("directory entry")
+  if entries.size() != 3 { panic("bad directory size") }
+  let entry = entries.at(2).expect("directory entry")
   if entry.name != "index.html" or entry.is_dir { panic("bad directory entry") }
   let info = assets.stat("public/index.html").expect("stat")
   if info.name != "index.html" or info.is_dir or info.size.or(0) != 15 { panic("bad file info") }
@@ -213,6 +224,20 @@ fn main() {
 	program, err := air.Lower(checked.Module())
 	if err != nil {
 		t.Fatalf("Lower: %v", err)
+	}
+	firstSources, err := GenerateSources(program, Options{PackageName: "main", ProjectInfo: resolver.GetProjectInfo()})
+	if err != nil {
+		t.Fatalf("first GenerateSources: %v", err)
+	}
+	secondSources, err := GenerateSources(program, Options{PackageName: "main", ProjectInfo: resolver.GetProjectInfo()})
+	if err != nil {
+		t.Fatalf("second GenerateSources: %v", err)
+	}
+	if !reflect.DeepEqual(firstSources, secondSources) {
+		t.Fatal("embedded filesystem source generation is not deterministic")
+	}
+	if resourceSource := string(firstSources["internal/ardembed/embed.go"]); !strings.Contains(resourceSource, "//go:embed all:sets/") || !strings.Contains(resourceSource, "func FS") {
+		t.Fatalf("generated embedded filesystem source:\n%s", resourceSource)
 	}
 	if err := os.RemoveAll(filepath.Join(root, "public")); err != nil {
 		t.Fatal(err)

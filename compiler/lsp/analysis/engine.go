@@ -18,10 +18,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"hash"
-	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime/debug"
 	"sort"
 	"strings"
@@ -649,62 +648,90 @@ func (s *Snapshot) check(filePath string, relPath string, program *parse.Program
 // Standard-library imports (ard/*) are skipped because they are embedded in the
 // compiler binary. `ard/embed` is the exception: importing it adds the owning
 // package's resource tree to the signature.
-func hashEmbeddedPackageTree(h hash.Hash, root string) {
-	if root == "" {
-		return
+func collectEmbeddedInputSpec(program *parse.Program) checker.EmbeddedInputSpec {
+	spec := checker.EmbeddedInputSpec{}
+	if program == nil {
+		return spec
 	}
-	_ = filepath.WalkDir(root, func(filePath string, entry os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			h.Write([]byte(filePath))
-			h.Write([]byte(":unreadable\x00"))
-			return nil
+	aliases := map[string]bool{}
+	for _, imported := range program.Imports {
+		if imported.Path == checker.EmbedModulePath {
+			aliases[imported.Alias()] = true
 		}
-		if filePath == root {
-			return nil
+	}
+	if len(aliases) == 0 {
+		return spec
+	}
+	exactSeen := map[string]bool{}
+	patternSetSeen := map[string]bool{}
+	seenPointers := map[uintptr]bool{}
+	var walk func(reflect.Value)
+	walk = func(value reflect.Value) {
+		if !value.IsValid() {
+			return
 		}
-		if entry.IsDir() {
-			switch entry.Name() {
-			case ".bzr", ".git", ".hg", ".svn", "ard-out", "vendor":
-				return filepath.SkipDir
+		if value.Kind() == reflect.Interface || value.Kind() == reflect.Pointer {
+			if value.IsNil() {
+				return
 			}
-			if _, err := os.Stat(filepath.Join(filePath, "ard.toml")); err == nil {
-				return filepath.SkipDir
+			if value.Kind() == reflect.Pointer {
+				pointer := value.Pointer()
+				if seenPointers[pointer] {
+					return
+				}
+				seenPointers[pointer] = true
 			}
-			if _, err := os.Stat(filepath.Join(filePath, "go.mod")); err == nil {
-				return filepath.SkipDir
+			if value.CanInterface() {
+				if call, ok := value.Interface().(*parse.StaticFunction); ok {
+					if target, ok := call.Target.(*parse.Identifier); ok && aliases[target.Name] && len(call.Function.TypeArgs) == 0 && len(call.Function.Args) == 1 && call.Function.Args[0].Name == "" && !call.Function.Args[0].Spread {
+						switch call.Function.Name {
+						case "text", "bytes":
+							if literal, ok := call.Function.Args[0].Value.(*parse.StrLiteral); ok && !exactSeen[literal.Value] {
+								exactSeen[literal.Value] = true
+								spec.ExactPaths = append(spec.ExactPaths, literal.Value)
+							}
+						case "fs":
+							if list, ok := call.Function.Args[0].Value.(*parse.ListLiteral); ok && len(list.Items) > 0 {
+								patterns := make([]string, 0, len(list.Items))
+								for _, item := range list.Items {
+									literal, ok := item.(*parse.StrLiteral)
+									if !ok {
+										patterns = nil
+										break
+									}
+									patterns = append(patterns, literal.Value)
+								}
+								patternKey := strings.Join(patterns, "\x00")
+								if patterns != nil && !patternSetSeen[patternKey] {
+									patternSetSeen[patternKey] = true
+									spec.PatternSets = append(spec.PatternSets, patterns)
+								}
+							}
+						}
+					}
+				}
 			}
-			return nil
+			walk(value.Elem())
+			return
 		}
-		rel, err := filepath.Rel(root, filePath)
-		if err != nil {
-			return nil
-		}
-		h.Write([]byte(filepath.ToSlash(rel)))
-		h.Write([]byte{0})
-		if entry.Type()&os.ModeSymlink != 0 {
-			if target, err := os.Readlink(filePath); err == nil {
-				h.Write([]byte("symlink:" + target))
+		switch value.Kind() {
+		case reflect.Struct:
+			for index := 0; index < value.NumField(); index++ {
+				walk(value.Field(index))
 			}
-			h.Write([]byte{0})
-			return nil
+		case reflect.Slice, reflect.Array:
+			for index := 0; index < value.Len(); index++ {
+				walk(value.Index(index))
+			}
+		case reflect.Map:
+			iterator := value.MapRange()
+			for iterator.Next() {
+				walk(iterator.Value())
+			}
 		}
-		if !entry.Type().IsRegular() {
-			h.Write([]byte(":irregular\x00"))
-			return nil
-		}
-		file, err := os.Open(filePath)
-		if err != nil {
-			h.Write([]byte(":unreadable\x00"))
-			return nil
-		}
-		_, copyErr := io.Copy(h, io.LimitReader(file, checker.MaxEmbeddedFileBytes+1))
-		closeErr := file.Close()
-		if copyErr != nil || closeErr != nil {
-			h.Write([]byte(":read-error"))
-		}
-		h.Write([]byte{0})
-		return nil
-	})
+	}
+	walk(reflect.ValueOf(program))
+	return spec
 }
 
 func (s *Snapshot) signature(filePath string, content []byte, program *parse.Program, moduleResolver *checker.ModuleResolver, relPath string, trackDependencies bool) string {
@@ -716,7 +743,6 @@ func (s *Snapshot) signature(filePath string, content []byte, program *parse.Pro
 
 	seen := map[string]bool{filePath: true}
 	seenPackageManifests := map[string]bool{}
-	seenEmbedPackages := map[string]bool{}
 	projectInfo := moduleResolver.GetProjectInfo()
 	if projectInfo != nil {
 		seenPackageManifests[projectInfo.RootPackageID] = true
@@ -740,8 +766,8 @@ func (s *Snapshot) signature(filePath string, content []byte, program *parse.Pro
 		}
 		h.Write([]byte{0})
 	}
-	var visit func(prog *parse.Program, importerModulePath string, importerFilePath string, importerPackageID string)
-	visit = func(prog *parse.Program, importerModulePath string, importerFilePath string, importerPackageID string) {
+	var visit func(prog *parse.Program, importerModulePath string, importerFilePath string)
+	visit = func(prog *parse.Program, importerModulePath string, importerFilePath string) {
 		if prog == nil {
 			return
 		}
@@ -752,11 +778,7 @@ func (s *Snapshot) signature(filePath string, content []byte, program *parse.Pro
 		}
 		deps := make([]dep, 0, len(prog.Imports))
 		known := true
-		usesEmbed := false
 		for _, imp := range prog.Imports {
-			if imp.Path == checker.EmbedModulePath {
-				usesEmbed = true
-			}
 			if imp.Kind == parse.ImportKindGo || strings.HasPrefix(imp.Path, "ard/") {
 				continue
 			}
@@ -772,11 +794,10 @@ func (s *Snapshot) signature(filePath string, content []byte, program *parse.Pro
 			}
 			deps = append(deps, dep{file: resolved.FilePath, module: resolved.ModulePath, packageID: resolved.PackageID})
 		}
-		if usesEmbed && projectInfo != nil && !seenEmbedPackages[importerPackageID] {
-			seenEmbedPackages[importerPackageID] = true
-			if pkg, ok := projectInfo.Packages[importerPackageID]; ok {
-				hashEmbeddedPackageTree(h, pkg.RootPath)
-			}
+		embedSpec := collectEmbeddedInputSpec(prog)
+		if len(embedSpec.ExactPaths) > 0 || len(embedSpec.PatternSets) > 0 {
+			h.Write([]byte(moduleResolver.EmbeddedInputSignature(importerModulePath, embedSpec)))
+			h.Write([]byte{0})
 		}
 		sort.Slice(deps, func(a, b int) bool { return deps[a].file < deps[b].file })
 		if trackDependencies {
@@ -813,14 +834,10 @@ func (s *Snapshot) signature(filePath string, content []byte, program *parse.Pro
 				}
 				continue
 			}
-			visit(entry.program, d.module, d.file, d.packageID)
+			visit(entry.program, d.module, d.file)
 		}
 	}
-	rootPackageID := ""
-	if projectInfo != nil {
-		rootPackageID = projectInfo.RootPackageID
-	}
-	visit(program, strings.TrimSuffix(relPath, ".ard"), filePath, rootPackageID)
+	visit(program, strings.TrimSuffix(relPath, ".ard"), filePath)
 
 	// Project manifest and Go module metadata participate so dependency and
 	// FFI configuration changes invalidate checks.

@@ -1732,3 +1732,65 @@ func TestRemoveDependencyFromManifestMissing(t *testing.T) {
 		t.Fatalf("manifest changed unexpectedly:\n%s", data)
 	}
 }
+
+func TestEmbeddedFilesystemWorksAcrossRunBuildAndTest(t *testing.T) {
+	root := t.TempDir()
+	for path, content := range map[string]string{
+		filepath.Join(root, "ard.toml"):            "name = \"embedded_workflows\"\nard = \">= 0.1.0\"\n",
+		filepath.Join(root, "assets", "value.txt"): "captured",
+		filepath.Join(root, "main.ard"): `use ard/embed
+use ard/testing
+
+let files = embed::fs(["assets"])
+
+fn embedded_value() Str {
+  files.read_text("assets/value.txt").expect("embedded value")
+}
+
+fn main() {
+  if embedded_value() != "captured" { panic("run/build lost embedded filesystem") }
+}
+
+test fn embeds_in_tests() Void!Str {
+  try testing::assert(embedded_value() == "captured", "test lost embedded filesystem")
+  testing::pass()
+}
+`,
+	} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mainPath := filepath.Join(root, "main.ard")
+	loaded, err := frontend.LoadModule(mainPath)
+	if err != nil {
+		t.Fatalf("load run module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower run module: %v", err)
+	}
+	if err := gotarget.RunProgram(program, []string{"ard", "run", mainPath}, loaded.ProjectInfo); err != nil {
+		t.Fatalf("run embedded program: %v", err)
+	}
+
+	binaryPath := filepath.Join(t.TempDir(), "embedded-workflows")
+	built, err := buildGoBinary(mainPath, binaryPath)
+	if err != nil {
+		t.Fatalf("build embedded program: %v", err)
+	}
+	if output, err := exec.Command(built).CombinedOutput(); err != nil {
+		t.Fatalf("built embedded program failed: %v\n%s", err, output)
+	}
+
+	var testsPassed bool
+	output := captureStdout(t, func() {
+		testsPassed = runTests(root, "embeds_in_tests", false)
+	})
+	if !testsPassed || !strings.Contains(output, "1 passed; 0 failed; 0 panicked") {
+		t.Fatalf("embedded test workflow failed:\n%s", output)
+	}
+}

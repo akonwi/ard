@@ -76,6 +76,23 @@ root. Missing and invalid runtime paths return `Error` values.
 On the Go target, `embed::FS` implements `io/fs.FS`, so it can be passed directly
 to compatible Go APIs such as `net/http.FS` and `template.ParseFS`.
 
+## Limits and generated files
+
+Embedding is bounded to keep checking and generated artifacts predictable:
+
+- 16 MiB per file;
+- 64 MiB per embedded filesystem; and
+- 128 MiB and 10,000 selected files per program.
+
+Repeated references to the same exact content and identical filesystem sets are
+counted once. Different filesystem sets are counted independently, even when
+they contain overlapping files.
+
+The Go target stages captured bytes under `ard-out` and generates an internal
+package containing `//go:embed` directives. These are compiler-managed build
+artifacts: do not import or edit them. The backend uses the bytes captured while
+checking and does not reread the original resource files during code generation.
+
 :::caution
 Embedded contents can be recovered from the resulting executable. Do not embed
 passwords, tokens, private keys, or other secrets.

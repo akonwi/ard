@@ -183,7 +183,7 @@ func TestEmbedFSExpandsDirectoriesAndAllPatterns(t *testing.T) {
 
 	source := `use ard/embed
 let normal = embed::fs(["public"])
-let complete = embed::fs(["all:public"])
+let complete = embed::fs(["all:public", "public/*.js"])
 fn read(path: Str) [Byte]!Error { normal.read_file(path) }
 fn read_text(path: Str) Str!Error { normal.read_text(path) }
 fn subset(path: Str) embed::FS!Error { normal.sub(path) }
@@ -285,5 +285,46 @@ func TestEmbedFSRejectsDynamicAndUnmatchedPatterns(t *testing.T) {
 	malformed := checkEmbedSource(t, root, "use ard/embed\nlet files = embed::fs([\"[bad\"])\n")
 	if !hasEmbedDiagnostic(malformed, checker.DiagnosticCodeEmbedResource) {
 		t.Fatalf("missing malformed-pattern diagnostic: %#v", malformed.Diagnostics())
+	}
+	if err := os.Symlink(filepath.Join(root, "asset.txt"), filepath.Join(root, "linked.txt")); err != nil {
+		t.Fatal(err)
+	}
+	symlink := checkEmbedSource(t, root, "use ard/embed\nlet files = embed::fs([\"linked.txt\"])\n")
+	if !hasEmbedDiagnostic(symlink, checker.DiagnosticCodeEmbedResource) {
+		t.Fatalf("missing filesystem symlink diagnostic: %#v", symlink.Diagnostics())
+	}
+}
+
+func TestEmbedRejectsInvalidPathsAndPackageBoundaries(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "directory"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	nested := filepath.Join(root, "nested")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(nested, "ard.toml"), []byte("name = \"nested\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(nested, "asset.txt"), []byte("nested"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for name, source := range map[string]string{
+		"traversal":      "use ard/embed\nlet value = embed::bytes(\"../outside\")\n",
+		"absolute":       "use ard/embed\nlet value = embed::bytes(\"/absolute\")\n",
+		"directory":      "use ard/embed\nlet value = embed::bytes(\"directory\")\n",
+		"nested package": "use ard/embed\nlet value = embed::bytes(\"nested/asset.txt\")\n",
+		"nested pattern": "use ard/embed\nlet value = embed::fs([\"nested\"])\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			checked := checkEmbedSource(t, root, source)
+			if !hasEmbedDiagnostic(checked, checker.DiagnosticCodeEmbedResource) {
+				t.Fatalf("missing resource diagnostic: %#v", checked.Diagnostics())
+			}
+		})
 	}
 }

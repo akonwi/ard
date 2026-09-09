@@ -25,6 +25,14 @@ const (
 	MaxEmbeddedProgramFileCount = 10_000
 )
 
+// EmbeddedInputSpec describes statically discoverable resource constructors in
+// one parsed Ard module. The LSP uses it to fingerprint only relevant resource
+// inputs before deciding whether a checked result is reusable.
+type EmbeddedInputSpec struct {
+	ExactPaths  []string
+	PatternSets [][]string
+}
+
 type embeddedFSType struct{}
 
 var EmbeddedFS Type = &embeddedFSType{}
@@ -212,6 +220,44 @@ func (c *Checker) addEmbedDiagnostic(code DiagnosticCode, title string, text str
 	c.addDiagnostic(diagnostic)
 }
 
+// EmbeddedInputSignature resolves and hashes the resource inputs selected by a
+// module. Resolution errors participate so creation, removal, and newly
+// matching pattern entries invalidate cached diagnostics.
+func (mr *ModuleResolver) EmbeddedInputSignature(importerModulePath string, spec EmbeddedInputSpec) string {
+	hash := sha256.New()
+	exactPaths := append([]string(nil), spec.ExactPaths...)
+	sort.Strings(exactPaths)
+	for _, logicalPath := range exactPaths {
+		_, _ = hash.Write([]byte("exact\x00" + logicalPath + "\x00"))
+		resource, err := mr.resolveEmbeddedExactFile(importerModulePath, logicalPath)
+		if err != nil {
+			_, _ = hash.Write([]byte("error\x00" + err.Error() + "\x00"))
+			continue
+		}
+		_, _ = hash.Write([]byte(resource.OwnerPackageIdentity))
+		_, _ = hash.Write([]byte{0})
+		digest := sha256.Sum256(resource.Data)
+		_, _ = hash.Write(digest[:])
+	}
+	for _, patterns := range spec.PatternSets {
+		_, _ = hash.Write([]byte("set\x00" + strings.Join(patterns, "\x00") + "\x00"))
+		set, err := mr.resolveEmbeddedFileSetSnapshot(importerModulePath, patterns)
+		if err != nil {
+			_, _ = hash.Write([]byte("error\x00" + err.Error() + "\x00"))
+			continue
+		}
+		_, _ = hash.Write([]byte(set.OwnerPackageIdentity))
+		_, _ = hash.Write([]byte{0})
+		for _, entry := range set.Entries {
+			_, _ = hash.Write([]byte(entry.LogicalPath))
+			_, _ = hash.Write([]byte{0})
+			digest := sha256.Sum256(entry.Data)
+			_, _ = hash.Write(digest[:])
+		}
+	}
+	return hex.EncodeToString(hash.Sum(nil))
+}
+
 func (mr *ModuleResolver) resolveEmbeddedExactFile(importerModulePath string, logicalPath string) (EmbeddedResource, error) {
 	if err := ValidateEmbeddedLogicalFilePath(logicalPath); err != nil {
 		return EmbeddedResource{}, err
@@ -332,6 +378,17 @@ func (mr *ModuleResolver) accountEmbeddedExact(resource EmbeddedResource) error 
 }
 
 func (mr *ModuleResolver) resolveEmbeddedFileSet(importerModulePath string, patterns []string) (EmbeddedFileSet, error) {
+	set, err := mr.resolveEmbeddedFileSetSnapshot(importerModulePath, patterns)
+	if err != nil {
+		return EmbeddedFileSet{}, err
+	}
+	if err := mr.accountEmbeddedSet(set); err != nil {
+		return EmbeddedFileSet{}, err
+	}
+	return set, nil
+}
+
+func (mr *ModuleResolver) resolveEmbeddedFileSetSnapshot(importerModulePath string, patterns []string) (EmbeddedFileSet, error) {
 	packageID := mr.packageIDForModule(importerModulePath)
 	pkg := mr.packageInfo(packageID)
 	if pkg.RootPath == "" {
@@ -472,10 +529,19 @@ func (mr *ModuleResolver) resolveEmbeddedFileSet(importerModulePath string, patt
 		set.Entries = append(set.Entries, EmbeddedSetEntry{LogicalPath: logicalPath, Data: resource.Data})
 	}
 
+	mr.embedMu.Lock()
+	mr.embeddedPatternSets[patternCacheKey] = set
+	mr.embedMu.Unlock()
+	return set, nil
+}
+
+func (mr *ModuleResolver) accountEmbeddedSet(set EmbeddedFileSet) error {
 	hash := sha256.New()
 	_, _ = hash.Write([]byte(set.OwnerPackageIdentity))
 	_, _ = hash.Write([]byte{0})
+	totalBytes := 0
 	for _, entry := range set.Entries {
+		totalBytes += len(entry.Data)
 		_, _ = hash.Write([]byte(entry.LogicalPath))
 		_, _ = hash.Write([]byte{0})
 		sum := sha256.Sum256(entry.Data)
@@ -484,19 +550,19 @@ func (mr *ModuleResolver) resolveEmbeddedFileSet(importerModulePath string, patt
 	identity := hex.EncodeToString(hash.Sum(nil))
 	mr.embedMu.Lock()
 	defer mr.embedMu.Unlock()
-	if !mr.embeddedSetIdentities[identity] {
-		if mr.embeddedProgramFileCount+len(set.Entries) > MaxEmbeddedProgramFileCount {
-			return EmbeddedFileSet{}, fmt.Errorf("embedded resources exceed program limit of %d files", MaxEmbeddedProgramFileCount)
-		}
-		if mr.embeddedProgramBytes+totalBytes > MaxEmbeddedProgramBytes {
-			return EmbeddedFileSet{}, fmt.Errorf("embedded resources exceed program limit of %d bytes", MaxEmbeddedProgramBytes)
-		}
-		mr.embeddedSetIdentities[identity] = true
-		mr.embeddedProgramFileCount += len(set.Entries)
-		mr.embeddedProgramBytes += totalBytes
+	if mr.embeddedSetIdentities[identity] {
+		return nil
 	}
-	mr.embeddedPatternSets[patternCacheKey] = set
-	return set, nil
+	if mr.embeddedProgramFileCount+len(set.Entries) > MaxEmbeddedProgramFileCount {
+		return fmt.Errorf("embedded resources exceed program limit of %d files", MaxEmbeddedProgramFileCount)
+	}
+	if mr.embeddedProgramBytes+totalBytes > MaxEmbeddedProgramBytes {
+		return fmt.Errorf("embedded resources exceed program limit of %d bytes", MaxEmbeddedProgramBytes)
+	}
+	mr.embeddedSetIdentities[identity] = true
+	mr.embeddedProgramFileCount += len(set.Entries)
+	mr.embeddedProgramBytes += totalBytes
+	return nil
 }
 
 func embedPatternScanRoot(pattern string) string {

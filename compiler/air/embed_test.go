@@ -1,6 +1,9 @@
 package air
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -95,5 +98,44 @@ func TestLowerEmbeddedExactFilesIntoBlobReferences(t *testing.T) {
 	invalidPath.EmbeddedSets[0].Entries[0].Path = "../escape"
 	if err := Validate(&invalidPath); err == nil || !strings.Contains(err.Error(), "invalid path") {
 		t.Fatalf("invalid embedded set path validation error = %v", err)
+	}
+}
+
+func embeddedSetTestDigest(set EmbeddedSet, blobs []EmbeddedBlob) string {
+	hash := sha256.New()
+	_, _ = hash.Write([]byte(set.OwnerPackageIdentity))
+	_, _ = hash.Write([]byte{0})
+	for _, entry := range set.Entries {
+		_, _ = hash.Write([]byte(entry.Path))
+		_, _ = hash.Write([]byte{0})
+		_, _ = hash.Write([]byte(blobs[entry.Blob].Digest))
+		_, _ = hash.Write([]byte{0})
+	}
+	return hex.EncodeToString(hash.Sum(nil))
+}
+
+func TestValidateEmbeddedResourceLimits(t *testing.T) {
+	blobData := make([]byte, checker.MaxEmbeddedFileBytes)
+	blobSum := sha256.Sum256(blobData)
+	blob := EmbeddedBlob{ID: 0, Data: blobData, Digest: hex.EncodeToString(blobSum[:])}
+
+	oversizedSet := EmbeddedSet{ID: 0, OwnerPackageIdentity: "app"}
+	for index := 0; index < 5; index++ {
+		oversizedSet.Entries = append(oversizedSet.Entries, EmbeddedEntry{Path: fmt.Sprintf("%05d.bin", index), Blob: 0})
+	}
+	oversizedSet.Digest = embeddedSetTestDigest(oversizedSet, []EmbeddedBlob{blob})
+	if err := Validate(&Program{EmbeddedBlobs: []EmbeddedBlob{blob}, EmbeddedSets: []EmbeddedSet{oversizedSet}}); err == nil || !strings.Contains(err.Error(), "embedded set") {
+		t.Fatalf("oversized embedded set validation error = %v", err)
+	}
+
+	zeroSum := sha256.Sum256(nil)
+	zeroBlob := EmbeddedBlob{ID: 0, Digest: hex.EncodeToString(zeroSum[:])}
+	tooMany := EmbeddedSet{ID: 0, OwnerPackageIdentity: "app"}
+	for index := 0; index <= checker.MaxEmbeddedProgramFileCount; index++ {
+		tooMany.Entries = append(tooMany.Entries, EmbeddedEntry{Path: fmt.Sprintf("%05d.txt", index), Blob: 0})
+	}
+	tooMany.Digest = embeddedSetTestDigest(tooMany, []EmbeddedBlob{zeroBlob})
+	if err := Validate(&Program{EmbeddedBlobs: []EmbeddedBlob{zeroBlob}, EmbeddedSets: []EmbeddedSet{tooMany}}); err == nil || !strings.Contains(err.Error(), "program limit") {
+		t.Fatalf("embedded file-count validation error = %v", err)
 	}
 }
