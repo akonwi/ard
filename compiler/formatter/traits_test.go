@@ -8,7 +8,7 @@ fn mut set(value:Int)
 fn mut()
 fn mut mut()
 }`
-	want := "trait Counter {\n  fn mut set(value: Int)\n  \n  fn mut()\n  \n  fn mut mut()\n}\n"
+	want := "trait Counter {\n  fn mut set(value: Int)\n\n  fn mut()\n\n  fn mut mut()\n}\n"
 	got, err := Format([]byte(input), "test.ard")
 	if err != nil {
 		t.Fatal(err)

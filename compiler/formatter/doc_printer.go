@@ -23,6 +23,25 @@ func (p printer) printDocAtColumn(root doc, baseColumn int) string {
 	var out strings.Builder
 	stack := []printCmd{{indent: 0, mode: modeBreak, doc: root}}
 	column := baseColumn
+	// Indentation is written lazily, just before the next non-empty text on
+	// a line, so that blank lines (consecutive line breaks) never carry
+	// trailing whitespace.
+	pendingIndent := 0
+
+	newline := func(indent int) {
+		out.WriteByte('\n')
+		pendingIndent = indent
+		column = baseColumn + indent
+	}
+	// write is the only path that emits visible content, so indentation is
+	// guaranteed to precede anything else on a line.
+	write := func(value string) {
+		if pendingIndent > 0 {
+			out.WriteString(strings.Repeat(" ", pendingIndent))
+			pendingIndent = 0
+		}
+		out.WriteString(value)
+	}
 
 	for len(stack) > 0 {
 		cmd := stack[len(stack)-1]
@@ -31,7 +50,7 @@ func (p printer) printDocAtColumn(root doc, baseColumn int) string {
 		switch node := cmd.doc.(type) {
 		case docText:
 			if node.value != "" {
-				out.WriteString(node.value)
+				write(node.value)
 				column += len(node.value)
 			}
 		case docConcat:
@@ -54,25 +73,17 @@ func (p printer) printDocAtColumn(root doc, baseColumn int) string {
 			stack = append(stack, printCmd{indent: cmd.indent, mode: cmd.mode, doc: selected})
 		case docLine:
 			if node.hard {
-				out.WriteByte('\n')
-				if cmd.indent > 0 {
-					out.WriteString(strings.Repeat(" ", cmd.indent))
-				}
-				column = baseColumn + cmd.indent
+				newline(cmd.indent)
 				continue
 			}
 			if cmd.mode == modeFlat {
 				if !node.soft {
-					out.WriteByte(' ')
+					write(" ")
 					column++
 				}
 				continue
 			}
-			out.WriteByte('\n')
-			if cmd.indent > 0 {
-				out.WriteString(strings.Repeat(" ", cmd.indent))
-			}
-			column = baseColumn + cmd.indent
+			newline(cmd.indent)
 		case docGroup:
 			testStack := append([]printCmd(nil), stack...)
 			testStack = append(testStack, printCmd{indent: cmd.indent, mode: modeFlat, doc: node.content})

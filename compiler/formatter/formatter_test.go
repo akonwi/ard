@@ -346,3 +346,21 @@ func TestFormatMutRefMatchArmStaysInline(t *testing.T) {
 		t.Fatalf("formatted output does not re-parse: %v", res.Errors)
 	}
 }
+
+func TestFormatBlankLinesHaveNoTrailingWhitespace(t *testing.T) {
+	// #497: blank lines inside indented blocks must be truly empty, not
+	// indentation-only lines that `git diff --check` rejects.
+	input := "fn main() {\n  let first = 1\n\n  let second = 2\n  if first == 1 {\n    let third = 3\n\n    let fourth = 4\n  }\n}\n"
+	formatted, err := Format([]byte(input), "test.ard")
+	if err != nil {
+		t.Fatalf("format: %v", err)
+	}
+	if string(formatted) != input {
+		t.Fatalf("formatted = %q, want unchanged %q", string(formatted), input)
+	}
+	for i, line := range strings.Split(string(formatted), "\n") {
+		if strings.TrimSpace(line) == "" && line != "" {
+			t.Fatalf("line %d is whitespace-only: %q", i+1, line)
+		}
+	}
+}

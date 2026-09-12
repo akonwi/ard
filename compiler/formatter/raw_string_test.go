@@ -99,9 +99,9 @@ func TestFormatPreservesRawStrings(t *testing.T) {
 				"}\n",
 			want: "fn main() Str {\n" +
 				"  `\n" +
-				"    \n" +
+				"\n" +
 				"    value\n" +
-				"    \n" +
+				"\n" +
 				"    `\n" +
 				"}\n",
 		},
