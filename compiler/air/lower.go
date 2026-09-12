@@ -4288,10 +4288,14 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 			return fl.lowerErrorConstructor(typeID, e)
 		}
 		if e.Module == "ard/list" && e.Call.Name == "new" {
-			if len(e.Call.Args) != 0 {
-				return nil, fmt.Errorf("ard/list::new expects no arguments")
+			if len(e.Call.Args) != 1 {
+				return nil, fmt.Errorf("ard/list::new expects one checked argument")
 			}
-			return &Expr{Kind: ExprMakeList, Type: typeID}, nil
+			size, err := fl.lowerExpr(e.Call.Args[0])
+			if err != nil {
+				return nil, err
+			}
+			return &Expr{Kind: ExprMakeListSized, Type: typeID, Args: []Expr{*size}}, nil
 		}
 		if e.Module == "ard/async" && e.Call.Name == "start" {
 			if len(e.Call.Args) != 1 {

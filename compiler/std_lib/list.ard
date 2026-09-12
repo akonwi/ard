@@ -1,6 +1,6 @@
 use ard/testing
 
-fn new() [$T] {
+fn new(size: Int?) [$T] {
   let list: [$T] = []
   list
 }

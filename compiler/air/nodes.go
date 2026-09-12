@@ -108,6 +108,7 @@ const (
 	ExprTraitUpcast
 	ExprCallTrait
 	ExprMakeList
+	ExprMakeListSized
 	ExprMakeFixedArray
 	ExprListAt
 	// ExprListAtChecked is the user-facing list.at: a bounds-checked access

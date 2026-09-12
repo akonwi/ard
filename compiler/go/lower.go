@@ -2760,6 +2760,8 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		return l.lowerMatchStr(fn, expr)
 	case air.ExprMakeList:
 		return l.lowerMakeList(fn, expr)
+	case air.ExprMakeListSized:
+		return l.lowerMakeListSized(fn, expr)
 	case air.ExprMakeFixedArray:
 		return l.lowerMakeList(fn, expr)
 	case air.ExprAsyncStart:
@@ -6700,6 +6702,25 @@ func (l *lowerer) lowerMatchMaybe(fn air.Function, expr air.Expr) (loweredExpr, 
 		Else: &ast.BlockStmt{List: noneBody},
 	})
 	return loweredExpr{stmts: stmts, expr: resultExpr}, nil
+}
+
+func (l *lowerer) lowerMakeListSized(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	if len(expr.Args) != 1 {
+		return loweredExpr{}, fmt.Errorf("sized list construction expects one argument")
+	}
+	listType, err := l.goType(expr.Type)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	size, err := l.lowerExpr(fn, expr.Args[0])
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	value := &ast.CallExpr{Fun: &ast.SelectorExpr{X: size.expr, Sel: l.ident("Value")}}
+	return loweredExpr{
+		stmts: size.stmts,
+		expr:  &ast.CallExpr{Fun: l.ident("make"), Args: []ast.Expr{listType, value}},
+	}, nil
 }
 
 func (l *lowerer) lowerMakeList(fn air.Function, expr air.Expr) (loweredExpr, error) {
