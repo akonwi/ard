@@ -13,10 +13,11 @@ use ard/list
 
 ## API
 
-### `new() [$T]`
+### `new(size: Int?) [$T]`
 
-Create a new empty list. The expected type is usually inferred from context, or
-named with an explicit type argument.
+Create a new list. When `size` is omitted, the list is empty. When provided, the
+list contains that many zero-initialized elements. The expected element type is
+usually inferred from context, or named with an explicit type argument.
 
 ```ard
 use ard/list
@@ -30,6 +31,8 @@ without a binding annotation. Through the prelude alias this needs no import:
 ```ard
 let items = mut List::new<Int>()
 items.push(1)
+
+let buffer = mut List::new<Byte>(1_000)
 ```
 
 ### `concat(a: [$T], b: [$T]) [$T]`

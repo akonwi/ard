@@ -6391,6 +6391,24 @@ func TestRunProgramReturnsGenericMaybeThroughABI(t *testing.T) {
 	}
 }
 
+func TestRunProgramListNewWithSize(t *testing.T) {
+	program := lowerSource(t, `
+		fn main() {
+			let values = List::new<Int>(3)
+			if values.size() != 3 {
+				panic("wrong list size")
+			}
+			if values.at(0).or(-1) != 0 {
+				panic("list was not zero initialized")
+			}
+		}
+	`)
+
+	if err := RunProgram(program, []string{"ard", "run", "sample.ard"}); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
+
 // TestRunProgramStdlibListFindThroughABI pins the stdlib shape that first
 // exposed the generic zero-value bug.
 func TestRunProgramStdlibListFindThroughABI(t *testing.T) {
