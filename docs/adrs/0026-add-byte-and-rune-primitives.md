@@ -2,7 +2,16 @@
 
 ## Status
 
-Proposed
+Proposed. Partially superseded by ADR 0072.
+
+The `Byte::from_int` / `Rune::from_int` constructors and the prelude-module
+design below were never implemented, and the ADR 0034 std-lib reset removed the
+`Int::from_str` style they were modeled on. ADR 0072 replaces them with the
+tiered checker intrinsics `Byte::try`, `Rune::try`, and `Rune::from`, and
+removes the `to_int` methods described here in favor of `Int::from`. This ADR's
+definition of `Rune` as a valid Unicode scalar value is retained and
+strengthened: ADR 0072 gives `Rune` no `fit` tier, so no conversion can
+manufacture an invalid scalar.
 
 ## Context
 

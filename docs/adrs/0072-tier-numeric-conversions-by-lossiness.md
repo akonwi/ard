@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Accepted
 
 ## Context
 
@@ -282,21 +282,17 @@ like a compiler bug on a 64-bit host.
 ### AIR and Go backend
 
 - `ExprScalarConvert` is shared with `ForeignScalarConvert` and implicit
-  coercions (`air/lower.go:3076`, `:3107`), so it keeps its current meaning.
-  Add `ExprScalarTryConvert` and `ExprScalarFitConvert` rather than overloading
-  it with a payload.
-- `from` and the non-saturating `fit` cases lower to Go `T(x)`.
-- `try` lowers like the existing checked list access `ExprListAtChecked`
-  (`go/lower.go:2994`): emit temps, then `ard.Some`/`ard.None`. The target
-  scalar is recoverable from the `Maybe` element type, so foreign named targets
-  produce `Maybe[time.Duration]` naturally.
-- Saturating float→int `fit` lowers to a runtime helper.
-- New helpers live in `runtime/convert.go`, registered in `runtime/embed.go`.
-  They must be stdlib-only. Generic helpers need `~`-constraints
-  (`~int8 | ~int16 | …`) so foreign named types participate; since per-`T`
-  bounds are not available generically in Go, the backend emits a
-  **per-target-type helper** instantiation rather than one fully generic
-  function.
+  coercions, so it keeps its current meaning and carries the `from` tier.
+  `ExprScalarTryConvert` and `ExprScalarFitConvert` are separate kinds rather
+  than a payload, leaving the existing coercion paths untouched.
+- `from`, and `fit` for every pair except float-to-integer, lower to Go `T(x)`.
+- `try` and saturating `fit` call helpers in `runtime/convert.go`, registered
+  in `runtime/embed.go`. These are functions, not new runtime types.
+- Helpers are generic over the target with `~` constraints so foreign named
+  scalars participate, and they take the target's **bit width** rather than its
+  bounds. A platform-sized target has no constant bounds the backend could
+  emit, so it passes `math/bits.UintSize` and the helper derives the range with
+  integer arithmetic.
 
 ### Float range checking is not a round trip
 
@@ -314,7 +310,10 @@ Two traps, both of which the implementation must avoid:
   integer → float as `fit`-only (above) removes the need for this test
   entirely.
 
-`math.MinInt`/`math.MaxInt` cover the platform-sized types without build tags.
+Bounds are derived from the bit width with integer arithmetic (`int64(-1) <<
+(bits - 1)`, `^uint64(0) >> (64 - bits)`) rather than from float constants, so
+the maximum is exact. Float comparison bounds use `math.Ldexp(1, bits)`, which
+is the exact power of two.
 
 ## Test plan
 
