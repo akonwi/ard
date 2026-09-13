@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed. Partially superseded by ADR 0072.
+Accepted. Partially superseded by ADR 0072.
 
 The `Byte::from_int` / `Rune::from_int` constructors and the prelude-module
 design below were never implemented, and the ADR 0034 std-lib reset removed the
