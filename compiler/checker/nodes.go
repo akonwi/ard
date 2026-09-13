@@ -338,16 +338,31 @@ type ForeignScalarConvert struct {
 
 func (f *ForeignScalarConvert) Type() Type { return f.Target }
 
-// ScalarFrom is a `T::from(value)` conversion that lowers to an explicit Go
-// conversion `T(x)`. It covers the truncating numeric conversions into a bare
-// sized scalar (Int64, Uint32, ...) or a foreign named scalar type (#284), and
-// Str::from building a string from a [Byte]/[Rune] view (#283).
+// ScalarFrom is a tiered numeric conversion into a bare sized scalar (Int64,
+// Uint32, ...), a default scalar (Int, Float64, Rune), or a foreign named
+// scalar type (#284, #500), and Str::from building a string from a
+// [Byte]/[Rune] view (#283).
+//
+// Tier selects the spelling and the semantics (ADR 0072):
+//
+//	ConversionFrom  lossless, lowers to Go's T(x)
+//	ConversionTry   fallible, evaluates to Target wrapped in a Maybe
+//	ConversionFit   lossy but total: wrapping, rounding, or saturation
+//
+// Type() reports Target for `from` and `fit`; a `try` conversion reports
+// Maybe[Target], so callers must use Type() rather than Target directly.
 type ScalarFrom struct {
 	Value  Expression
 	Target Type
+	Tier   ConversionTier
 }
 
-func (s *ScalarFrom) Type() Type { return s.Target }
+func (s *ScalarFrom) Type() Type {
+	if s.Tier == ConversionTry {
+		return MakeMaybe(s.Target)
+	}
+	return s.Target
+}
 
 type ForeignFieldAccess struct {
 	Subject Expression
@@ -463,8 +478,7 @@ func (s *StrMethod) Type() Type {
 type ByteMethodKind uint8
 
 const (
-	ByteToInt ByteMethodKind = iota
-	ByteToStr
+	ByteToStr ByteMethodKind = iota
 )
 
 type ByteMethod struct {
@@ -474,8 +488,6 @@ type ByteMethod struct {
 
 func (m *ByteMethod) Type() Type {
 	switch m.Kind {
-	case ByteToInt:
-		return Int
 	case ByteToStr:
 		return Str
 	default:
@@ -486,8 +498,7 @@ func (m *ByteMethod) Type() Type {
 type RuneMethodKind uint8
 
 const (
-	RuneToInt RuneMethodKind = iota
-	RuneToStr
+	RuneToStr RuneMethodKind = iota
 )
 
 type RuneMethod struct {
@@ -497,8 +508,6 @@ type RuneMethod struct {
 
 func (m *RuneMethod) Type() Type {
 	switch m.Kind {
-	case RuneToInt:
-		return Int
 	case RuneToStr:
 		return Str
 	default:
@@ -510,7 +519,6 @@ type IntMethodKind uint8
 
 const (
 	IntToStr IntMethodKind = iota
-	IntToF64
 )
 
 type IntMethod struct {
@@ -522,8 +530,6 @@ func (m *IntMethod) Type() Type {
 	switch m.Kind {
 	case IntToStr:
 		return Str
-	case IntToF64:
-		return Float64
 	default:
 		return Void
 	}
@@ -553,7 +559,6 @@ type FloatMethodKind uint8
 
 const (
 	FloatToStr FloatMethodKind = iota
-	FloatToInt
 )
 
 type FloatMethod struct {
@@ -565,8 +570,6 @@ func (m *FloatMethod) Type() Type {
 	switch m.Kind {
 	case FloatToStr:
 		return Str
-	case FloatToInt:
-		return Int
 	default:
 		return Void
 	}

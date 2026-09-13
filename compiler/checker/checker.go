@@ -1749,6 +1749,12 @@ func mapKeyTypeComplexity(t Type, seen map[Type]bool) int {
 
 func scalarTypeByName(name string) Type {
 	switch name {
+	case "Int":
+		return Int
+	case "Float64":
+		return Float64
+	case "Rune":
+		return Rune
 	case "Int8":
 		return Int8
 	case "Int16":
@@ -7106,13 +7112,11 @@ func (c *Checker) checkStrStatic(s *parse.StaticFunction) (Expression, bool) {
 	return nil, false
 }
 
-// checkScalarFrom checks a `T::from(value)` conversion into the sized/named
-// scalar `target`. The conversion is truncating like Go's `T(x)`: integer
-// targets accept an integer-like value, float targets accept a numeric value,
-// and the result is `target` (never optional). (#284)
-func (c *Checker) checkScalarFrom(s *parse.StaticFunction, target Type) Expression {
+// checkScalarConversion checks `T::from`, `T::try`, or `T::fit` according to
+// the lossiness rules in ADR 0072.
+func (c *Checker) checkScalarConversion(s *parse.StaticFunction, target Type, tier ConversionTier) Expression {
+	name := target.String() + "::" + tier.String()
 	if len(s.Function.TypeArgs) > 0 {
-		name := target.String() + "::from"
 		c.addInvalidFunctionTypeArguments(name, 0, len(s.Function.TypeArgs), false, s.GetLocation(), name+" does not take type arguments")
 		return nil
 	}
@@ -7121,10 +7125,8 @@ func (c *Checker) checkScalarFrom(s *parse.StaticFunction, target Type) Expressi
 		return nil
 	}
 	// The value type is the target itself for a bare scalar, or the foreign
-	// type's underlying sized primitive. Typing the argument against it makes
-	// numeric literals adopt and range-check against the target (a constant
-	// that overflows is an error, matching Go's constant conversion), while
-	// runtime values pass through to be truncated at the Go boundary.
+	// type's underlying sized primitive. Typing a literal against it makes the
+	// literal adopt and range-check against the target.
 	valueType := target
 	if prim := foreignScalarPrimitive(target); prim != nil {
 		valueType = prim
@@ -7132,37 +7134,116 @@ func (c *Checker) checkScalarFrom(s *parse.StaticFunction, target Type) Expressi
 	// Defensive: only numeric targets convert. Foreign named types over Str or
 	// Bool underlyings are not numeric and must not reach here.
 	if !isNumericScalar(valueType) {
-		legacy := fmt.Sprintf("%s::from requires a numeric type", target.String())
+		legacy := fmt.Sprintf("%s requires a numeric type", name)
 		c.addDiagnostic(invalidConversionDiagnostic{LegacyMessage: legacy, Span: c.sourceSpan(s.GetLocation()), Label: fmt.Sprintf("`%s` is not a numeric conversion target", target)}.build())
 		return nil
 	}
-	floatTarget := isFloatScalar(valueType)
+
 	argNode := s.Function.Args[0].Value
-	var arg Expression
 	if isNumericLiteralNode(argNode) {
-		// A numeric literal adopts and range-checks against the target, so a
-		// constant that overflows is reported here (matching Go's constant
-		// conversion) instead of leaking a generated-Go compile error.
-		arg = c.checkExprAs(argNode, valueType)
-	} else {
-		// A runtime value keeps its own type and is truncated at the Go
-		// boundary, matching Go's `T(x)` for non-constant x.
-		arg = c.checkExpr(argNode)
+		// A literal adopts the target and is range-checked at compile time, so
+		// it is lossless by construction and `from` is the only spelling.
+		// `isNumericLiteralNode` matches a literal or a negated literal; a
+		// constant expression like `1 + 2` is an ordinary runtime value and
+		// falls through to normal tier checking.
+		if tier != ConversionFrom {
+			legacy := fmt.Sprintf("%s does not take a literal", name)
+			c.addDiagnostic(invalidConversionDiagnostic{
+				LegacyMessage: legacy,
+				Span:          c.sourceSpan(s.GetLocation()),
+				Label:         fmt.Sprintf("a literal is range-checked at compile time; use `%s::from`", target),
+			}.build())
+			return nil
+		}
+		arg := c.checkExprAs(argNode, valueType)
+		if arg == nil {
+			return nil
+		}
+		return &ScalarFrom{Value: arg, Target: target, Tier: ConversionFrom}
 	}
+
+	arg := c.checkExpr(argNode)
 	if arg == nil {
 		return nil
 	}
 	argType := arg.Type()
-	ok := isRelationalIntegerLike(argType)
-	if floatTarget {
-		ok = ok || isRelationalFloatLike(argType)
-	}
-	if !ok {
-		legacy := fmt.Sprintf("%s::from expects a numeric value, got %s", target.String(), argType.String())
-		c.addDiagnostic(invalidConversionDiagnostic{LegacyMessage: legacy, Span: c.sourceSpan(s.Function.Args[0].Value.GetLocation()), Label: fmt.Sprintf("`%s` cannot be converted to `%s`", argType, target)}.build())
+	if !isRelationalIntegerLike(argType) && !isRelationalFloatLike(argType) {
+		legacy := fmt.Sprintf("%s expects a numeric value, got %s", name, argType.String())
+		c.addDiagnostic(invalidConversionDiagnostic{LegacyMessage: legacy, Span: c.sourceSpan(argNode.GetLocation()), Label: fmt.Sprintf("`%s` cannot be converted to `%s`", argType, target)}.build())
 		return nil
 	}
-	return &ScalarFrom{Value: arg, Target: target}
+
+	source := numericClassOf(derefMutableRef(argType))
+	dest := numericClassOf(target)
+	allowed, valid := conversionTierAllowed(source, dest, tier)
+	if len(valid) == 0 {
+		legacy := fmt.Sprintf("%s expects a numeric value, got %s", name, argType.String())
+		c.addDiagnostic(invalidConversionDiagnostic{LegacyMessage: legacy, Span: c.sourceSpan(argNode.GetLocation()), Label: fmt.Sprintf("`%s` cannot be converted to `%s`", argType, target)}.build())
+		return nil
+	}
+	if !allowed {
+		c.addDiagnostic(invalidConversionDiagnostic{
+			LegacyMessage: wrongConversionTierMessage(argType, target, tier, valid),
+			Span:          c.sourceSpan(s.GetLocation()),
+			Label:         wrongConversionTierLabel(argType, target, tier, valid),
+		}.build())
+		return nil
+	}
+	return &ScalarFrom{Value: arg, Target: target, Tier: tier}
+}
+
+// wrongConversionTierMessage renders the legacy non-span diagnostic text.
+func wrongConversionTierMessage(source Type, target Type, tier ConversionTier, valid []ConversionTier) string {
+	if tier == ConversionFrom {
+		return fmt.Sprintf("%s cannot hold every %s value", target.String(), source.String())
+	}
+	if len(valid) == 1 && valid[0] == ConversionFrom {
+		return fmt.Sprintf("every %s value is exactly representable as %s", source.String(), target.String())
+	}
+	if tier == ConversionTry {
+		// The pair is lossy but total, so a checked conversion would never
+		// report none.
+		return fmt.Sprintf("converting %s to %s cannot fail", source.String(), target.String())
+	}
+	// The pair has no total conversion, which today means a Rune target.
+	return fmt.Sprintf("%s cannot hold every %s value", target.String(), source.String())
+}
+
+// wrongConversionTierLabel explains which spelling to use instead.
+func wrongConversionTierLabel(source Type, target Type, tier ConversionTier, valid []ConversionTier) string {
+	if len(valid) == 1 && valid[0] == ConversionFrom {
+		return fmt.Sprintf("use `%s::from`", target)
+	}
+	if tier == ConversionTry && len(valid) == 1 && valid[0] == ConversionFit {
+		return fmt.Sprintf("the conversion always succeeds; use `%s::fit`", target)
+	}
+	if tier == ConversionFit && len(valid) == 1 && valid[0] == ConversionTry {
+		return fmt.Sprintf("`%s` has no unchecked conversion; use `%s::try`", target, target)
+	}
+	reason := fmt.Sprintf("`%s` may not hold every `%s` value", target, source)
+	if note := platformSizedNote(source, target); note != "" {
+		reason += note
+	}
+	switch {
+	case len(valid) == 1 && valid[0] == ConversionTry:
+		return fmt.Sprintf("%s; use `%s::try` for a checked conversion", reason, target)
+	case len(valid) == 1 && valid[0] == ConversionFit:
+		return fmt.Sprintf("%s; use `%s::fit`", reason, target)
+	default:
+		return fmt.Sprintf("%s; use `%s::try` for a checked conversion or `%s::fit` to convert anyway", reason, target, target)
+	}
+}
+
+// platformSizedNote explains a rejection that only holds because Int, Uint, or
+// Uintptr may be 32 or 64 bits depending on the platform.
+func platformSizedNote(source Type, target Type) string {
+	for _, t := range []Type{source, target} {
+		switch numericClassOf(t) {
+		case classInt, classUint, classUintptr:
+			return fmt.Sprintf(" because `%s` may be 32 or 64 bits depending on the platform", t)
+		}
+	}
+	return ""
 }
 
 func isFloatScalar(t Type) bool {
@@ -7228,8 +7309,6 @@ func (c *Checker) createStrMethod(subject Expression, methodName string, args []
 func (c *Checker) createByteMethod(subject Expression, methodName string) Expression {
 	var kind ByteMethodKind
 	switch methodName {
-	case "to_int":
-		kind = ByteToInt
 	case "to_str":
 		kind = ByteToStr
 	default:
@@ -7241,8 +7320,6 @@ func (c *Checker) createByteMethod(subject Expression, methodName string) Expres
 func (c *Checker) createRuneMethod(subject Expression, methodName string) Expression {
 	var kind RuneMethodKind
 	switch methodName {
-	case "to_int":
-		kind = RuneToInt
 	case "to_str":
 		kind = RuneToStr
 	default:
@@ -7256,8 +7333,6 @@ func (c *Checker) createIntMethod(subject Expression, methodName string) Express
 	switch methodName {
 	case "to_str":
 		kind = IntToStr
-	case "to_f64":
-		kind = IntToF64
 	default:
 		panic(fmt.Sprintf("Unknown Int method: %s", methodName))
 	}
@@ -7283,8 +7358,6 @@ func (c *Checker) createFloatMethod(subject Expression, methodName string) Expre
 	switch methodName {
 	case "to_str":
 		kind = FloatToStr
-	case "to_int":
-		kind = FloatToInt
 	default:
 		panic(fmt.Sprintf("Unknown Float64 method: %s", methodName))
 	}
@@ -8994,10 +9067,11 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 				}
 				if sig == nil {
 					c.addDiagnostic(undefinedMemberDiagnostic{
-						Kind:     undefinedMethod,
-						Receiver: fmt.Sprint(subj),
-						Member:   s.Method.Name,
-						Span:     c.sourceSpan(s.Method.GetLocation()),
+						Kind:         undefinedMethod,
+						Receiver:     fmt.Sprint(subj),
+						ReceiverType: fmt.Sprint(derefMutableRef(subj.Type())),
+						Member:       s.Method.Name,
+						Span:         c.sourceSpan(s.Method.GetLocation()),
 					}.build())
 					return nil
 				}
@@ -9531,14 +9605,15 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 				}
 			}
 
-			// `Int64::from(x)`, `Uint32::from(x)`, ... truncating conversion into a
-			// bare sized scalar. (#284)
-			if targetIdent, ok := s.Target.(*parse.Identifier); ok && s.Function.Name == "from" {
-				if scalar := scalarTypeByName(targetIdent.Name); scalar != nil {
-					if c.rejectSpreadForFixedCall(s.Function.Args) {
-						return nil
+			// Tiered conversion into a built-in scalar.
+			if targetIdent, ok := s.Target.(*parse.Identifier); ok {
+				if tier, isConversion := conversionTierByName(s.Function.Name); isConversion {
+					if scalar := scalarTypeByName(targetIdent.Name); scalar != nil {
+						if c.rejectSpreadForFixedCall(s.Function.Args) {
+							return nil
+						}
+						return c.checkScalarConversion(s, scalar, tier)
 					}
-					return c.checkScalarFrom(s, scalar)
 				}
 			}
 
@@ -9621,15 +9696,21 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 				}
 			}
 			if goPkg := c.program.GoImports[modName]; goPkg != nil {
-				// `pkg::T::from(x)` truncating conversion into a foreign named
-				// scalar type, e.g. time::Duration::from(ms). (#284)
-				if typeName, isFrom := strings.CutSuffix(name, "::from"); isFrom {
-					if named, ok := goPkg.Types[typeName]; ok && isNumericScalar(foreignScalarPrimitive(named)) {
-						if c.rejectSpreadForFixedCall(s.Function.Args) {
-							return nil
-						}
-						return c.checkScalarFrom(s, named)
+				// Tiered conversion into a foreign named scalar.
+				for _, spelling := range []string{"::from", "::try", "::fit"} {
+					typeName, matched := strings.CutSuffix(name, spelling)
+					if !matched {
+						continue
 					}
+					named, ok := goPkg.Types[typeName]
+					if !ok || !isNumericScalar(foreignScalarPrimitive(named)) {
+						continue
+					}
+					if c.rejectSpreadForFixedCall(s.Function.Args) {
+						return nil
+					}
+					tier, _ := conversionTierByName(strings.TrimPrefix(spelling, "::"))
+					return c.checkScalarConversion(s, named, tier)
 				}
 				fnDef := goPkg.Functions[name]
 				var callTypeArgs []Type

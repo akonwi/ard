@@ -62,6 +62,48 @@ let from_runes: Str = Str::from(runes)
 
 `Str::from([Byte])` mirrors Go's `string([]byte)` conversion; validate bytes first if your program needs to reject invalid UTF-8.
 
+### Numeric conversions
+
+Numbers convert through a static function on the **target** type. Which one you
+use depends on whether the conversion can lose information, and the compiler
+enforces the choice:
+
+```ard
+let wide: Float64 = Float64::from(ratio) // lossless
+let count: Int? = Int::try(big)          // checked, none when it does not fit
+let low: Byte = Byte::fit(hash)          // forced, wraps
+```
+
+`from` only compiles when every source value is exactly representable in the
+target. When it is not, the error names the alternative:
+
+```ard
+Int::from(big)  // error: Int cannot hold every Int64 value
+                // use `Int::try` for a checked conversion or `Int::fit`
+```
+
+`try` returns a `Maybe`, so a conversion that might not fit is handled like any
+other optional:
+
+```ard
+let ms = Int::try(elapsed).or(0)
+```
+
+`fit` always succeeds: integers wrap, floats round, and a float converted to an
+integer saturates at the target's bounds with `NaN` becoming `0`.
+
+`Int`, `Uint`, and `Uintptr` are 32 or 64 bits depending on the platform, so a
+conversion involving them is only lossless when it holds on every platform.
+That is why `Int::try(x: Int64)` is checked even though it always succeeds on a
+64-bit machine, and why converting an `Int` to a `Float64` uses `fit` — an
+`Int` can carry more precision than a `Float64` holds.
+
+A `Rune` is always a valid Unicode scalar value, so it has no `fit`. Only a
+`Byte` widens into it losslessly; anything else uses `Rune::try`.
+
+See [Go interop](/advanced/go-interop/#numeric-conversions) for the full rules,
+including foreign named scalar types.
+
 Strings support checked Go-style byte slicing with optional bounds:
 
 ```ard

@@ -6024,15 +6024,15 @@ fn main() {}
 	}
 }
 
-func TestRunProgramExecutesIntToF64(t *testing.T) {
+func TestRunProgramExecutesNumericConversions(t *testing.T) {
 	program := lowerSource(t, `
 		use go:fmt
 
 		fn main() {
 			let width = 5
-			let scaled = 0.5 * (width - 1).to_f64()
+			let scaled = 0.5 * Float64::fit(width - 1)
 			fmt::Println(scaled.to_str())
-			if scaled.to_int() != 2 {
+			if Int::fit(scaled) != 2 {
 				panic("expected 2")
 			}
 		}

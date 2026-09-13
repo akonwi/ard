@@ -13,11 +13,11 @@ var (
 		StrStartsWith: "starts_with", StrEndsWith: "ends_with",
 		StrToStr: "to_str", StrTrim: "trim",
 	}
-	byteMethodNames   = map[ByteMethodKind]string{ByteToInt: "to_int", ByteToStr: "to_str"}
-	runeMethodNames   = map[RuneMethodKind]string{RuneToInt: "to_int", RuneToStr: "to_str"}
-	intMethodNames    = map[IntMethodKind]string{IntToStr: "to_str", IntToF64: "to_f64"}
+	byteMethodNames   = map[ByteMethodKind]string{ByteToStr: "to_str"}
+	runeMethodNames   = map[RuneMethodKind]string{RuneToStr: "to_str"}
+	intMethodNames    = map[IntMethodKind]string{IntToStr: "to_str"}
 	scalarMethodNames = map[ScalarMethodKind]string{ScalarToStr: "to_str"}
-	floatMethodNames  = map[FloatMethodKind]string{FloatToStr: "to_str", FloatToInt: "to_int"}
+	floatMethodNames  = map[FloatMethodKind]string{FloatToStr: "to_str"}
 	boolMethodNames   = map[BoolMethodKind]string{BoolToStr: "to_str"}
 	listMethodNames   = map[ListMethodKind]string{
 		ListAt: "at", ListSlice: "slice", ListIsEmpty: "is_empty", ListToList: "to_list",

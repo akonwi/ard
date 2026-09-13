@@ -410,6 +410,9 @@ type undefinedMemberDiagnostic struct {
 	Receiver string
 	Member   string
 	Span     SourceSpan
+	// ReceiverType names the receiver's type when the receiver itself prints
+	// as an expression (a variable name, say). Suggestions key on the type.
+	ReceiverType string
 }
 
 func (d undefinedMemberDiagnostic) build() Diagnostic {
@@ -422,6 +425,14 @@ func (d undefinedMemberDiagnostic) build() Diagnostic {
 	default:
 		panic(fmt.Sprintf("unknown undefined-member kind: %d", d.Kind))
 	}
+	label := fmt.Sprintf("`%s` is not defined for `%s`", d.Member, d.Receiver)
+	receiverType := d.ReceiverType
+	if receiverType == "" {
+		receiverType = d.Receiver
+	}
+	if replacement := removedConversionMethod(receiverType, d.Member); replacement != "" {
+		label = fmt.Sprintf("`%s` has been removed; use `%s` (ADR 0072)", d.Member, replacement)
+	}
 	diagnostic := newLabeledDiagnostic(
 		Error,
 		fmt.Sprintf("Undefined: %s.%s", d.Receiver, d.Member),
@@ -429,7 +440,7 @@ func (d undefinedMemberDiagnostic) build() Diagnostic {
 		"",
 		DiagnosticLabel{
 			Span:    d.Span,
-			Message: fmt.Sprintf("`%s` is not defined for `%s`", d.Member, d.Receiver),
+			Message: label,
 		},
 	)
 	diagnostic.Code = DiagnosticCodeUndefinedMember
@@ -2791,4 +2802,26 @@ func (d typeMismatchDiagnostic) build() Diagnostic {
 	)
 	diagnostic.Code = DiagnosticCodeTypeMismatch
 	return diagnostic
+}
+
+// removedConversionMethod names the tiered replacement for a numeric
+// conversion method removed by ADR 0072, so the error carries a fix instead of
+// only reporting that the method is gone.
+func removedConversionMethod(receiver string, member string) string {
+	switch receiver {
+	case "Byte", "Rune":
+		if member == "to_int" {
+			return "Int::from(value)"
+		}
+	case "Int":
+		if member == "to_f64" {
+			// Int may be 64 bits, so widening is lossy and takes `fit`.
+			return "Float64::fit(value)"
+		}
+	case "Float64":
+		if member == "to_int" {
+			return "Int::try(value) or Int::fit(value)"
+		}
+	}
+	return ""
 }

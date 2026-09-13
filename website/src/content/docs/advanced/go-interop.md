@@ -144,7 +144,7 @@ let zero: Byte = 0
 let first = digest.at(0).or(zero)
 ```
 
-Ard does not implicitly convert through containers. If a Go API needs `[Byte]` and you have `[Int]`, write the transformation explicitly with `Byte::from(...)` so allocation and truncation are visible in source.
+Ard does not implicitly convert through containers. If a Go API needs `[Byte]` and you have `[Int]`, write the transformation explicitly with `Byte::fit(...)` so allocation and truncation are visible in source.
 
 ## Reference arguments and exact Go ABI
 
@@ -175,34 +175,95 @@ A `mut Slice<T>` reference projects to a compatible Go `[]T` parameter, with cap
 
 ## Numeric Conversions
 
-`T::from(value)` converts a numeric value into a bare sized scalar (`Int64`,
-`Uint32`, `Float32`, …) or a foreign named scalar type (a Go named type whose
-underlying type is numeric, like `time::Duration`). It is a truncating
-conversion, mirroring Go's `T(x)`, and returns `T` — not an optional — so it
-composes with arithmetic:
+Numeric conversions are spelled as static functions on the **target** type, and
+the spelling depends on whether the conversion can lose information. Exactly
+one of the three compiles for any given pair, so a lossy conversion always
+announces itself:
+
+| spelling | meaning | result |
+| --- | --- | --- |
+| `T::from(x)` | lossless — every source value is exactly representable | `T` |
+| `T::try(x)` | checked — reports `none` when the value does not fit | `T?` |
+| `T::fit(x)` | forced — wraps, rounds, or saturates | `T` |
+
+Targets include the bare sized scalars (`Int64`, `Uint32`, `Float32`, …), the
+default scalars (`Int`, `Float64`, `Rune`), and foreign named scalar types (a
+Go named type whose underlying type is numeric, like `time::Duration`).
 
 ```ard
 use go:time
 
 fn every(ms: Int) time::Duration {
+  // Int -> Int64 is lossless.
   time::Duration::from(ms) * time::Millisecond
 }
 
-let page: Uint32 = Uint32::from(count)
+// Int -> Uint32 may not fit, so it must say which behavior it wants.
+let page: Uint32 = Uint32::fit(count)
+let checked: Uint32? = Uint32::try(count)
 ```
 
-Runtime values are truncated at the boundary exactly like Go. A numeric
-**literal**, however, is range-checked against the target, so a constant that
-cannot fit is a compile error (again matching Go's constant conversion):
+Using the wrong spelling is a compile error that names the right one:
+
+```ard
+Uint32::from(count) // error: Uint32 cannot hold every Int value
+                    // use `Uint32::try` for a checked conversion
+                    // or `Uint32::fit` to convert anyway
+```
+
+### What each tier guarantees
+
+`try` reports `some` only when the value survives unchanged. A float source
+must also be finite and integral, so `Int::try(2.5)`, `Int::try(nan)`, and an
+out-of-range value are all `none`.
+
+`fit` always produces a value: integers wrap like Go's `T(x)`, floats round,
+and a float converted to an integer **saturates** at the target's bounds with
+`NaN` becoming `0`. Go leaves that last case implementation-defined; Ard
+defines it.
+
+Converting an integer to a float can round but never fails, so it has no `try`:
+
+```ard
+let ratio = Float64::fit(total) // Int -> Float64 rounds above 2^53
+```
+
+### Platform-sized types
+
+`Int`, `Uint`, and `Uintptr` are 32 or 64 bits depending on the platform. A
+conversion is only lossless if it holds everywhere, so `Int` counts as 64 bits
+when it is the source and 32 bits when it is the target. That is why
+`Int64::from(n: Int)` compiles while `Int32::from(n: Int)` does not, and why
+`Int::try(x: Int64)` is checked even though it never fails on a 64-bit host.
+
+### Runes
+
+A `Rune` is always a valid Unicode scalar value, so nothing may manufacture an
+invalid one. `Rune` has no `fit`: only `Byte` widens into it losslessly, and
+every other source must be checked.
+
+```ard
+let a = Rune::from(byte)          // lossless
+let maybe = Rune::try(code_point) // none for surrogates or values past 0x10FFFF
+```
+
+Because every `Rune` is a valid scalar, a `Rune` widens losslessly into any
+type that holds its range, including `Uint32` and `Float64`.
+
+### Literals
+
+A numeric literal adopts the target and is range-checked at compile time, so it
+is always lossless and always uses `from`:
 
 ```ard
 Uint8::from(200) // ok
 Uint8::from(300) // error: Integer literal 300 overflows Uint8
+Uint8::fit(300)  // error: a literal is range-checked at compile time; use `Uint8::from`
 ```
 
 Numeric literals already adopt a foreign scalar type directly in arithmetic and
-annotated bindings (`let d: time::Duration = 5 * time::Millisecond`); `from` is
-for converting **runtime** values.
+annotated bindings (`let d: time::Duration = 5 * time::Millisecond`); the
+conversions are for **runtime** values.
 
 ## Variadic Calls
 

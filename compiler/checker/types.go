@@ -284,12 +284,6 @@ type byteType struct{}
 func (b byteType) String() string { return "Byte" }
 func (b byteType) get(name string) Type {
 	switch name {
-	case "to_int":
-		return &FunctionDef{
-			Name:       name,
-			Parameters: []Parameter{},
-			ReturnType: Int,
-		}
 	case "to_str":
 		return &FunctionDef{
 			Name:       name,
@@ -329,12 +323,6 @@ type runeType struct{}
 func (r runeType) String() string { return "Rune" }
 func (r runeType) get(name string) Type {
 	switch name {
-	case "to_int":
-		return &FunctionDef{
-			Name:       name,
-			Parameters: []Parameter{},
-			ReturnType: Int,
-		}
 	case "to_str":
 		return &FunctionDef{
 			Name:       name,
@@ -379,12 +367,6 @@ func (i _int) get(name string) Type {
 			Name:       name,
 			Parameters: []Parameter{},
 			ReturnType: Str,
-		}
-	case "to_f64":
-		return &FunctionDef{
-			Name:       name,
-			Parameters: []Parameter{},
-			ReturnType: Float64,
 		}
 	default:
 		return nil
@@ -473,12 +455,6 @@ func (f float) get(name string) Type {
 			Name:       name,
 			Parameters: []Parameter{},
 			ReturnType: Str,
-		}
-	case "to_int":
-		return &FunctionDef{
-			Name:       name,
-			Parameters: []Parameter{},
-			ReturnType: Int,
 		}
 	default:
 		return nil

@@ -450,7 +450,17 @@ Builtin collection and string operations lower to Go builtins and the `strings`,
 
 #### Numeric and primitive conversions
 
-Conversions such as `to_int`, `to_float`, `to_str`, `Byte::from_int`, `Rune::from_int`/`from_str`, and `Str::from_bytes`/`from_runes` lower to Go conversions and `strconv` calls. Conversions that can fail a range or parse check produce a `Maybe` or `Result`. Mixing `Byte`, `Int`, and `Rune` inserts the explicit Go numeric conversions Go requires between distinct numeric types.
+Numeric conversions are tiered by lossiness (ADR 0072). `T::from` and most of
+`T::fit` lower to a plain Go conversion `T(x)`. `T::try` lowers to a runtime
+helper returning a `Maybe`, and `T::fit` from a float to an integer lowers to a
+saturating runtime helper, because Go leaves that overflow
+implementation-defined. `to_str` lowers to Go conversions and `strconv` calls,
+and `Str::from` builds a string from a `[Byte]`/`[Rune]` view. Mixing `Byte`,
+`Int`, and `Rune` inserts the explicit Go numeric conversions Go requires
+between distinct numeric types.
+
+These helpers are runtime **functions**, not new runtime types; the shared
+runtime still defines exactly `Maybe` and `Result` (see below).
 
 ### Runtime shapes
 

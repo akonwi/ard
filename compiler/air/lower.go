@@ -4120,12 +4120,19 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		}
 		return &Expr{Kind: ExprScalarConvert, Type: typeID, Target: target}, nil
 	case *checker.ScalarFrom:
-		// T::from(x): explicit truncating numeric conversion, lowers to T(x). (#284)
+		// Keep lossy tiers distinct so targets can apply their semantics.
 		value, err := fl.lowerExpr(e.Value)
 		if err != nil {
 			return nil, err
 		}
-		return &Expr{Kind: ExprScalarConvert, Type: typeID, Target: value}, nil
+		kind := ExprScalarConvert
+		switch e.Tier {
+		case checker.ConversionTry:
+			kind = ExprScalarTryConvert
+		case checker.ConversionFit:
+			kind = ExprScalarFitConvert
+		}
+		return &Expr{Kind: kind, Type: typeID, Target: value}, nil
 	case *checker.ForeignFieldAccess:
 		target, err := fl.lowerExpr(e.Subject)
 		if err != nil {
@@ -4377,17 +4384,11 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		}
 		return &Expr{Kind: kind, Type: typeID, Target: target, Args: args}, nil
 	case *checker.ByteMethod:
-		if e.Kind == checker.ByteToInt {
-			return fl.lowerUnary(ExprToInt, typeID, e.Subject)
-		}
 		if e.Kind == checker.ByteToStr {
 			return fl.lowerUnary(ExprToStr, typeID, e.Subject)
 		}
 		return nil, fmt.Errorf("unsupported AIR Byte method %d", e.Kind)
 	case *checker.RuneMethod:
-		if e.Kind == checker.RuneToInt {
-			return fl.lowerUnary(ExprToInt, typeID, e.Subject)
-		}
 		if e.Kind == checker.RuneToStr {
 			return fl.lowerUnary(ExprToStr, typeID, e.Subject)
 		}
@@ -4395,9 +4396,6 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 	case *checker.IntMethod:
 		if e.Kind == checker.IntToStr {
 			return fl.lowerUnary(ExprToStr, typeID, e.Subject)
-		}
-		if e.Kind == checker.IntToF64 {
-			return fl.lowerUnary(ExprToF64, typeID, e.Subject)
 		}
 		return nil, fmt.Errorf("unsupported AIR Int method %d", e.Kind)
 	case *checker.ScalarMethod:
@@ -4408,9 +4406,6 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 	case *checker.FloatMethod:
 		if e.Kind == checker.FloatToStr {
 			return fl.lowerUnary(ExprToStr, typeID, e.Subject)
-		}
-		if e.Kind == checker.FloatToInt {
-			return fl.lowerUnary(ExprToInt, typeID, e.Subject)
 		}
 		return nil, fmt.Errorf("unsupported AIR Float method %d", e.Kind)
 	case *checker.BoolMethod:
