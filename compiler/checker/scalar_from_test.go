@@ -13,9 +13,27 @@ func TestScalarFrom(t *testing.T) {
 			input: `let x: Int64 = Int64::from(5)`,
 		},
 		{
-			name: "from a runtime Int into a sized scalar",
+			// Int -> Uint32 is lossy in both directions of the platform rule,
+			// so `from` is rejected and names both replacements (ADR 0072).
+			name: "from a runtime Int into a sized scalar is rejected",
 			input: `fn f(n: Int) Uint32 {
   Uint32::from(n)
+}`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Uint32 cannot hold every Int value"},
+				{Kind: checker.Error, Message: "Type mismatch: Expected Uint32, got Void"},
+			},
+		},
+		{
+			name: "fit converts a runtime Int into a sized scalar",
+			input: `fn f(n: Int) Uint32 {
+  Uint32::fit(n)
+}`,
+		},
+		{
+			name: "try converts a runtime Int into a sized scalar",
+			input: `fn f(n: Int) Uint32? {
+  Uint32::try(n)
 }`,
 		},
 		{

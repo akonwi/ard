@@ -26,18 +26,18 @@ func TestGoTargetScalarFromBareScalars(t *testing.T) {
 			want: "true",
 		},
 		{
-			name: "runtime narrowing truncates like Go",
+			name: "runtime narrowing wraps like Go",
 			input: `fn main() Bool {
   let n: Int = 300
-  Uint8::from(n) == 44
+  Uint8::fit(n) == 44
 }`,
 			want: "true",
 		},
 		{
-			name: "runtime narrowing to Byte truncates like Go",
+			name: "runtime narrowing to Byte wraps like Go",
 			input: `fn main() Bool {
   let n: Int = 300
-  Byte::from(n) == 44
+  Byte::fit(n) == 44
 }`,
 			want: "true",
 		},
@@ -45,7 +45,7 @@ func TestGoTargetScalarFromBareScalars(t *testing.T) {
 			name: "runtime Int narrows to Uint32",
 			input: `fn main() Bool {
   let n: Int = 4294967297
-  Uint32::from(n) == 1
+  Uint32::fit(n) == 1
 }`,
 			want: "true",
 		},

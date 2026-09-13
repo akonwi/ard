@@ -2504,6 +2504,10 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 			return loweredExpr{}, err
 		}
 		return loweredExpr{stmts: target.stmts, expr: &ast.CallExpr{Fun: convertType, Args: []ast.Expr{target.expr}}}, nil
+	case air.ExprScalarTryConvert:
+		return l.lowerScalarTryConvert(fn, expr)
+	case air.ExprScalarFitConvert:
+		return l.lowerScalarFitConvert(fn, expr)
 	case air.ExprTraitRefProject:
 		return l.lowerTraitReferenceProjection(fn, expr)
 	case air.ExprTraitUpcast:

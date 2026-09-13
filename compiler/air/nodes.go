@@ -99,8 +99,19 @@ const (
 	ExprTraitRefProject
 	ExprMatchForeignType
 	// ExprScalarConvert converts Target's foreign named scalar value to the
-	// primitive scalar named by Type (for example Go's string(v)).
+	// primitive scalar named by Type (for example Go's string(v)). It also
+	// carries the lossless `T::from` tier and implicit foreign scalar
+	// coercions, all of which lower to a plain Go conversion.
 	ExprScalarConvert
+	// ExprScalarTryConvert is a checked numeric conversion `T::try(x)`
+	// (ADR 0072). Type is the Maybe wrapping the target scalar; Target is the
+	// source value. It evaluates to none when the value is not representable.
+	ExprScalarTryConvert
+	// ExprScalarFitConvert is a forced numeric conversion `T::fit(x)`
+	// (ADR 0072). Type is the target scalar. Integer targets wrap and float
+	// targets round, both as Go does; a float source saturates rather than
+	// inheriting Go's implementation-defined overflow.
+	ExprScalarFitConvert
 	ExprMakeClosure
 	ExprCallClosure
 	ExprUnionWrap

@@ -338,16 +338,31 @@ type ForeignScalarConvert struct {
 
 func (f *ForeignScalarConvert) Type() Type { return f.Target }
 
-// ScalarFrom is a `T::from(value)` conversion that lowers to an explicit Go
-// conversion `T(x)`. It covers the truncating numeric conversions into a bare
-// sized scalar (Int64, Uint32, ...) or a foreign named scalar type (#284), and
-// Str::from building a string from a [Byte]/[Rune] view (#283).
+// ScalarFrom is a tiered numeric conversion into a bare sized scalar (Int64,
+// Uint32, ...), a default scalar (Int, Float64, Rune), or a foreign named
+// scalar type (#284, #500), and Str::from building a string from a
+// [Byte]/[Rune] view (#283).
+//
+// Tier selects the spelling and the semantics (ADR 0072):
+//
+//	ConversionFrom  lossless, lowers to Go's T(x)
+//	ConversionTry   fallible, evaluates to Target wrapped in a Maybe
+//	ConversionFit   lossy but total: wrapping, rounding, or saturation
+//
+// Type() reports Target for `from` and `fit`; a `try` conversion reports
+// Maybe[Target], so callers must use Type() rather than Target directly.
 type ScalarFrom struct {
 	Value  Expression
 	Target Type
+	Tier   ConversionTier
 }
 
-func (s *ScalarFrom) Type() Type { return s.Target }
+func (s *ScalarFrom) Type() Type {
+	if s.Tier == ConversionTry {
+		return MakeMaybe(s.Target)
+	}
+	return s.Target
+}
 
 type ForeignFieldAccess struct {
 	Subject Expression

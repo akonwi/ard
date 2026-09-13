@@ -4120,12 +4120,22 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		}
 		return &Expr{Kind: ExprScalarConvert, Type: typeID, Target: target}, nil
 	case *checker.ScalarFrom:
-		// T::from(x): explicit truncating numeric conversion, lowers to T(x). (#284)
+		// Tiered numeric conversion (#284, #500, ADR 0072). `from` is lossless
+		// and lowers to Go's T(x); `try` and `fit` carry their own kinds so the
+		// backend can emit the checked and saturating forms. For `try`, typeID
+		// is already the Maybe wrapping the target.
 		value, err := fl.lowerExpr(e.Value)
 		if err != nil {
 			return nil, err
 		}
-		return &Expr{Kind: ExprScalarConvert, Type: typeID, Target: value}, nil
+		kind := ExprScalarConvert
+		switch e.Tier {
+		case checker.ConversionTry:
+			kind = ExprScalarTryConvert
+		case checker.ConversionFit:
+			kind = ExprScalarFitConvert
+		}
+		return &Expr{Kind: kind, Type: typeID, Target: value}, nil
 	case *checker.ForeignFieldAccess:
 		target, err := fl.lowerExpr(e.Subject)
 		if err != nil {
