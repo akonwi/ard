@@ -3529,6 +3529,11 @@ func (l *lowerer) lowerValueBlock(fn air.Function, block air.Block, resultType a
 // lowerNumericConstant materializes AIR scalar types that differ from Go's
 // default int and float64 types before short declarations can erase them.
 func (l *lowerer) lowerNumericConstant(typeID air.TypeID, kind token.Token, value string) (loweredExpr, error) {
+	// Go's AST printer emits a BasicLit's value verbatim, and the token kind is
+	// not enough to make an integer-looking value (such as "3") a float literal.
+	if kind == token.FLOAT && !strings.ContainsAny(value, ".eEpP") {
+		value += ".0"
+	}
 	literal := &ast.BasicLit{Kind: kind, Value: value}
 	if validTypeID(l.program, typeID) {
 		typeKind := l.program.Types[typeID-1].Kind

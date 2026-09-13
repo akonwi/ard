@@ -54,6 +54,16 @@ fn main() {
 	}
 }
 
+func TestGoTargetWholeValueFloat64LiteralKeepsFloatType(t *testing.T) {
+	program := lowerParitySource(t, `fn main() Str {
+  let value = 3.0
+  value.to_str()
+}`)
+	if got := runGoTargetParityJSON(t, program); got != `"3.00"` {
+		t.Fatalf("whole-value Float64.to_str() result mismatch: got %s", got)
+	}
+}
+
 func TestGoTargetSizedScalarToStrMutableReference(t *testing.T) {
 	program := lowerParitySource(t, `fn render(value: mut Int64) Str {
   value.to_str()
