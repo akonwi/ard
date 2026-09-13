@@ -1,9 +1,11 @@
 package checker_test
 
 import (
+	"strings"
 	"testing"
 
 	checker "github.com/akonwi/ard/checker"
+	"github.com/akonwi/ard/parse"
 )
 
 // TestConversionTierSelection covers the tier rules in ADR 0072: the lossless
@@ -220,4 +222,85 @@ func TestConversionLiterals(t *testing.T) {
 }`,
 		},
 	})
+}
+
+// TestRemovedConversionMethods pins the replacements for the methods ADR 0072
+// removes, so the error carries a fix rather than only reporting the method is
+// gone.
+func TestRemovedConversionMethods(t *testing.T) {
+	run(t, []test{
+		{
+			name: "Byte.to_int is removed",
+			input: `fn f(b: Byte) Int {
+  b.to_int()
+}`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Undefined: b.to_int"},
+				{Kind: checker.Error, Message: "Type mismatch: Expected Int, got Void"},
+			},
+		},
+		{
+			name: "Rune.to_int is removed",
+			input: `fn f(r: Rune) Int {
+  r.to_int()
+}`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Undefined: r.to_int"},
+				{Kind: checker.Error, Message: "Type mismatch: Expected Int, got Void"},
+			},
+		},
+		{
+			name: "Int.to_f64 is removed",
+			input: `fn f(n: Int) Float64 {
+  n.to_f64()
+}`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Undefined: n.to_f64"},
+				{Kind: checker.Error, Message: "Type mismatch: Expected Float64, got Void"},
+			},
+		},
+		{
+			name: "Float64.to_int is removed",
+			input: `fn f(value: Float64) Int {
+  value.to_int()
+}`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Undefined: value.to_int"},
+				{Kind: checker.Error, Message: "Type mismatch: Expected Int, got Void"},
+			},
+		},
+		{
+			name:  "to_str is still available",
+			input: `let text: Str = 42.to_str()`,
+		},
+	})
+}
+
+// TestRemovedConversionMethodSuggestion checks the label names the tiered
+// replacement, which is what the LSP surfaces as a quick fix.
+func TestRemovedConversionMethodSuggestion(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		expect string
+	}{
+		{"byte", "fn f(b: Byte) { b.to_int() }\n", "Int::from(value)"},
+		{"rune", "fn f(r: Rune) { r.to_int() }\n", "Int::from(value)"},
+		{"int", "fn f(n: Int) { n.to_f64() }\n", "Float64::fit(value)"},
+		{"float", "fn f(v: Float64) { v.to_int() }\n", "Int::try(value) or Int::fit(value)"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := parse.Parse([]byte(tt.source), "main.ard")
+			if len(result.Errors) > 0 {
+				t.Fatalf("parse errors: %v", result.Errors)
+			}
+			c := checker.New("main.ard", result.Program, nil)
+			c.Check()
+			diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeUndefinedMember)
+			if !strings.Contains(diagnostic.Primary.Message, tt.expect) {
+				t.Fatalf("label %q does not suggest %q", diagnostic.Primary.Message, tt.expect)
+			}
+		})
+	}
 }

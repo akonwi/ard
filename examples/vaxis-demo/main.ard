@@ -1003,7 +1003,7 @@ fn clamp_int(v: Int, lo: Int, hi: Int) Int {
 
 // A "|   ◆   |" track with the diamond placed by the animation value.
 fn animation_track(value: Float64, width: Int) Str {
-  let raw = (value * (width - 1).to_f64()).to_int()
+  let raw = Int::fit(value * Float64::fit(width - 1))
   let pos = clamp_int(raw, 0, width - 1)
   mut bar = "|"
   for i in 1..pos {

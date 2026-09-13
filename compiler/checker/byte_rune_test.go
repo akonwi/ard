@@ -15,7 +15,7 @@ func TestByteAndRunePrimitiveTypes(t *testing.T) {
 		{
 			name: "string iteration cursor is rune",
 			input: `for ch in "hé" {
-  let code: Int = ch.to_int()
+  let code: Int = Int::from(ch)
 }`,
 		},
 		{

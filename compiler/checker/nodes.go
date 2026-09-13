@@ -478,8 +478,7 @@ func (s *StrMethod) Type() Type {
 type ByteMethodKind uint8
 
 const (
-	ByteToInt ByteMethodKind = iota
-	ByteToStr
+	ByteToStr ByteMethodKind = iota
 )
 
 type ByteMethod struct {
@@ -489,8 +488,6 @@ type ByteMethod struct {
 
 func (m *ByteMethod) Type() Type {
 	switch m.Kind {
-	case ByteToInt:
-		return Int
 	case ByteToStr:
 		return Str
 	default:
@@ -501,8 +498,7 @@ func (m *ByteMethod) Type() Type {
 type RuneMethodKind uint8
 
 const (
-	RuneToInt RuneMethodKind = iota
-	RuneToStr
+	RuneToStr RuneMethodKind = iota
 )
 
 type RuneMethod struct {
@@ -512,8 +508,6 @@ type RuneMethod struct {
 
 func (m *RuneMethod) Type() Type {
 	switch m.Kind {
-	case RuneToInt:
-		return Int
 	case RuneToStr:
 		return Str
 	default:
@@ -525,7 +519,6 @@ type IntMethodKind uint8
 
 const (
 	IntToStr IntMethodKind = iota
-	IntToF64
 )
 
 type IntMethod struct {
@@ -537,8 +530,6 @@ func (m *IntMethod) Type() Type {
 	switch m.Kind {
 	case IntToStr:
 		return Str
-	case IntToF64:
-		return Float64
 	default:
 		return Void
 	}
@@ -568,7 +559,6 @@ type FloatMethodKind uint8
 
 const (
 	FloatToStr FloatMethodKind = iota
-	FloatToInt
 )
 
 type FloatMethod struct {
@@ -580,8 +570,6 @@ func (m *FloatMethod) Type() Type {
 	switch m.Kind {
 	case FloatToStr:
 		return Str
-	case FloatToInt:
-		return Int
 	default:
 		return Void
 	}

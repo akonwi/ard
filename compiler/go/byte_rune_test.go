@@ -11,7 +11,7 @@ func TestGoTargetParityByteRunePrimitives(t *testing.T) {
 		{
 			name: "str at returns rune",
 			input: `fn main() Int {
-  "hé".at(1).expect("rune").to_int()
+  Int::from("hé".at(1).expect("rune"))
 }`,
 			want: "233",
 		},
@@ -27,7 +27,7 @@ func TestGoTargetParityByteRunePrimitives(t *testing.T) {
 			input: `fn main() Int {
   mut total = 0
   for r in "hé" {
-    total = total + r.to_int()
+    total = total + Int::from(r)
   }
   total
 }`,
@@ -47,7 +47,7 @@ func TestGoTargetParityByteRunePrimitives(t *testing.T) {
       saw_slash = true
     }
   }
-  newline.to_int() == 10 and matched and saw_slash
+  Int::from(newline) == 10 and matched and saw_slash
 }`,
 			want: "true",
 		},

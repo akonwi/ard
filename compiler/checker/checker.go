@@ -7322,8 +7322,6 @@ func (c *Checker) createStrMethod(subject Expression, methodName string, args []
 func (c *Checker) createByteMethod(subject Expression, methodName string) Expression {
 	var kind ByteMethodKind
 	switch methodName {
-	case "to_int":
-		kind = ByteToInt
 	case "to_str":
 		kind = ByteToStr
 	default:
@@ -7335,8 +7333,6 @@ func (c *Checker) createByteMethod(subject Expression, methodName string) Expres
 func (c *Checker) createRuneMethod(subject Expression, methodName string) Expression {
 	var kind RuneMethodKind
 	switch methodName {
-	case "to_int":
-		kind = RuneToInt
 	case "to_str":
 		kind = RuneToStr
 	default:
@@ -7350,8 +7346,6 @@ func (c *Checker) createIntMethod(subject Expression, methodName string) Express
 	switch methodName {
 	case "to_str":
 		kind = IntToStr
-	case "to_f64":
-		kind = IntToF64
 	default:
 		panic(fmt.Sprintf("Unknown Int method: %s", methodName))
 	}
@@ -7377,8 +7371,6 @@ func (c *Checker) createFloatMethod(subject Expression, methodName string) Expre
 	switch methodName {
 	case "to_str":
 		kind = FloatToStr
-	case "to_int":
-		kind = FloatToInt
 	default:
 		panic(fmt.Sprintf("Unknown Float64 method: %s", methodName))
 	}
@@ -9088,10 +9080,11 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 				}
 				if sig == nil {
 					c.addDiagnostic(undefinedMemberDiagnostic{
-						Kind:     undefinedMethod,
-						Receiver: fmt.Sprint(subj),
-						Member:   s.Method.Name,
-						Span:     c.sourceSpan(s.Method.GetLocation()),
+						Kind:         undefinedMethod,
+						Receiver:     fmt.Sprint(subj),
+						ReceiverType: fmt.Sprint(derefMutableRef(subj.Type())),
+						Member:       s.Method.Name,
+						Span:         c.sourceSpan(s.Method.GetLocation()),
 					}.build())
 					return nil
 				}
