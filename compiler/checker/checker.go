@@ -7112,14 +7112,8 @@ func (c *Checker) checkStrStatic(s *parse.StaticFunction) (Expression, bool) {
 	return nil, false
 }
 
-// checkScalarConversion checks a tiered numeric conversion `T::from(value)`,
-// `T::try(value)`, or `T::fit(value)` into the sized/named scalar `target`
-// (#284, #500, ADR 0072).
-//
-// Exactly one tier is valid for any source/target pair: `from` when every
-// source value is exactly representable, otherwise `try` (yielding `T?`) and
-// `fit` (total, with defined wrapping/rounding/saturation). Using the wrong
-// tier is an error that names the right one.
+// checkScalarConversion checks `T::from`, `T::try`, or `T::fit` according to
+// the lossiness rules in ADR 0072.
 func (c *Checker) checkScalarConversion(s *parse.StaticFunction, target Type, tier ConversionTier) Expression {
 	name := target.String() + "::" + tier.String()
 	if len(s.Function.TypeArgs) > 0 {
@@ -7168,8 +7162,6 @@ func (c *Checker) checkScalarConversion(s *parse.StaticFunction, target Type, ti
 		return &ScalarFrom{Value: arg, Target: target, Tier: ConversionFrom}
 	}
 
-	// A runtime value keeps its own type; the tier decides what happens at the
-	// boundary.
 	arg := c.checkExpr(argNode)
 	if arg == nil {
 		return nil
@@ -7200,10 +7192,7 @@ func (c *Checker) checkScalarConversion(s *parse.StaticFunction, target Type, ti
 	return &ScalarFrom{Value: arg, Target: target, Tier: tier}
 }
 
-// wrongConversionTierMessage renders the legacy (non-span) diagnostic text for
-// a conversion spelled with the wrong tier. There are three ways to be wrong:
-// asking for `from` on a lossy pair, asking for `try`/`fit` on a lossless one,
-// and asking for the tier that does not apply to a lossy pair.
+// wrongConversionTierMessage renders the legacy non-span diagnostic text.
 func wrongConversionTierMessage(source Type, target Type, tier ConversionTier, valid []ConversionTier) string {
 	if tier == ConversionFrom {
 		return fmt.Sprintf("%s cannot hold every %s value", target.String(), source.String())
@@ -7220,9 +7209,7 @@ func wrongConversionTierMessage(source Type, target Type, tier ConversionTier, v
 	return fmt.Sprintf("%s cannot hold every %s value", target.String(), source.String())
 }
 
-// wrongConversionTierLabel explains which spelling to use instead, and why the
-// requested one does not apply. Platform-sized types get an extra clause so a
-// rejection on a 64-bit host does not read like a compiler bug.
+// wrongConversionTierLabel explains which spelling to use instead.
 func wrongConversionTierLabel(source Type, target Type, tier ConversionTier, valid []ConversionTier) string {
 	if len(valid) == 1 && valid[0] == ConversionFrom {
 		return fmt.Sprintf("use `%s::from`", target)
@@ -9618,8 +9605,7 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 				}
 			}
 
-			// `Int64::from(x)`, `Int::try(x)`, `Byte::fit(x)`, ... tiered numeric
-			// conversion into a bare scalar. (#284, #500, ADR 0072)
+			// Tiered conversion into a built-in scalar.
 			if targetIdent, ok := s.Target.(*parse.Identifier); ok {
 				if tier, isConversion := conversionTierByName(s.Function.Name); isConversion {
 					if scalar := scalarTypeByName(targetIdent.Name); scalar != nil {
@@ -9710,9 +9696,7 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 				}
 			}
 			if goPkg := c.program.GoImports[modName]; goPkg != nil {
-				// `pkg::T::from(x)`, `pkg::T::try(x)`, `pkg::T::fit(x)`: tiered
-				// numeric conversion into a foreign named scalar type, e.g.
-				// time::Duration::from(ms). (#284, ADR 0072)
+				// Tiered conversion into a foreign named scalar.
 				for _, spelling := range []string{"::from", "::try", "::fit"} {
 					typeName, matched := strings.CutSuffix(name, spelling)
 					if !matched {

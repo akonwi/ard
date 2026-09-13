@@ -5,10 +5,7 @@ import (
 	"testing"
 )
 
-// The float bounds the backend emits for the 64-bit types. These are the exact
-// powers of two, not the type maxima: float64(math.MaxInt64) rounds up to 2^63.
-// The float endpoints that matter: these powers of two are exactly
-// representable while the corresponding type maxima are not.
+// Exact float boundaries; the corresponding integer maxima are not exact.
 const (
 	twoPow63 = 9223372036854775808.0  // 2^63
 	twoPow64 = 18446744073709551616.0 // 2^64
@@ -16,8 +13,6 @@ const (
 )
 
 func TestTryFloatToIntegerEndpoints(t *testing.T) {
-	// 2^63 is representable as a float while math.MaxInt64 is not, so the
-	// exclusive upper bound is the endpoint that matters.
 	if got := TryFloatToSigned[int64](twoPow63, 64); got.IsSome() {
 		t.Errorf("2^63 must not convert to int64, got %v", got)
 	}
@@ -40,7 +35,6 @@ func TestTryFloatToIntegerRejectsNonIntegral(t *testing.T) {
 			t.Errorf("%v must not convert to int64", value)
 		}
 	}
-	// Negative zero is integral and in range.
 	if got := TryFloatToSigned[int64](math.Copysign(0, -1), 64); !got.IsSome() {
 		t.Error("-0.0 should convert to 0")
 	}
@@ -50,8 +44,6 @@ func TestTryFloatToIntegerRejectsNonIntegral(t *testing.T) {
 }
 
 func TestTrySignedAcrossSignedness(t *testing.T) {
-	// A matching bit pattern is not a representable value: int8(-1) is not a
-	// uint8, even though uint8(int8(-1)) round-trips.
 	if got := TrySignedToUnsigned[uint8](-1, 8); got.IsSome() {
 		t.Error("-1 must not convert to uint8")
 	}
@@ -70,8 +62,6 @@ func TestTrySignedAcrossSignedness(t *testing.T) {
 }
 
 func TestTryFloat64ToFloat32(t *testing.T) {
-	// Rounding is permitted; only a finite value overflowing to an infinity
-	// fails (ADR 0072).
 	if got := TryFloat64ToFloat32[float32](0.1); !got.IsSome() {
 		t.Error("0.1 should convert to float32 by rounding")
 	}
@@ -134,7 +124,6 @@ func TestFitFloatToIntegerSaturates(t *testing.T) {
 			t.Errorf("FitFloatToSigned(%v) = %d, want %d", tt.value, got, tt.want)
 		}
 	}
-	// An unsigned target clamps negatives to zero.
 	if got := FitFloatToUnsigned[uint8](-5, 8); got != 0 {
 		t.Errorf("negative should clamp to 0, got %d", got)
 	}

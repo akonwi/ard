@@ -8,20 +8,15 @@ import (
 	"github.com/akonwi/ard/parse"
 )
 
-// TestConversionTierSelection covers the tier rules in ADR 0072: the lossless
-// tier compiles without a Maybe, the checked tier yields one, and the wrong
-// spelling is rejected with the right suggestion.
 func TestConversionTierSelection(t *testing.T) {
 	run(t, []test{
 		{
-			// #500: Float32 -> Float64 widening.
 			name: "lossless widening uses from",
 			input: `fn widen(value: Float32) Float64 {
   Float64::from(value)
 }`,
 		},
 		{
-			// #500: Int64 -> Int checked narrowing.
 			name: "checked narrowing uses try",
 			input: `fn narrow(value: Int64) Int? {
   Int::try(value)
@@ -96,8 +91,7 @@ func TestConversionTierSelection(t *testing.T) {
 	})
 }
 
-// TestRuneConversionInvariant pins ADR 0026's invariant under ADR 0072: no
-// conversion may manufacture an invalid Rune, so Rune has no `fit`.
+// TestRuneConversionInvariant ensures conversions cannot create invalid runes.
 func TestRuneConversionInvariant(t *testing.T) {
 	run(t, []test{
 		{
@@ -141,8 +135,6 @@ func TestRuneConversionInvariant(t *testing.T) {
 	})
 }
 
-// TestIdentityConversion covers same-primitive pairs, which stay lossless so
-// foreign named scalars keep working (#284).
 func TestIdentityConversion(t *testing.T) {
 	run(t, []test{
 		{
@@ -184,8 +176,6 @@ fn count(d: time::Duration) Int64 {
 	})
 }
 
-// TestConversionLiterals pins the literal rule: a literal adopts the target
-// and is range-checked, so `from` is the only spelling.
 func TestConversionLiterals(t *testing.T) {
 	run(t, []test{
 		{
@@ -214,8 +204,6 @@ func TestConversionLiterals(t *testing.T) {
 			},
 		},
 		{
-			// `isNumericLiteralNode` matches a literal or a negated literal, so
-			// a constant expression is an ordinary runtime value.
 			name: "a constant expression is not a literal",
 			input: `fn f() Uint8 {
   Uint8::fit(1 + 2)
@@ -224,9 +212,6 @@ func TestConversionLiterals(t *testing.T) {
 	})
 }
 
-// TestRemovedConversionMethods pins the replacements for the methods ADR 0072
-// removes, so the error carries a fix rather than only reporting the method is
-// gone.
 func TestRemovedConversionMethods(t *testing.T) {
 	run(t, []test{
 		{
@@ -276,8 +261,7 @@ func TestRemovedConversionMethods(t *testing.T) {
 	})
 }
 
-// TestRemovedConversionMethodSuggestion checks the label names the tiered
-// replacement, which is what the LSP surfaces as a quick fix.
+// TestRemovedConversionMethodSuggestion checks the diagnostic replacement.
 func TestRemovedConversionMethodSuggestion(t *testing.T) {
 	tests := []struct {
 		name   string

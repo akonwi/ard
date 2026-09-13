@@ -13,8 +13,6 @@ func TestScalarFrom(t *testing.T) {
 			input: `let x: Int64 = Int64::from(5)`,
 		},
 		{
-			// Int -> Uint32 is lossy in both directions of the platform rule,
-			// so `from` is rejected and names both replacements (ADR 0072).
 			name: "from a runtime Int into a sized scalar is rejected",
 			input: `fn f(n: Int) Uint32 {
   Uint32::from(n)

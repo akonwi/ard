@@ -15,8 +15,6 @@ var conversionTypes = []string{
 	"Byte", "Rune", "Float32", "Float64",
 }
 
-// conversionCompiles reports whether `target::tier(value)` checks cleanly for a
-// runtime value of the source type.
 func conversionCompiles(t *testing.T, source string, target string, tier string) bool {
 	t.Helper()
 	src := fmt.Sprintf("fn probe(value: %s) {\n  let result = %s::%s(value)\n}\n", source, target, tier)
@@ -29,7 +27,6 @@ func conversionCompiles(t *testing.T, source string, target string, tier string)
 	return !c.HasErrors()
 }
 
-// validTiers reports which of from/try/fit compile for a source/target pair.
 func validTiers(t *testing.T, source string, target string) []string {
 	t.Helper()
 	var valid []string
@@ -41,17 +38,8 @@ func validTiers(t *testing.T, source string, target string) []string {
 	return valid
 }
 
-// TestEveryPairIsExpressible checks the two structural invariants of ADR 0072
-// across the whole matrix:
-//
-//   - Every pair has at least one spelling, so no conversion is unexpressible.
-//   - `from` never coexists with `try` or `fit`. A pair is either lossless,
-//     and then `from` is the only spelling, or it is lossy, and then the
-//     lossless spelling is unavailable. That mutual exclusion is what makes a
-//     lossy conversion announce itself.
-//
-// A lossy pair may offer both `try` and `fit`: checked versus forced is the
-// caller's choice, not the compiler's.
+// TestEveryPairIsExpressible ensures every pair has a tier and that lossless
+// `from` never coexists with a lossy tier.
 func TestEveryPairIsExpressible(t *testing.T) {
 	for _, source := range conversionTypes {
 		for _, target := range conversionTypes {
@@ -69,15 +57,13 @@ func TestEveryPairIsExpressible(t *testing.T) {
 	}
 }
 
-// TestMatrixTierAssignments spot-checks the exact spellings for pairs whose
-// classification carries a design decision.
+// TestMatrixTierAssignments spot-checks policy-sensitive pairs.
 func TestMatrixTierAssignments(t *testing.T) {
 	expected := map[string]string{
-		// Identity keeps foreign named scalars working (#284).
-		"Int->Int":    "from",
-		"Byte->Uint8": "from",
-		"Uint8->Byte": "from",
-		// #500.
+		// Identity.
+		"Int->Int":         "from",
+		"Byte->Uint8":      "from",
+		"Uint8->Byte":      "from",
 		"Float32->Float64": "from",
 		"Int64->Int":       "try fit",
 		// Platform-sized types are 64-bit as a source, 32-bit as a target.

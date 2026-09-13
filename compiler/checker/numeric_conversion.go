@@ -1,16 +1,5 @@
 package checker
 
-// Tiered numeric conversions (ADR 0072).
-//
-// Every numeric source/target pair admits exactly one of three tiers:
-//
-//	from  lossless: every source value is exactly representable in the target
-//	try   fallible: returns the target wrapped in a Maybe
-//	fit   lossy but total: defined truncation, wrapping, or saturation
-//
-// Choosing the wrong tier is a compile error that names the right one, so each
-// conversion has a single spelling and lossy conversions announce themselves.
-
 // ConversionTier identifies one of the three conversion spellings.
 type ConversionTier int
 
@@ -34,8 +23,6 @@ func (t ConversionTier) String() string {
 	}
 }
 
-// conversionTierByName maps a static function name to its tier. Only these
-// three names are numeric conversions.
 func conversionTierByName(name string) (ConversionTier, bool) {
 	switch name {
 	case "from":
@@ -222,16 +209,9 @@ func losslessConversion(src, dst numericClass) bool {
 	}
 }
 
-// conversionTierFor reports the single tier that is valid for src -> dst, and
-// whether the pair is a numeric conversion at all.
-//
-// Lossless pairs take `from`. Every other pair takes `try` or `fit`:
-//
-//   - Nothing may produce an invalid Rune, so a Rune target has no `fit`.
-//   - Integer -> float rounds but can never overflow or fail, so it has no
-//     `try`; `fit` is the only spelling. This also keeps the compiler out of
-//     proving float exactness, which cannot be done portably.
-//   - Every other lossy pair admits both `try` and `fit`.
+// conversionTierFor returns the permitted tiers for src -> dst. Lossless
+// pairs only permit `from`; lossy pairs may permit `try`, `fit`, or both.
+// Rune has no unchecked conversion, while integer-to-float cannot fail.
 func conversionTierFor(src, dst numericClass) (tiers []ConversionTier, ok bool) {
 	if src == classNone || dst == classNone {
 		return nil, false

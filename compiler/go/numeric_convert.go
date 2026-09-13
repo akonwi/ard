@@ -9,14 +9,6 @@ import (
 	"github.com/akonwi/ard/air"
 )
 
-// Go lowering for the tiered numeric conversions in ADR 0072.
-//
-// `from` lowers to a plain Go conversion and is handled with the other
-// ExprScalarConvert forms. `fit` is a Go conversion too, except for a float
-// source, which saturates through a runtime helper instead of inheriting Go's
-// implementation-defined overflow. `try` always calls a runtime helper and
-// evaluates to a Maybe.
-
 // numericTarget describes a conversion endpoint: an integer with a width and
 // signedness, or a float. A Rune is tracked separately because it carries a
 // Unicode validity invariant that an Int32 does not.
@@ -28,9 +20,8 @@ type numericTarget struct {
 	ok      bool
 }
 
-// numericTargetOf resolves a type to its conversion endpoint, following a
-// foreign named scalar to its Go underlying kind. Platform-sized types report
-// zero bits, and callers emit math.MaxInt-style bounds for them.
+// numericTargetOf resolves foreign named scalars to their underlying Go kind.
+// Zero bits denotes a platform-sized integer.
 func (l *lowerer) numericTargetOf(typeID air.TypeID) numericTarget {
 	info, ok := l.typeInfo(typeID)
 	if !ok {
@@ -90,9 +81,7 @@ func numericTargetByName(name string) numericTarget {
 	return numericTarget{}
 }
 
-// bitWidthExpr renders a target's width for a runtime helper. A platform-sized
-// type has no constant width, so it passes math/bits.UintSize and the helper
-// derives the bounds at run time.
+// bitWidthExpr uses bits.UintSize for platform-sized targets.
 func (l *lowerer) bitWidthExpr(target numericTarget) ast.Expr {
 	if target.bits == 0 {
 		return l.qualified("bits", "math/bits", "UintSize")
@@ -100,9 +89,7 @@ func (l *lowerer) bitWidthExpr(target numericTarget) ast.Expr {
 	return &ast.BasicLit{Kind: token.INT, Value: strconv.Itoa(target.bits)}
 }
 
-// lowerScalarTryConvert emits a checked conversion `T::try(x)`, evaluating to
-// a Maybe of the target scalar (ADR 0072). expr.Type is the Maybe type, so the
-// target scalar comes from its element.
+// lowerScalarTryConvert emits `T::try(x)` as a runtime helper call.
 func (l *lowerer) lowerScalarTryConvert(fn air.Function, expr air.Expr) (loweredExpr, error) {
 	if expr.Target == nil {
 		return loweredExpr{}, fmt.Errorf("scalar try convert missing target")
@@ -126,8 +113,6 @@ func (l *lowerer) lowerScalarTryConvert(fn air.Function, expr air.Expr) (lowered
 		return loweredExpr{}, err
 	}
 
-	// The helper takes the source widened to its widest carrier, so the
-	// backend converts the value once and the helper compares in one domain.
 	var helper string
 	var args []ast.Expr
 	switch {
@@ -143,7 +128,6 @@ func (l *lowerer) lowerScalarTryConvert(fn air.Function, expr air.Expr) (lowered
 			helper = "TryRuneFromUnsigned"
 			args = []ast.Expr{l.convertTo("uint64", value.expr)}
 		}
-		// TryRune* is not generic: a Rune is always Go's rune.
 		return loweredExpr{
 			stmts: value.stmts,
 			expr:  &ast.CallExpr{Fun: l.runtimeQualified(helper), Args: args},
@@ -179,9 +163,8 @@ func (l *lowerer) lowerScalarTryConvert(fn air.Function, expr air.Expr) (lowered
 	return loweredExpr{stmts: value.stmts, expr: call}, nil
 }
 
-// lowerScalarFitConvert emits a forced conversion `T::fit(x)` (ADR 0072). A
-// float source saturates through a runtime helper; every other pair is Go's
-// own defined wrapping or rounding, so it lowers to a plain conversion.
+// lowerScalarFitConvert uses a saturating helper for float-to-integer; other
+// forced conversions use Go's defined wrapping or rounding.
 func (l *lowerer) lowerScalarFitConvert(fn air.Function, expr air.Expr) (loweredExpr, error) {
 	if expr.Target == nil {
 		return loweredExpr{}, fmt.Errorf("scalar fit convert missing target")
@@ -200,8 +183,6 @@ func (l *lowerer) lowerScalarFitConvert(fn air.Function, expr air.Expr) (lowered
 		return loweredExpr{}, err
 	}
 	if source.isFloat && !target.isFloat {
-		// Go leaves float-to-integer overflow implementation-defined, so this
-		// saturates instead (ADR 0072).
 		helper := "FitFloatToUnsigned"
 		if target.signed {
 			helper = "FitFloatToSigned"
@@ -218,7 +199,6 @@ func (l *lowerer) lowerScalarFitConvert(fn air.Function, expr air.Expr) (lowered
 	}, nil
 }
 
-// convertTo wraps value in a conversion to a predeclared Go type.
 func (l *lowerer) convertTo(name string, value ast.Expr) ast.Expr {
 	return &ast.CallExpr{Fun: l.ident(name), Args: []ast.Expr{value}}
 }

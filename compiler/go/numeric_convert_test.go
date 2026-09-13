@@ -2,10 +2,6 @@ package gotarget
 
 import "testing"
 
-// Executable coverage for the tiered numeric conversions in ADR 0072 (#500).
-// These run the generated Go program, so they pin real runtime behavior rather
-// than the shape of the emitted code.
-
 func runConversionCases(t *testing.T, cases []struct {
 	name  string
 	input string
@@ -23,8 +19,6 @@ func runConversionCases(t *testing.T, cases []struct {
 	}
 }
 
-// #500: Float32 -> Float64 widening must preserve the numeric value, including
-// signed zero, the infinities, and NaN.
 func TestGoTargetLosslessWidening(t *testing.T) {
 	runConversionCases(t, []struct {
 		name  string
@@ -66,8 +60,7 @@ func TestGoTargetLosslessWidening(t *testing.T) {
 	})
 }
 
-// #500: Int64 -> Int is checked. On a 64-bit platform the whole Int64 range is
-// representable, so these assert the in-range behavior that holds everywhere.
+// Int64 -> Int succeeds for these values on every platform.
 func TestGoTargetCheckedNarrowing(t *testing.T) {
 	runConversionCases(t, []struct {
 		name  string
@@ -107,7 +100,6 @@ func TestGoTargetCheckedNarrowing(t *testing.T) {
 			want: "true",
 		},
 		{
-			// A matching bit pattern is not a representable value.
 			name: "a negative value is not an unsigned value",
 			input: `fn main() Bool {
   let negative: Int64 = -1
@@ -136,9 +128,6 @@ func TestGoTargetCheckedNarrowing(t *testing.T) {
 	})
 }
 
-// Float sources must be finite, integral, and in range. The endpoints that
-// matter are the exact powers of two, which are representable as floats while
-// the corresponding type maxima are not.
 func TestGoTargetCheckedFloatToInt(t *testing.T) {
 	runConversionCases(t, []struct {
 		name  string
@@ -170,7 +159,6 @@ func TestGoTargetCheckedFloatToInt(t *testing.T) {
 			want: "true",
 		},
 		{
-			// 2^31 is exactly representable as a float; Int32's maximum is not.
 			name: "two to the thirty-first is out of range for Int32",
 			input: `fn main() Bool {
   let value = 2147483648.0
@@ -197,8 +185,6 @@ func TestGoTargetCheckedFloatToInt(t *testing.T) {
 	})
 }
 
-// `fit` is total: integers wrap and floats saturate, replacing Go's
-// implementation-defined float-to-integer overflow.
 func TestGoTargetForcedConversion(t *testing.T) {
 	runConversionCases(t, []struct {
 		name  string
@@ -265,8 +251,6 @@ func TestGoTargetForcedConversion(t *testing.T) {
 	})
 }
 
-// A Rune is always a valid Unicode scalar value (ADR 0026), so conversions
-// into one are always checked.
 func TestGoTargetRuneConversion(t *testing.T) {
 	runConversionCases(t, []struct {
 		name  string
@@ -316,7 +300,6 @@ func TestGoTargetRuneConversion(t *testing.T) {
 	})
 }
 
-// A foreign named scalar converts through its underlying Go kind (#284).
 func TestGoTargetForeignScalarConversion(t *testing.T) {
 	runConversionCases(t, []struct {
 		name  string
