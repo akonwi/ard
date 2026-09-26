@@ -358,33 +358,48 @@ func (s *Server) handleInitialize(ctx context.Context, reply jsonrpc2.Replier, r
 
 func (s *Server) handleInitialized(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
 	if s.watchFilesDynamicSupport && s.conn != nil {
-		watchers := []protocol.FileSystemWatcher{{GlobPattern: "**/*"}}
-		if root := s.projectRootPath(); root != "" {
-			if project, err := checker.FindProjectRoot(root); err == nil {
-				dependencyRoots := make([]string, 0, len(project.Packages))
-				for _, pkg := range project.Packages {
-					if pkg.RootPath != "" && filepath.Clean(pkg.RootPath) != filepath.Clean(project.RootPath) {
-						dependencyRoots = append(dependencyRoots, pkg.RootPath)
-					}
-				}
-				sort.Strings(dependencyRoots)
-				for _, dependencyRoot := range dependencyRoots {
-					watchers = append(watchers, protocol.FileSystemWatcher{GlobPattern: filepath.ToSlash(filepath.Join(dependencyRoot, "**", "*"))})
-				}
-			}
-		}
-		options := protocol.DidChangeWatchedFilesRegistrationOptions{Watchers: watchers}
-		params := protocol.RegistrationParams{Registrations: []protocol.Registration{{
-			ID:              "ard-embedded-resources",
-			Method:          protocol.MethodWorkspaceDidChangeWatchedFiles,
-			RegisterOptions: options,
-		}}}
-		var result any
-		if _, err := s.conn.Call(ctx, protocol.MethodClientRegisterCapability, params, &result); err != nil {
-			fmt.Fprintf(os.Stderr, "ard-lsp: could not register embedded resource watcher: %v\n", err)
-		}
+		// client/registerCapability is a request. Calling it on the JSON-RPC
+		// reader deadlocks: conn.run cannot deliver the response while this
+		// handler is still on the stack. Clients that advertise dynamic
+		// registration (Zed does) then die at startup with "all goroutines are
+		// asleep".
+		conn := s.conn
+		root := s.projectRootPath()
+		go s.registerWatchedFiles(ctx, conn, root)
 	}
 	return reply(ctx, nil, nil)
+}
+
+func (s *Server) registerWatchedFiles(ctx context.Context, conn jsonrpc2.Conn, root string) {
+	watchers := []protocol.FileSystemWatcher{{GlobPattern: "**/*"}}
+	if root != "" {
+		if project, err := checker.FindProjectRoot(root); err == nil {
+			dependencyRoots := make([]string, 0, len(project.Packages))
+			for _, pkg := range project.Packages {
+				if pkg.RootPath != "" && filepath.Clean(pkg.RootPath) != filepath.Clean(project.RootPath) {
+					dependencyRoots = append(dependencyRoots, pkg.RootPath)
+				}
+			}
+			sort.Strings(dependencyRoots)
+			for _, dependencyRoot := range dependencyRoots {
+				watchers = append(watchers, protocol.FileSystemWatcher{GlobPattern: filepath.ToSlash(filepath.Join(dependencyRoot, "**", "*"))})
+			}
+		}
+	}
+	options := protocol.DidChangeWatchedFilesRegistrationOptions{Watchers: watchers}
+	params := protocol.RegistrationParams{Registrations: []protocol.Registration{{
+		ID:              "ard-embedded-resources",
+		Method:          protocol.MethodWorkspaceDidChangeWatchedFiles,
+		RegisterOptions: options,
+	}}}
+	// Bound a client that never answers so the goroutine cannot leak for the
+	// life of the process. Shutdown still cancels via ctx.
+	regCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	var result any
+	if _, err := conn.Call(regCtx, protocol.MethodClientRegisterCapability, params, &result); err != nil {
+		fmt.Fprintf(os.Stderr, "ard-lsp: could not register embedded resource watcher: %v\n", err)
+	}
 }
 
 func (s *Server) handleShutdown(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
