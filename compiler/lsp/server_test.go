@@ -3,6 +3,7 @@ package lsp
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -65,6 +66,64 @@ func TestServerInitializes(t *testing.T) {
 		if _, ok := server.handlers[method]; !ok {
 			t.Errorf("missing handler for %s", method)
 		}
+	}
+}
+
+// TestInitializedRegistersWatchedFilesWithoutDeadlock verifies that dynamic
+// file-watcher registration does not run client/registerCapability on the
+// JSON-RPC reader. That call waits for a response only the reader can
+// deliver, so doing it inline deadlocks the process as soon as the client
+// advertises dynamic registration (Zed does).
+func TestInitializedRegistersWatchedFilesWithoutDeadlock(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	serverPipe, clientPipe := net.Pipe()
+	defer serverPipe.Close()
+	defer clientPipe.Close()
+
+	server := NewServer()
+	serverConn := jsonrpc2.NewConn(jsonrpc2.NewStream(serverPipe))
+	server.conn = serverConn
+	serverConn.Go(ctx, server.jsonRPCHandler())
+
+	registered := make(chan struct{})
+	clientConn := jsonrpc2.NewConn(jsonrpc2.NewStream(clientPipe))
+	clientConn.Go(ctx, func(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
+		if req.Method() != protocol.MethodClientRegisterCapability {
+			_ = reply(ctx, nil, nil)
+			return nil
+		}
+		// Reply before signaling. On net.Pipe the write blocks until the server
+		// reads it, so this only completes if the reader is not stuck inside Call.
+		if err := reply(ctx, nil, nil); err != nil {
+			return nil
+		}
+		close(registered)
+		return nil
+	})
+
+	var initResult protocol.InitializeResult
+	if _, err := clientConn.Call(ctx, protocol.MethodInitialize, protocol.InitializeParams{
+		RootURI: protocol.DocumentURI(uri.File(t.TempDir())),
+		Capabilities: protocol.ClientCapabilities{
+			Workspace: &protocol.WorkspaceClientCapabilities{
+				DidChangeWatchedFiles: &protocol.DidChangeWatchedFilesWorkspaceClientCapabilities{
+					DynamicRegistration: true,
+				},
+			},
+		},
+	}, &initResult); err != nil {
+		t.Fatal(err)
+	}
+	if err := clientConn.Notify(ctx, protocol.MethodInitialized, protocol.InitializedParams{}); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case <-registered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("deadlock: initialized blocked the reader waiting for client/registerCapability")
 	}
 }
 
