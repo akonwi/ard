@@ -2,6 +2,7 @@ package gotarget
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -456,6 +457,51 @@ func TestBuildGeneratedProgramUsesConfiguredBuildTags(t *testing.T) {
 	}
 	if err := buildGeneratedProgram(dir, filepath.Join(dir, "tagged-bin"), "special"); err != nil {
 		t.Fatalf("buildGeneratedProgram with tag: %v", err)
+	}
+}
+
+// Release tooling passes Go toolchain options such as -trimpath and linker
+// flags through GOFLAGS; generated builds must inherit the environment.
+func TestBuildGeneratedProgramInheritsGOFLAGS(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module flagged\n\ngo 1.21\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	program := `package main
+
+import (
+	"fmt"
+	"runtime/debug"
+)
+
+var stamp = "default"
+
+func main() {
+	trimpath := "false"
+	if info, ok := debug.ReadBuildInfo(); ok {
+		for _, setting := range info.Settings {
+			if setting.Key == "-trimpath" {
+				trimpath = setting.Value
+			}
+		}
+	}
+	fmt.Printf("%s trimpath=%s", stamp, trimpath)
+}
+`
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte(program), 0644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GOFLAGS", "-trimpath '-ldflags=-X main.stamp=from-goflags'")
+	binary := filepath.Join(dir, "flagged-bin")
+	if err := buildGeneratedProgram(dir, binary); err != nil {
+		t.Fatalf("buildGeneratedProgram with GOFLAGS: %v", err)
+	}
+	output, err := exec.Command(binary).Output()
+	if err != nil {
+		t.Fatalf("run flagged binary: %v", err)
+	}
+	if got, want := string(output), "from-goflags trimpath=true"; got != want {
+		t.Fatalf("flagged binary output = %q, want %q", got, want)
 	}
 }
 

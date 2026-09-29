@@ -69,6 +69,32 @@ enforces this policy; it does not change optimization or target settings.
 Ard does not inspect environment variables, Git state, timestamps, or hostnames.
 Release tooling should collect that metadata and pass it explicitly.
 
+## Go toolchain flags
+
+Build values replace linker-stamped metadata such as `-ldflags -X`, which would
+otherwise depend on generated Go names. Packaging options that do not change
+program behavior, such as stripping symbols or removing local paths, belong to
+the Go toolchain. The Go target runs `go build` with the current environment,
+so pass them through `GOFLAGS`:
+
+```sh
+GOFLAGS="-trimpath -ldflags=-s" ard build main.ard \
+  --release \
+  --define version=v1.2.3 \
+  --out example
+```
+
+Since Go 1.22, `-s` also omits DWARF debug information, as `-w` does. Quote
+flags whose values contain spaces, for example
+`GOFLAGS="'-ldflags=-s -w'"`. Setting `GOFLAGS` replaces any value already in
+the environment, so include existing flags when release scripts extend it.
+`GOFLAGS` also applies to `ard run`, `ard test`, and Go package resolution
+during checking. Other Go environment variables such as `CGO_ENABLED`,
+`GOOS`, and `GOARCH` pass through the same way.
+
+Avoid `-ldflags -X` with Ard packages. Generated Go package paths and symbol
+names are compiler implementation details; use build values instead.
+
 :::caution
 Build values are embedded in the resulting artifact. Do not use them for
 passwords, tokens, or other secrets.
