@@ -288,37 +288,54 @@ func (st *SymbolTable) getGenericBindings() map[string]Type {
 // extractGenericNames recursively collects all generic parameter names from a type.
 // Walks the type tree and adds any $T, $U, etc. to the names map.
 func extractGenericNames(t Type, names map[string]bool) {
+	seen := acquireTypeTraversalSeen()
+	defer releaseTypeTraversalSeen(seen)
+	extractGenericNamesSeen(t, names, seen)
+}
+
+func extractGenericNamesSeen(t Type, names map[string]bool, seen map[Type]struct{}) {
+	// Only pointer-backed types supported by this traversal reach the map lookup.
+	// Other Type implementations may be non-comparable values and cannot be keys.
+	switch t.(type) {
+	case *TypeVar, *List, *Slice, *Map, *Maybe, *Result, *MutableRef, *Union, *StructDef, *FunctionDef:
+	default:
+		return
+	}
+	if _, ok := seen[t]; ok {
+		return
+	}
+	seen[t] = struct{}{}
+
 	switch t := t.(type) {
 	case *TypeVar:
 		names[t.name] = true
 	case *List:
-		extractGenericNames(t.of, names)
+		extractGenericNamesSeen(t.of, names, seen)
 	case *Slice:
-		extractGenericNames(t.of, names)
+		extractGenericNamesSeen(t.of, names, seen)
 	case *Map:
-		extractGenericNames(t.key, names)
-		extractGenericNames(t.value, names)
+		extractGenericNamesSeen(t.key, names, seen)
+		extractGenericNamesSeen(t.value, names, seen)
 	case *Maybe:
-		extractGenericNames(t.of, names)
+		extractGenericNamesSeen(t.of, names, seen)
 	case *Result:
-		extractGenericNames(t.val, names)
-		extractGenericNames(t.err, names)
+		extractGenericNamesSeen(t.val, names, seen)
+		extractGenericNamesSeen(t.err, names, seen)
 	case *MutableRef:
-		extractGenericNames(t.of, names)
+		extractGenericNamesSeen(t.of, names, seen)
 	case *Union:
-		for _, t := range t.Types {
-			extractGenericNames(t, names)
+		for _, member := range t.Types {
+			extractGenericNamesSeen(member, names, seen)
 		}
 	case *StructDef:
 		for _, fieldType := range t.Fields {
-			extractGenericNames(fieldType, names)
+			extractGenericNamesSeen(fieldType, names, seen)
 		}
 	case *FunctionDef:
-		// Extract generics from function parameters and return type
 		for _, param := range t.Parameters {
-			extractGenericNames(param.Type, names)
+			extractGenericNamesSeen(param.Type, names, seen)
 		}
-		extractGenericNames(t.ReturnType, names)
+		extractGenericNamesSeen(t.ReturnType, names, seen)
 	}
 }
 
