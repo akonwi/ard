@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	checker "github.com/akonwi/ard/checker"
+	"github.com/akonwi/ard/parse"
 )
 
 func TestMatchReturningRecursiveStructDoesNotOverflowTypeBinding(t *testing.T) {
@@ -41,6 +42,57 @@ fn choose(flag: Bool, node: Node) Node {
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("checking a recursive struct match result failed: %v\n%s", err, output)
+	}
+}
+
+func TestRecursiveImplicitGenericStructLiteralDoesNotOverflow(t *testing.T) {
+	const helperEnv = "ARD_TEST_CHECKER_RECURSIVE_GENERIC_EXTRACTION"
+	const input = `
+struct Ref {
+  current: (mut Item)?,
+}
+
+struct Generic {
+  value: $T,
+}
+
+struct Item {
+  ref: (mut Ref)?,
+  generic: Generic,
+}
+
+fn main() {
+  let value = mut Ref{current: Maybe::new<mut Item>()}
+}
+`
+
+	if os.Getenv(helperEnv) == "1" {
+		debug.SetMaxStack(1 << 20)
+		result := parse.Parse([]byte(input), "test.ard")
+		if len(result.Errors) > 0 {
+			t.Fatalf("parse errors: %v", result.Errors)
+		}
+		c := checker.New("test.ard", result.Program, nil)
+		c.Check()
+		diagnosticCounts := map[checker.DiagnosticCode]int{}
+		for _, diagnostic := range c.Diagnostics() {
+			diagnosticCounts[diagnostic.Code]++
+		}
+		if len(c.Diagnostics()) != 3 || diagnosticCounts[checker.DiagnosticCodeMissingTypeArguments] != 2 || diagnosticCounts[checker.DiagnosticCodeTypeMismatch] != 1 {
+			t.Fatalf("diagnostics = %#v, want two missing type arguments and one type mismatch", c.Diagnostics())
+		}
+		return
+	}
+
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(executable, "-test.run=^TestRecursiveImplicitGenericStructLiteralDoesNotOverflow$")
+	cmd.Env = append(os.Environ(), helperEnv+"=1")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("checking a recursive implicit-generic struct literal failed: %v\n%s", err, output)
 	}
 }
 
