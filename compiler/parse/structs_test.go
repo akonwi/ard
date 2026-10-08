@@ -231,6 +231,23 @@ func TestUsingStructs(t *testing.T) {
 			},
 		},
 		{
+			name:  "Instantiating with shorthand fields",
+			input: "Person{name,\n age, employed}",
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&StructInstance{
+						Name: Identifier{Name: "Person"},
+						Properties: []StructValue{
+							{Name: Identifier{Name: "name"}, Value: &Identifier{Name: "name"}, Shorthand: true},
+							{Name: Identifier{Name: "age"}, Value: &Identifier{Name: "age"}, Shorthand: true},
+							{Name: Identifier{Name: "employed"}, Value: &Identifier{Name: "employed"}, Shorthand: true},
+						},
+					},
+				},
+			},
+		},
+		{
 			name: "Referencing fields",
 			input: `
 					p.age
@@ -258,6 +275,28 @@ func TestUsingStructs(t *testing.T) {
 		},
 	})
 }
+func TestStructLiteralShorthandBeforeComment(t *testing.T) {
+	result := Parse([]byte("Person{name // preserved\n}"), "test.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	instance := result.Program.Statements[0].(*StructInstance)
+	if len(instance.Properties) != 1 || !instance.Properties[0].Shorthand {
+		t.Fatalf("properties = %#v", instance.Properties)
+	}
+}
+
+func TestStructLiteralShorthandRequiresFieldTerminator(t *testing.T) {
+	result := Parse([]byte(`Person{name "Alice", age}`), "test.ard")
+	if len(result.Errors) == 0 || result.Errors[0].Message != "Expected ':' after field name - assuming it" {
+		t.Fatalf("errors = %#v", result.Errors)
+	}
+	instance := result.Program.Statements[0].(*StructInstance)
+	if len(instance.Properties) != 2 || instance.Properties[0].Shorthand || !instance.Properties[1].Shorthand {
+		t.Fatalf("properties = %#v", instance.Properties)
+	}
+}
+
 func TestReferencingStructsFromPackage(t *testing.T) {
 	runTests(t, []test{
 		{

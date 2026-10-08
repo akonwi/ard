@@ -438,8 +438,20 @@ func (s *Server) renameFromSpans(ctx context.Context, docURI uri.URI, position p
 		if !s.rangeHoldsIdentifier(ref, group.name) {
 			return nil, fmt.Errorf("cannot verify rename target %s at %s", group.name, ref.URI)
 		}
+		replacement := newName
+		shorthand, err := s.isStructFieldShorthand(ctx, uri.URI(ref.URI), ref.Range)
+		if err != nil {
+			return nil, err
+		}
+		if shorthand {
+			if spanGroupIsField(group) {
+				replacement = newName + ": " + group.name
+			} else if _, isLocal := group.key.(*checker.Symbol); isLocal {
+				replacement = group.name + ": " + newName
+			}
+		}
 		target := uri.URI(ref.URI)
-		changes[target] = append(changes[target], protocol.TextEdit{Range: ref.Range, NewText: newName})
+		changes[target] = append(changes[target], protocol.TextEdit{Range: ref.Range, NewText: replacement})
 	}
 	if len(changes) == 0 {
 		return nil, nil
@@ -453,6 +465,38 @@ func (s *Server) renameFromSpans(ctx context.Context, docURI uri.URI, position p
 		})
 	}
 	return &protocol.WorkspaceEdit{Changes: changes}, nil
+}
+
+func spanGroupIsField(group *spanGroup) bool {
+	if group == nil {
+		return false
+	}
+	if group.target != nil {
+		return group.target.Kind == checker.TargetField
+	}
+	key, ok := group.key.(string)
+	return ok && strings.HasPrefix(key, "field:")
+}
+
+func (s *Server) isStructFieldShorthand(ctx context.Context, docURI uri.URI, rng protocol.Range) (bool, error) {
+	fa, err := s.analyzeSnapshot(ctx, docURI)
+	if err != nil {
+		return false, err
+	}
+	if fa == nil || fa.Spans == nil {
+		return false, fmt.Errorf("span information unavailable for %s", docURI)
+	}
+	filePath, err := filePathFromURI(docURI)
+	if err != nil {
+		return false, err
+	}
+	point := s.docLinesFor(filePath).positionToPoint(rng.Start)
+	for _, rec := range fa.Spans.At(point) {
+		if rec.StructFieldShorthand {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // rangeHoldsIdentifier verifies the range's current text is exactly name, so

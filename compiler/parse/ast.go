@@ -501,8 +501,9 @@ func (t TraitImplementation) String() string {
 
 type StructValue struct {
 	Location
-	Name  Identifier
-	Value Expression
+	Name      Identifier
+	Value     Expression
+	Shorthand bool
 }
 
 type StructInstance struct {

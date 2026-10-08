@@ -189,6 +189,22 @@ func TestStructs(t *testing.T) {
 			},
 		},
 		{
+			name: "Struct literal field shorthand resolves local values",
+			input: personStructInput + "\n" + strings.Join([]string{
+				`let name = "Alice"`,
+				`let age = 30`,
+				`let employed = true`,
+				`Person{name, age, employed}`,
+			}, "\n"),
+		},
+		{
+			name:  "Struct literal field shorthand reports an undefined value",
+			input: personStructInput + "\n" + `Person{name, age: 30, employed: true}`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Undefined variable: name"},
+			},
+		},
+		{
 			name: "Cannot instantiate with incorrect fields",
 			input: personStructInput + "\n" + strings.Join([]string{
 				`Person{ name: "Alice", age: 30 }`,
