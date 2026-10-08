@@ -103,6 +103,26 @@ func TestFormatHugsTrailingClosures(t *testing.T) {
 	}
 }
 
+func TestFormatStructLiteralShorthand(t *testing.T) {
+	input := "fn make(name: Str, age: Int) Person {\n  Person{ name, age, employed: employed }\n}\n"
+	want := "fn make(name: Str, age: Int) Person {\n  Person{\n    name,\n    age,\n    employed: employed,\n  }\n}\n"
+
+	got, err := Format([]byte(input), "test.ard")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != want {
+		t.Fatalf("format mismatch:\ngot:\n%s\nwant:\n%s", got, want)
+	}
+	gotAgain, err := Format(got, "test.ard")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(gotAgain) != want {
+		t.Fatalf("second format mismatch:\ngot:\n%s\nwant:\n%s", gotAgain, want)
+	}
+}
+
 func TestFormatGenericStructLiterals(t *testing.T) {
 	inputs := []struct {
 		name  string

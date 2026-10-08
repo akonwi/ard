@@ -31,6 +31,18 @@ let person = Person{
 }
 ```
 
+When a field's value comes from a variable with the same name, omit the colon and value:
+
+```ard
+let name = "Alice"
+let age = 30
+let email = "alice@example.com"
+
+let person = Person{name, age, email}
+```
+
+This is equivalent to `Person{name: name, age: age, email: email}`.
+
 ## Accessing Fields
 
 Use dot notation to access struct fields:

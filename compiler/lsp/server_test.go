@@ -2547,6 +2547,69 @@ func TestRenameLocalVariable(t *testing.T) {
 	}
 	assertRenameEdits(t, edit, filePath, []renameWant{{1, 6, 11}, {2, 13, 18}, {3, 2, 7}})
 }
+func TestRenameStructLiteralShorthand(t *testing.T) {
+	root := t.TempDir()
+	filePath := filepath.Join(root, "main.ard")
+	source := `struct Person {
+  name: Str,
+}
+
+fn make(name: Str) Person {
+  Person{name}
+}
+`
+	if err := os.WriteFile(filePath, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("local value rename expands shorthand", func(t *testing.T) {
+		srv, docURI := spanServer(t, source, filePath)
+		edit, err := srv.renameFromSpans(context.Background(), docURI, protocol.Position{Line: 4, Character: 9}, "display_name")
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertRenameNewTexts(t, edit, filePath, map[uint32]string{4: "display_name", 5: "name: display_name"})
+	})
+
+	t.Run("field rename expands shorthand", func(t *testing.T) {
+		srv, docURI := spanServer(t, source, filePath)
+		edit, err := srv.renameFromSpans(context.Background(), docURI, protocol.Position{Line: 1, Character: 3}, "display_name")
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertRenameNewTexts(t, edit, filePath, map[uint32]string{1: "display_name", 5: "display_name: name"})
+	})
+
+	t.Run("rename on shorthand token selects the field", func(t *testing.T) {
+		srv, docURI := spanServer(t, source, filePath)
+		edit, err := srv.renameFromSpans(context.Background(), docURI, protocol.Position{Line: 5, Character: 10}, "display_name")
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertRenameNewTexts(t, edit, filePath, map[uint32]string{1: "display_name", 5: "display_name: name"})
+	})
+}
+
+func assertRenameNewTexts(t *testing.T, edit *protocol.WorkspaceEdit, filePath string, wants map[uint32]string) {
+	t.Helper()
+	if edit == nil {
+		t.Fatal("expected workspace edit, got nil")
+	}
+	edits := edit.Changes[uri.File(filePath)]
+	if len(edits) != len(wants) {
+		t.Fatalf("got %d edits, want %d: %#v", len(edits), len(wants), edits)
+	}
+	for _, edit := range edits {
+		want, ok := wants[edit.Range.Start.Line]
+		if !ok {
+			t.Fatalf("unexpected edit on line %d: %#v", edit.Range.Start.Line, edit)
+		}
+		if edit.NewText != want {
+			t.Fatalf("edit on line %d = %q, want %q", edit.Range.Start.Line, edit.NewText, want)
+		}
+	}
+}
+
 func TestRenameImportedFunction(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.0.0\"\n"), 0o644); err != nil {

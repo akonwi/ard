@@ -1442,12 +1442,35 @@ func TestRunProgramPassesGoFunctionCallbacks(t *testing.T) {
 	}
 }
 
+func TestRunProgramConstructsArdStructLiteralsWithFieldShorthand(t *testing.T) {
+	program := lowerSource(t, `
+		struct Pair {
+			left: Int,
+			right: Int,
+		}
+
+		fn main() {
+			let left = 10
+			let right = 20
+			let pair = Pair{left, right}
+			if not pair.left == 10 { panic("bad left") }
+			if not pair.right == 20 { panic("bad right") }
+		}
+	`)
+
+	if err := RunProgram(program, []string{"ard", "run", "sample.ard"}); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
+
 func TestRunProgramConstructsGoStructLiterals(t *testing.T) {
 	program := lowerSource(t, `
 		use go:image
 
 		fn main() {
-			let point = image::Point{X: 10, Y: 20}
+			let X = 10
+			let Y = 20
+			let point = image::Point{X, Y}
 			if not point.X == 10 { panic("bad x") }
 			if not point.Y == 20 { panic("bad y") }
 			let partial = image::Point{X: 7}

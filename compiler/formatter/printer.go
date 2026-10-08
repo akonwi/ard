@@ -1335,6 +1335,10 @@ func (p printer) renderStructInstanceDoc(node *parse.StructInstance) doc {
 
 	parts := make([]string, 0, len(node.Properties))
 	for _, property := range node.Properties {
+		if property.Shorthand {
+			parts = append(parts, property.Name.Name)
+			continue
+		}
 		parts = append(parts, property.Name.Name+": "+p.renderExpression(property.Value, 0))
 	}
 	oneLine := head + "{" + strings.Join(parts, ", ") + "}"

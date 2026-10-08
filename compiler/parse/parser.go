@@ -3223,26 +3223,34 @@ func (p *parser) parseStructFields(name *Identifier) (*StructInstance, error) {
 		}
 
 		propToken := p.consumeVariableName("Expected name")
+		shorthand := propToken.kind == identifier && (p.check(comma) || p.check(new_line) || p.check(comment) || p.check(right_brace))
 
-		if !p.check(colon) {
-			p.addError(p.peek(), "Expected ':' after field name - assuming it")
-			// Continue parsing without consuming colon - assume it was meant to be there
+		var val Expression
+		if shorthand {
+			val = &Identifier{Location: propToken.getLocation(), Name: propToken.text}
 		} else {
-			p.advance() // consume the ':'
-		}
+			if !p.check(colon) {
+				p.addError(p.peek(), "Expected ':' after field name - assuming it")
+				// Continue parsing without consuming colon - assume it was meant to be there
+			} else {
+				p.advance() // consume the ':'
+			}
 
-		val, err := p.parseExpression()
-		if err != nil {
-			return nil, err
+			var err error
+			val, err = p.parseExpression()
+			if err != nil {
+				return nil, err
+			}
 		}
 		propLocation := propToken.getLocation()
 		if val != nil {
 			propLocation.End = val.GetLocation().End
 		}
 		instance.Properties = append(instance.Properties, StructValue{
-			Location: propLocation,
-			Name:     Identifier{Location: propToken.getLocation(), Name: propToken.text},
-			Value:    val,
+			Location:  propLocation,
+			Name:      Identifier{Location: propToken.getLocation(), Name: propToken.text},
+			Value:     val,
+			Shorthand: shorthand,
 		})
 
 		// Check for inline comment after property

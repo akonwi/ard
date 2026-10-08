@@ -49,6 +49,10 @@ type SpanRecord struct {
 	// access. It lets completion enumerate valid members even when the
 	// placeholder itself cannot resolve to a checked expression.
 	CompletionType Type
+	// StructFieldShorthand marks a token that simultaneously names a struct
+	// field and supplies a same-named value. Rename uses it to expand the
+	// shorthand without changing the other symbol.
+	StructFieldShorthand bool
 }
 
 // TargetKind classifies a cross-module reference target.
@@ -96,6 +100,18 @@ func memberTarget(kind TargetKind, subjType Type, member string) *SpanTarget {
 // recordMember records a struct/enum member access for navigation. Member
 // accesses on function-typed properties are method values and recorded as
 // method targets.
+func (s *SpanIndex) markStructFieldShorthand(loc parse.Location, start int) {
+	if s == nil {
+		return
+	}
+	start = max(0, min(start, len(s.records)))
+	for i := start; i < len(s.records); i++ {
+		if s.records[i].Loc == loc {
+			s.records[i].StructFieldShorthand = true
+		}
+	}
+}
+
 func (c *Checker) recordMember(loc parse.Location, kind TargetKind, subjType Type, member string, node Expression) {
 	if c.spans == nil {
 		return

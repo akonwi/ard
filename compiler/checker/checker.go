@@ -5992,6 +5992,8 @@ func (c *Checker) checkMap(declaredType Type, expr *parse.MapLiteral) *MapLitera
 }
 
 func (c *Checker) validateForeignStructInstance(foreign *ForeignType, typeArgs []parse.DeclaredType, properties []parse.StructValue, loc parse.Location) *ForeignStructInstance {
+	spansMark := c.spansMark()
+	defer c.markStructFieldShorthands(properties, spansMark)
 	if foreign == nil || foreign.Target != "go" || foreign.Pointer || !foreign.Struct {
 		c.addDiagnostic(invalidGoStructLiteralDiagnostic{Span: c.sourceSpan(loc), Message: "Go struct literals require a non-pointer Go struct type"}.build())
 		return nil
@@ -6530,8 +6532,21 @@ func (c *Checker) resolveStructTypeArgs(instance *parse.StructInstance) ([]Type,
 	return typeArgs, true
 }
 
+func (c *Checker) markStructFieldShorthands(properties []parse.StructValue, spansMark int) {
+	if c.spans == nil {
+		return
+	}
+	for _, property := range properties {
+		if property.Shorthand {
+			c.spans.markStructFieldShorthand(property.Name.GetLocation(), spansMark)
+		}
+	}
+}
+
 // validateStructInstance validates struct instantiation and returns the instance or nil if errors
 func (c *Checker) validateStructInstance(structType *StructDef, properties []parse.StructValue, structName string, loc parse.Location, typeArgs []Type, contextualTypeArgs bool) *StructInstance {
+	spansMark := c.spansMark()
+	defer c.markStructFieldShorthands(properties, spansMark)
 	instance := &StructInstance{Name: structName, _type: structType}
 	if c.spans != nil {
 		for _, prop := range properties {
