@@ -19,7 +19,7 @@ impl Todo {
 }
 
 fn Todo::new(title: Str) Todo {
-  Todo{title: title, completed: false}
+  Todo{title, completed: false}
 }
 
 fn render(list: [Todo]) {
