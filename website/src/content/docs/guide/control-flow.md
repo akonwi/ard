@@ -23,6 +23,25 @@ if temperature > 30 {
 
 Conditions must be boolean expressions. There are no implicit truthy/falsy coercions. Comparison operators include `==`, `!=`, `<`, `<=`, `>`, and `>=`; combine boolean expressions with `and`, `or`, and `not`.
 
+### Boolean Operator Grouping
+
+Comparisons bind more tightly than `and`, and `and` binds more tightly than `or`. Ard's prefix `not` is intentionally broad: it negates the complete expression to its right, including comparisons and `and` or `or` expressions.
+
+```ard
+not value == expected  // not (value == expected)
+not ready and enabled  // not (ready and enabled)
+not ready or enabled   // not (ready or enabled)
+```
+
+To negate only one operand, group the `not` expression itself:
+
+```ard
+(not ready) and enabled
+(not ready) or enabled
+```
+
+The formatter may remove parentheses that only restate broad `not` grouping, so `not (ready or enabled)` can become `not ready or enabled` without changing its meaning. Parenthesize the `not` expression, as above, when you need narrow negation.
+
 ## Loops
 
 ### For Loops
