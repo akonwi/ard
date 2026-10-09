@@ -29,10 +29,10 @@ An explicit type argument composes with `mut` to start an empty mutable list
 without a binding annotation. Through the prelude alias this needs no import:
 
 ```ard
-let items = mut List::new<Int>()
+let items = &mut List::new<Int>()
 items.push(1)
 
-let buffer = mut List::new<Byte>(1_000)
+let buffer = &mut List::new<Byte>(1_000)
 ```
 
 ### `concat(a: [$T], b: [$T]) [$T]`

@@ -53,6 +53,28 @@ fn inspect(counter: Counter) Int {
 }
 ```
 
+`mut Counter` is a trait value that may call `fn mut` methods. It is not a
+pointer: create one by passing a `*mut T` whose `T` implements the trait. A
+`mut Counter` converts to an ordinary `Counter` without copying the
+underlying value:
+
+```ard
+struct Tally { count: Int }
+
+impl Counter for Tally {
+  fn mut set(value: Int) { self.count = value }
+  fn value() Int { self.count }
+}
+
+let tally = &mut Tally{count: 0}
+update(tally)              // *mut Tally widens to mut Counter
+let total = inspect(tally) // 2
+```
+
+`mut Trait` is the only type that uses `mut`. Pointer types such as `*Counter`
+are rejected; point to the concrete type instead. To keep an independent copy,
+dereference the concrete pointer before widening: `let copy: Counter = tally.*`.
+
 A mutating implementation cannot satisfy a trait method that omits `mut`.
 A non-mutating implementation may satisfy a mutating method because it requires
 less receiver capability than the contract permits.

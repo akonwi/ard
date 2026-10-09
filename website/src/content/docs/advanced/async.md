@@ -37,8 +37,8 @@ fn main() {
 
 Because `start` returns nothing, you coordinate with a channel rather than a
 return value. Task functions use ordinary closure capture rules. They may
-capture existing references, explicitly borrow outer storage, and rebind outer
-writable reference slots.
+capture pointers, take pointers to outer storage, and rebind outer `mut`
+bindings.
 
 ```ard
 use ard/async
@@ -47,12 +47,12 @@ use go:fmt
 struct Counter { value: Int }
 
 fn main() {
-  let counter = Counter{value: 0}
-  let reference = mut counter
+  mut counter = Counter{value: 0}
+  let pointer = &mut counter
   let done = Chan::new<Bool>()
 
   async::start(fn() {
-    reference.value = 1
+    pointer.value = 1
     done.send(true)
   })
 
@@ -61,9 +61,9 @@ fn main() {
 }
 ```
 
-Capturing an existing reference copies its current handle, so both goroutines
-share the pointee. Explicitly borrowing outer storage or rebinding an outer
-writable binding captures the required binding slot. Go's escape analysis gives
+Capturing a pointer copies it, so both goroutines share the pointee. Taking a
+pointer to outer storage or rebinding an outer `mut` binding inside the task
+captures that binding's slot. Go's escape analysis gives
 captured storage a sufficient lifetime.
 
 Ard does not add synchronization or data-race protection. Concurrent access

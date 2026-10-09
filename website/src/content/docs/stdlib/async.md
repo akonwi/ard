@@ -46,7 +46,7 @@ fn main() {
 }
 ```
 
-Task functions use ordinary Ard closure captures. Existing reference handles are copied while their pointees remain shared; borrowing or rebinding outer storage captures the required binding slot. Ard does not add synchronization or data-race protection. Use channels, mutexes, atomics, or another Go-compatible synchronization mechanism for conflicting concurrent access.
+Task functions use ordinary Ard closure captures. Captured pointers are copied while their pointees remain shared; borrowing or rebinding outer storage captures the required binding slot. Ard does not add synchronization or data-race protection. Use channels, mutexes, atomics, or another Go-compatible synchronization mechanism for conflicting concurrent access.
 
 ## Related built-ins
 

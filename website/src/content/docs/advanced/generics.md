@@ -33,24 +33,24 @@ let text = identity("hello")     // $T inferred as Str
 let flag = identity(true)        // $T inferred as Bool
 ```
 
-Reference identity is preserved during generic inference. If `$T` is inferred from a `mut User`, the result is also `mut User`:
+Pointer types are preserved during generic inference. If `$T` is inferred from a `*mut User`, the result is also `*mut User`:
 
 ```ard
 struct User { name: Str }
 
-let user = User{name: "Ada"}
-let reference = mut user
-let alias = identity(reference) // $T is mut User
+mut user = User{name: "Ada"}
+let pointer = &mut user
+let alias = identity(pointer) // $T is *mut User
 alias.name = "Grace"
 ```
 
-A generic destination explicitly fixed to ordinary `User` does not silently copy the referent. Use `.@` to select a shallow value:
+A generic destination explicitly fixed to ordinary `User` does not silently copy the pointee. Use `.*` to select a shallow value:
 
 ```ard
-let snapshot = identity<User>(reference.@)
+let snapshot = identity<User>(pointer.*)
 ```
 
-The same rule applies when references appear inside generic lists, maps, `Maybe`, `Result`, channels, callbacks, and struct fields: the reference type remains part of the generic shape.
+The same rule applies when pointers appear inside generic lists, maps, `Maybe`, `Result`, channels, callbacks, and struct fields: the pointer type remains part of the generic shape. A generic pointer type such as `*mut $T` or `*$T` binds `$T` to the pointee type.
 
 ## Explicit Type Arguments
 

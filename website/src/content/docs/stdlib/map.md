@@ -15,7 +15,7 @@ use ard/map
 
 ### `new() [Str: $V]`
 
-Create a new empty map with `Str` keys and values of type `$V`. The value type is usually inferred from the assignment context, or named with an explicit type argument — `let counts = mut Map::new<Int>()` starts an empty mutable map without a binding annotation or import through the prelude alias.
+Create a new empty map with `Str` keys and values of type `$V`. The value type is usually inferred from the assignment context, or named with an explicit type argument — `let counts = &mut Map::new<Int>()` starts an empty mutable map without a binding annotation or import through the prelude alias.
 
 ```ard
 use ard/map

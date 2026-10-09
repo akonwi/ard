@@ -118,18 +118,20 @@ Exported Go named types can appear directly in Ard signatures and fields.
 use go:net/http as gohttp
 
 struct RequestBox {
-  raw: mut gohttp::Request,
+  raw: *mut gohttp::Request,
 }
 
-fn status(resp: mut gohttp::Response) Int {
+fn status(resp: *mut gohttp::Response) Int {
   resp.StatusCode
 }
 ```
 
-Raw Go pointer syntax does not appear in Ard source. Use Ard's mutable-reference syntax instead:
+Ard pointer types lower to Go pointers:
 
 - `gohttp::Response` lowers to `http.Response`
-- `mut gohttp::Response` lowers to `*http.Response`
+- `*mut gohttp::Response` and `*gohttp::Response` both lower to `*http.Response`
+
+A Go function that returns or accepts `*T` imports with `*mut T`, because Go code may write through the pointer. A `*mut T` can be passed where Ard expects `*T`.
 
 ## Go Arrays, Slices, and Maps
 
@@ -138,7 +140,7 @@ Go slices map to Ard lists (`[T]`), Go maps map to Ard maps (`[K:V]`), and Go fi
 ```ard
 use go:crypto/sha256
 
-let bytes = mut "hello".bytes()
+let bytes = "hello".bytes()
 let digest: [Byte; 32] = sha256::Sum256(bytes)
 let zero: Byte = 0
 let first = digest.at(0).or(zero)
@@ -146,32 +148,44 @@ let first = digest.at(0).or(zero)
 
 Ard does not implicitly convert through containers. If a Go API needs `[Byte]` and you have `[Int]`, write the transformation explicitly with `Byte::fit(...)` so allocation and truncation are visible in source.
 
-## Reference arguments and exact Go ABI
+## Pointer arguments and exact Go ABI
 
-Representable single-level Go pointer parameters (`*T` where `T` is not an interface), plus Go slice and map parameters, require actual Ard references. Binding an ordinary value with `mut` does not satisfy that requirement; use `mut expression` or pass an existing reference.
+Go `[]T` and `map[K]V` parameters accept ordinary Ard lists and maps:
 
 ```ard
 use go:sort
+use go:strings
+
+let words = ["a", "b"]
+let joined = strings::Join(words, ",")
 
 let numbers = [3, 1, 2]
-sort::Ints(mut numbers)
-
-let number_reference = mut numbers
-sort::Ints(number_reference)
+sort::Ints(numbers)
 ```
 
-The source-level reference requirement is separate from Go's raw ABI:
+Go has no read-only slices or maps, so the Go function may write elements or entries. Those writes are visible through the Ard list or map and any copies sharing its storage. Passing a pointer, such as `sort::Ints(&mut numbers)`, is also accepted and documents the intended mutation at the call site.
+
+Go `*T` parameters require a `*mut T` pointer, because Go can write through them. Create Go structs that are passed by pointer as pointers:
+
+```ard
+use go:strings
+
+let builder = &mut strings::Builder{}
+try builder.WriteString("hello") -> err { panic(err) }
+```
+
+At the Go boundary:
 
 - a representable single-level Go `*T` receives the current `*T` pointer;
 - exact Go `*Interface` parameters remain unsupported;
-- multi-level pointers can flow only from an already compatible foreign pointer value—pure Ard cannot create them by applying another `mut`;
-- a Go `[]T` or `map[K]V` receives the current descriptor value from an Ard reference;
-- a Go `*[]T` or `*map[K]V` receives the pointer to an Ard list or map descriptor;
+- multi-level pointers can flow only from an already compatible foreign pointer value; Ard cannot create a pointer to a pointer;
+- a Go `[]T` or `map[K]V` receives the current descriptor value, from a list, a map, or a pointer to one;
+- a Go `*[]T` or `*map[K]V` requires a `*mut [T]` or `*mut [K: V]` pointer and receives the pointer to the Ard list or map descriptor;
 - Go functions and channels remain ordinary values.
 
-Each boundary copies the selected current pointer or descriptor. Later rebinding of an Ard reference slot does not retarget a value already passed to or retained by Go. Foreign code receiving a pointer may replace its pointee; this is part of the explicit FFI trust boundary.
+Each boundary copies the selected current pointer or descriptor. Later rebinding of an Ard pointer variable does not retarget a value already passed to or retained by Go. Foreign code receiving a pointer may replace its pointee; this is part of the explicit FFI trust boundary.
 
-A `mut Slice<T>` reference projects to a compatible Go `[]T` parameter, with capacity restricted to the view's visible length. It does not satisfy Go `*[]T`: replacing that descriptor would violate the fixed-length `Slice<T>` contract. Convert the view with `to_list()` when a pointer-to-slice API must be used.
+A `Slice<T>` view projects to a compatible Go `[]T` parameter, with capacity restricted to the view's visible length. It does not satisfy Go `*[]T`: replacing that descriptor would violate the fixed-length `Slice<T>` contract. Convert the view with `to_list()` when a pointer-to-slice API must be used.
 
 ## Numeric Conversions
 
@@ -287,13 +301,13 @@ use go:os/exec as exec
 let args = ["-l", "/tmp"]
 exec::Command("ls", args...)
 
-let args_reference = mut args
-exec::Command("ls", args_reference...)
+let args_pointer = &args
+exec::Command("ls", args_pointer...)
 ```
 
-Spread forwards the current Go slice descriptor without copying. `List<T>`, `Slice<T>`, compatible named Go slices, and references to those values are supported when the complete slice is assignable to the variadic tail without element conversion. For example, `[Any]` can spread into `...Any`, but `[Str]` cannot.
+Spread forwards the current Go slice descriptor without copying. `List<T>`, `Slice<T>`, compatible named Go slices, and pointers to those values are supported when the complete slice is assignable to the variadic tail without element conversion. For example, `[Any]` can spread into `...Any`, but `[Str]` cannot.
 
-The Go function may retain the slice or mutate its elements; those element writes remain visible through the Ard list even when the list itself was passed without `mut`. Spread does not grant access to rebind the Ard variable or replace its descriptor.
+The Go function may retain the slice or mutate its elements; those element writes remain visible through the Ard list even when the list itself was passed without a pointer. Spread does not grant access to rebind the Ard variable or replace its descriptor.
 
 A spread call supplies every fixed parameter positionally, followed by one final spread. It cannot use named arguments or mix individual variadic values with a spread.
 
@@ -314,22 +328,22 @@ fn read_all(reader: io::Reader) [Byte]!Error {
 let bytes = read_all(strings::NewReader("hello")).expect("read")
 ```
 
-Interface-to-interface assignability also follows Go's rules, so a value such as `io::ReadCloser` can be used where `io::Reader` or `io::Closer` is expected when the required methods match. Go slices and maps remain invariant: `[mut strings::Reader]` is not automatically converted to `[]io.Reader`.
+Interface-to-interface assignability also follows Go's rules, so a value such as `io::ReadCloser` can be used where `io::Reader` or `io::Closer` is expected when the required methods match. Go slices and maps remain invariant: `[*mut strings::Reader]` is not automatically converted to `[]io.Reader`.
 
-At an interface destination—including Ard `Any` and named empty Go interfaces—an ordinary Ard value contributes a value copy, while an existing `mut T` contributes its current pointer identity. Use `reference.@` to deliberately select the ordinary shallow-value path instead. Every conversion copies the selected current pointer or value, so later rebinding of the Ard reference slot is not visible through an interface value already created.
+At an interface destination—including Ard `Any` and named empty Go interfaces—an ordinary Ard value contributes a value copy, while a pointer contributes its pointer identity. Use `pointer.*` to deliberately select the ordinary shallow-value path instead. Every conversion copies the selected current pointer or value, so later rebinding of the Ard pointer variable is not visible through an interface value already created.
 
-A concrete `mut T` appears to Go as dynamic `*T`. `Trait` and `mut Trait` use the same native Go interface; mutable trait values widened from concrete references therefore carry dynamic `*T` directly. Copying a trait captures its current interface value, and later rebinding of the source trait variable is not observed. Mutable trait values pass through compatible Go generic arguments, results, containers, and method constraints without a wrapper representation.
+A `*T` or `*mut T` appears to Go as dynamic `*T`. `Trait` and `mut Trait` use the same native Go interface; mutable trait values widened from `*mut T` pointers therefore carry dynamic `*T` directly. Copying a trait captures its current interface value, and later rebinding of the source trait variable is not observed. Mutable trait values pass through compatible Go generic arguments, results, containers, and method constraints without a wrapper representation.
 
-A reference to foreign-interface storage is different: it contributes a pointer-to-interface to `Any` and requires `interface_reference.@` when the destination needs the interface value itself.
+A pointer to foreign-interface storage is different: it contributes a pointer-to-interface to `Any` and requires `interface_pointer.*` when the destination needs the interface value itself.
 
-A bare imported Go generic such as `func Identity[T any](T) T` infers a reference argument as its pointer-shaped representation. If `T` is explicitly fixed to an ordinary value type, use `.@`:
+A bare imported Go generic such as `func Identity[T any](T) T` infers a pointer argument as a pointer. If `T` is explicitly fixed to an ordinary value type, use `.*`:
 
 ```ard
-let echoed_reference = ffi::Identity(reference)
-let copied_value = ffi::Identity<User>(reference.@)
+let echoed_pointer = ffi::Identity(pointer)
+let copied_value = ffi::Identity<User>(pointer.*)
 ```
 
-Exclusively slice/map-shaped generic parameters still require a reference but project the exact descriptor value required by the instantiated Go signature.
+Exclusively slice/map-shaped generic parameters project the exact descriptor value required by the instantiated Go signature.
 
 Ard-defined structs can satisfy nonempty Go interfaces when their `impl` methods have Go-compatible method names and signatures. The Go backend emits receiver methods for those impls, including methods that are only needed by Go interface dispatch. Functions and closure adapters still need companion FFI wrappers.
 
@@ -389,19 +403,19 @@ Pointer-typed hops preserve Go behavior. If an intermediate pointer is nil, the 
 ```ard
 use go:net/http as gohttp
 
-fn request_path(req: mut gohttp::Request) Str {
+fn request_path(req: *mut gohttp::Request) Str {
   req.URL.Path
 }
 ```
 
 ## Struct Field Writes
 
-Assignments to exported Go fields also use ordinary field syntax. The target must be an actual reference or foreign Go pointer. A writable ordinary `mut T` binding can be replaced as a whole, but it does not permit field writes or pointer-receiver calls.
+Assignments to exported Go fields also use ordinary field syntax. The target must be writable: a `mut` binding, or a value reached through a `*mut` pointer. Methods with Go pointer receivers need a `*mut T` receiver.
 
 ```ard
 use go:net/http as gohttp
 
-fn mark_ok(resp: mut gohttp::Response) {
+fn mark_ok(resp: *mut gohttp::Response) {
   resp.StatusCode = gohttp::StatusOK
 }
 ```
@@ -453,17 +467,17 @@ Prefer Go constructors or companion wrappers for structs whose zero value is uns
 
 ## Optional References
 
-Nullable mutable references are written with grouping:
+Optional pointers are written with grouping:
 
 ```ard
 use go:net/http as gohttp
 
-let missing: (mut gohttp::Request)? = Maybe::new()
+let missing: (*mut gohttp::Request)? = Maybe::new()
 ```
 
-Use `(mut T)?` when an Ard API intentionally models an optional reference. Direct-Go pointer fields and pointer-returning calls are not automatically wrapped in `Maybe`; Go pointer values remain `mut go::T` and preserve Go nil behavior.
+Use `(*mut T)?` when an Ard API intentionally models an optional pointer. Direct-Go pointer fields and pointer-returning calls are not automatically wrapped in `Maybe`; Go pointer values remain `*mut go::T` and preserve Go nil behavior.
 
-Use `pointer.@` when an ordinary Go value is required. This makes a shallow value copy and panics with Go's normal behavior when the foreign pointer is nil. In contrast, `unsafe::cast<T>(boxed_pointer)` is a fallible checked conversion and returns `none` for nil.
+Use `pointer.*` when an ordinary Go value is required. This makes a shallow value copy and panics with Go's normal behavior when the foreign pointer is nil. In contrast, `unsafe::cast<T>(boxed_pointer)` is a fallible checked conversion and returns `none` for nil.
 
 ## Checking for Nil
 
@@ -473,7 +487,7 @@ Use `ard/unsafe::is_nil` when you need to test a Go value for nil without adding
 use ard/unsafe
 use go:net/http as gohttp
 
-fn request_path(req: mut gohttp::Request) Str {
+fn request_path(req: *mut gohttp::Request) Str {
   match unsafe::is_nil(req.URL) {
     true => "",
     false => req.URL.Path,
@@ -492,7 +506,7 @@ Use `unsafe { ... }` as an explicit escape hatch around direct Go operations tha
 ```ard
 use go:net/http as gohttp
 
-fn request_path_or_default(req: mut gohttp::Request) Str {
+fn request_path_or_default(req: *mut gohttp::Request) Str {
   try unsafe {
     req.URL.Path
   } -> _ {

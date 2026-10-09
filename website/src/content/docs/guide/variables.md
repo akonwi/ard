@@ -1,20 +1,18 @@
 ---
 title: Variables
-description: Learn about bindings, mutable references, explicit dereferencing, and type inference in Ard.
+description: Learn about bindings, pointers, dereferencing, and type inference in Ard.
 ---
 
 ## Declaration keywords
 
 Ard uses two declaration keywords:
 
-- `let` creates a binding whose slot cannot be reassigned.
-- `mut` creates a binding whose slot can be reassigned.
-
-The keyword controls the **binding slot**, not whether the stored value has mutable interior access.
+- `let` creates a binding whose storage cannot be written.
+- `mut` creates a binding whose storage can be written: the whole value can be replaced, and its fields can be assigned.
 
 ```ard
 let name = "Ada"
-// name = "Grace" // Error: the binding slot is immutable
+// name = "Grace" // Error: the binding is immutable
 
 mut count = 1
 count = 2
@@ -32,138 +30,192 @@ let items: [Int] = [1, 2, 3]
 let labels: [Str: Int] = ["a": 1, "b": 2]
 ```
 
-A reference value keeps its reference type during inference:
-
-```ard
-struct User { name: Str }
-
-let user = User{name: "Ada"}
-let reference = mut user // inferred as mut User
-let alias = reference    // also mut User; copies the reference handle
-```
-
-## Binding mutability and reference values
-
-Binding mutability and mutable-reference values are independent:
-
-| Declaration | Slot can be reassigned | Stored value is a reference | Interior mutation |
-| --- | ---: | ---: | ---: |
-| `let user = User{name: "Ada"}` | no | no | no |
-| `mut user = User{name: "Ada"}` | yes | no | no |
-| `let user = mut User{name: "Ada"}` | no | yes | yes |
-| `mut user = mut User{name: "Ada"}` | yes | yes | yes |
-
-A mutable ordinary binding permits whole-slot replacement, but not interior mutation:
+A pointer keeps its pointer type during inference:
 
 ```ard
 struct User { name: Str }
 
 mut user = User{name: "Ada"}
-user = User{name: "Grace"} // OK: replaces the binding slot
-// user.name = "Lin"       // Error: user stores an ordinary User value
+let pointer = &mut user // inferred as *mut User
+let alias = pointer     // also *mut User; copies the pointer
 ```
 
-Create an actual reference to mutate a value's interior. The source storage may be declared with either `let` or `mut`:
+## Mutable bindings
+
+A `mut` binding owns its storage, including the fields of a struct stored inline:
 
 ```ard
-let user = User{name: "Ada"}
-let reference = mut user
-reference.name = "Grace"
+struct User { name: Str }
+
+mut user = User{name: "Ada"}
+user.name = "Grace"        // OK: writes user's own storage
+user = User{name: "Lin"}   // OK: replaces the whole value
+
+let fixed = User{name: "Ada"}
+// fixed.name = "Grace"    // Error: fixed is not writable
 ```
 
-A `let` reference cannot be rebound, but it can mutate its pointee. A `mut` reference binding can also replace its own stored handle:
+Writing to a binding never affects other values. Copies of a struct are independent:
 
 ```ard
-let first = User{name: "First"}
-let second = User{name: "Second"}
-mut current = mut first
+mut first = User{name: "Ada"}
+let second = first
+first.name = "Grace" // second.name is still "Ada"
+```
+
+Lists and maps are the exception: copies share storage, so in-place operations such as `push` and `set` need a pointer even on a `mut` binding. See [Lists and maps](#lists-and-maps).
+
+## Pointers
+
+A pointer shares storage. Ard has two pointer types:
+
+| Type | Created with | Meaning |
+| --- | --- | --- |
+| `*T` | `&value` | Read-only pointer: reads through the pointer only. |
+| `*mut T` | `&mut value` | Writable pointer: reads and writes through the pointer. |
+
+```ard
+struct User { name: Str }
+
+mut user = User{name: "Ada"}
+
+let reader = &user     // *User
+let writer = &mut user // *mut User
+
+writer.name = "Grace"  // writes user
+reader.name            // "Grace"
+```
+
+Field access and method calls go through a pointer implicitly. A `*mut T` can be used wherever a `*T` is expected; the reverse is rejected.
+
+`&` works on any addressable place, but `&mut` requires a **writable place**: a `mut` binding, a field of one, or a place reached through a `*mut` pointer. Taking `&mut` of a fresh value creates new storage:
+
+```ard
+let fixed = User{name: "Ada"}
+let a = &fixed                    // OK: read-only pointer
+// let b = &mut fixed             // Error: fixed is not writable
+
+let fresh = &mut User{name: "Lin"} // *mut User to new storage
+```
+
+`*T` is read-only only through that pointer. Other `*mut T` pointers to the same storage can still write it.
+
+A pointer binding declared with `let` cannot be rebound, but it can still write through to its pointee. A `mut` pointer binding can also point somewhere else:
+
+```ard
+mut first = User{name: "First"}
+mut second = User{name: "Second"}
+mut current = &mut first
 let alias = current
 
-current = mut second // rebinds only current
-alias.name = "One"   // still mutates first
-current.name = "Two" // mutates second
+current = &mut second // rebinds only current
+alias.name = "One"    // still writes first
+current.name = "Two"  // writes second
 ```
 
-## Explicit reference destinations
+## Pointer parameters
 
-`mut T` in a type position means “a mutable reference to `T`.” Such a destination requires an actual reference value; a writable ordinary binding is not borrowed implicitly.
+Parameters are immutable bindings. To let a function change the caller's value, take a `*mut T` parameter:
 
 ```ard
-fn rename(user: mut User, name: Str) {
+fn rename(user: *mut User, name: Str) {
   user.name = name
 }
 
-let user = User{name: "Ada"}
-rename(mut user, "Grace")
-
-let reference = mut user
-rename(reference, "Lin")
+mut user = User{name: "Ada"}
+rename(&mut user, "Grace")
 ```
 
-`mut expression` has three useful behaviors:
-
-- borrowing addressable local, field, or module storage;
-- copying an existing reference handle (`mut reference` is idempotent);
-- creating stable fresh storage for a value expression such as a literal or call result.
-
-Copy-producing accessors still produce fresh storage rather than a reference into the container.
-
-## Explicit shallow values with `.@`
-
-References remain references during ordinary value flow. Use the postfix **value-at** operator `.@` when a destination needs the current `T` value:
+A function that only needs its own writable copy shadows the parameter instead:
 
 ```ard
-let user = User{name: "Ada"}
-let reference = mut user
-let snapshot: User = reference.@
+fn renamed(user: User, name: Str) User {
+  mut user = user
+  user.name = name
+  user
+}
 ```
 
-`.@` removes exactly one outer reference layer and evaluates its operand once. It is the only dereference syntax; `deref` is an ordinary identifier.
+## Dereferencing with `.*`
 
-:::caution[Migration from prefix `deref`]
-Prefix `deref reference` is no longer accepted. Before upgrading, run `ard format` with an older Ard release that still supports the compatibility syntax, or rewrite each use as `reference.@`. The current formatter no longer parses or rewrites the prefix form.
-:::
+Postfix `.*` gives the value at a pointer. Reading it produces a shallow copy:
 
-`mut Trait` shares the trait's native Go interface representation. Converting it directly to ordinary `Trait` preserves the same current dynamic object. Explicit `trait_reference.@` instead returns ordinary `Trait` with an independent shallow copy of the hidden dynamic concrete value.
+```ard
+mut user = User{name: "Ada"}
+let pointer = &mut user
+let snapshot: User = pointer.*
+```
+
+`pointer.*` is also a place. Through a `*mut T` pointer it can be assigned, replacing the whole pointee:
+
+```ard
+pointer.* = User{name: "Grace"} // user is now Grace
+pointer.*.name = "Lin"          // same as pointer.name = "Lin"
+```
+
+`.*` evaluates its operand once and composes left to right with calls and member access: `load().*.name`.
 
 The copy is **shallow**:
 
 - structs, fixed arrays, and primitive values copy their current value;
-- reference-valued fields keep copied reference handles;
+- pointer-valued fields keep copied pointers;
 - lists initially share their existing backing storage, although later growth may detach one descriptor;
 - maps continue sharing map contents;
 - channels and foreign handles retain their intrinsic sharing behavior.
 
-`.@` is not a deep-copy operation, and Ard does not provide one. Programs that need an independent deep copy construct it explicitly.
+Ard does not provide a deep copy. Programs that need one construct it explicitly.
 
-References compare by pointer identity. Compare referent values explicitly when their value types support equality:
+Pointers compare by identity. Compare pointee values explicitly when their types support equality:
 
 ```ard
-let same_place = reference == mut user
+let same_place = pointer == &user
 
-let count = 1
-let count_reference = mut count
-let count_snapshot = count_reference.@
-let same_value = count_reference.@ == count_snapshot
+mut count = 1
+let count_pointer = &mut count
+let same_value = count_pointer.* == count
 ```
 
-## Reference-valued fields
+## Lists and maps
 
-Struct fields can store references:
+Copying a list copies its descriptor and shares its backing storage. Copying a map shares its contents. To keep that sharing visible, in-place list and map operations such as `push`, `set`, `swap`, and `delete` require a `*mut` pointer. A `mut` binding can only replace the whole value:
+
+```ard
+mut values = [1, 2]
+values = [3]          // OK: replaces the value
+// values.push(4)     // Error: requires *mut [Int]
+
+let items = &mut [1, 2]
+items.push(3)         // OK
+```
+
+## Pointer-valued fields
+
+Struct fields can store pointers. Writing through a pointer field targets the pointee, so it does not need the containing value to be writable:
 
 ```ard
 struct Tree { value: Int }
-struct Context { tree: mut Tree }
+struct Context { tree: *mut Tree }
 
-let tree = Tree{value: 1}
-let context = mut Context{tree: mut tree}
-context.tree.value = 2
+let context = Context{tree: &mut Tree{value: 1}}
+context.tree.value = 2                   // OK: writes the Tree
 
-let other = Tree{value: 3}
-context.tree = mut other // rebinds the field's reference slot
+// context.tree = &mut Tree{value: 3}    // Error: writes context's own storage
 ```
 
-The containing value must itself be reached through a reference to rebind a reference-valued field. Reading or mutating the referenced tree does not require the field's binding slot to be reassignable.
+## Migrating from `mut` references
+
+Earlier releases spelled pointers with `mut`. That syntax still works but reports deprecation warnings, and it will be removed in a future release:
+
+| Before | Now |
+| --- | --- |
+| `user: mut User` | `user: *mut User` |
+| `mut user` | `&mut user` |
+| `mut pointer` (already a pointer) | `pointer` |
+| `pointer.@` | `pointer.*` |
+
+`mut Trait` is unchanged; see [Traits](/advanced/traits/).
+
+`ard migrate <path>` rewrites the mechanical cases in place. Use `ard migrate --check <path>` to list files that still need migration without changing them. Some uses need a manual change and are reported instead. One example is borrowing a parameter, because `&mut` requires a writable place: shadow the parameter with `mut name = name` first.
 
 ## Shadowing
 

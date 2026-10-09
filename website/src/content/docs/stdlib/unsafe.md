@@ -34,7 +34,7 @@ Return `true` when the value's backend representation is nil.
 use ard/unsafe
 use go:net/http as http
 
-fn has_url(req: mut http::Request) Bool {
+fn has_url(req: *mut http::Request) Bool {
   !unsafe::is_nil(req.URL)
 }
 ```

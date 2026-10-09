@@ -160,11 +160,11 @@ maybe_name = Maybe::new("Alice")
 let formal: Maybe<Int> = Maybe::new(42)
 ```
 
-When the wrapped type starts with `mut`, group it before adding `?`:
+A pointer prefix binds more loosely than `?`, so `*mut Widget?` is a pointer to a `Widget?`. Group the pointer type before adding `?` to make the pointer optional:
 
 ```ard
 struct Widget {}
-let maybe_ref: (mut Widget)? = Maybe::new()
+let maybe_ref: (*mut Widget)? = Maybe::new()
 ```
 
 Working with `Maybe` values:

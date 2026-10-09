@@ -29,6 +29,7 @@ Note: trying to follow Go's philosophy for readablity left to right, rather than
 
 - Use `let` for constants and `mut` for variables
 - `let` variables cannot be reassigned or mutated
+- `mut` variables can be reassigned, and their fields can be written
 - Variable types can be inferred or explicitly declared
 
 ```ard
@@ -36,46 +37,44 @@ let name: Str = "Alice"
 mut age = 30
 ```
 
-#### Mutable References
+#### Pointers
 
-Ard uses `mut` for mutable access. A mutable function parameter receives a mutable reference to caller-owned storage, so the caller must pass an addressable mutable value:
+Ard shares storage through explicit pointers. `*T` is a read-only pointer and `*mut T` is a writable one. `&value` and `&mut value` create them, and postfix `.*` dereferences:
 
 ```ard
-fn update_person(person: mut Person) {
+fn update_person(person: *mut Person) {
     person.age = 99  // Mutates the caller's value
 }
 
 mut alice = Person { name: "Alice", age: 30 }
-update_person(alice)
+update_person(&mut alice)
 // alice.age is now 99
 ```
 
-Immutable values cannot be passed where mutable access is required:
+`&mut` requires a writable place, so immutable values cannot be passed where a writable pointer is required:
 
 ```ard
-let alice = Person { name: "Alice", age: 30 }
-update_person(alice) // Error: expected a mutable Person
+let bob = Person { name: "Bob", age: 30 }
+update_person(&mut bob) // Error: bob is not writable
 ```
 
-Struct fields can also hold mutable references:
+Struct fields can also hold pointers:
 
 ```ard
 struct Context {
-    tree: mut ViewTree,
+    tree: *mut ViewTree,
 }
 
-let ctx = Context { tree: tree }
+let ctx = Context { tree: &mut tree }
 ctx.tree.add_child(child)
 ```
 
-The `ctx` binding is immutable, but `ctx.tree` is mutable access to the referenced `ViewTree`. Field assignment writes through the reference; it does not rebind the field slot.
+The `ctx` binding is immutable, but `ctx.tree` points to a writable `ViewTree`. Writing through the pointer does not change `ctx` itself.
 
-Nullable mutable references use grouping before `?`:
+Optional pointers use grouping before `?`:
 
 ```ard
-use ard/maybe
-
-let maybe_tree: (mut ViewTree)? = maybe::none()
+let maybe_tree: (*mut ViewTree)? = Maybe::new()
 ```
 
 #### Increment/Decrement short hand
@@ -407,7 +406,7 @@ let rect = image::Rectangle{
   Max: image::Point{X: 80, Y: 24},
 }
 
-fn mark_ok(resp: mut gohttp::Response) {
+fn mark_ok(resp: *mut gohttp::Response) {
   resp.StatusCode = gohttp::StatusOK
 }
 ```
