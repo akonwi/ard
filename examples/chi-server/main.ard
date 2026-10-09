@@ -23,7 +23,7 @@ use go:time
 //   - `context.WithTimeout` also returns a pair; shutdown uses
 //     `context.Background()` and waits for in-flight requests to drain.
 
-fn service() mut chi::Mux {
+fn service() *mut chi::Mux {
   let router = chi::NewRouter()
   let public = embed::fs(["public"]).sub("public").expect("embedded public directory")
   let files = http::FileServer(http::FS(public))
@@ -31,19 +31,19 @@ fn service() mut chi::Mux {
   router.Use(middleware::RequestID)
   router.Use(middleware::Logger)
 
-  router.Get("/", fn(w: http::ResponseWriter, r: mut http::Request) {
-    let body = mut "sup".bytes()
+  router.Get("/", fn(w: http::ResponseWriter, r: *mut http::Request) {
+    let body = &mut "sup".bytes()
     w.Write(body)
   })
 
   router.Mount("/static", http::StripPrefix("/static", files))
 
-  router.Get("/slow", fn(w: http::ResponseWriter, r: mut http::Request) {
+  router.Get("/slow", fn(w: http::ResponseWriter, r: *mut http::Request) {
     // Simulates some hard work. We want this handler to complete
     // successfully during a shutdown signal.
     time::Sleep(5 * time::Second)
 
-    let body = mut "all done.\n".bytes()
+    let body = &mut "all done.\n".bytes()
     w.Write(body)
   })
 
@@ -52,7 +52,7 @@ fn service() mut chi::Mux {
 
 fn main() {
   // The HTTP server
-  let server = mut http::Server{Addr: "0.0.0.0:3333", Handler: service()}
+  let server = &mut http::Server{Addr: "0.0.0.0:3333", Handler: service()}
 
   // Listen for shutdown signals
   let interrupts = Chan::new<os::Signal>()
