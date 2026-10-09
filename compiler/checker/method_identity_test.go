@@ -416,7 +416,7 @@ func TestExplicitGenericStructCanUseTypeParamOnlyInMethods(t *testing.T) {
 				panic("x")
 			}
 
-			fn set(mutate: fn(*mut $T)) {
+			fn set(mutate: fn(&mut $T)) {
 			}
 		}
 
@@ -431,7 +431,7 @@ func TestExplicitGenericStructCanUseTypeParamOnlyInMethods(t *testing.T) {
 				init: fn(_ctx: Ctx, _state: State<Model>) Model { Model{n: 0} },
 				build: fn(_ctx: Ctx, state: State<Model>) Widget {
 					let model = state.value()
-					state.set(fn(next: *mut Model) {
+					state.set(fn(next: &mut Model) {
 						next.n = model.n + 1
 					})
 					Widget{}

@@ -10,7 +10,7 @@ func TestAnyConversionRecordsSourceOwnership(t *testing.T) {
 	result := parse.Parse([]byte(`
 fn consume(value: Any) {}
 
-fn pass_reference(value: *mut $T) {
+fn pass_reference(value: &mut $T) {
   consume(value)
 }
 
@@ -20,7 +20,7 @@ fn pass_value(value: $T) {
 
 fn consume_maybe(value: Any?) {}
 
-fn pass_maybe_reference(value: *mut $T) {
+fn pass_maybe_reference(value: &mut $T) {
   consume_maybe(value)
 }
 

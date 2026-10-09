@@ -7,23 +7,23 @@ import "testing"
 func TestFormatPointerTypes(t *testing.T) {
 	input := `struct Node {
 value:Int,
-parent:*Node,
+parent:&Node,
 }
-fn rename(user:*mut User,name:Str) *User {
+fn rename(user:&mut User,name:Str) &User {
 user
 }
-fn maybe(user:(*User)?,inner:*User?,items:*mut [Int],result:(*mut User)!Str) {}
-let callback:fn(*mut User) *User=rename
+fn maybe(user:(&User)?,inner:&User?,items:&mut [Int],result:(&mut User)!Str) {}
+let callback:fn(&mut User) &User=rename
 `
 	want := `struct Node {
   value: Int,
-  parent: *Node,
+  parent: &Node,
 }
-fn rename(user: *mut User, name: Str) *User {
+fn rename(user: &mut User, name: Str) &User {
   user
 }
-fn maybe(user: (*User)?, inner: *User?, items: *mut [Int], result: (*mut User)!Str) {}
-let callback: fn(*mut User) *User = rename
+fn maybe(user: (&User)?, inner: &User?, items: &mut [Int], result: (&mut User)!Str) {}
+let callback: fn(&mut User) &User = rename
 `
 
 	assertDerefFormat(t, input, want)

@@ -240,7 +240,7 @@ func TestGoTargetParityGlobalInitializerLocalContexts(t *testing.T) {
 			name: "escaping reference local",
 			source: `
 				struct Box { value: Int }
-				let shared: *mut Box = {
+				let shared: &mut Box = {
 					let box = &mut Box{value: 1}
 					box
 				}

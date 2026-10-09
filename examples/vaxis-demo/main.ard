@@ -18,7 +18,7 @@ struct DemoState {
 }
 
 // Runs ~1/sec on the UI thread (via the shim's goroutine + Runtime.Dispatch).
-fn tick(c: *mut ffi::StateCtx) {
+fn tick(c: &mut ffi::StateCtx) {
   let state = ffi::StateRef<DemoState>(c)
   state.ticks = state.ticks + 1
   ffi::MarkDirty(c)
@@ -31,70 +31,70 @@ fn tick(c: *mut ffi::StateCtx) {
 // and no whole-value write-back. Adding a field to DemoState needs no changes
 // here.
 
-fn set_page(c: *mut ffi::StateCtx, v: Int) {
+fn set_page(c: &mut ffi::StateCtx, v: Int) {
   let state = ffi::StateRef<DemoState>(c)
   state.page = v
   ffi::MarkDirty(c)
 }
 
-fn set_count(c: *mut ffi::StateCtx, v: Int) {
+fn set_count(c: &mut ffi::StateCtx, v: Int) {
   let state = ffi::StateRef<DemoState>(c)
   state.count = v
   ffi::MarkDirty(c)
 }
 
-fn set_name(c: *mut ffi::StateCtx, v: Str) {
+fn set_name(c: &mut ffi::StateCtx, v: Str) {
   let state = ffi::StateRef<DemoState>(c)
   state.name = v
   ffi::MarkDirty(c)
 }
 
-fn set_notes(c: *mut ffi::StateCtx, v: Str) {
+fn set_notes(c: &mut ffi::StateCtx, v: Str) {
   let state = ffi::StateRef<DemoState>(c)
   state.notes = v
   ffi::MarkDirty(c)
 }
 
-fn set_done(c: *mut ffi::StateCtx, v: Bool) {
+fn set_done(c: &mut ffi::StateCtx, v: Bool) {
   let state = ffi::StateRef<DemoState>(c)
   state.done = v
   ffi::MarkDirty(c)
 }
 
-fn set_dialog(c: *mut ffi::StateCtx, v: Bool) {
+fn set_dialog(c: &mut ffi::StateCtx, v: Bool) {
   let state = ffi::StateRef<DemoState>(c)
   state.dialog = v
   ffi::MarkDirty(c)
 }
 
-fn set_palette(c: *mut ffi::StateCtx, v: Bool) {
+fn set_palette(c: &mut ffi::StateCtx, v: Bool) {
   let state = ffi::StateRef<DemoState>(c)
   state.palette = v
   ffi::MarkDirty(c)
 }
 
 // Palette actions close the palette as they run.
-fn goto_page(c: *mut ffi::StateCtx, page: Int) {
+fn goto_page(c: &mut ffi::StateCtx, page: Int) {
   let state = ffi::StateRef<DemoState>(c)
   state.page = page
   state.palette = false
   ffi::MarkDirty(c)
 }
 
-fn open_dialog_from_palette(c: *mut ffi::StateCtx) {
+fn open_dialog_from_palette(c: &mut ffi::StateCtx) {
   let state = ffi::StateRef<DemoState>(c)
   state.palette = false
   state.dialog = true
   ffi::MarkDirty(c)
 }
 
-fn replay_animation(c: *mut ffi::StateCtx) {
+fn replay_animation(c: &mut ffi::StateCtx) {
   let anim = ffi::Animation(c)
   anim.Forward()
   set_palette(c, false)
 }
 
-fn palette_nav_item(c: *mut ffi::StateCtx, label: Str, name: Str, page: Int) ui::CommandPaletteItem {
+fn palette_nav_item(c: &mut ffi::StateCtx, label: Str, name: Str, page: Int) ui::CommandPaletteItem {
   ui::CommandPaletteItem{
     Title: "Go to {label}",
     Description: "Open the {name} demo page",
@@ -105,7 +105,7 @@ fn palette_nav_item(c: *mut ffi::StateCtx, label: Str, name: Str, page: Int) ui:
   }
 }
 
-fn command_palette_items(c: *mut ffi::StateCtx) [ui::CommandPaletteItem] {
+fn command_palette_items(c: &mut ffi::StateCtx) [ui::CommandPaletteItem] {
   let items = &mut [
     palette_nav_item(c, "Home", "home", 0),
     palette_nav_item(c, "Text layout", "text", 1),
@@ -160,7 +160,7 @@ fn command_palette_items(c: *mut ffi::StateCtx) [ui::CommandPaletteItem] {
 }
 
 // A modal command-palette overlay entry, shown when state.palette is set.
-fn palette_entry(c: *mut ffi::StateCtx) ui::OverlayEntry {
+fn palette_entry(c: &mut ffi::StateCtx) ui::OverlayEntry {
   ui::OverlayEntry{
     Modal: true,
     Child: ui::CommandPalette{
@@ -174,7 +174,7 @@ fn palette_entry(c: *mut ffi::StateCtx) ui::OverlayEntry {
 }
 
 // A modal dialog overlay entry, shown when state.dialog is set.
-fn dialog_entry(c: *mut ffi::StateCtx) ui::OverlayEntry {
+fn dialog_entry(c: &mut ffi::StateCtx) ui::OverlayEntry {
   ui::OverlayEntry{
     Modal: true,
     Child: ui::Dialog{
@@ -202,19 +202,19 @@ fn dialog_entry(c: *mut ffi::StateCtx) ui::OverlayEntry {
   }
 }
 
-fn set_mode(c: *mut ffi::StateCtx, v: Str) {
+fn set_mode(c: &mut ffi::StateCtx, v: Str) {
   let state = ffi::StateRef<DemoState>(c)
   state.mode = v
   ffi::MarkDirty(c)
 }
 
-fn set_chat(c: *mut ffi::StateCtx, v: Str) {
+fn set_chat(c: &mut ffi::StateCtx, v: Str) {
   let state = ffi::StateRef<DemoState>(c)
   state.chat = v
   ffi::MarkDirty(c)
 }
 
-fn submit_chat(c: *mut ffi::StateCtx, value: Str) {
+fn submit_chat(c: &mut ffi::StateCtx, value: Str) {
   let trimmed = value.trim()
   match trimmed.is_empty() {
     true => (),
@@ -258,7 +258,7 @@ fn home_page(s: DemoState) ui::Widget {
   }
 }
 
-fn controls_page(c: *mut ffi::StateCtx, s: DemoState, theme: ui::Theme) ui::Widget {
+fn controls_page(c: &mut ffi::StateCtx, s: DemoState, theme: ui::Theme) ui::Widget {
   ui::Flex{
     Axis: ui::Vertical,
     CrossAxisAlignment: ui::CrossAxisStretch,
@@ -490,7 +490,7 @@ fn theme_swatch_row(spans: [ui::TextSpan]) ui::Widget {
 }
 
 fn theme_group(name: Str, children: [ui::Widget]) ui::Widget {
-  let kids: *mut [ui::Widget] = &mut [
+  let kids: &mut [ui::Widget] = &mut [
     ui::RichText{Spans: [ui::TextSpan{Text: "  "}, ui::TextSpan{Text: name, Style: bold()}]},
   ]
   for child in children {
@@ -640,7 +640,7 @@ fn theme_page(theme: ui::Theme) ui::Widget {
 
 // --- chrome ---
 
-fn tab_button(c: *mut ffi::StateCtx, s: DemoState, theme: ui::Theme, label: Str, page: Int) ui::Widget {
+fn tab_button(c: &mut ffi::StateCtx, s: DemoState, theme: ui::Theme, label: Str, page: Int) ui::Widget {
   let tab = ui::Button{Label: label, OnPressed: fn(ev: ui::EventContext) {
     set_page(c, page)
   }}
@@ -660,7 +660,7 @@ fn tab_button(c: *mut ffi::StateCtx, s: DemoState, theme: ui::Theme, label: Str,
   }
 }
 
-fn header(c: *mut ffi::StateCtx, s: DemoState, theme: ui::Theme) ui::Widget {
+fn header(c: &mut ffi::StateCtx, s: DemoState, theme: ui::Theme) ui::Widget {
   ui::Flex{
     Axis: ui::Vertical,
     CrossAxisAlignment: ui::CrossAxisStretch,
@@ -739,7 +739,7 @@ fn list_tile(leading: Str, title: Str, subtitle: Str, trailing: Str, note: Str) 
   }
 }
 
-fn lists_page(c: *mut ffi::StateCtx, s: DemoState, theme: ui::Theme) ui::Widget {
+fn lists_page(c: &mut ffi::StateCtx, s: DemoState, theme: ui::Theme) ui::Widget {
   ui::Flex{
     Axis: ui::Vertical,
     CrossAxisAlignment: ui::CrossAxisStretch,
@@ -1017,7 +1017,7 @@ fn animation_track(value: Float64, width: Int) Str {
   "{bar}|"
 }
 
-fn animation_page(c: *mut ffi::StateCtx, theme: ui::Theme) ui::Widget {
+fn animation_page(c: &mut ffi::StateCtx, theme: ui::Theme) ui::Widget {
   let anim = ffi::Animation(c)
   let value = anim.Value()
   let status = animation_status(anim.Status())
@@ -1130,7 +1130,7 @@ fn terminal_page(theme: ui::Theme) ui::Widget {
   }
 }
 
-fn page_body(c: *mut ffi::StateCtx, s: DemoState, theme: ui::Theme) ui::Widget {
+fn page_body(c: &mut ffi::StateCtx, s: DemoState, theme: ui::Theme) ui::Widget {
   match s.page {
     1 => text_page(theme),
     2 => controls_page(c, s, theme),
@@ -1157,7 +1157,7 @@ fn previous_page(page: Int) Int {
   }
 }
 
-fn build(c: *mut ffi::StateCtx, ctx: ui::BuildContext) ui::Widget {
+fn build(c: &mut ffi::StateCtx, ctx: ui::BuildContext) ui::Widget {
   let state = ffi::StateValue<DemoState>(c)
   let theme = ui::MustDepend<ui::Theme>(ctx)
   let body = ui::DecoratedBox(

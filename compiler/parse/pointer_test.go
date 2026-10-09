@@ -13,14 +13,14 @@ func TestPointerTypeAnnotations(t *testing.T) {
 		typ  string
 		want string
 	}{
-		{name: "read-only pointer", typ: "*User", want: "ptr(User)"},
-		{name: "writable pointer", typ: "*mut User", want: "ptrmut(User)"},
-		{name: "pointer to nullable", typ: "*User?", want: "ptr(User?)"},
-		{name: "nullable pointer", typ: "(*User)?", want: "ptr(User)?"},
-		{name: "pointer to list", typ: "*mut [Int]", want: "ptrmut([Int])"},
-		{name: "pointer to generic", typ: "*$T", want: "ptr($T)"},
-		{name: "pointer to foreign type", typ: "*mut http::Request", want: "ptrmut(http::Request)"},
-		{name: "list of pointers", typ: "[*mut User]", want: "[ptrmut(User)]"},
+		{name: "read-only pointer", typ: "&User", want: "ptr(User)"},
+		{name: "writable pointer", typ: "&mut User", want: "ptrmut(User)"},
+		{name: "pointer to nullable", typ: "&User?", want: "ptr(User?)"},
+		{name: "nullable pointer", typ: "(&User)?", want: "ptr(User)?"},
+		{name: "pointer to list", typ: "&mut [Int]", want: "ptrmut([Int])"},
+		{name: "pointer to generic", typ: "&$T", want: "ptr($T)"},
+		{name: "pointer to foreign type", typ: "&mut http::Request", want: "ptrmut(http::Request)"},
+		{name: "list of pointers", typ: "[&mut User]", want: "[ptrmut(User)]"},
 		{name: "legacy mutable type", typ: "mut User", want: "mut(User)"},
 	}
 
@@ -44,14 +44,14 @@ func TestPointerTypeAnnotations(t *testing.T) {
 func TestPointerTypesInSignaturesAndFields(t *testing.T) {
 	result := Parse([]byte(`struct Node {
   value: Int,
-  parent: *Node,
+  parent: &Node,
 }
 
-fn rename(user: *mut User, name: Str) *User {
+fn rename(user: &mut User, name: Str) &User {
   user
 }
 
-let callback: fn(*mut User) *User = rename
+let callback: fn(&mut User) &User = rename
 `), "test.ard")
 	if len(result.Errors) > 0 {
 		t.Fatalf("parse errors: %v", result.Errors)

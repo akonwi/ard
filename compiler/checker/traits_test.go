@@ -166,7 +166,7 @@ func TestRecursiveTraitChildManagementTypeDoesNotOverflow(t *testing.T) {
 		input: `struct Children {}
 
 trait View {
-  fn init(children: *mut Children)
+  fn init(children: &mut Children)
 }
 
 impl Children {
@@ -176,7 +176,7 @@ impl Children {
 struct Leaf {}
 
 impl View for Leaf {
-  fn init(children: *mut Children) {}
+  fn init(children: &mut Children) {}
 }
 `,
 	}})
@@ -194,10 +194,10 @@ fn drive(root: mut Widget) {
   root.event()
 }
 
-fn forward(root: *mut $W) {
+fn forward(root: &mut $W) {
   drive(root)
 }`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected mut Widget, got *mut $W"}},
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected mut Widget, got &mut $W"}},
 		},
 		{
 			name: "concrete implementation projects to mutable trait",
@@ -222,9 +222,9 @@ fn main() {
 		},
 		{
 			name: "generic reference forwards to generic parameter",
-			input: `fn pass(value: *mut $T) {}
+			input: `fn pass(value: &mut $T) {}
 
-fn forward(value: *mut $W) {
+fn forward(value: &mut $W) {
   pass(value)
 }`,
 		},
@@ -241,10 +241,10 @@ func TestNestedMutableTraitProjectionRequiresKnownImplementation(t *testing.T) {
 
 fn take(value: (mut Widget)?) {}
 
-fn forward(value: (*mut $W)?) {
+fn forward(value: (&mut $W)?) {
   take(value)
 }`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected (mut Widget)?, got (*mut $W)?"}},
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected (mut Widget)?, got (&mut $W)?"}},
 		},
 		{
 			name: "list of generic references cannot project to list of trait references",
@@ -254,10 +254,10 @@ fn forward(value: (*mut $W)?) {
 
 fn take(value: [mut Widget]) {}
 
-fn forward(value: [*mut $W]) {
+fn forward(value: [&mut $W]) {
   take(value)
 }`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected [mut Widget], got [*mut $W]"}},
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected [mut Widget], got [&mut $W]"}},
 		},
 		{
 			name: "inferred list rejects mixed trait and generic references",
@@ -265,7 +265,7 @@ fn forward(value: [*mut $W]) {
   fn mut event()
 }
 
-fn combine(left: mut Widget, right: *mut $W) {
+fn combine(left: mut Widget, right: &mut $W) {
   let values = [left, right]
 }`,
 			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: A list can only contain values of single type"}},
@@ -276,10 +276,10 @@ fn combine(left: mut Widget, right: *mut $W) {
   fn mut event()
 }
 
-fn combine(left: mut Widget, right: *mut $W) {
+fn combine(left: mut Widget, right: &mut $W) {
   let values = ["left": left, "right": right]
 }`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Map value type mismatch: Expected mut Widget, got *mut $W"}},
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Map value type mismatch: Expected mut Widget, got &mut $W"}},
 		},
 		{
 			name: "if branches reject nested generic and trait references",
@@ -287,7 +287,7 @@ fn combine(left: mut Widget, right: *mut $W) {
   fn mut event()
 }
 
-fn choose(condition: Bool, left: (mut Widget)?, right: (*mut $W)?) (mut Widget)? {
+fn choose(condition: Bool, left: (mut Widget)?, right: (&mut $W)?) (mut Widget)? {
   if condition == true {
     left
   } else {
@@ -304,19 +304,19 @@ fn choose(condition: Bool, left: (mut Widget)?, right: (*mut $W)?) (mut Widget)?
   fn mut event()
 }
 
-fn choose(condition: Bool, left: (mut Widget)?, right: (*mut $W)?) {
+fn choose(condition: Bool, left: (mut Widget)?, right: (&mut $W)?) {
   let chosen = match condition {
     true => left,
     false => right,
   }
 }`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected (mut Widget)?, got (*mut $W)?"}},
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected (mut Widget)?, got (&mut $W)?"}},
 		},
 		{
 			name: "nested reference forwards through the same inferred generic",
-			input: `fn take(value: [(*mut $T)?]) {}
+			input: `fn take(value: [(&mut $T)?]) {}
 
-fn forward(value: [(*mut $W)?]) {
+fn forward(value: [(&mut $W)?]) {
   take(value)
 }`,
 		},
@@ -331,17 +331,17 @@ func TestGenericReferenceEqualityRequiresCompatibleReferents(t *testing.T) {
   fn mut event()
 }
 
-fn compare(left: mut Widget, right: *mut $W) {
+fn compare(left: mut Widget, right: &mut $W) {
   let equal = left == right
 }`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Invalid: mut Widget == *mut $W"}},
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Invalid: mut Widget == &mut $W"}},
 		},
 		{
 			name: "distinct generic references cannot compare",
-			input: `fn compare(left: *mut $T, right: *mut $W) {
+			input: `fn compare(left: &mut $T, right: &mut $W) {
   let equal = left == right
 }`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Invalid: *mut $T == *mut $W"}},
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Invalid: &mut $T == &mut $W"}},
 		},
 		{
 			name: "reference equality rejects unresolved literal inference",
@@ -352,11 +352,11 @@ fn compare(left: mut Widget, right: *mut $W) {
 fn compare() {
   let equal = &mut Marker{value: 1} == &mut Marker<Int>{value: 2}
 }`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Invalid: *mut Marker<$T> == *mut Marker<Int>"}},
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Invalid: &mut Marker<$T> == &mut Marker<Int>"}},
 		},
 		{
 			name: "references to the same generic can compare",
-			input: `fn same(left: *mut $T, right: *mut $T) Bool {
+			input: `fn same(left: &mut $T, right: &mut $T) Bool {
   left == right
 }`,
 		},
@@ -372,7 +372,7 @@ impl Widget for Root {
   fn mut event() {}
 }
 
-fn same(left: mut Widget, right: *mut Root) Bool {
+fn same(left: mut Widget, right: &mut Root) Bool {
   left == right
 }`,
 		},
@@ -400,7 +400,7 @@ func TestGenericStructReferenceFieldInfersReferent(t *testing.T) {
 		{
 			name: "mutable generic field infers from reference value",
 			input: `struct Box<$T> {
-  value: *mut $T,
+  value: &mut $T,
 }
 
 struct User {}
@@ -408,7 +408,7 @@ struct User {}
 fn main() {
   let user = &mut User{}
   let box = Box{value: user}
-  let value: *mut User = box.value
+  let value: &mut User = box.value
 }`,
 		},
 		{
@@ -423,7 +423,7 @@ impl Widget for Root {
 }
 
 struct Holder<$T> {
-  value: *mut $T,
+  value: &mut $T,
 }
 
 fn main() {
@@ -670,11 +670,11 @@ func TestTraitDefinitions(t *testing.T) {
 			input: `
 			struct Counter { value: Int }
 			trait Bumpable {
-				fn poke(c: *mut Counter)
+				fn poke(c: &mut Counter)
 			}
 			struct Doubler {}
 			impl Bumpable for Doubler {
-				fn poke(c: *mut Counter) { () }
+				fn poke(c: &mut Counter) { () }
 			}
 			`,
 			output: &checker.Program{
@@ -687,7 +687,7 @@ func TestTraitDefinitions(t *testing.T) {
 			input: `
 			struct Counter { value: Int }
 			trait Bumpable {
-				fn poke(c: *mut Counter)
+				fn poke(c: &mut Counter)
 			}
 			struct Doubler {}
 			impl Bumpable for Doubler {
@@ -695,7 +695,7 @@ func TestTraitDefinitions(t *testing.T) {
 			}
 			`,
 			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Type mismatch: Expected *mut Counter, got Counter"},
+				{Kind: checker.Error, Message: "Type mismatch: Expected &mut Counter, got Counter"},
 				{Kind: checker.Error, Message: "Trait method 'poke' parameter 'c' mutability mismatch"},
 			},
 		},

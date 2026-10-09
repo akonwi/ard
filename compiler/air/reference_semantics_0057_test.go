@@ -63,7 +63,7 @@ func TestADR0057AsyncTasksPreserveOrdinaryClosureCaptureModes(t *testing.T) {
 }
 
 func TestADR0057BindsGenericReferentThroughReferenceType(t *testing.T) {
-	module := checkedModuleWithPath(t, "test", `fn take(value: *mut $T) {}`)
+	module := checkedModuleWithPath(t, "test", `fn take(value: &mut $T) {}`)
 	definition, ok := module.Get("take").Type.(*checker.FunctionDef)
 	if !ok || len(definition.Parameters) != 1 {
 		t.Fatalf("take definition = %#v", module.Get("take").Type)
@@ -165,13 +165,13 @@ func TestADR0057LowersReferenceShapedCompoundTypes(t *testing.T) {
 		struct Holder<$T> { value: $T }
 
 		fn keep(
-			values: [*mut Box],
-			maybe: (*mut Box)?,
-			holder: Holder<*mut Box>,
-			mapping: [Str: *mut Box],
-			callback: fn(*mut Box) *mut Box,
-			result: (*mut Box)!Str,
-		) Holder<*mut Box> {
+			values: [&mut Box],
+			maybe: (&mut Box)?,
+			holder: Holder<&mut Box>,
+			mapping: [Str: &mut Box],
+			callback: fn(&mut Box) &mut Box,
+			result: (&mut Box)!Str,
+		) Holder<&mut Box> {
 			holder
 		}
 	`)
@@ -205,7 +205,7 @@ func TestADR0057LowersReferenceShapedCompoundTypes(t *testing.T) {
 
 func TestADR0057GenericDefinitionPreservesReferenceFieldIdentity(t *testing.T) {
 	program := lowerSource(t, `
-		struct Holder<$T> { value: *mut $T }
+		struct Holder<$T> { value: &mut $T }
 		fn keep(value: Holder<Int>) Holder<Int> { value }
 	`)
 
@@ -237,13 +237,13 @@ func TestADR0057NormalizesForeignDescriptorParameterABI(t *testing.T) {
 func TestADR0057PreservesReferenceHandlesAcrossFieldsCallsAndReturns(t *testing.T) {
 	program := lowerSource(t, `
 		struct Box { value: Int }
-		struct Holder { current: *mut Box }
+		struct Holder { current: &mut Box }
 
-		fn identity(value: *mut Box) *mut Box {
+		fn identity(value: &mut Box) &mut Box {
 			value
 		}
 
-		fn keep(holder: Holder, value: *mut Box) *mut Box {
+		fn keep(holder: Holder, value: &mut Box) &mut Box {
 			let from_field = holder.current
 			let from_call = identity(value)
 			from_call
@@ -293,7 +293,7 @@ func TestADR0057LowersConcreteToTraitReferenceProjection(t *testing.T) {
 			value.get()
 		}
 
-		fn project(value: *mut Box) mut View {
+		fn project(value: &mut Box) mut View {
 			let holder = Holder{current: value}
 			consume(value)
 		}
@@ -341,7 +341,7 @@ func TestADR0057PreservesTraitReferenceProjectionsInCompoundContexts(t *testing.
 			fn get() Int { self.value }
 		}
 
-		fn contexts(value: *mut Box) {
+		fn contexts(value: &mut Box) {
 			let values: [Str: mut View] = ["box": value]
 			let keys: [mut View: Int] = [value: 1]
 			let nested: [Str: [mut View]] = ["box": [value]]
@@ -364,7 +364,7 @@ func TestADR0057PreservesTraitReferenceProjectionsInCompoundContexts(t *testing.
 func TestADR0057MaybeMatchReferenceLocalMetadataAgreesWithType(t *testing.T) {
 	program := lowerSource(t, `
 		struct Box { value: Int }
-		fn read(value: (*mut Box)?) Int {
+		fn read(value: (&mut Box)?) Int {
 			match value {
 				found => found.value,
 				_ => 0,
@@ -394,10 +394,10 @@ func TestADR0057MutatingMethodReceiverIsReferenceTyped(t *testing.T) {
 				self.value = value
 			}
 		}
-		fn update(holder: *mut Holder) {
+		fn update(holder: &mut Holder) {
 			holder.inner.set(2)
 		}
-		fn observe(value: *mut Box) Int {
+		fn observe(value: &mut Box) Int {
 			value.get()
 		}
 	`)
@@ -433,7 +433,7 @@ func TestADR0057MutatingMethodReceiverIsReferenceTyped(t *testing.T) {
 
 func TestADR0057DistinguishesObservationalAndExplicitDereference(t *testing.T) {
 	program := lowerSource(t, `
-		fn observe(reference: *mut Int) Int {
+		fn observe(reference: &mut Int) Int {
 			let implicit = reference + 1
 			let explicit = reference.*
 			implicit + explicit

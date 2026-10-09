@@ -147,7 +147,7 @@ fn main() {
   if not ffi::Message(Error::new("simple")) == "simple" { panic("Error::new failed") }
   let mutable_error = MutableError{message: "mutable", calls: 0}
   if not ffi::Message(mutable_error) == "mutable" { panic("Error implementation failed") }
-  let interpolation_error: *mut MutableError = &mut MutableError{message: "interpolated", calls: 0}
+  let interpolation_error: &mut MutableError = &mut MutableError{message: "interpolated", calls: 0}
   if not "{interpolation_error}" == "interpolated" { panic("referenced Error interpolation failed") }
   let holder = ffi::Holder{Err: custom}
   if not ffi::HolderMessage(holder) == "custom" { panic("Go error field failed") }

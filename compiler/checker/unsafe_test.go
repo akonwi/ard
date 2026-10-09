@@ -72,13 +72,13 @@ func TestUnsafeCastTypeChecksMutableTarget(t *testing.T) {
 	module, diagnostics := checkUnsafeCastSource(t, `use ard/unsafe
 
 let value: Any = "hello"
-let text = unsafe::cast<*mut Str>(value)`)
+let text = unsafe::cast<&mut Str>(value)`)
 	if len(diagnostics) > 0 {
 		t.Fatalf("unexpected diagnostics: %v", diagnostics)
 	}
 	got := module.Get("text").Type.String()
-	if got != "(*mut Str)?" {
-		t.Fatalf("text type = %q, want (*mut Str)?", got)
+	if got != "(&mut Str)?" {
+		t.Fatalf("text type = %q, want (&mut Str)?", got)
 	}
 }
 

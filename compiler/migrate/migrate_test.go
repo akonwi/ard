@@ -40,22 +40,22 @@ func TestRewritePointerSyntax(t *testing.T) {
 		{
 			name:  "parameter type",
 			input: "fn reset(box: mut Box) { box.value = 0 }",
-			want:  "fn reset(box: *mut Box) { box.value = 0 }",
+			want:  "fn reset(box: &mut Box) { box.value = 0 }",
 		},
 		{
 			name:  "nullable and list parameter types",
 			input: "fn f(a: mut Box?, b: mut [Int]) {}",
-			want:  "fn f(a: *mut Box?, b: *mut [Int]) {}",
+			want:  "fn f(a: &mut Box?, b: &mut [Int]) {}",
 		},
 		{
 			name:  "binding, field, and return types",
 			input: "struct Holder {\n  box: mut Box,\n}\nfn make() mut Box {\n  let holder = Holder{box: mut Box{value: 1}}\n  holder.box\n}\nlet box: mut Box = make()",
-			want:  "struct Holder {\n  box: *mut Box,\n}\nfn make() *mut Box {\n  let holder = Holder{box: &mut Box{value: 1}}\n  holder.box\n}\nlet box: *mut Box = make()",
+			want:  "struct Holder {\n  box: &mut Box,\n}\nfn make() &mut Box {\n  let holder = Holder{box: &mut Box{value: 1}}\n  holder.box\n}\nlet box: &mut Box = make()",
 		},
 		{
 			name:  "function type parameter",
 			input: "fn apply(f: fn(mut Box) Void, box: mut Box) { f(box) }",
-			want:  "fn apply(f: fn(*mut Box) Void, box: *mut Box) { f(box) }",
+			want:  "fn apply(f: fn(&mut Box) Void, box: &mut Box) { f(box) }",
 		},
 		{
 			name:  "trait types stay",
@@ -70,41 +70,41 @@ func TestRewritePointerSyntax(t *testing.T) {
 		},
 		{
 			name:  "redundant mut on pointer parameter types",
-			input: "fn f(a: mut *mut Box, g: fn(mut *mut Box) Void) {}",
-			want:  "fn f(a: *mut Box, g: fn(*mut Box) Void) {}",
+			input: "fn f(a: mut &mut Box, g: fn(mut &mut Box) Void) {}",
+			want:  "fn f(a: &mut Box, g: fn(&mut Box) Void) {}",
 		},
 		{
 			name:    "mut on a pointer type outside parameters needs a manual change",
-			input:   "struct Holder {\n  box: mut *mut Box,\n}",
-			want:    "struct Holder {\n  box: mut *mut Box,\n}",
+			input:   "struct Holder {\n  box: mut &mut Box,\n}",
+			want:    "struct Holder {\n  box: mut &mut Box,\n}",
 			manual:  1,
 			invalid: true,
 		},
 		{
 			name:  "borrow of mut binding",
 			input: "fn reset(box: mut Box) { box.value = 0 }\nmut box = Box{value: 1}\nreset(mut box)",
-			want:  "fn reset(box: *mut Box) { box.value = 0 }\nmut box = Box{value: 1}\nreset(&mut box)",
+			want:  "fn reset(box: &mut Box) { box.value = 0 }\nmut box = Box{value: 1}\nreset(&mut box)",
 		},
 		{
 			name:  "borrow of let binding makes it mut",
 			input: "fn reset(box: mut Box) { box.value = 0 }\nfn main() {\n  let box = Box{value: 1}\n  reset(mut box)\n  reset(mut box)\n}",
-			want:  "fn reset(box: *mut Box) { box.value = 0 }\nfn main() {\n  mut box = Box{value: 1}\n  reset(&mut box)\n  reset(&mut box)\n}",
+			want:  "fn reset(box: &mut Box) { box.value = 0 }\nfn main() {\n  mut box = Box{value: 1}\n  reset(&mut box)\n  reset(&mut box)\n}",
 		},
 		{
 			name:  "borrow of let field makes the root mut",
 			input: "struct Pair {\n  left: Box,\n}\nfn reset(box: mut Box) { box.value = 0 }\nfn main() {\n  let pair = Pair{left: Box{value: 1}}\n  reset(mut pair.left)\n}",
-			want:  "struct Pair {\n  left: Box,\n}\nfn reset(box: *mut Box) { box.value = 0 }\nfn main() {\n  mut pair = Pair{left: Box{value: 1}}\n  reset(&mut pair.left)\n}",
+			want:  "struct Pair {\n  left: Box,\n}\nfn reset(box: &mut Box) { box.value = 0 }\nfn main() {\n  mut pair = Pair{left: Box{value: 1}}\n  reset(&mut pair.left)\n}",
 		},
 		{
 			name:   "borrow of module-level let needs a manual change",
 			input:  "let shared = Box{value: 1}\nfn get() mut Box { (mut shared) }",
-			want:   "let shared = Box{value: 1}\nfn get() *mut Box { (mut shared) }",
+			want:   "let shared = Box{value: 1}\nfn get() &mut Box { (mut shared) }",
 			manual: 1,
 		},
 		{
 			name:  "redundant mut on pointer",
 			input: "fn reset(box: mut Box) { box.value = 0 }\nfn twice(box: mut Box) {\n  reset(mut box)\n  reset(box)\n}",
-			want:  "fn reset(box: *mut Box) { box.value = 0 }\nfn twice(box: *mut Box) {\n  reset(box)\n  reset(box)\n}",
+			want:  "fn reset(box: &mut Box) { box.value = 0 }\nfn twice(box: &mut Box) {\n  reset(box)\n  reset(box)\n}",
 		},
 		{
 			name:  "fresh values",
@@ -114,7 +114,7 @@ func TestRewritePointerSyntax(t *testing.T) {
 		{
 			name:  "dereference",
 			input: "fn copy(box: mut Box) Box { box.@ }",
-			want:  "fn copy(box: *mut Box) Box { box.* }",
+			want:  "fn copy(box: &mut Box) Box { box.* }",
 		},
 		{
 			name:  "loose operand is parenthesized",
@@ -136,13 +136,13 @@ func TestRewritePointerSyntax(t *testing.T) {
 		{
 			name:   "parameter borrow needs a manual change",
 			input:  "fn reset(box: mut Box) { box.value = 0 }\nfn local(box: Box) { reset(mut box) }",
-			want:   "fn reset(box: *mut Box) { box.value = 0 }\nfn local(box: Box) { reset(mut box) }",
+			want:   "fn reset(box: &mut Box) { box.value = 0 }\nfn local(box: Box) { reset(mut box) }",
 			manual: 1,
 		},
 		{
 			name:   "borrowing a dereferenced copy needs a manual change",
 			input:  "fn reset(box: mut Box) { box.value = 0 }\nfn copy(box: mut Box) { reset(mut box.@) }",
-			want:   "fn reset(box: *mut Box) { box.value = 0 }\nfn copy(box: *mut Box) { reset(mut box.@) }",
+			want:   "fn reset(box: &mut Box) { box.value = 0 }\nfn copy(box: &mut Box) { reset(mut box.@) }",
 			manual: 2,
 		},
 	}

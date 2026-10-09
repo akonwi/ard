@@ -33,7 +33,7 @@ box.value = 2`, wantError: true},
 		{name: "let value rejects mutating method", source: `let box = Box{value: 1}
 box.set(2)`, wantError: true},
 		{name: "let value is explicitly borrowable", source: `mut box = Box{value: 1}
-let reference: *mut Box = &mut box`},
+let reference: &mut Box = &mut box`},
 		{name: "mut value accepts slot assignment", source: `mut box = Box{value: 1}
 box = Box{value: 2}`},
 		{name: "mut scalar accepts compound slot assignment", source: `mut count = 1
@@ -43,7 +43,7 @@ box.value = 2`},
 		{name: "mut value rejects mutating method", source: `mut box = Box{value: 1}
 box.set(2)`, wantError: true},
 		{name: "mut value is explicitly borrowable", source: `mut box = Box{value: 1}
-let reference: *mut Box = &mut box`},
+let reference: &mut Box = &mut box`},
 		{name: "let reference permits interior field assignment", source: `mut box = Box{value: 1}
 let reference = &mut box
 reference.value = 2`},
@@ -86,79 +86,79 @@ func TestADR0057ReferenceDestinationsRequireActualReferences(t *testing.T) {
 		wantError bool
 	}{
 		{name: "annotated binding rejects ordinary value", source: `let value = Box{value: 1}
-let reference: *mut Box = value`, wantError: true},
+let reference: &mut Box = value`, wantError: true},
 		{name: "annotated binding accepts explicit reference", source: `mut value = Box{value: 1}
-let reference: *mut Box = &mut value`},
-		{name: "parameter rejects ordinary let value", source: `fn take(value: *mut Box) {}
+let reference: &mut Box = &mut value`},
+		{name: "parameter rejects ordinary let value", source: `fn take(value: &mut Box) {}
 let value = Box{value: 1}
 take(value)`, wantError: true},
-		{name: "parameter rejects ordinary mut value", source: `fn take(value: *mut Box) {}
+		{name: "parameter rejects ordinary mut value", source: `fn take(value: &mut Box) {}
 mut value = Box{value: 1}
 take(value)`, wantError: true},
-		{name: "parameter accepts explicit reference", source: `fn take(value: *mut Box) {}
+		{name: "parameter accepts explicit reference", source: `fn take(value: &mut Box) {}
 mut value = Box{value: 1}
 take(&mut value)`},
-		{name: "parameter accepts existing reference", source: `fn take(value: *mut Box) {}
+		{name: "parameter accepts existing reference", source: `fn take(value: &mut Box) {}
 mut value = Box{value: 1}
 let reference = &mut value
 take(reference)`},
-		{name: "unannotated binding preserves reference type", source: `fn take(value: *mut Box) {}
+		{name: "unannotated binding preserves reference type", source: `fn take(value: &mut Box) {}
 mut value = Box{value: 1}
 let reference = &mut value
 let alias = reference
 take(alias)`},
-		{name: "return rejects ordinary value", source: `fn take(value: Box) *mut Box { value }`, wantError: true},
-		{name: "return accepts explicit reference", source: `fn take(value: Box) *mut Box { (mut value) }`},
-		{name: "field rejects ordinary value", source: `struct Holder { item: *mut Box }
+		{name: "return rejects ordinary value", source: `fn take(value: Box) &mut Box { value }`, wantError: true},
+		{name: "return accepts explicit reference", source: `fn take(value: Box) &mut Box { (mut value) }`},
+		{name: "field rejects ordinary value", source: `struct Holder { item: &mut Box }
 let value = Box{value: 1}
 let holder = Holder{item: value}`, wantError: true},
-		{name: "field accepts explicit reference", source: `struct Holder { item: *mut Box }
+		{name: "field accepts explicit reference", source: `struct Holder { item: &mut Box }
 mut value = Box{value: 1}
 let holder = Holder{item: &mut value}`},
 		{name: "list rejects ordinary value", source: `let value = Box{value: 1}
-let values: [*mut Box] = [value]`, wantError: true},
+let values: [&mut Box] = [value]`, wantError: true},
 		{name: "list preserves reference", source: `mut value = Box{value: 1}
 let reference = &mut value
-let values: [*mut Box] = [reference]`},
+let values: [&mut Box] = [reference]`},
 		{name: "map rejects ordinary value", source: `let value = Box{value: 1}
-let values: [Str: *mut Box] = ["box": value]`, wantError: true},
+let values: [Str: &mut Box] = ["box": value]`, wantError: true},
 		{name: "map preserves reference", source: `mut value = Box{value: 1}
 let reference = &mut value
-let values: [Str: *mut Box] = ["box": reference]`},
+let values: [Str: &mut Box] = ["box": reference]`},
 		{name: "Maybe rejects ordinary value", source: `let value = Box{value: 1}
-let maybe: (*mut Box)? = Maybe::new(value)`, wantError: true},
+let maybe: (&mut Box)? = Maybe::new(value)`, wantError: true},
 		{name: "Maybe preserves reference", source: `mut value = Box{value: 1}
 let reference = &mut value
-let maybe: (*mut Box)? = Maybe::new(reference)`},
-		{name: "nullable reference parameter preserves outer Maybe", source: `fn take(value: (*mut Box)?) {}
+let maybe: (&mut Box)? = Maybe::new(reference)`},
+		{name: "nullable reference parameter preserves outer Maybe", source: `fn take(value: (&mut Box)?) {}
 mut value = Box{value: 1}
 let reference = &mut value
 take(Maybe::new(reference))`},
-		{name: "nullable reference parameter rejects Maybe value", source: `fn take(value: (*mut Box)?) {}
+		{name: "nullable reference parameter rejects Maybe value", source: `fn take(value: (&mut Box)?) {}
 let value = Box{value: 1}
 take(Maybe::new(value))`, wantError: true},
 		{name: "Result rejects ordinary value", source: `let value = Box{value: 1}
-let result: (*mut Box)!Str = Result::ok(value)`, wantError: true},
+let result: (&mut Box)!Str = Result::ok(value)`, wantError: true},
 		{name: "Result preserves reference", source: `mut value = Box{value: 1}
 let reference = &mut value
-let result: (*mut Box)!Str = Result::ok(reference)`},
+let result: (&mut Box)!Str = Result::ok(reference)`},
 		{name: "channel rejects ordinary value at reference element", source: `let value = Box{value: 1}
-let channel = Chan::new<*mut Box>(1)
+let channel = Chan::new<&mut Box>(1)
 channel.send(value)`, wantError: true},
 		{name: "channel preserves reference element", source: `mut value = Box{value: 1}
 let reference = &mut value
-let channel = Chan::new<*mut Box>(1)
+let channel = Chan::new<&mut Box>(1)
 channel.send(reference)`},
 		{name: "generic inference preserves reference", source: `fn identity(value: $T) $T { value }
-fn take(value: *mut Box) {}
+fn take(value: &mut Box) {}
 mut value = Box{value: 1}
 let reference = &mut value
 let same = identity(reference)
 take(same)`},
-		{name: "function value rejects ordinary argument", source: `let callback: fn(*mut Box) = fn(value: *mut Box) { value.set(2) }
+		{name: "function value rejects ordinary argument", source: `let callback: fn(&mut Box) = fn(value: &mut Box) { value.set(2) }
 let value = Box{value: 1}
 callback(value)`, wantError: true},
-		{name: "function value accepts reference argument", source: `let callback: fn(*mut Box) = fn(value: *mut Box) { value.set(2) }
+		{name: "function value accepts reference argument", source: `let callback: fn(&mut Box) = fn(value: &mut Box) { value.set(2) }
 mut value = Box{value: 1}
 let reference = &mut value
 callback(reference)`},
@@ -182,7 +182,7 @@ let reference = &mut value`},
 		{name: "borrow mut local", source: `mut value = Box{value: 1}
 let reference = &mut value`},
 		{name: "borrow module let", source: `mut value = Box{value: 1}
-fn borrow() *mut Box { (&mut value) }`},
+fn borrow() &mut Box { (&mut value) }`},
 		{name: "borrow field through let storage", source: `struct Outer { inner: Box }
 mut outer = Outer{inner: Box{value: 1}}
 let reference = &mut outer.inner`},
@@ -198,22 +198,22 @@ let reference = mut make().inner`, wantError: true},
 let reference = mut helper`, wantError: true},
 		{name: "mut existing reference is idempotent", source: `mut value = Box{value: 1}
 let reference = &mut value
-let same: *mut Box = reference`},
+let same: &mut Box = reference`},
 		{name: "Ard owned nested reference type is rejected", source: `mut value = Box{value: 1}
 let reference = &mut value
-let nested: mut *mut Box = reference`, wantError: true},
-		{name: "annotation types empty list through mut", source: `let rows: *mut [Int] = &mut []
+let nested: mut &mut Box = reference`, wantError: true},
+		{name: "annotation types empty list through mut", source: `let rows: &mut [Int] = &mut []
 rows.push(1)`},
-		{name: "annotation types empty map through mut", source: `let scores: *mut [Str: Int] = &mut [:]
+		{name: "annotation types empty map through mut", source: `let scores: &mut [Str: Int] = &mut [:]
 scores.set("a", 1)`},
-		{name: "return annotation types empty list through mut", source: `fn make() *mut [Int] { (&mut []) }
+		{name: "return annotation types empty list through mut", source: `fn make() &mut [Int] { (&mut []) }
 let rows = make()
 rows.push(1)`},
-		{name: "reference parameter types fresh empty list", source: `fn take(values: *mut [Int]) { values.push(1) }
+		{name: "reference parameter types fresh empty list", source: `fn take(values: &mut [Int]) { values.push(1) }
 take(&mut [])`},
-		{name: "annotation rejects mismatched fresh list element", source: `let rows: *mut [Int] = mut ["a"]`, wantError: true},
+		{name: "annotation rejects mismatched fresh list element", source: `let rows: &mut [Int] = mut ["a"]`, wantError: true},
 		{name: "generic annotation types empty list through mut", source: `fn keep_all(from: [$T]) [$T] {
-  let out: *mut [$T] = &mut []
+  let out: &mut [$T] = &mut []
   for t in from {
     out.push(t)
   }
@@ -221,14 +221,14 @@ take(&mut [])`},
 }
 let kept = keep_all([1, 2])`},
 		{name: "generic annotation types empty map through mut", source: `fn index(values: [$V]) [Str: $V] {
-  let out: *mut [Str: $V] = &mut [:]
+  let out: &mut [Str: $V] = &mut [:]
   for v, i in values {
     out.set("{i}", v)
   }
   out.*
 }
 let indexed = index([1, 2])`},
-		{name: "generic return annotation types empty list through mut", source: `fn fresh(seed: $T) *mut [$T] {
+		{name: "generic return annotation types empty list through mut", source: `fn fresh(seed: $T) &mut [$T] {
   (&mut [])
 }
 let rows = fresh(1)
@@ -264,16 +264,16 @@ take(reference)`, wantError: true},
 mut value = Box{value: 1}
 let reference = &mut value
 take(reference.*)`},
-		{name: "value return rejects bare reference", source: `fn copy(reference: *mut Box) Box { reference }`, wantError: true},
-		{name: "value return accepts deref", source: `fn copy(reference: *mut Box) Box { reference.* }`},
+		{name: "value return rejects bare reference", source: `fn copy(reference: &mut Box) Box { reference }`, wantError: true},
+		{name: "value return accepts deref", source: `fn copy(reference: &mut Box) Box { reference.* }`},
 		{name: "value field rejects bare reference", source: `struct Holder { item: Box }
 mut value = Box{value: 1}
 let reference = &mut value
 let holder = Holder{item: reference}`, wantError: true},
-		{name: "reference field rejects writable ordinary binding", source: `struct Holder { item: *mut Box }
+		{name: "reference field rejects writable ordinary binding", source: `struct Holder { item: &mut Box }
 mut value = Box{value: 1}
 let holder = Holder{item: value}`, wantError: true},
-		{name: "reference field accepts explicit borrow", source: `struct Holder { item: *mut Box }
+		{name: "reference field accepts explicit borrow", source: `struct Holder { item: &mut Box }
 mut value = Box{value: 1}
 let holder = Holder{item: (&mut value)}`},
 		{name: "value field accepts deref", source: `struct Holder { item: Box }
@@ -298,7 +298,7 @@ let reference = &mut value
 reference.@.value = 2`, wantError: true},
 		{name: "legacy mut deref creates independent top level storage", source: `mut value = Box{value: 1}
 let reference = &mut value
-let independent: *mut Box = mut reference.@`},
+let independent: &mut Box = mut reference.@`},
 		{name: "mutable trait implicitly narrows to ordinary trait", source: `trait View {
   fn get() Int
 }
@@ -367,7 +367,7 @@ let right = &mut value
 let ordered = left < right`, wantError: true},
 		{name: "reference to noncomparable referent is a map key", source: `mut values = [1, 2]
 let key = &mut values
-let table: [*mut [Int]: Str] = [key: "values"]`},
+let table: [&mut [Int]: Str] = [key: "values"]`},
 		{name: "mutable trait reference supports identity and map keys", source: `trait View {
   fn get() Int
 }
@@ -380,22 +380,22 @@ let second = first
 let equal = first == second
 let table: [mut View: Str] = [first: "value"]
 let found = table.get(second)`},
-		{name: "ordinary let holder rejects reference field rebinding", source: `struct Holder { item: *mut Box }
+		{name: "ordinary let holder rejects reference field rebinding", source: `struct Holder { item: &mut Box }
 mut first = Box{value: 1}
 mut second = Box{value: 2}
 let holder = Holder{item: &mut first}
 holder.item = &mut second`, wantError: true},
-		{name: "ordinary mut holder permits reference field rebinding", source: `struct Holder { item: *mut Box }
+		{name: "ordinary mut holder permits reference field rebinding", source: `struct Holder { item: &mut Box }
 mut first = Box{value: 1}
 mut second = Box{value: 2}
 mut holder = Holder{item: &mut first}
 holder.item = &mut second`},
-		{name: "reference valued field rebinds through referenced holder", source: `struct Holder { item: *mut Box }
+		{name: "reference valued field rebinds through referenced holder", source: `struct Holder { item: &mut Box }
 mut first = Box{value: 1}
 mut second = Box{value: 2}
 let holder = &mut Holder{item: &mut first}
 holder.item = &mut second`},
-		{name: "reference valued field rejects value rhs", source: `struct Holder { item: *mut Box }
+		{name: "reference valued field rejects value rhs", source: `struct Holder { item: &mut Box }
 mut first = Box{value: 1}
 let holder = &mut Holder{item: &mut first}
 holder.item = Box{value: 2}`, wantError: true},
@@ -462,7 +462,7 @@ func TestADR0057UnsafeCastReferencePolicy(t *testing.T) {
 		{name: "concrete reference can be recovered", source: `mut value = Box{value: 1}
 let reference = &mut value
 let boxed: Any = reference
-let recovered: *mut Box = unsafe::cast<*mut Box>(boxed).expect("reference")`},
+let recovered: &mut Box = unsafe::cast<&mut Box>(boxed).expect("reference")`},
 		{name: "concrete pointee can be explicitly materialized", source: `mut value = Box{value: 1}
 let reference = &mut value
 let boxed: Any = reference

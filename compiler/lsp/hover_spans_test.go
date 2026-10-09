@@ -239,15 +239,15 @@ func TestSpanHoverMutParamRendering(t *testing.T) {
   cells: [Str],
 }
 
-fn native_mut(board: *mut Board) {
+fn native_mut(board: &mut Board) {
   board.cells.push("x")
 }
 `
 	content := spanHover(t, source, 4, 4)
-	if !strings.Contains(content, "fn native_mut(board: *mut Board)") {
+	if !strings.Contains(content, "fn native_mut(board: &mut Board)") {
 		t.Fatalf("native mut param rendering wrong: %q", content)
 	}
-	if strings.Contains(content, "mut mut") || strings.Contains(content, "mut *mut") {
+	if strings.Contains(content, "mut mut") || strings.Contains(content, "mut &mut") {
 		t.Fatalf("double mut in rendering: %q", content)
 	}
 }

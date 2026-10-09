@@ -138,10 +138,10 @@ type MutableType struct {
 	Location
 	Inner    DeclaredType
 	nullable bool
-	// Pointer marks the ADR 0073 `*T` / `*mut T` spelling. When false, the
+	// Pointer marks the ADR 0073 `&T` / `&mut T` spelling. When false, the
 	// node is the legacy `mut T` reference spelling.
 	Pointer bool
-	// ReadOnly marks a `*T` pointer, which forbids writes through itself.
+	// ReadOnly marks a `&T` pointer, which forbids writes through itself.
 	// It is only set together with Pointer.
 	ReadOnly bool
 }
@@ -164,7 +164,7 @@ type FunctionType struct {
 	ParamMutability []bool
 	// ParamMutLocations records the legacy `mut` keyword of each mutable
 	// parameter, parallel to ParamMutability, so migration tooling can
-	// rewrite `fn(mut T)` to `fn(*mut T)` (ADR 0073).
+	// rewrite `fn(mut T)` to `fn(&mut T)` (ADR 0073).
 	ParamMutLocations []Location
 	// Variadic marks the final parameter as a repeated element in a callable
 	// type. Ard declarations remain fixed-arity; this syntax describes foreign

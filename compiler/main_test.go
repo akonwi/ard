@@ -1254,7 +1254,7 @@ func TestMigratePath(t *testing.T) {
 		t.Fatalf("migrate: %v", err)
 	}
 	module, _ := os.ReadFile(filepath.Join(dir, "shapes.ard"))
-	if !strings.Contains(string(module), "fn reset(box: *mut Box)") {
+	if !strings.Contains(string(module), "fn reset(box: &mut Box)") {
 		t.Fatalf("module not migrated:\n%s", module)
 	}
 	main, _ := os.ReadFile(mainPath)

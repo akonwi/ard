@@ -15,7 +15,7 @@ type ForeignType struct {
 	Name       string
 	Underlying Type
 	Pointer    bool
-	// ReadOnly marks a read-only `*pkg::T` pointer form (ADR 0073). It is only
+	// ReadOnly marks a read-only `&pkg::T` pointer form (ADR 0073). It is only
 	// set together with Pointer and is a checker-only restriction: writes and
 	// pointer-receiver method calls through the pointer are rejected, while
 	// the runtime representation is the ordinary Go pointer.
@@ -85,9 +85,9 @@ func (f *ForeignType) String() string {
 	}
 	if f.Pointer {
 		if f.ReadOnly {
-			return "*" + name
+			return "&" + name
 		}
-		return "*mut " + name
+		return "&mut " + name
 	}
 	return name
 }

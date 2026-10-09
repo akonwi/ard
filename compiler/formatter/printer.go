@@ -806,9 +806,9 @@ func (p printer) renderType(declared parse.DeclaredType) string {
 	case *parse.MutableType:
 		prefix := "mut "
 		if node.Pointer {
-			prefix = "*mut "
+			prefix = "&mut "
 			if node.ReadOnly {
-				prefix = "*"
+				prefix = "&"
 			}
 		}
 		name := prefix + p.renderType(node.Inner)

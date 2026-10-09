@@ -264,7 +264,7 @@ const (
 // (ADR 0073), or the legacy `mut operand`. It evaluates to a pointer and
 // preserves whether lowering copies an existing handle, borrows addressable
 // storage, or materializes fresh storage (ADR 0057). ReadOnly marks `&operand`,
-// whose `*T` result forbids writes through itself; it has no runtime effect.
+// whose `&T` result forbids writes through itself; it has no runtime effect.
 type MutableRefExpr struct {
 	Operand  Expression
 	Mode     ReferenceMode

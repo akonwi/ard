@@ -60,7 +60,7 @@ fn main() {
   let reader = strings::NewReader("body")
   http::ListenAndServe(":0", reader)
 }`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected http::Handler, got *mut strings::Reader"}},
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected http::Handler, got &mut strings::Reader"}},
 		},
 		{
 			name: "same named type across packages is assignable",

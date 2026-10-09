@@ -734,13 +734,13 @@ func TestLowerProgramTakesAddressOfLocalMutTraitArgs(t *testing.T) {
 		}
 
 		trait Bumpable {
-			fn poke(c: *mut Counter)
+			fn poke(c: &mut Counter)
 		}
 
 		struct Doubler {}
 
 		impl Bumpable for Doubler {
-			fn poke(c: *mut Counter) {
+			fn poke(c: &mut Counter) {
 				c.bump()
 				c.bump()
 			}
@@ -783,19 +783,19 @@ func TestLowerProgramPassesMutTraitArgsByPointer(t *testing.T) {
 		}
 
 		trait Bumpable {
-			fn poke(c: *mut Counter)
+			fn poke(c: &mut Counter)
 		}
 
 		struct Doubler {}
 
 		impl Bumpable for Doubler {
-			fn poke(c: *mut Counter) {
+			fn poke(c: &mut Counter) {
 				c.bump()
 				c.bump()
 			}
 		}
 
-		fn invoke(b: Bumpable, c: *mut Counter) {
+		fn invoke(b: Bumpable, c: &mut Counter) {
 			b.poke(c)
 		}
 	`)
@@ -850,7 +850,7 @@ func TestLowerProgramDereferencesMutParamForNonMutMethodCall(t *testing.T) {
 			}
 		}
 
-		fn process(b: *mut Box) Int {
+		fn process(b: &mut Box) Int {
 			b.bump()
 			b.peek()
 		}
@@ -1380,7 +1380,7 @@ func TestRunProgramExecutesGoForeignMethodValues(t *testing.T) {
 				panic("expected marshal bytes")
 			}
 			let mutable_when = &mut time::Now()
-			let unmarshal: fn(*mut [Byte]) Void!Error = mutable_when.UnmarshalText
+			let unmarshal: fn(&mut [Byte]) Void!Error = mutable_when.UnmarshalText
 			let text = &mut "2024-01-02T00:00:00Z".bytes()
 			try unmarshal(text) -> err { panic(err) }
 			if not mutable_when.Format(time::RFC3339) == "2024-01-02T00:00:00Z" {
@@ -1644,7 +1644,7 @@ func TestRunProgramPreservesArdOwnershipAcrossGoInterfaceConversion(t *testing.T
 			fmt::Fprint(writer, "x")
 		}
 
-		fn forward_reference(writer: *mut Sink) Int!Error {
+		fn forward_reference(writer: &mut Sink) Int!Error {
 			fmt::Fprint(writer, "x")
 		}
 
@@ -1653,7 +1653,7 @@ func TestRunProgramPreservesArdOwnershipAcrossGoInterfaceConversion(t *testing.T
 			let _ = try consume(value) -> err { panic(err) }
 			if not value.written == 0 { panic("value interface conversion mutated original") }
 
-			let reference: *mut Sink = &mut Sink{written: 0}
+			let reference: &mut Sink = &mut Sink{written: 0}
 			let _ = try consume(reference) -> err { panic(err) }
 			if not reference.written == 1 { panic("reference interface conversion lost identity") }
 
@@ -1692,7 +1692,7 @@ func TestRunProgramPreservesDynamicTypeForValueReceiverInterfaces(t *testing.T) 
 
 		fn main() {
 			let value = Sink{}
-			let reference: *mut Sink = &mut Sink{}
+			let reference: &mut Sink = &mut Sink{}
 			if not dynamic_type(value) == "test.Sink" { panic("value interface did not preserve dynamic W") }
 			if not dynamic_type(reference) == "*test.Sink" { panic("reference interface did not preserve dynamic *W") }
 		}
@@ -1812,7 +1812,7 @@ fn make_caster() fn(Any) $T? {
 }
 
 fn cast_mut_value(value: Any, witness: $T) Bool {
-  unsafe::cast<*mut $T>(value).is_some()
+  unsafe::cast<&mut $T>(value).is_some()
 }
 
 
@@ -1863,7 +1863,7 @@ func TestRunProgramMatchesQualifiedForeignTypesInClosedUnions(t *testing.T) {
 	program := lowerSource(t, `use go:image
 
  type Shape = image::Point | image::Rectangle
- type ShapeRef = *mut image::Point | *mut image::Rectangle
+ type ShapeRef = &mut image::Point | &mut image::Rectangle
 
  fn describe(shape: Shape) Int {
    match shape {
@@ -2013,11 +2013,11 @@ use go:foreigncast/ffi
 use go:image
 
 fn main() {
-  let handle = unsafe::cast<*mut image::Point>(ffi::BoxPt()).expect("point handle")
+  let handle = unsafe::cast<&mut image::Point>(ffi::BoxPt()).expect("point handle")
   handle.X = 42
   if not ffi::PtX() == 42 { panic("mutation lost") }
-  if unsafe::cast<*mut image::Point>(ffi::BoxNilPt()).is_some() { panic("nil pointer matched") }
-  if unsafe::cast<*mut image::Rectangle>(ffi::BoxPt()).is_some() { panic("wrong pointer type matched") }
+  if unsafe::cast<&mut image::Point>(ffi::BoxNilPt()).is_some() { panic("nil pointer matched") }
+  if unsafe::cast<&mut image::Rectangle>(ffi::BoxPt()).is_some() { panic("wrong pointer type matched") }
   if not unsafe::cast<image::Point>(ffi::BoxPt()).expect("deref").X == 42 { panic("value cast did not deref") }
 }
 `), 0o644); err != nil {
@@ -2039,20 +2039,20 @@ fn main() {
 func TestRunProgramReturnsMutableMaybeReference(t *testing.T) {
 	program := lowerSource(t, `struct Box { value: Int }
 
-fn borrow(value: *mut Box) (*mut Box)? {
+fn borrow(value: &mut Box) (&mut Box)? {
   Maybe::new(value)
 }
 
-fn none_direct() (*mut Box)? {
-  Maybe::new<*mut Box>()
+fn none_direct() (&mut Box)? {
+  Maybe::new<&mut Box>()
 }
 
-fn none_packed() (*mut Box)? {
-  let missing: (*mut Box)? = Maybe::new<*mut Box>()
+fn none_packed() (&mut Box)? {
+  let missing: (&mut Box)? = Maybe::new<&mut Box>()
   missing
 }
 
-fn make_nested_updater(value: *mut Box) fn(Int) Void {
+fn make_nested_updater(value: &mut Box) fn(Int) Void {
   match borrow(value) {
     found => fn(next: Int) {
       let update = fn() {
@@ -2064,7 +2064,7 @@ fn make_nested_updater(value: *mut Box) fn(Int) Void {
   }
 }
 
-fn make_list_updater(values: *mut [Int]) fn(Int) Void {
+fn make_list_updater(values: &mut [Int]) fn(Int) Void {
   let list_ref = values
   fn(value: Int) {
     list_ref.set(0, value)
@@ -2134,8 +2134,8 @@ func PointX() int { return Point.X }
 use go:genericcast/ffi
 use go:image
 
-fn recover_boxed(value: Any, fallback: *mut $T) *mut $T {
-  match unsafe::cast<*mut $T>(value) {
+fn recover_boxed(value: Any, fallback: &mut $T) &mut $T {
+  match unsafe::cast<&mut $T>(value) {
     found => found,
     _ => fallback,
   }
@@ -2203,7 +2203,7 @@ func NameValue() string { return Name }
 use go:anycast/ffi
 
 fn main() {
-  let name = unsafe::cast<*mut Str>(ffi::BoxName())
+  let name = unsafe::cast<&mut Str>(ffi::BoxName())
   if not name.is_some() { panic("mutable cast failed") }
   if unsafe::cast<mut Str>("Ada").is_some() { panic("mutable cast accepted value") }
   if unsafe::cast<mut Str>(ffi::BoxNilName()).is_some() { panic("mutable cast accepted nil") }
@@ -2476,7 +2476,7 @@ func TestRunProgramSupportsStatementProducingGlobalInitializers(t *testing.T) {
 func TestRunProgramSupportsMutableModuleGlobals(t *testing.T) {
 	program := lowerSource(t, `
 		mut counter = 0
-		let items: *mut [Str] = &mut []
+		let items: &mut [Str] = &mut []
 
 		fn bump() {
 			counter = counter + 1
@@ -3005,7 +3005,7 @@ fn main() {
 func TestRunProgramSpecializesGenericEmptyListLocal(t *testing.T) {
 	program := lowerSource(t, `
 		fn drop(from: [$T], till: Int) [$T] {
-			let out: *mut [$T] = &mut []
+			let out: &mut [$T] = &mut []
 			for item, idx in from {
 				if idx >= till {
 					out.push(item)
@@ -3795,7 +3795,7 @@ func TestLowerProgramUsesPointersForReferenceStructParams(t *testing.T) {
 			body: Str,
 		}
 
-		fn set_body(res: *mut Response) Void {
+		fn set_body(res: &mut Response) Void {
 			res.body = "ok"
 		}
 
@@ -3831,7 +3831,7 @@ func TestLowerProgramUsesPointersForReferenceStructParams(t *testing.T) {
 }
 func TestLowerProgramUsesPointersForNativeReferenceListParams(t *testing.T) {
 	program := lowerSource(t, `
-		fn replace_first(values: *mut [Int]) Void {
+		fn replace_first(values: &mut [Int]) Void {
 			values.set(0, 1)
 		}
 
@@ -3872,7 +3872,7 @@ func TestLowerProgramKeepsForeignMutableListParamsAsDescriptors(t *testing.T) {
 		struct Sink {}
 
 		impl io::Writer for Sink {
-			fn write(bytes: *mut [Byte]) Int!Error {
+			fn write(bytes: &mut [Byte]) Int!Error {
 				Result::ok(bytes.size())
 			}
 		}
@@ -4019,7 +4019,7 @@ func TestLowerProgramInlinesCaptureFreeRetainedClosure(t *testing.T) {
 		fn main() {
 			http::HandleFunc(
 				"/",
-				fn(w: http::ResponseWriter, r: *mut http::Request) {
+				fn(w: http::ResponseWriter, r: &mut http::Request) {
 					http::Error(w, r.Method, 400)
 				},
 			)
@@ -4325,7 +4325,7 @@ fn lookup(values: [mut View: Str], key: mut View) Str { values.get(key).or("miss
 fn shared_ref() mut View { shared }
 fn set_from_any(value: mut View, number: Int) {
   let boxed: Any = value
-  let recovered = unsafe::cast<*mut Box>(boxed).expect("box pointer")
+  let recovered = unsafe::cast<&mut Box>(boxed).expect("box pointer")
   recovered.number = number
 }
 `), 0o644); err != nil {
@@ -4505,7 +4505,7 @@ fn read_mut(value: mut View) Int { value.value() }
 
 struct Holder { current: views::View }
 
-fn borrow(value: *mut Holder) mut views::View { (mut value.current) }
+fn borrow(value: &mut Holder) mut views::View { (mut value.current) }
 `,
 		"models.ard": `use privateimpl/views
 use privateimpl/holder
@@ -6082,7 +6082,7 @@ func TestRunProgramExecutesNamedGoTypeIdentities(t *testing.T) {
 				panic("expected string to be a driver value")
 			}
 			// A closure satisfies a named Go func type annotation.
-			let handler: http::HandlerFunc = fn(w: http::ResponseWriter, r: *mut http::Request) {}
+			let handler: http::HandlerFunc = fn(w: http::ResponseWriter, r: &mut http::Request) {}
 			let _ = handler
 		}
 	`)
@@ -6100,7 +6100,7 @@ func TestRunProgramExecutesListPushOnStructField(t *testing.T) {
 			entries: [Str],
 		}
 
-		fn add(log: *mut Log, entry: Str) {
+		fn add(log: &mut Log, entry: Str) {
 			log.entries.push(entry)
 		}
 
@@ -6320,7 +6320,7 @@ func TestRunProgramMutParameterWritesBack(t *testing.T) {
 			n: Int,
 		}
 
-		fn bump(s: *mut S) {
+		fn bump(s: &mut S) {
 			s.n = s.n + 1
 		}
 

@@ -92,8 +92,8 @@ fn partition(list: [$T], where: fn($T) Bool) Partition<$T> {
 }
 
 fn partition_int(list: [Int], where: fn(Int) Bool) IntPartition {
-  let selected: *mut [Int] = &mut []
-  let others: *mut [Int] = &mut []
+  let selected: &mut [Int] = &mut []
+  let others: &mut [Int] = &mut []
 
   for t in list {
     match where(t) {

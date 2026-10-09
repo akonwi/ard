@@ -46,21 +46,21 @@ func TestADR0073PointerTypes(t *testing.T) {
 		source    string
 		wantError bool
 	}{
-		{name: "read-only pointer parameter reads through", source: `fn show(user: *User) Str { user.name }`},
-		{name: "writable pointer parameter writes through", source: `fn rename(user: *mut User) { user.name = "Grace" }`},
-		{name: "read-only pointer parameter rejects field write", source: `fn rename(user: *User) { user.name = "Grace" }`, wantError: true},
-		{name: "read-only pointer rejects nested field write", source: `fn rename(user: *User) { user.profile.name = "Grace" }`, wantError: true},
-		{name: "read-only pointer parameter rejects mutating method", source: `fn bump(box: *Box) { box.set(2) }`, wantError: true},
-		{name: "read-only pointer parameter allows read method", source: `fn read(box: *Box) Int { box.get() }`},
-		{name: "read-only list pointer rejects push", source: `fn add(xs: *[Int]) { xs.push(1) }`, wantError: true},
-		{name: "read-only list pointer allows size", source: `fn count(xs: *[Int]) Int { xs.size() }`},
-		{name: "writable list pointer allows push", source: `fn add(xs: *mut [Int]) { xs.push(1) }`},
-		{name: "pointer to trait is rejected", source: `fn show(view: *View) {}`, wantError: true},
-		{name: "writable pointer to trait is rejected", source: `fn show(view: *mut View) {}`, wantError: true},
+		{name: "read-only pointer parameter reads through", source: `fn show(user: &User) Str { user.name }`},
+		{name: "writable pointer parameter writes through", source: `fn rename(user: &mut User) { user.name = "Grace" }`},
+		{name: "read-only pointer parameter rejects field write", source: `fn rename(user: &User) { user.name = "Grace" }`, wantError: true},
+		{name: "read-only pointer rejects nested field write", source: `fn rename(user: &User) { user.profile.name = "Grace" }`, wantError: true},
+		{name: "read-only pointer parameter rejects mutating method", source: `fn bump(box: &Box) { box.set(2) }`, wantError: true},
+		{name: "read-only pointer parameter allows read method", source: `fn read(box: &Box) Int { box.get() }`},
+		{name: "read-only list pointer rejects push", source: `fn add(xs: &[Int]) { xs.push(1) }`, wantError: true},
+		{name: "read-only list pointer allows size", source: `fn count(xs: &[Int]) Int { xs.size() }`},
+		{name: "writable list pointer allows push", source: `fn add(xs: &mut [Int]) { xs.push(1) }`},
+		{name: "pointer to trait is rejected", source: `fn show(view: &View) {}`, wantError: true},
+		{name: "writable pointer to trait is rejected", source: `fn show(view: &mut View) {}`, wantError: true},
 		{name: "mutable trait value is accepted", source: `fn show(view: mut View) { view.bump() }`},
 		{name: "pointer field in struct", source: `struct Node {
   value: Int,
-  parent: *Node?,
+  parent: &Node?,
 }`},
 	}
 
@@ -78,31 +78,31 @@ func TestADR0073AddressOf(t *testing.T) {
 		wantError bool
 	}{
 		{name: "read-only address of let binding", source: `let user = new_user()
-let reader: *User = &user`},
+let reader: &User = &user`},
 		{name: "read-only address of mut binding", source: `mut user = new_user()
-let reader: *User = &user`},
+let reader: &User = &user`},
 		{name: "writable address of mut binding", source: `mut user = new_user()
-let writer: *mut User = &mut user`},
+let writer: &mut User = &mut user`},
 		{name: "writable address of let binding is rejected", source: `let user = new_user()
 let writer = &mut user`, wantError: true},
 		{name: "read-only address is not writable", source: `let user = new_user()
-let writer: *mut User = &user`, wantError: true},
-		{name: "writable address of fresh value", source: `let writer: *mut User = &mut new_user()`},
-		{name: "writable address of struct literal", source: `let writer: *mut Box = &mut Box{value: 1}`},
+let writer: &mut User = &user`, wantError: true},
+		{name: "writable address of fresh value", source: `let writer: &mut User = &mut new_user()`},
+		{name: "writable address of struct literal", source: `let writer: &mut Box = &mut Box{value: 1}`},
 		{name: "writable address of field of mut binding", source: `mut user = new_user()
-let writer: *mut Profile = &mut user.profile`},
+let writer: &mut Profile = &mut user.profile`},
 		{name: "writable address of field of let binding is rejected", source: `let user = new_user()
 let writer = &mut user.profile`, wantError: true},
 		{name: "writable address of field through writable pointer", source: `let user = &mut new_user()
-let writer: *mut Profile = &mut user.profile`},
+let writer: &mut Profile = &mut user.profile`},
 		{name: "writable address of field through read-only pointer is rejected", source: `let user = &new_user()
 let writer = &mut user.profile`, wantError: true},
 		{name: "read-only address of field through read-only pointer", source: `let user = &new_user()
-let reader: *Profile = &user.profile`},
+let reader: &Profile = &user.profile`},
 		{name: "writable pointer coerces to read-only", source: `let writer = &mut new_user()
-let reader: *User = writer`},
+let reader: &User = writer`},
 		{name: "read-only pointer does not coerce to writable", source: `let reader = &new_user()
-let writer: *mut User = reader`, wantError: true},
+let writer: &mut User = reader`, wantError: true},
 		{name: "address of pointer is rejected", source: `mut writer = &mut new_user()
 let nested = &writer`, wantError: true},
 		{name: "writable address of pointer is rejected", source: `mut writer = &mut new_user()
@@ -113,7 +113,7 @@ let pointer = &mut view`, wantError: true},
 let view: mut View = box
 view.bump()`},
 		{name: "pointers compare by identity", source: `let box = &mut Box{value: 1}
-let reader: *Box = box
+let reader: &Box = box
 let same = box == reader`},
 	}
 
@@ -130,29 +130,29 @@ func TestADR0073PointerArguments(t *testing.T) {
 		source    string
 		wantError bool
 	}{
-		{name: "read-only parameter accepts read-only pointer", source: `fn show(user: *User) {}
+		{name: "read-only parameter accepts read-only pointer", source: `fn show(user: &User) {}
 let user = new_user()
 show(&user)`},
-		{name: "read-only parameter accepts writable pointer", source: `fn show(user: *User) {}
+		{name: "read-only parameter accepts writable pointer", source: `fn show(user: &User) {}
 mut user = new_user()
 show(&mut user)`},
-		{name: "read-only parameter rejects value", source: `fn show(user: *User) {}
+		{name: "read-only parameter rejects value", source: `fn show(user: &User) {}
 let user = new_user()
 show(user)`, wantError: true},
-		{name: "writable parameter rejects read-only pointer", source: `fn rename(user: *mut User) {}
+		{name: "writable parameter rejects read-only pointer", source: `fn rename(user: &mut User) {}
 let user = new_user()
 rename(&user)`, wantError: true},
-		{name: "writable parameter accepts writable pointer", source: `fn rename(user: *mut User) {}
+		{name: "writable parameter accepts writable pointer", source: `fn rename(user: &mut User) {}
 mut user = new_user()
 rename(&mut user)`},
-		{name: "generic pointer parameter infers from writable pointer", source: `fn read(pointer: *$T) $T { pointer.* }
+		{name: "generic pointer parameter infers from writable pointer", source: `fn read(pointer: &$T) $T { pointer.* }
 let box: Box = read(&mut Box{value: 1})`},
-		{name: "function type pointer parameter unifies with closure parameter", source: `fn update(value: $T, change: fn(*mut $T)) $T {
+		{name: "function type pointer parameter unifies with closure parameter", source: `fn update(value: $T, change: fn(&mut $T)) $T {
   mut value = value
   change(&mut value)
   value
 }
-let box = update(Box{value: 1}, fn(box: *mut Box) { box.value = 2 })`},
+let box = update(Box{value: 1}, fn(box: &mut Box) { box.value = 2 })`},
 	}
 
 	for _, tt := range tests {
@@ -218,12 +218,12 @@ user.tags = ["a"]`},
 		{name: "mut binding rejects list field push", source: `mut user = new_user()
 user.tags.push("a")`, wantError: true},
 		{name: "pointer field writes through let binding", source: `struct Holder {
-  box: *mut Box,
+  box: &mut Box,
 }
 let holder = Holder{box: &mut Box{value: 1}}
 holder.box.value = 2`},
 		{name: "pointer field slot is not writable through let binding", source: `struct Holder {
-  box: *mut Box,
+  box: &mut Box,
 }
 let holder = Holder{box: &mut Box{value: 1}}
 holder.box = &mut Box{value: 2}`, wantError: true},
@@ -242,13 +242,13 @@ func TestADR0073ParametersAreImmutable(t *testing.T) {
 		source    string
 		wantError bool
 	}{
-		{name: "pointer parameter allows field write", source: `fn rename(user: *mut User) {
+		{name: "pointer parameter allows field write", source: `fn rename(user: &mut User) {
   user.name = "Grace"
 }`},
-		{name: "pointer parameter allows pointee replacement", source: `fn reset(box: *mut Box) {
+		{name: "pointer parameter allows pointee replacement", source: `fn reset(box: &mut Box) {
   box.* = Box{value: 0}
 }`},
-		{name: "pointer parameter slot cannot be rebound", source: `fn swap(box: *mut Box) { box = &mut Box{value: 0} }`, wantError: true},
+		{name: "pointer parameter slot cannot be rebound", source: `fn swap(box: &mut Box) { box = &mut Box{value: 0} }`, wantError: true},
 		{name: "legacy reference parameter slot cannot be rebound", source: `fn swap(box: mut Box) { box = mut Box{value: 0} }`, wantError: true},
 		{name: "value parameter can be shadowed as a writable local", source: `fn rename(user: User) User {
   mut user = user
@@ -275,12 +275,12 @@ let value: Int = reader`
 	checked.Check()
 	for _, diagnostic := range checked.Diagnostics() {
 		for _, label := range append([]checker.DiagnosticLabel{diagnostic.Primary}, diagnostic.Secondary...) {
-			if label.Message == "this expression has type `*User`" {
+			if label.Message == "this expression has type `&User`" {
 				return
 			}
 		}
 	}
-	t.Fatalf("expected the read-only pointer type to display as `*User`, got %#v", checked.Diagnostics())
+	t.Fatalf("expected the read-only pointer type to display as `&User`, got %#v", checked.Diagnostics())
 }
 
 func TestADR0073GoPointerBoundaries(t *testing.T) {
@@ -299,15 +299,15 @@ ffi::TakePtr(&mut item)`},
 ffi::TakePtr(&item)`, wantError: true},
 		{name: "writable address of let foreign value is rejected", source: `let item = ffi::Item{N: 1}
 ffi::TakePtr(&mut item)`, wantError: true},
-		{name: "Go pointer result coerces to read-only pointer", source: `let reader: *ffi::Item = ffi::ItemPtr()
+		{name: "Go pointer result coerces to read-only pointer", source: `let reader: &ffi::Item = ffi::ItemPtr()
 let n = reader.N`},
-		{name: "read-only foreign pointer rejects pointer receiver method", source: `let reader: *ffi::Item = ffi::ItemPtr()
+		{name: "read-only foreign pointer rejects pointer receiver method", source: `let reader: &ffi::Item = ffi::ItemPtr()
 reader.Bump()`, wantError: true},
-		{name: "read-only foreign pointer rejects pointer receiver method value", source: `let reader: *ffi::Item = ffi::ItemPtr()
+		{name: "read-only foreign pointer rejects pointer receiver method value", source: `let reader: &ffi::Item = ffi::ItemPtr()
 let bump = reader.Bump`, wantError: true},
-		{name: "read-only foreign pointer rejects field write", source: `let reader: *ffi::Item = ffi::ItemPtr()
+		{name: "read-only foreign pointer rejects field write", source: `let reader: &ffi::Item = ffi::ItemPtr()
 reader.N = 2`, wantError: true},
-		{name: "read-only foreign pointer does not satisfy writable parameter", source: `let reader: *ffi::Item = ffi::ItemPtr()
+		{name: "read-only foreign pointer does not satisfy writable parameter", source: `let reader: &ffi::Item = ffi::ItemPtr()
 ffi::TakePtr(reader)`, wantError: true},
 		{name: "writable foreign pointer calls pointer receiver method", source: `let writer = ffi::ItemPtr()
 writer.Bump()`},

@@ -53,19 +53,19 @@ fn age_from_match(user: User?, fallback: Int) Int {
   }
 }
 
-fn age_from_reference_match(user: *mut Maybe<User>, fallback: Int) Int {
+fn age_from_reference_match(user: &mut Maybe<User>, fallback: Int) Int {
   match user.primary.age {
     age => age,
     _ => fallback,
   }
 }
 
-fn age_from_reference_try(user: *mut Maybe<User>, fallback: Int) Int {
+fn age_from_reference_try(user: &mut Maybe<User>, fallback: Int) Int {
   let age = try user.primary.age -> _ { fallback }
   age
 }
 
-fn tracked(counter: *mut Counter, user: User?) User? {
+fn tracked(counter: &mut Counter, user: User?) User? {
   counter.calls = counter.calls + 1
   user
 }

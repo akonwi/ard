@@ -53,17 +53,17 @@ func (d deprecatedPointerSyntaxDiagnostic) build() Diagnostic {
 	var message, title, text, label string
 	switch d.Kind {
 	case legacyPointerType:
-		message = "Deprecated pointer type syntax: write `*mut T` instead of `mut T`"
+		message = "Deprecated pointer type syntax: write `&mut T` instead of `mut T`"
 		title = "Deprecated `mut T` pointer type"
-		text = "Writable pointer types are spelled `*mut T` (ADR 0073). In type position, `mut` is reserved for `mut Trait`."
-		label = "write `*mut` here"
+		text = "Writable pointer types are spelled `&mut T` (ADR 0073). In type position, `mut` is reserved for `mut Trait`."
+		label = "write `&mut` here"
 	case legacyRedundantTypeMut:
 		message = "Deprecated pointer type syntax: `mut` on a pointer type is redundant"
 		title = "Redundant `mut` on a pointer type"
 		text = "This type is already a pointer (ADR 0073)."
 		label = "remove `mut`"
 		if len(d.Fixes) == 0 {
-			text += " Here `mut` adds a second pointer layer, which has no `*mut` spelling; change the type manually."
+			text += " Here `mut` adds a second pointer layer, which has no `&mut` spelling; change the type manually."
 		}
 	case legacyAddressOf:
 		message = "Deprecated pointer syntax: write `&mut expression` instead of `mut expression`"
@@ -81,7 +81,7 @@ func (d deprecatedPointerSyntaxDiagnostic) build() Diagnostic {
 	case legacyTraitBorrow:
 		message = "Deprecated pointer syntax: `mut` on a trait value has no replacement"
 		title = "Deprecated `mut` trait borrow"
-		text = "`mut Trait` values are created by widening a `*mut T` pointer (ADR 0073). Store a `mut Trait` value instead of borrowing a trait-typed place."
+		text = "`mut Trait` values are created by widening a `&mut T` pointer (ADR 0073). Store a `mut Trait` value instead of borrowing a trait-typed place."
 		label = "borrows a trait-typed place"
 	case legacyDeref:
 		message = "Deprecated dereference syntax: write `.*` instead of `.@`"
@@ -153,7 +153,7 @@ func (c *Checker) reportLegacyPointerType(location parse.Location, mutStart pars
 		c.reportLegacyPointerSyntax(legacyRedundantTypeMut, location, removal)
 		return
 	}
-	c.reportLegacyPointerSyntax(legacyPointerType, location, c.insertEdit(mutStart, "*"))
+	c.reportLegacyPointerSyntax(legacyPointerType, location, c.insertEdit(mutStart, "&"))
 }
 
 // reportLegacyAddressOf reports a legacy `mut <operand>` expression and, when

@@ -20,7 +20,7 @@ func TestRunProgramGoInt64ToStr(t *testing.T) {
 	mainPath := filepath.Join(projectDir, "main.ard")
 	if err := os.WriteFile(mainPath, []byte(`use go:time
 
-fn render_duration(value: *mut time::Duration) Str {
+fn render_duration(value: &mut time::Duration) Str {
   value.to_str()
 }
 
@@ -65,7 +65,7 @@ func TestGoTargetWholeValueFloat64LiteralKeepsFloatType(t *testing.T) {
 }
 
 func TestGoTargetSizedScalarToStrMutableReference(t *testing.T) {
-	program := lowerParitySource(t, `fn render(value: *mut Int64) Str {
+	program := lowerParitySource(t, `fn render(value: &mut Int64) Str {
   value.to_str()
 }
 

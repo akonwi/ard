@@ -78,7 +78,7 @@ fn main() {
 struct Sink {}
 
 impl io::Writer for Sink {
-  fn write(bytes: *mut [Byte]) Int!Error {
+  fn write(bytes: &mut [Byte]) Int!Error {
     Result::ok(bytes.size())
   }
 }`,
@@ -90,7 +90,7 @@ impl io::Writer for Sink {
 struct Sink {}
 
 impl io::Writer for Sink {
-  fn write(bytes: *mut [Byte]) Int!Error {
+  fn write(bytes: &mut [Byte]) Int!Error {
     bytes.push(bytes.at(0).expect("byte"))
     Result::ok(bytes.size())
   }
@@ -104,7 +104,7 @@ impl io::Writer for Sink {
 struct Sink {}
 
 impl io::Writer for Sink {
-  fn write(bytes: *mut [Byte]) Int!Error {
+  fn write(bytes: &mut [Byte]) Int!Error {
     bytes = []
     Result::ok(bytes.size())
   }
@@ -118,7 +118,7 @@ impl io::Writer for Sink {
 struct Sink {}
 
 impl io::Writer for Sink {
-  fn write(bytes: *mut [Byte]) Int!Error {
+  fn write(bytes: &mut [Byte]) Int!Error {
     let alias = bytes
     alias.prepend(bytes.at(0).expect("byte"))
     Result::ok(bytes.size())
@@ -133,7 +133,7 @@ impl io::Writer for Sink {
 struct Sink {}
 
 impl io::Writer for Sink {
-  fn write(bytes: *mut [Byte]) Int!Error {
+  fn write(bytes: &mut [Byte]) Int!Error {
     let grow = fn() {
       bytes.push(bytes.at(0).expect("byte"))
       ()
@@ -151,7 +151,7 @@ impl io::Writer for Sink {
 struct Sink {}
 
 impl io::Writer for Sink {
-  fn write(bytes: *mut [Byte]) Int!Error {
+  fn write(bytes: &mut [Byte]) Int!Error {
     let copy = mut bytes.@
     copy.push(bytes.at(0).expect("byte"))
     Result::ok(copy.size())
@@ -240,7 +240,7 @@ impl io::Writer for Sink {
 }
 
 fn main() {
-  let sink: *mut Sink = &mut Sink{written: 0}
+  let sink: &mut Sink = &mut Sink{written: 0}
   let _ = fmt::Fprint(sink, "hello")
 }`,
 		},
@@ -261,7 +261,7 @@ fn discard(value: $T) {}
 
 fn main() {
   let value = Sink{written: 0}
-  let reference: *mut Sink = &mut Sink{written: 0}
+  let reference: &mut Sink = &mut Sink{written: 0}
   discard<io::Writer>(value)
   discard<io::Writer>(reference)
 }`,
@@ -285,7 +285,7 @@ fn consume(writer: io::Writer) {}
 
 fn main() {
   let value = Sink{written: 0}
-  let reference: *mut Sink = &mut Sink{written: 0}
+  let reference: &mut Sink = &mut Sink{written: 0}
   let writer: io::Writer = value
   mut reassigned: io::Writer = value
   reassigned = reference
@@ -434,7 +434,7 @@ func TestGoImportSupportsExportedEmbeddedStructFields(t *testing.T) {
 use go:io
 use go:strings
 
-fn reader() *mut bufio::Reader {
+fn reader() &mut bufio::Reader {
   let rw = bufio::ReadWriter{
     Reader: bufio::NewReader(strings::NewReader("Ard")),
     Writer: bufio::NewWriter(io::Discard),
@@ -634,7 +634,7 @@ fn main() [Byte]!Error {
 
 fn main() Void!Error {
   let when = &mut time::Now()
-  let unmarshal: fn(*mut [Byte]) Void!Error = when.UnmarshalText
+  let unmarshal: fn(&mut [Byte]) Void!Error = when.UnmarshalText
   mut text = "2024-01-02T00:00:00Z".bytes()
   unmarshal(&mut text)
 }`,
@@ -772,9 +772,9 @@ func TestMutableForeignAnnotationsMatchGoPointerTypes(t *testing.T) {
 			name: "mut foreign parameter forwards to another mut foreign parameter",
 			input: `use go:strings
 
-fn inner(b: *mut strings::Builder) {}
+fn inner(b: &mut strings::Builder) {}
 
-fn outer(b: *mut strings::Builder) {
+fn outer(b: &mut strings::Builder) {
   inner(b)
 }`,
 		},
@@ -782,7 +782,7 @@ fn outer(b: *mut strings::Builder) {
 			name: "mut foreign parameter exposes pointer receiver methods",
 			input: `use go:strings
 
-fn write(b: *mut strings::Builder) {
+fn write(b: &mut strings::Builder) {
   try b.WriteString("hello") -> err { panic(err) }
 }`,
 		},
@@ -790,7 +790,7 @@ fn write(b: *mut strings::Builder) {
 			name: "mut foreign parameter allows field writes",
 			input: `use go:image
 
-fn reset(p: *mut image::Point) {
+fn reset(p: &mut image::Point) {
   p.X = 0
 }`,
 		},
@@ -815,14 +815,14 @@ fn main() {
 			name: "foreign scalar is rejected for mutable primitive parameter",
 			input: `use go:time
 
-fn bump(value: *mut Int) {
+fn bump(value: &mut Int) {
 }
 
 fn main() {
   mut month = time::January
   bump(&mut month)
 }`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected *mut Int, got *mut time::Month"}},
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected &mut Int, got &mut time::Month"}},
 		},
 		{
 			name: "foreign scalar Maybe does not compare against primitive Maybe",
@@ -946,14 +946,14 @@ fn main() {
 			name: "Str is rejected for a mutable foreign newtype parameter",
 			input: `use go:encoding/json
 
-fn rewrite(n: *mut json::Number) {
+fn rewrite(n: &mut json::Number) {
 }
 
 fn main() {
   mut s = "42"
   rewrite(s)
 }`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected *mut json::Number, got Str"}},
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected &mut json::Number, got Str"}},
 		},
 	})
 }
@@ -1002,7 +1002,7 @@ fn origin(value: Any) Int {
 use go:image
 
 fn reset(value: Any) {
-  match unsafe::cast<*mut image::Point>(value) {
+  match unsafe::cast<&mut image::Point>(value) {
     point => { point.X = 0 },
     _ => {},
   }
@@ -1043,10 +1043,10 @@ func TestQualifiedForeignTypePatternsInClosedUnions(t *testing.T) {
 			name: "qualified patterns bind exact mutable foreign members",
 			input: `use go:database/sql
 
- type QueryTarget = *mut sql::DB | *mut sql::Tx
+ type QueryTarget = &mut sql::DB | &mut sql::Tx
 
- fn use_db(db: *mut sql::DB) {}
- fn use_tx(tx: *mut sql::Tx) {}
+ fn use_db(db: &mut sql::DB) {}
+ fn use_tx(tx: &mut sql::Tx) {}
 
  fn run(target: QueryTarget) {
    match target {
@@ -1103,7 +1103,7 @@ func TestQualifiedForeignTypePatternsInClosedUnions(t *testing.T) {
 			name: "qualified pattern rejects ambiguous value and reference members",
 			input: `use go:image
 
- type Ambiguous = image::Point | *mut image::Point
+ type Ambiguous = image::Point | &mut image::Point
 
  fn inspect(value: Ambiguous) {
    match value {
@@ -1278,7 +1278,7 @@ fn main() {
 fn main() {
   os::Stdout = 5
 }`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected *mut os::File, got Int"}},
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected &mut os::File, got Int"}},
 		},
 		{
 			name: "package constant assignment rejected",
@@ -1486,7 +1486,7 @@ func TestVariadicSpreadRejectsFixedSpecialCalls(t *testing.T) {
 		},
 		{
 			name: "contextual Result constructor",
-			input: `fn result() (*mut [Int])!Str {
+			input: `fn result() (&mut [Int])!Str {
   let values = [1]
   Result::ok((mut values)...)
 }`,
@@ -1671,7 +1671,7 @@ fn peek(nums: sort::IntSlice) Int {
 		{
 			name: "real Go methods on the named slice still resolve",
 			input: `use go:sort
-fn sorted(nums: *mut sort::IntSlice) sort::IntSlice {
+fn sorted(nums: &mut sort::IntSlice) sort::IntSlice {
   nums.Sort()
   nums.*
 }`,
@@ -1707,13 +1707,13 @@ sort::Ints(&mut [3, 1, 2])`,
 		},
 		{
 			name: "bare map literal is rejected for mutable Ard parameter",
-			source: `fn consume(m: *mut [Str: Int]) Int { m.size() }
+			source: `fn consume(m: &mut [Str: Int]) Int { m.size() }
 let size = consume(["a": 1])`,
 			wantError: true,
 		},
 		{
 			name: "explicit fresh map reference is accepted",
-			source: `fn consume(m: *mut [Str: Int]) Int { m.size() }
+			source: `fn consume(m: &mut [Str: Int]) Int { m.size() }
 let size = consume(&mut ["a": 1])`,
 		},
 		{
@@ -1763,7 +1763,7 @@ func TestNamedGoFuncTypesAcceptClosures(t *testing.T) {
 			name: "closure satisfies a named Go func annotation",
 			input: `use go:net/http
 fn handler() http::HandlerFunc {
-  let f: http::HandlerFunc = fn(w: http::ResponseWriter, r: *mut http::Request) {}
+  let f: http::HandlerFunc = fn(w: http::ResponseWriter, r: &mut http::Request) {}
   f
 }`,
 		},
@@ -1819,8 +1819,8 @@ func TestFunctionTypeAnnotationsUnifyWithGoSignatures(t *testing.T) {
 		{
 			name: "mut annotation matches an imported Go pointer parameter",
 			input: `use go:net/http
-fn store(handler: http::HandlerFunc) fn(http::ResponseWriter, *mut http::Request) {
-  let f: fn(http::ResponseWriter, *mut http::Request) = handler
+fn store(handler: http::HandlerFunc) fn(http::ResponseWriter, &mut http::Request) {
+  let f: fn(http::ResponseWriter, &mut http::Request) = handler
   f
 }`,
 		},
@@ -1836,7 +1836,7 @@ fn store(handler: http::HandlerFunc) {
 			name: "closure with mut foreign param satisfies the annotation",
 			input: `use go:net/http
 fn main() {
-  let f: fn(http::ResponseWriter, *mut http::Request) = fn(w: http::ResponseWriter, r: *mut http::Request) {}
+  let f: fn(http::ResponseWriter, &mut http::Request) = fn(w: http::ResponseWriter, r: &mut http::Request) {}
   let _ = f
 }`,
 		},

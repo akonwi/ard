@@ -578,7 +578,7 @@ func (c *Checker) checkPointeeAssignment(s *parse.VariableAssignment, target *pa
 }
 
 // rejectsReadOnlyForeignPointerMethod reports and rejects a Go
-// pointer-receiver method selected through a read-only `*pkg::T` pointer.
+// pointer-receiver method selected through a read-only `&pkg::T` pointer.
 // Go methods carry no mutability annotation, so a pointer-receiver method may
 // write through the pointer; only the value method set is available through a
 // read-only pointer (ADR 0073).
@@ -666,7 +666,7 @@ func pointerAsMutableRef(t Type) *MutableRef {
 	return nil
 }
 
-// isReadOnlyPointer reports whether t is a read-only `*T` pointer (ADR 0073).
+// isReadOnlyPointer reports whether t is a read-only `&T` pointer (ADR 0073).
 func isReadOnlyPointer(t Type) bool {
 	switch typ := t.(type) {
 	case *MutableRef:
@@ -690,7 +690,7 @@ func (c *Checker) containerPermitsWrite(subject Expression) bool {
 
 // isWritablePlace reports whether expr names storage that may be written: a
 // `mut` binding, a writable module or Go global, a field of a writable place,
-// or a place reached through a writable `*mut` pointer (ADR 0073).
+// or a place reached through a writable `&mut` pointer (ADR 0073).
 func (c *Checker) isWritablePlace(expr Expression) bool {
 	switch e := expr.(type) {
 	case *Variable:
@@ -748,7 +748,7 @@ func (c *Checker) addInteriorMutationDiagnostic(base Expression, fallback Diagno
 // (mutating methods, sanctioned container operations, Maybe.set/clear) may
 // flow through the expression. It requires a writable pointer as the nearest
 // pointer along the access chain; a writable ordinary binding slot does not
-// qualify (ADRs 0057 and 0073). A read-only `*T` pointer stops the chain:
+// qualify (ADRs 0057 and 0073). A read-only `&T` pointer stops the chain:
 // writes through it are forbidden even when it is stored in a writable slot.
 func (c *Checker) permitsInteriorMutation(expr Expression) bool {
 	if isReferenceValued(expr) {
@@ -1884,7 +1884,7 @@ func (c *Checker) validateMapKeyType(key Type, loc parse.Location) {
 	c.addDiagnostic(invalidMapKeyTypeDiagnostic{KeyType: key, Span: c.sourceSpan(loc)}.build())
 }
 
-// resolveMutableTypeAnnotation resolves a `*T`, `*mut T`, or legacy `mut T`
+// resolveMutableTypeAnnotation resolves a `&T`, `&mut T`, or legacy `mut T`
 // annotation (ADR 0073). Pointer syntax always denotes a real pointer, so it
 // rejects trait referents (spelled `mut Trait`) and pointers to pointers.
 func (c *Checker) resolveMutableTypeAnnotation(annotation parse.MutableType) Type {
@@ -1917,7 +1917,7 @@ func (c *Checker) validPointerReferent(inner Type, location parse.Location) bool
 }
 
 // readOnlyPointer returns the read-only form of a writable pointer type
-// (ADR 0073). Ard pointers become `*T`; pointer-shaped foreign Go types keep
+// (ADR 0073). Ard pointers become `&T`; pointer-shaped foreign Go types keep
 // their foreign pointer form with the ReadOnly restriction, so field and
 // method resolution reuse the foreign pointer machinery.
 func readOnlyPointer(pointer Type) Type {
@@ -2171,8 +2171,8 @@ func (c *Checker) resolveType(t parse.DeclaredType) Type {
 				mutable = ty.ParamMutability[i]
 			}
 			if pointer, ok := param.(*parse.MutableType); ok && pointer.Pointer && !pointer.IsNullable() {
-				// `fn(*mut T)` carries the same parameter metadata as a
-				// named `name: *mut T` parameter (see resolveParameterType).
+				// `fn(&mut T)` carries the same parameter metadata as a
+				// named `name: &mut T` parameter (see resolveParameterType).
 				mutable = true
 			}
 			paramType := c.resolveType(param)
@@ -3026,7 +3026,7 @@ func (c *Checker) areCompatible(expected Type, actual Type) bool {
 	// (`mut Box` -> `mut View`). General value coercions (Any, Go
 	// interfaces, named descriptors) do not apply through a pointer: the
 	// referent storage shapes would differ.
-	// A writable foreign pointer coerces to the read-only `*pkg::T` form of the
+	// A writable foreign pointer coerces to the read-only `&pkg::T` form of the
 	// same Go type (ADR 0073).
 	if expectedForeign, ok := expected.(*ForeignType); ok && expectedForeign.Pointer && expectedForeign.ReadOnly {
 		if actualForeign, ok := actual.(*ForeignType); ok && actualForeign.Pointer && !actualForeign.ReadOnly {
@@ -3035,7 +3035,7 @@ func (c *Checker) areCompatible(expected Type, actual Type) bool {
 	}
 	if expectedRef, ok := expected.(*MutableRef); ok {
 		if actualRef := pointerAsMutableRef(actual); actualRef != nil {
-			// A writable `*mut T` coerces to a read-only `*T`; a read-only
+			// A writable `&mut T` coerces to a read-only `&T`; a read-only
 			// pointer never satisfies a writable destination (ADR 0073).
 			if actualRef.ReadOnly() && !expectedRef.ReadOnly() {
 				return false

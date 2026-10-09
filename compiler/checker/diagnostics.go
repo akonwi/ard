@@ -593,14 +593,14 @@ func (d nonWritableAddressDiagnostic) build() Diagnostic {
 		DiagnosticCodeNonWritableAddress,
 		"Cannot take a writable pointer to a place that is not writable",
 		"Cannot take a writable pointer",
-		"`&mut` requires a writable place: a `mut` binding, a field of a writable place, or a place reached through a `*mut` pointer. Use `&` for a read-only pointer.",
+		"`&mut` requires a writable place: a `mut` binding, a field of a writable place, or a place reached through a `&mut` pointer. Use `&` for a read-only pointer.",
 		DiagnosticLabel{Span: d.Span, Message: "this place is not writable"},
 		d.DeclarationSpan,
 		"declared with `let`",
 	)
 }
 
-// readOnlyPointerWriteDiagnostic reports a write through a read-only `*T`
+// readOnlyPointerWriteDiagnostic reports a write through a read-only `&T`
 // pointer (ADR 0073).
 type readOnlyPointerWriteDiagnostic struct {
 	Pointer Type
@@ -612,7 +612,7 @@ func (d readOnlyPointerWriteDiagnostic) build() Diagnostic {
 		DiagnosticCodeReadOnlyPointerWrite,
 		fmt.Sprintf("Cannot write through read-only pointer %s", formatTypeForDisplay(d.Pointer)),
 		"Write through a read-only pointer",
-		"A `*T` pointer forbids writes through itself. Use a `*mut T` pointer to write.",
+		"A `&T` pointer forbids writes through itself. Use a `&mut T` pointer to write.",
 		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("`%s` is read-only", formatTypeForDisplay(d.Pointer))},
 		nil,
 		"",
@@ -630,7 +630,7 @@ func (d valueInteriorMutationDiagnostic) build() Diagnostic {
 		DiagnosticCodeValueInteriorMutation,
 		fmt.Sprintf("Cannot write to '%s': it is not a writable place", d.Place),
 		"Write requires a writable place",
-		"A field can be written through a `mut` binding or a `*mut` pointer.",
+		"A field can be written through a `mut` binding or a `&mut` pointer.",
 		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("`%s` is not writable", d.Place)},
 		d.DeclarationSpan,
 		"declared without `mut` here",
@@ -781,24 +781,24 @@ type referenceReceiverDiagnostic struct {
 func (d referenceReceiverDiagnostic) build() Diagnostic {
 	legacy := fmt.Sprintf("Cannot call mutating method '%s.%s': receiver is not a writable pointer", d.Receiver, d.Method)
 	title := "Mutating method requires a writable pointer"
-	primary := fmt.Sprintf("`.%s()` requires a `*mut` receiver", d.Method)
+	primary := fmt.Sprintf("`.%s()` requires a `&mut` receiver", d.Method)
 	if d.Kind == referenceMaybeReceiver {
 		legacy = fmt.Sprintf("Cannot call Maybe.%s: receiver is not a writable pointer", d.Method)
-		primary = fmt.Sprintf("`Maybe.%s` requires a `*mut` receiver", d.Method)
+		primary = fmt.Sprintf("`Maybe.%s` requires a `&mut` receiver", d.Method)
 	} else if d.Kind == referencePointerMethodAccess {
 		legacy = fmt.Sprintf("Cannot access pointer receiver method %s.%s on a value", d.Receiver, d.Method)
 		title = "Pointer receiver method requires a writable pointer"
-		primary = "this method value requires a `*mut` receiver"
+		primary = "this method value requires a `&mut` receiver"
 	} else if d.Kind == referencePointerMethodCall {
 		legacy = fmt.Sprintf("Cannot call pointer receiver method %s.%s on a value", d.Receiver, d.Method)
 		title = "Pointer receiver method requires a writable pointer"
-		primary = "this method call requires a `*mut` receiver"
+		primary = "this method call requires a `&mut` receiver"
 	}
 	return mutationDiagnostic(
 		DiagnosticCodeValueInteriorMutation,
 		legacy,
 		title,
-		"Mutating methods need a `*mut` receiver. Take one with `&mut`, or hold the value as a pointer.",
+		"Mutating methods need a `&mut` receiver. Take one with `&mut`, or hold the value as a pointer.",
 		DiagnosticLabel{Span: d.Span, Message: primary},
 		d.DeclarationSpan,
 		"this binding stores a value",

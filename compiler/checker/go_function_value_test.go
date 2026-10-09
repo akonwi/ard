@@ -60,7 +60,7 @@ fn main() {
 			name: "variadic Go function value accepts referenced list spread",
 			input: `use go:fmt
 
-fn invoke(print: fn(...Any) Int!Error, values: *mut [Any]) Int!Error {
+fn invoke(print: fn(...Any) Int!Error, values: &mut [Any]) Int!Error {
   print(values...)
 }
 
@@ -74,14 +74,14 @@ fn main() {
 		},
 		{
 			name: "generic Ard forwarding cannot hide descriptor element ABI",
-			input: `fn forward(call: fn(...$T), values: *mut [$T]) {
+			input: `fn forward(call: fn(...$T), values: &mut [$T]) {
   call(values...)
 }`,
 			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Variadic spread requires a concrete element type, got $T"}},
 		},
 		{
 			name: "generic spread source must also have a concrete element",
-			input: `fn forward(call: fn(...Int), values: *mut [$T]) {
+			input: `fn forward(call: fn(...Int), values: &mut [$T]) {
   call(values...)
 }`,
 			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Variadic spread requires a concrete element type, got $T"}},

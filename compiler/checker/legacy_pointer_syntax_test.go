@@ -23,7 +23,7 @@ impl View for Box {
 		source       string
 		deprecations int
 	}{
-		{name: "pointer syntax is current", source: `fn reset(box: *mut Box) { box.value = 0 }
+		{name: "pointer syntax is current", source: `fn reset(box: &mut Box) { box.value = 0 }
 fn main() {
   mut box = Box{value: 1}
   reset(&mut box)

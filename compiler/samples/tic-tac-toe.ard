@@ -90,7 +90,7 @@ impl Board {
   }
 }
 
-fn read_move(scanner: *mut bufio::Scanner) Int {
+fn read_move(scanner: &mut bufio::Scanner) Int {
   fmt::Println("Enter a number between 1 and 9")
   fmt::Println("---------------")
 

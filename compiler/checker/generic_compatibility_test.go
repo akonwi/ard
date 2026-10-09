@@ -76,7 +76,7 @@ func TestUnionReferenceRepresentationCompatibility(t *testing.T) {
 struct Right {}
 type Choice = Left | Right
 
-fn same(left: *mut Choice, right: *mut Left) Bool {
+fn same(left: &mut Choice, right: &mut Left) Bool {
   left == right
 }`, "mut Choice")
 	})
@@ -85,9 +85,9 @@ fn same(left: *mut Choice, right: *mut Left) Bool {
 struct Right {}
 type Choice = Left | Right
 
-fn take(value: *mut Choice) {}
+fn take(value: &mut Choice) {}
 
-fn forward(value: *mut Left) {
+fn forward(value: &mut Left) {
   take(value)
 }`, "mut Choice")
 	})
@@ -108,7 +108,7 @@ impl View for Right {
 
 type Choice = Left | Right
 
-fn same(left: mut View, right: *mut Choice) Bool {
+fn same(left: mut View, right: &mut Choice) Bool {
   left == right
 }`, "mut View")
 	})
@@ -298,7 +298,7 @@ impl Widget for Root {
 }
 
 struct Holder<$T> {
-  values: *mut [$T],
+  values: &mut [$T],
 }
 
 fn main() {
@@ -319,7 +319,7 @@ impl Widget for Root {
 }
 
 struct Holder<$T> {
-  value: (*mut $T)?,
+  value: (&mut $T)?,
 }
 
 fn main() {
@@ -333,7 +333,7 @@ fn main() {
 }
 
 struct Holder<$T> {
-  value: *mut $T,
+  value: &mut $T,
 }
 
 fn read(holder: Holder<Widget>) mut Widget {
@@ -349,10 +349,10 @@ func TestMutableGenericsPreserveForeignInterfaceArguments(t *testing.T) {
 			input: `use go:io
 
 struct Holder<$T> {
-  value: *mut $T,
+  value: &mut $T,
 }
 
-fn read(holder: Holder<io::Reader>) *mut io::Reader {
+fn read(holder: Holder<io::Reader>) &mut io::Reader {
   holder.value
 }`,
 		},
@@ -360,11 +360,11 @@ fn read(holder: Holder<io::Reader>) *mut io::Reader {
 			name: "generic function keeps pointer to Go interface",
 			input: `use go:io
 
-fn identity(value: *mut $T) *mut $T {
+fn identity(value: &mut $T) &mut $T {
   value
 }
 
-fn consume(value: *mut io::Reader) {
+fn consume(value: &mut io::Reader) {
   let echoed = identity<io::Reader>(value)
 }`,
 		},
@@ -381,7 +381,7 @@ impl Widget for Root {
   fn render() Int { 1 }
 }
 
-fn identity(value: *mut $T) *mut $T {
+fn identity(value: &mut $T) &mut $T {
   value
 }
 `
@@ -412,10 +412,10 @@ impl Widget for Root {
 }
 
 struct Holder<$T> {
-  value: *mut $T,
+  value: &mut $T,
 }
 
-fn make(value: *mut $T) Holder<$T> {
+fn make(value: &mut $T) Holder<$T> {
   Holder{value: value}
 }
 

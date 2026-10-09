@@ -14,30 +14,30 @@ func TestMutRefExpressions(t *testing.T) {
 		{
 			name: "let storage can be explicitly referenced",
 			source: `mut counter = 0
-let reference: *mut Int = &mut counter`,
+let reference: &mut Int = &mut counter`,
 		},
 		{
 			name: "mut on an existing reference is idempotent",
 			source: `mut counter = 0
 let reference = &mut counter
-let again: *mut Int = reference`,
+let again: &mut Int = reference`,
 		},
 		{
 			name: "unannotated binding preserves the reference",
 			source: `mut counter = 0
 let reference = &mut counter
-let alias: *mut Int = reference`,
+let alias: &mut Int = reference`,
 		},
 		{
 			name: "ordinary mut binding does not implicitly satisfy reference parameter",
-			source: `fn take(value: *mut Int) {}
+			source: `fn take(value: &mut Int) {}
 mut counter = 0
 take(counter)`,
 			wantError: true,
 		},
 		{
 			name: "explicit reference satisfies reference parameter",
-			source: `fn take(value: *mut Int) {}
+			source: `fn take(value: &mut Int) {}
 mut counter = 0
 take(&mut counter)`,
 		},

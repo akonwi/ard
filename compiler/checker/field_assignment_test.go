@@ -64,7 +64,7 @@ fn main() {
   n: Int,
 }
 
-fn f(s: *mut S) {
+fn f(s: &mut S) {
   s.n = "oops"
 }
 
@@ -170,7 +170,7 @@ func TestMutableParameterTypeSyntax(t *testing.T) {
   n: Int,
 }
 
-fn f(s: *mut S) {
+fn f(s: &mut S) {
   s.n = 2
 }
 
@@ -186,7 +186,7 @@ fn main() {
   n: Int,
 }
 
-fn f(s: *mut S) {
+fn f(s: &mut S) {
   s.n = 2
 }
 
@@ -194,7 +194,7 @@ fn main() {
   mut s = S{n: 1}
   f(s)
 }
-`), "Expected *mut S")
+`), "Expected &mut S")
 	})
 
 	t.Run("mut parameter forwards to mut parameter", func(t *testing.T) {
@@ -202,11 +202,11 @@ fn main() {
   n: Int,
 }
 
-fn inner(s: *mut S) {
+fn inner(s: &mut S) {
   s.n = 3
 }
 
-fn outer(s: *mut S) {
+fn outer(s: &mut S) {
   inner(s)
 }
 

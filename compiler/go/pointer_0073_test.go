@@ -15,13 +15,13 @@ func TestADR0073ReadOnlyAndWritablePointersShareStorage(t *testing.T) {
 	program := lowerParitySource(t, `
 		struct Box { value: Int }
 
-		fn read(box: *Box) Int { box.value }
-		fn bump(box: *mut Box) { box.value = box.value + 1 }
+		fn read(box: &Box) Int { box.value }
+		fn bump(box: &mut Box) { box.value = box.value + 1 }
 
 		fn main() [Int] {
 			mut box = Box{value: 1}
 			let writer = &mut box
-			let reader: *Box = writer
+			let reader: &Box = writer
 			bump(writer)
 			bump(&mut box)
 			[read(reader), read(&box), box.value]
@@ -67,7 +67,7 @@ func TestADR0073PointeeReplacementAndDeref(t *testing.T) {
 
 func TestADR0073ScalarPointeeReplacement(t *testing.T) {
 	program := lowerParitySource(t, `
-		fn increment(count: *mut Int) {
+		fn increment(count: &mut Int) {
 			count.* = count.* + 1
 			count.* =+ 1
 		}
@@ -145,11 +145,11 @@ func TestADR0073CapturedMutableBindingFieldWrite(t *testing.T) {
 
 func TestADR0073PointerListOperations(t *testing.T) {
 	program := lowerParitySource(t, `
-		fn add(items: *mut [Int], value: Int) {
+		fn add(items: &mut [Int], value: Int) {
 			items.push(value)
 		}
 
-		fn count(items: *[Int]) Int { items.size() }
+		fn count(items: &[Int]) Int { items.size() }
 
 		fn main() [Int] {
 			mut items = [1]
@@ -201,7 +201,7 @@ func TestADR0073PointerIdentityAcrossMutability(t *testing.T) {
 		fn main() [Bool] {
 			mut box = Box{value: 1}
 			let writer = &mut box
-			let reader: *Box = writer
+			let reader: &Box = writer
 			let other = &Box{value: 1}
 			[writer == reader, reader == other]
 		}
@@ -228,14 +228,14 @@ func Bump(value *Item) { value.N++ }
 	mainPath := filepath.Join(projectDir, "main.ard")
 	writeTestFile(t, mainPath, `use go:pointers/ffi
 
-fn read(item: *ffi::Item) Int { item.N + item.Read() }
+fn read(item: &ffi::Item) Int { item.N + item.Read() }
 
 fn main() {
   mut item = ffi::Item{N: 1}
   let writer = &mut item
   ffi::Bump(writer)
   writer.Bump()
-  let reader: *ffi::Item = writer
+  let reader: &ffi::Item = writer
   if not read(reader) == 6 { panic("read-only foreign pointer read failed") }
   if not read(&item) == 6 { panic("read-only address of foreign value failed") }
 

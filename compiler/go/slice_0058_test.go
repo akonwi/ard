@@ -66,16 +66,16 @@ func TestGoTargetCheckedSlicing(t *testing.T) {
 		},
 		{
 			name: "named bounds evaluate in source order",
-			input: `fn mark(log: *mut [Int], value: Int) Int {
+			input: `fn mark(log: &mut [Int], value: Int) Int {
   log.push(value)
   value
 }
 
 fn main() Bool {
   let values = [10, 20, 30]
-  let list_log: *mut [Int] = &mut []
+  let list_log: &mut [Int] = &mut []
   let view = values.slice(end: mark(list_log, 3), start: mark(list_log, 1)).expect("bounds")
-  let string_log: *mut [Int] = &mut []
+  let string_log: &mut [Int] = &mut []
   let text = "abc".slice(end: mark(string_log, 3), start: mark(string_log, 1)).expect("bounds")
   view.size() == 2 and text == "bc" and list_log.at(0).or(0) == 3 and list_log.at(1).or(0) == 1 and string_log.at(0).or(0) == 3 and string_log.at(1).or(0) == 1
 }`,

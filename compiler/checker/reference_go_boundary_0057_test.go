@@ -130,7 +130,7 @@ let reference = &mut values
 let size = ffi::MixedSize(reference)`, wantError: true},
 		{name: "foreign pointer result flows as reference", source: `let pointer = ffi::ItemPtr()
 ffi::TakePtr(pointer)`},
-		{name: "foreign pointer satisfies Ard reference destination", source: `fn use_reference(value: *mut ffi::Item) Int { value.N }
+		{name: "foreign pointer satisfies Ard reference destination", source: `fn use_reference(value: &mut ffi::Item) Int { value.N }
 let pointer = ffi::ItemPtr()
 let n = use_reference(pointer)`},
 
@@ -334,7 +334,7 @@ ffi::TakeDoublePtr(reference)`, wantError: true},
 ffi::TakeDoublePtr(pointer)
 let value = ffi::ReadDoublePtr(pointer)`},
 		{name: "deref removes one foreign pointer layer", source: `let pointer = ffi::DoublePtr()
-let single: *mut ffi::Item = pointer.*
+let single: &mut ffi::Item = pointer.*
 ffi::TakePtr(single)`},
 		{name: "exact pointer to interface remains unsupported", source: `fn pass(value: ffi::Bumper) { ffi::TakeInterfacePtr(mut value) }`, wantError: true},
 	}

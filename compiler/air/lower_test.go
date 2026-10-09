@@ -747,7 +747,7 @@ func TestLowerSizedScalarToStr(t *testing.T) {
 
 func TestLowerSizedScalarToStrObservesMutableReference(t *testing.T) {
 	program := lowerSource(t, `
-		fn render(value: *mut Int64) Str {
+		fn render(value: &mut Int64) Str {
 			value.to_str()
 		}
 	`)
@@ -2157,7 +2157,7 @@ func TestLowerMutableGenericArgumentHasDistinctNominalIdentity(t *testing.T) {
 	program := lowerSource(t, `
 		struct Box<$T> { value: $T }
 		fn plain(value: Box<Int>) {}
-		fn borrowed(value: Box<*mut Int>) {}
+		fn borrowed(value: Box<&mut Int>) {}
 	`)
 
 	plain := findFunction(t, program, "plain")
@@ -2176,16 +2176,16 @@ func TestLowerMutableGenericArgumentHasDistinctNominalIdentity(t *testing.T) {
 func TestLowerRecursiveGenericMethodUsesReceiverTypeParameterIdentity(t *testing.T) {
 	program := lowerSource(t, `
 		struct Context<$T> {
-			handlers: [fn(*mut Context<$T>)],
+			handlers: [fn(&mut Context<$T>)],
 		}
 
 		impl Context {
-			fn first() fn(*mut Context<$T>) {
+			fn first() fn(&mut Context<$T>) {
 				self.handlers.at(0).expect("handler")
 			}
 		}
 
-		fn consume(context: Context<Int>) fn(*mut Context<Int>) {
+		fn consume(context: Context<Int>) fn(&mut Context<Int>) {
 			context.first()
 		}
 	`)

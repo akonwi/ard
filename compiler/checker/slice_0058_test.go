@@ -29,7 +29,7 @@ fn main() Bool {
   let generic: Slice<Int> = identity(middle)
   let nested: Slice<Int>? = middle.slice(start: 1)
   let copied: [Int] = middle.to_list()
-  let writable: *mut Slice<Int> = &mut middle
+  let writable: &mut Slice<Int> = &mut middle
   let changed: Bool = writable.set(0, 99)
   writable.swap(0, 1)
   changed and (not middle.is_empty()) and middle.size() == 2 and middle.at(0).or(0) == 30 and copied.at(0).or(0) == 20 and generic.size() == 2 and consume(middle) == 129 and full.is_some() and tail.is_some() and computed.is_some() and head.is_some() and nested.is_some()

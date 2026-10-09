@@ -30,7 +30,7 @@ func TestGenericCompatibilityPreservesGoRepresentations(t *testing.T) {
 		}
 
 		struct WidgetListRef<$T> {
-			values: *mut [$T],
+			values: &mut [$T],
 		}
 
 		fn marker(seed: $T) Marker<$T> {

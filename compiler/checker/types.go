@@ -85,8 +85,8 @@ type Type interface {
 }
 
 // MutableRef is a pointer to storage of type `of` (ADR 0073). A writable
-// pointer is spelled `*mut T` (legacy `mut T`); a read-only pointer is spelled
-// `*T` and forbids writes through itself. Read-only is a checker-only
+// pointer is spelled `&mut T` (legacy `mut T`); a read-only pointer is spelled
+// `&T` and forbids writes through itself. Read-only is a checker-only
 // property: both forms share one runtime representation.
 //
 // A MutableRef whose referent is a trait is the ADR 0061 `mut Trait` value: a
@@ -101,7 +101,7 @@ func MakeMutableRef(of Type) *MutableRef {
 	return &MutableRef{of: of}
 }
 
-// MakeReadOnlyRef returns the read-only pointer type `*of`.
+// MakeReadOnlyRef returns the read-only pointer type `&of`.
 func MakeReadOnlyRef(of Type) *MutableRef {
 	return &MutableRef{of: of, readOnly: true}
 }
@@ -121,12 +121,12 @@ func (m *MutableRef) String() string {
 		return "mut ?"
 	}
 	if m.readOnly {
-		return "*" + m.of.String()
+		return "&" + m.of.String()
 	}
 	if _, isTrait := m.of.(*Trait); isTrait {
 		return "mut " + m.of.String()
 	}
-	return "*mut " + m.of.String()
+	return "&mut " + m.of.String()
 }
 func (m *MutableRef) get(name string) Type {
 	if m == nil || m.of == nil {
@@ -1161,11 +1161,11 @@ func functionTypeString(f FunctionDef) string {
 func callableTypeString(params []Parameter, returnType Type) string {
 	paramStrs := make([]string, len(params))
 	for i := range params {
-		// Pointer types render their own `*`, `*mut`, or trait `mut` prefix; a
+		// Pointer types render their own `&`, `&mut`, or trait `mut` prefix; a
 		// legacy mutability flag on a plain type is a writable pointer.
 		paramStrs[i] = typeSyntaxString(params[i].Type)
 		if params[i].Mutable && !isReferenceType(params[i].Type) {
-			paramStrs[i] = "*mut " + paramStrs[i]
+			paramStrs[i] = "&mut " + paramStrs[i]
 		}
 		if params[i].Variadic {
 			paramStrs[i] = "..." + paramStrs[i]

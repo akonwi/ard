@@ -146,7 +146,7 @@ func TestGoTargetParityNestedNamedFunctionsAreLexicalClosures(t *testing.T) {
 			name: "existing reference capture retains pointee",
 			source: `
 				struct Box { value: Int }
-				fn outer(box: *mut Box) fn() {
+				fn outer(box: &mut Box) fn() {
 					fn bump() { box.value = box.value + 1 }
 					bump
 				}

@@ -123,16 +123,16 @@ func renderTypeAliasDecl(decl *parse.TypeDeclaration) string {
 	return "type " + decl.Name.Name + " = " + strings.Join(parts, " | ")
 }
 
-// mutableTypePrefix renders the pointer (`*`, `*mut `) or legacy reference
+// mutableTypePrefix renders the pointer (`&`, `&mut `) or legacy reference
 // (`mut `) prefix of a MutableType annotation.
 func mutableTypePrefix(t parse.MutableType) string {
 	switch {
 	case !t.Pointer:
 		return "mut "
 	case t.ReadOnly:
-		return "*"
+		return "&"
 	default:
-		return "*mut "
+		return "&mut "
 	}
 }
 

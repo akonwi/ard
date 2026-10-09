@@ -22,7 +22,7 @@ func TestRunProgramMutRefExpressions(t *testing.T) {
   age: Int,
 }
 
-fn grow(person: *mut Person) {
+fn grow(person: &mut Person) {
   person.age =+ 1
 }
 

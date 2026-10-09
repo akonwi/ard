@@ -64,7 +64,7 @@ struct User {}
 
 fn consume(value: Any) {}
 
-fn pass_reference(value: *mut $T) {
+fn pass_reference(value: &mut $T) {
   consume(value)
 }
 

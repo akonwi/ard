@@ -42,14 +42,14 @@ fn age_from_match(user: User?) Int {
   }
 }
 
-fn reference_match(user: *mut Maybe<User>) Int {
+fn reference_match(user: &mut Maybe<User>) Int {
   match user.primary.age {
     age => age,
     _ => -1,
   }
 }
 
-fn reference_try(user: *mut Maybe<User>) Int {
+fn reference_try(user: &mut Maybe<User>) Int {
   let age = try user.primary.age -> _ { -1 }
   age
 }
