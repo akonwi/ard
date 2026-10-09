@@ -69,6 +69,10 @@ const (
 	DiagnosticCodeInvalidDerefOperand           DiagnosticCode = "invalid_deref_operand"
 	DiagnosticCodeInvalidVariadicSpread         DiagnosticCode = "invalid_variadic_spread"
 	DiagnosticCodeNonAddressableBorrow          DiagnosticCode = "non_addressable_borrow"
+	DiagnosticCodePointerToTrait                DiagnosticCode = "pointer_to_trait"
+	DiagnosticCodePointerToPointer              DiagnosticCode = "pointer_to_pointer"
+	DiagnosticCodeNonWritableAddress            DiagnosticCode = "non_writable_address"
+	DiagnosticCodeReadOnlyPointerWrite          DiagnosticCode = "read_only_pointer_write"
 	DiagnosticCodeValueInteriorMutation         DiagnosticCode = "value_interior_mutation"
 	DiagnosticCodeWholeReferentAssignment       DiagnosticCode = "whole_referent_assignment"
 	DiagnosticCodeReferenceDestination          DiagnosticCode = "reference_destination_requires_reference"
@@ -531,6 +535,82 @@ func (d nonAddressableBorrowDiagnostic) build() Diagnostic {
 		"Cannot take a mutable reference",
 		"A selector on a temporary base has no stable storage to reference. Bind the base first.",
 		DiagnosticLabel{Span: d.Span, Message: "this place has no addressable storage"},
+		nil,
+		"",
+	)
+}
+
+// pointerToTraitDiagnostic reports pointer syntax applied to a trait type
+// (ADR 0073). Trait values are not spelled with pointer syntax; mutation
+// permission on a trait value is spelled `mut Trait`.
+type pointerToTraitDiagnostic struct {
+	Trait Type
+	Span  SourceSpan
+}
+
+func (d pointerToTraitDiagnostic) build() Diagnostic {
+	return mutationDiagnostic(
+		DiagnosticCodePointerToTrait,
+		fmt.Sprintf("Cannot take a pointer to trait %s", formatTypeForDisplay(d.Trait)),
+		"Pointer to a trait",
+		fmt.Sprintf("Trait values are not pointers. Use `mut %s` for a trait value that may call mutating methods, or point to the concrete type instead.", formatTypeForDisplay(d.Trait)),
+		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("`%s` is a trait", formatTypeForDisplay(d.Trait))},
+		nil,
+		"",
+	)
+}
+
+// pointerToPointerDiagnostic reports a pointer to a pointer (ADR 0073).
+type pointerToPointerDiagnostic struct {
+	Pointer Type
+	Span    SourceSpan
+}
+
+func (d pointerToPointerDiagnostic) build() Diagnostic {
+	return mutationDiagnostic(
+		DiagnosticCodePointerToPointer,
+		fmt.Sprintf("Cannot take a pointer to pointer %s", formatTypeForDisplay(d.Pointer)),
+		"Pointer to a pointer",
+		"Pointers to pointers are not supported. Copy a pointer by ordinary assignment.",
+		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("`%s` is already a pointer", formatTypeForDisplay(d.Pointer))},
+		nil,
+		"",
+	)
+}
+
+// nonWritableAddressDiagnostic reports `&mut` applied to a place that is not
+// writable (ADR 0073).
+type nonWritableAddressDiagnostic struct {
+	Span            SourceSpan
+	DeclarationSpan *SourceSpan
+}
+
+func (d nonWritableAddressDiagnostic) build() Diagnostic {
+	return mutationDiagnostic(
+		DiagnosticCodeNonWritableAddress,
+		"Cannot take a writable pointer to a place that is not writable",
+		"Cannot take a writable pointer",
+		"`&mut` requires a writable place: a `mut` binding, a field of a writable place, or a place reached through a `*mut` pointer. Use `&` for a read-only pointer.",
+		DiagnosticLabel{Span: d.Span, Message: "this place is not writable"},
+		d.DeclarationSpan,
+		"declared with `let`",
+	)
+}
+
+// readOnlyPointerWriteDiagnostic reports a write through a read-only `*T`
+// pointer (ADR 0073).
+type readOnlyPointerWriteDiagnostic struct {
+	Pointer Type
+	Span    SourceSpan
+}
+
+func (d readOnlyPointerWriteDiagnostic) build() Diagnostic {
+	return mutationDiagnostic(
+		DiagnosticCodeReadOnlyPointerWrite,
+		fmt.Sprintf("Cannot write through read-only pointer %s", formatTypeForDisplay(d.Pointer)),
+		"Write through a read-only pointer",
+		"A `*T` pointer forbids writes through itself. Use a `*mut T` pointer to write.",
+		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("`%s` is read-only", formatTypeForDisplay(d.Pointer))},
 		nil,
 		"",
 	)

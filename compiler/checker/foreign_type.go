@@ -15,12 +15,17 @@ type ForeignType struct {
 	Name       string
 	Underlying Type
 	Pointer    bool
-	Struct     bool
-	Interface  bool
-	GoType     types.Type
-	TypeArgs   []Type
-	MapKey     Type
-	MapValue   Type
+	// ReadOnly marks a read-only `*pkg::T` pointer form (ADR 0073). It is only
+	// set together with Pointer and is a checker-only restriction: writes and
+	// pointer-receiver method calls through the pointer are rejected, while
+	// the runtime representation is the ordinary Go pointer.
+	ReadOnly  bool
+	Struct    bool
+	Interface bool
+	GoType    types.Type
+	TypeArgs  []Type
+	MapKey    Type
+	MapValue  Type
 	// Elem is set for named Go slice types (`type Nums []int`); the foreign
 	// value then behaves like an Ard list of Elem.
 	Elem                      Type
@@ -79,6 +84,9 @@ func (f *ForeignType) String() string {
 		name += ">"
 	}
 	if f.Pointer {
+		if f.ReadOnly {
+			return "*" + name
+		}
 		return "mut " + name
 	}
 	return name
@@ -132,7 +140,7 @@ func (f *ForeignType) equal(other Type) bool {
 		}
 		return false
 	}
-	if f.Target != o.Target || f.Namespace != o.Namespace || f.Name != o.Name || f.Pointer != o.Pointer || len(f.TypeArgs) != len(o.TypeArgs) {
+	if f.Target != o.Target || f.Namespace != o.Namespace || f.Name != o.Name || f.Pointer != o.Pointer || f.ReadOnly != o.ReadOnly || len(f.TypeArgs) != len(o.TypeArgs) {
 		return false
 	}
 	for i := range f.TypeArgs {
@@ -154,6 +162,17 @@ func (f *ForeignType) EmptyInterface() bool {
 	}
 	iface, ok := f.GoType.Underlying().(*types.Interface)
 	return ok && iface.Empty()
+}
+
+// readOnlyPointerForm returns the read-only form of a pointer-shaped foreign
+// type (ADR 0073).
+func (f *ForeignType) readOnlyPointerForm() *ForeignType {
+	if f == nil || !f.Pointer {
+		return nil
+	}
+	readOnly := *f
+	readOnly.ReadOnly = true
+	return &readOnly
 }
 
 func isPointerForeign(t Type) bool {

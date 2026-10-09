@@ -855,6 +855,27 @@ func validateBlock(program *Program, fn Function, block Block) error {
 				return fmt.Errorf("field set type %d does not match field type %d", stmt.Type, targetType.Fields[stmt.Field].Type)
 			}
 		}
+		if stmt.Kind == StmtSetPointee {
+			if stmt.Target == nil || stmt.Value == nil {
+				return fmt.Errorf("pointee set statement missing target or value")
+			}
+			if !validTypeID(program, stmt.Target.Type) {
+				return fmt.Errorf("pointee set target has invalid type %d", stmt.Target.Type)
+			}
+			targetType := program.Types[stmt.Target.Type-1]
+			switch {
+			case targetType.Kind == TypeReference:
+				if targetType.Elem != stmt.Type {
+					return fmt.Errorf("pointee set type %d does not match referent %d", stmt.Type, targetType.Elem)
+				}
+			case targetType.Kind == TypeForeignType && targetType.ForeignPointer:
+			default:
+				return fmt.Errorf("pointee set target has non-pointer type kind %d", targetType.Kind)
+			}
+			if !typesAssignable(program, stmt.Type, stmt.Value.Type) {
+				return fmt.Errorf("pointee set value type %d does not match pointee type %d", stmt.Value.Type, stmt.Type)
+			}
+		}
 		if stmt.Kind == StmtWhile {
 			if stmt.Condition == nil {
 				return fmt.Errorf("while statement missing condition")

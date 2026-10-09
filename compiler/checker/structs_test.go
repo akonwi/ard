@@ -234,13 +234,11 @@ func TestStructs(t *testing.T) {
 			diagnostics: []checker.Diagnostic{},
 		},
 		{
-			name: "Can't reassign to properties of ordinary struct values",
+			name: "Can reassign properties of mutable struct bindings",
 			input: fmt.Sprintf(`%s
 						mut p = Person{name: "Alice", age: 30, employed: true}
 						p.age = 31`, personStructInput),
-			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Cannot mutate 'p.age': it is an ordinary value, not a reference"},
-			},
+			diagnostics: []checker.Diagnostic{},
 		},
 		{
 			name: "Can't reassign to properties of immutable structs",

@@ -19,6 +19,9 @@ const (
 	StmtForMap
 	StmtBreak
 	StmtDefer
+	// StmtSetPointee replaces the whole pointee of the pointer-valued Target
+	// with Value (`pointer.* = value`, ADR 0073). Type is the pointee type.
+	StmtSetPointee
 )
 
 type Stmt struct {

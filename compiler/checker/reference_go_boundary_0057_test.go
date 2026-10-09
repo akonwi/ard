@@ -137,8 +137,8 @@ let n = use_reference(pointer)`},
 		{name: "foreign pointer explicitly dereferences", source: `let copy: ffi::Item = ffi::ItemPtr().@`},
 		{name: "imported global is explicitly addressable", source: `let reference = mut ffi::Global
 reference.N = 2`},
-		{name: "ordinary mut Go value rejects field mutation", source: `mut value = ffi::Item{N: 1}
-value.N = 2`, wantError: true},
+		{name: "ordinary mut Go value permits inline field mutation", source: `mut value = ffi::Item{N: 1}
+value.N = 2`},
 		{name: "ordinary mut Go value rejects pointer receiver", source: `mut value = ffi::Item{N: 1}
 value.Bump()`, wantError: true},
 		{name: "Go reference permits field and pointer receiver mutation", source: `let value = ffi::Item{N: 1}

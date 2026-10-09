@@ -38,8 +38,8 @@ let reference: mut Box = mut box`},
 box = Box{value: 2}`},
 		{name: "mut scalar accepts compound slot assignment", source: `mut count = 1
 count =+ 1`},
-		{name: "mut value rejects interior field assignment", source: `mut box = Box{value: 1}
-box.value = 2`, wantError: true},
+		{name: "mut value permits inline field assignment", source: `mut box = Box{value: 1}
+box.value = 2`},
 		{name: "mut value rejects mutating method", source: `mut box = Box{value: 1}
 box.set(2)`, wantError: true},
 		{name: "mut value is explicitly borrowable", source: `mut box = Box{value: 1}
@@ -385,11 +385,11 @@ let first = Box{value: 1}
 let second = Box{value: 2}
 let holder = Holder{item: mut first}
 holder.item = mut second`, wantError: true},
-		{name: "ordinary mut holder rejects reference field rebinding", source: `struct Holder { item: mut Box }
+		{name: "ordinary mut holder permits reference field rebinding", source: `struct Holder { item: mut Box }
 let first = Box{value: 1}
 let second = Box{value: 2}
 mut holder = Holder{item: mut first}
-holder.item = mut second`, wantError: true},
+holder.item = mut second`},
 		{name: "reference valued field rebinds through referenced holder", source: `struct Holder { item: mut Box }
 let first = Box{value: 1}
 let second = Box{value: 2}

@@ -2223,6 +2223,31 @@ func (l *lowerer) lowerStmt(fn air.Function, stmt air.Stmt) ([]ast.Stmt, error) 
 			Rhs: []ast.Expr{value.expr},
 		})
 		return out, nil
+	case air.StmtSetPointee:
+		if stmt.Target == nil || stmt.Value == nil {
+			return nil, fmt.Errorf("pointee set statement missing target or value")
+		}
+		target, err := l.lowerExpr(fn, *stmt.Target)
+		if err != nil {
+			return nil, err
+		}
+		value, err := l.lowerExprWithExpectedType(fn, *stmt.Value, stmt.Type)
+		if err != nil {
+			return nil, err
+		}
+		out := append([]ast.Stmt{}, target.stmts...)
+		out = append(out, value.stmts...)
+		valueExpr := value.expr
+		if l.isVoidType(stmt.Type) || isVoidExpr(valueExpr) {
+			out = l.appendVoidValueEval(out, valueExpr)
+			valueExpr = l.voidValueExpr()
+		}
+		out = append(out, &ast.AssignStmt{
+			Lhs: []ast.Expr{&ast.StarExpr{X: target.expr}},
+			Tok: token.ASSIGN,
+			Rhs: []ast.Expr{valueExpr},
+		})
+		return out, nil
 	case air.StmtSetField:
 		if stmt.Target == nil {
 			return nil, fmt.Errorf("field set statement missing target")

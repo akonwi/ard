@@ -644,7 +644,7 @@ func maskUnresolvedGenericsFrom(t Type, context *GenericContext) Type {
 		case *Result:
 			return MakeResult(visit(current.val, seen), visit(current.err, seen))
 		case *MutableRef:
-			return MakeMutableRef(visit(current.of, seen))
+			return current.withOf(visit(current.of, seen))
 		case *Chan:
 			return &Chan{of: visit(current.of, seen)}
 		case *Receiver:
@@ -969,7 +969,7 @@ func replaceGeneric(t Type, genericName string, concreteType Type) Type {
 		if newOf == t.of {
 			return t
 		}
-		return MakeMutableRef(newOf)
+		return t.withOf(newOf)
 	case *FunctionDef:
 		newParams := make([]Parameter, len(t.Parameters))
 		for i, p := range t.Parameters {
@@ -1298,7 +1298,7 @@ func substituteInstantiatedGoTypeArgsSeen(t Type, goArgs []gotypes.Type, ardArgs
 	}
 	switch typ := t.(type) {
 	case *MutableRef:
-		return MakeMutableRef(substitute(typ.Of()))
+		return typ.withOf(substitute(typ.Of()))
 	case *List:
 		return MakeList(substitute(typ.Of()))
 	case *Slice:
@@ -1408,7 +1408,7 @@ func substituteTypeBindings(t Type, bindings map[string]Type) Type {
 	case *Result:
 		return MakeResult(substituteTypeBindings(typ.val, bindings), substituteTypeBindings(typ.err, bindings))
 	case *MutableRef:
-		return MakeMutableRef(substituteTypeBindings(typ.of, bindings))
+		return typ.withOf(substituteTypeBindings(typ.of, bindings))
 	case *Union:
 		members := make([]Type, len(typ.Types))
 		for i, member := range typ.Types {
@@ -1644,7 +1644,7 @@ func copyTypeWithTypeVarMapSeen(t Type, typeVarMap map[string]*TypeVar, seenStru
 			err: copyTypeWithTypeVarMapSeen(typ.err, typeVarMap, seenStructs),
 		}
 	case *MutableRef:
-		return MakeMutableRef(copyTypeWithTypeVarMapSeen(typ.of, typeVarMap, seenStructs))
+		return typ.withOf(copyTypeWithTypeVarMapSeen(typ.of, typeVarMap, seenStructs))
 	case *Union:
 		newTypes := make([]Type, len(typ.Types))
 		for i, t := range typ.Types {

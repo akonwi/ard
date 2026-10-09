@@ -84,18 +84,44 @@ type Type interface {
 	hasTrait(trait *Trait) bool
 }
 
+// MutableRef is a pointer to storage of type `of` (ADR 0073). A writable
+// pointer is spelled `*mut T` (legacy `mut T`); a read-only pointer is spelled
+// `*T` and forbids writes through itself. Read-only is a checker-only
+// property: both forms share one runtime representation.
+//
+// A MutableRef whose referent is a trait is the ADR 0061 `mut Trait` value: a
+// trait value whose holder may call mutating methods. It is not spelled with
+// pointer syntax.
 type MutableRef struct {
-	of Type
+	of       Type
+	readOnly bool
 }
 
 func MakeMutableRef(of Type) *MutableRef {
 	return &MutableRef{of: of}
 }
 
+// MakeReadOnlyRef returns the read-only pointer type `*of`.
+func MakeReadOnlyRef(of Type) *MutableRef {
+	return &MutableRef{of: of, readOnly: true}
+}
+
 func (m *MutableRef) Of() Type { return m.of }
+
+// ReadOnly reports whether the pointer forbids writes through itself.
+func (m *MutableRef) ReadOnly() bool { return m != nil && m.readOnly }
+
+// withOf returns a pointer of the same mutability to a substituted referent.
+func (m *MutableRef) withOf(of Type) *MutableRef {
+	return &MutableRef{of: of, readOnly: m.readOnly}
+}
+
 func (m *MutableRef) String() string {
 	if m == nil || m.of == nil {
 		return "mut ?"
+	}
+	if m.readOnly {
+		return "*" + m.of.String()
 	}
 	return "mut " + m.of.String()
 }
@@ -107,7 +133,7 @@ func (m *MutableRef) get(name string) Type {
 }
 func (m *MutableRef) equal(other Type) bool {
 	r, ok := other.(*MutableRef)
-	return ok && equalTypes(m.of, r.of)
+	return ok && m.readOnly == r.readOnly && equalTypes(m.of, r.of)
 }
 func (m *MutableRef) hasTrait(trait *Trait) bool {
 	return m != nil && m.of != nil && m.of.hasTrait(trait)

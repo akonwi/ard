@@ -757,7 +757,10 @@ func (l *lowerer) allocateLocalNamesForOwner(fn air.Function, owner localNameOwn
 	for i := 0; i < len(fn.Signature.Params); i++ {
 		n.assign(air.LocalID(i), nil)
 	}
-	n.walkBlock(fn.Body)
+	// Go scopes parameters and the function body's top-level declarations
+	// together, so a body-level local that shadows a parameter or capture
+	// (`mut user = user`) must take a distinct name.
+	n.walkStmts(fn.Body)
 	n.pop()
 	// Insurance for any local the walk did not reach: name it uniquely against
 	// every name already assigned, so a missed binder can never collide.
