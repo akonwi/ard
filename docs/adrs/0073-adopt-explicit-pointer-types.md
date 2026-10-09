@@ -65,6 +65,9 @@ Observations:
   separation of `let mut` from `&mut` matches Ard's goal of independent axes.
 - Prefix dereference has a precedence trap (`*p.f` is `*(p.f)`). ADR 0060
   rejected prefix `deref` for that reason; Zig and Odin use postfix forms.
+- Pointer type spellings follow one of two conventions. C, Go, and Zig mirror
+  use: `p: *T` means dereferencing `p` gives a `T`. Rust mirrors construction:
+  `&x` has type `&T`.
 
 ## Decision
 
@@ -74,39 +77,48 @@ denotes references.
 | Concept | Syntax | Meaning |
 | --- | --- | --- |
 | Writable binding | `mut user = User{}` | The slot and its inline storage may be written. |
-| Read-only pointer | `*User`, `&user` | Shared identity; no writes through this pointer. |
-| Writable pointer | `*mut User`, `&mut user` | Shared identity; writes through this pointer allowed. |
+| Read-only pointer | `&User`, `&user` | Shared identity; no writes through this pointer. |
+| Writable pointer | `&mut User`, `&mut user` | Shared identity; writes through this pointer allowed. |
 | Dereference | `pointer.*` | The value at the pointer. |
 | Mutable trait value | `mut View` | A trait value that may call `fn mut` methods. |
 
-Pointer syntax always denotes a real pointer. On the Go target, both `*T` and
-`*mut T` lower to Go `*T`.
+Pointer syntax always denotes a real pointer. On the Go target, both `&T` and
+`&mut T` lower to Go `*T`.
+
+A pointer type is spelled like the expression that creates it: `&user` has type
+`&User`, and `&mut user` has type `&mut User`. `&` always means "pointer to",
+in types and expressions, and `*` appears only in the `.*` dereference.
+
+The spelling resembles Rust's references, but Ard pointers carry none of their
+guarantees. Ard has no borrow checker. A `&mut T` is not exclusive, so several
+may point at the same storage. A `&T` forbids writes only through itself, and
+pointers received from Go may be nil.
 
 ### Pointer types
 
-`*T` is a read-only pointer and `*mut T` is a writable pointer:
+`&T` is a read-only pointer and `&mut T` is a writable pointer:
 
 ```ard
-fn show(user: *User) Str { user.name }
-fn rename(user: *mut User, name: Str) { user.name = name }
+fn show(user: &User) Str { user.name }
+fn rename(user: &mut User, name: Str) { user.name = name }
 ```
 
 Read-only is a property of the pointer, not of the pointee. Like C's
-`const T*` and Zig's `*const T`, a `*T` forbids writes through itself but does
+`const T*` and Zig's `*const T`, a `&T` forbids writes through itself but does
 not guarantee that no other pointer writes the same storage.
 
-`*mut T` coerces implicitly to `*T`. The reverse is rejected. The coercion
+`&mut T` coerces implicitly to `&T`. The reverse is rejected. The coercion
 applies at the top level only; containers are invariant because list and map
-copies share storage (see "Lists and maps"), so `[*mut T]` is not a `[*T]`.
+copies share storage (see "Lists and maps"), so `[&mut T]` is not a `[&T]`.
 
 Pointer type modifiers are prefix and bind more loosely than postfix type
 forms, matching existing `mut T` parsing:
 
 ```ard
-*User?    // pointer to User?
-(*User)?  // optional pointer
-*mut [Int]
-*$T
+&User?    // pointer to User?
+(&User)?  // optional pointer
+&mut [Int]
+&$T
 ```
 
 Pointers to pointers remain unsupported for Ard-owned storage, as in ADR 0057.
@@ -120,12 +132,12 @@ postfix operations, so `&user.profile` is `&(user.profile)`.
 
 ```ard
 let user = User{name: "Ada"}
-let reader = &user // *User
+let reader = &user // &User
 
 mut account = Account{balance: 0}
-let writer = &mut account // *mut Account
+let writer = &mut account // &mut Account
 
-let fresh = &mut User{name: "Ada"} // *mut User to fresh storage
+let fresh = &mut User{name: "Ada"} // &mut User to fresh storage
 ```
 
 ADR 0057's operand modes are retained:
@@ -154,7 +166,7 @@ let alias = writer
 
 - a `mut` binding or writable module global;
 - a field of a writable place;
-- any place reached through a `*mut` pointer, including `pointer.*`.
+- any place reached through a `&mut` pointer, including `pointer.*`.
 
 ```ard
 let user = User{}
@@ -162,7 +174,7 @@ let a = &user     // allowed: read-only pointers work on any addressable place
 let b = &mut user // rejected: `user` is not writable
 ```
 
-This restriction is required because `*mut T` permits whole-value replacement.
+This restriction is required because `&mut T` permits whole-value replacement.
 Without it, `(&mut user).* = other` would reassign a `let` binding.
 
 A fresh value is always a writable place.
@@ -201,8 +213,8 @@ Field access and method calls dereference implicitly, as in Go and as ADR
 ```ard
 writer.name             // reads through the pointer
 writer.name = "Grace"   // writes through the pointer
-writer.rename("Grace")  // fn mut method through *mut
-reader.display()        // non-mutating method through *T
+writer.rename("Grace")  // fn mut method through &mut
+reader.display()        // non-mutating method through &T
 ```
 
 Dereferencing a nil foreign Go pointer panics, as today.
@@ -243,19 +255,19 @@ c.push(4) // could overwrite b's appended element
 
 Therefore list and map in-place operations (`push`, `prepend`, `set`, `swap`,
 `sort`, map `set`/`delete`, and similar) require the list or map to be reached
-through a `*mut` pointer. A `mut` binding may only replace the whole value:
+through a `&mut` pointer. A `mut` binding may only replace the whole value:
 
 ```ard
 mut xs = [1, 2]
 xs = [9]           // allowed: replaces the slot
-xs.push(3)         // rejected: requires *mut [Int]
+xs.push(3)         // rejected: requires &mut [Int]
 
 let ys = &mut [1, 2]
 ys.push(3)         // allowed
 ```
 
 The same applies to list and map fields of a writable binding: `u.tags = [...]`
-is allowed, `u.tags.push(...)` is not. A place reached through `*mut`, such as
+is allowed, `u.tags.push(...)` is not. A place reached through `&mut`, such as
 `self.tags` inside a `fn mut` method, permits in-place operations as it does
 today.
 
@@ -279,7 +291,7 @@ fn normalize(user: User) User {
 Caller-visible mutation requires a pointer parameter:
 
 ```ard
-fn rename(user: *mut User, name: Str) {
+fn rename(user: &mut User, name: Str) {
   user.name = name
 }
 
@@ -288,17 +300,17 @@ rename(&mut user, "Grace")
 ```
 
 The parser diagnostic for `fn f(mut user: User)` changes to suggest
-`user: *mut User` for caller-visible mutation or `mut user = user` for a local
+`user: &mut User` for caller-visible mutation or `mut user = user` for a local
 writable copy.
 
 Method receivers keep the `fn mut method` form. A `fn mut` method requires a
-receiver reached through `*mut`; a non-mutating method accepts any receiver.
+receiver reached through `&mut`; a non-mutating method accepts any receiver.
 Calling a `fn mut` method does not take the receiver's address implicitly:
 
 ```ard
 mut user = User{name: "Ada", tags: []}
 user.name = "Grace"         // allowed: field write on a writable binding
-user.rename("Lin")          // rejected: requires a *mut receiver
+user.rename("Lin")          // rejected: requires a &mut receiver
 (&mut user).rename("Lin")   // allowed
 ```
 
@@ -321,8 +333,8 @@ lists and maps gain value semantics.
 
 Pointer syntax is not used for trait values. ADR 0061 lowers `Trait` and
 `mut Trait` to the same Go interface and gives `mut Trait` existential meaning:
-some concrete `T` held as a `*T`. Spelling that `*mut Trait` would misread as
-Go's pointer-to-interface, whose semantics differ in slot rebinding, method
+some concrete `T` held as a Go `*T`. Spelling that `&mut Trait` would misread
+as a pointer to an interface (Go's `*Trait`), whose semantics differ in slot rebinding, method
 calls, equality, and whole-value writes. In particular, `pointer.* = other`
 through a pointer to a hidden concrete type cannot be checked statically.
 
@@ -331,14 +343,14 @@ whose holder may call `fn mut` methods:
 
 ```ard
 let box = &mut Box{value: 1}
-let view: mut View = box // *mut Box widens to mut View
+let view: mut View = box // &mut Box widens to mut View
 view.bump()              // fn mut method allowed
 let plain: View = view   // drops mutation permission; no runtime change
 ```
 
-A `mut Trait` value is obtained by widening a `*mut T` whose `T` implements the
+A `mut Trait` value is obtained by widening a `&mut T` whose `T` implements the
 trait, by copying another `mut Trait`, or through explicit `unsafe::cast`.
-`*Trait` and `*mut Trait` are rejected. A future decision may admit them as real
+`&Trait` and `&mut Trait` are rejected. A future decision may admit them as real
 pointers to trait-typed slots lowering to Go `*Trait`.
 
 `mut Trait` is not a pointer, so `.*` does not apply to it. Converting
@@ -358,11 +370,11 @@ The Go runtime's `TraitSnapshot` helper is removed, and trait values no longer
 use reflection.
 
 `mut T` for any non-trait type is rejected, with a diagnostic suggesting
-`*mut T`.
+`&mut T`.
 
 ### Equality
 
-Pointers compare by identity, as in ADR 0057. `*T` and `*mut T` with the same
+Pointers compare by identity, as in ADR 0057. `&T` and `&mut T` with the same
 pointee type are comparable with each other. Pointers do not support relational
 ordering.
 
@@ -374,13 +386,13 @@ Pointers are ordinary values. Closures capture them by copying the pointer;
 
 ### Recursive types
 
-`*T` and `*mut T` are sizedness boundaries for recursive types, replacing
+`&T` and `&mut T` are sizedness boundaries for recursive types, replacing
 `mut T` in ADR 0020 and ADR 0022:
 
 ```ard
 struct Node {
   value: Int,
-  parent: *Node,
+  parent: &Node,
 }
 ```
 
@@ -388,27 +400,27 @@ struct Node {
 
 | Ard | Go |
 | --- | --- |
-| `*T`, `*mut T` | `*T` |
-| `*mut [T]` | `*[]T` |
-| `*mut [K: V]` | `*map[K]V` |
-| `*mut pkg::T` | `*pkg.T` |
+| `&T`, `&mut T` | `*T` |
+| `&mut [T]` | `*[]T` |
+| `&mut [K: V]` | `*map[K]V` |
+| `&mut pkg::T` | `*pkg.T` |
 | `Trait`, `mut Trait` | the trait's Go interface |
 
-- A Go `*T` result imports as `*mut T`, which coerces to `*T` where needed.
-- A Go `*T` parameter imports as `*mut T`, because Go may write through it.
+- A Go `*T` result imports as `&mut T`, which coerces to `&T` where needed.
+- A Go `*T` parameter imports as `&mut T`, because Go may write through it.
   Unlike Go slice and map parameters, a `*T` parameter can change the caller's
-  own storage, so admitting `*T` would let Go code modify a `let` binding.
+  own storage, so admitting `&T` would let Go code modify a `let` binding.
   Go structs passed by pointer should be created as pointers:
 
   ```ard
   let cfg = &mut tls::Config{MinVersion: tls::VersionTLS12}
   tls::Client(conn, cfg)
   ```
-- Named Go pointer types previously spelled `mut pkg::T` become `*mut pkg::T`.
-- Generic Go `*T` parameters bind to Ard `*mut $T`.
+- Named Go pointer types previously spelled `mut pkg::T` become `&mut pkg::T`.
+- Generic Go `*T` parameters bind to Ard `&mut $T`.
 - Converting a pointer to `Any` or a Go interface exposes the dynamic Go
   pointer, as in ADR 0056 and ADR 0057.
-- `unsafe::cast<*mut T>` recovers a pointer from `Any`.
+- `unsafe::cast<&mut T>` recovers a pointer from `Any`.
 
 #### Go slice and map parameters
 
@@ -435,7 +447,7 @@ storage between copies (see "Lists and maps").
 Pointers remain accepted at these parameters and are projected to the
 descriptor value. Writing `sort::Ints(&mut values)` documents intended
 mutation at the call site. Parameters whose Go type is a pointer to a slice or
-map (`*[]T`, `*map[K]V`) require `*mut [T]` or `*mut [K: V]`.
+map (`*[]T`, `*map[K]V`) require `&mut [T]` or `&mut [K: V]`.
 
 Variadic parameters keep ADR 0062's list-forwarding rules.
 
@@ -445,7 +457,7 @@ Existing syntax maps as follows:
 
 | Current | New |
 | --- | --- |
-| `name: mut T` (concrete `T`) | `name: *mut T` |
+| `name: mut T` (concrete `T`) | `name: &mut T` |
 | `name: mut Trait` | unchanged |
 | `mut place` | `&mut place` |
 | `mut Value{...}`, `mut f()` | `&mut Value{...}`, `&mut f()` |
@@ -466,7 +478,7 @@ Some programs need manual changes:
 
   ```ard
   let shared = &mut Box{number: 7}
-  fn shared_ref() *mut Box { shared }
+  fn shared_ref() &mut Box { shared }
   ```
 
   Mutable module state remains a separate decision.
@@ -489,17 +501,19 @@ Unchanged syntax:
 
 ## Consequences
 
-- Each axis has one spelling: `mut` bindings for writable slots, `*`/`&` for
+- Each axis has one spelling: `mut` bindings for writable slots, `&` for
   identity, and `mut` within pointer types for write permission through a
   pointer.
 - Read-only sharing becomes expressible.
-- Generated Go and Ard source use the same pointer vocabulary.
+- Ard pointer types use `&` where Go uses `*`, so reading generated Go
+  requires a one-symbol translation.
 - Field writes on writable bindings behave as in Go and Rust.
-- Whole-value replacement through `*mut T` is allowed.
+- Whole-value replacement through `&mut T` is allowed.
 - `&mut` of `let` bindings, previously allowed by ADR 0057, is rejected.
 - List and map in-place operations still require pointers until list/map value
   semantics are designed.
-- `*` gains a type-position and postfix meaning alongside multiplication.
+- `&` gains type-position and prefix meanings. `*` gains only the postfix
+  `.*` form alongside multiplication.
 - The lexer, parser, formatter, Tree-sitter grammar, highlighting, LSP,
   checker, AIR, Go backend, diagnostics, documentation, samples, standard
   library, and examples must adopt the new syntax.
@@ -521,7 +535,7 @@ to the new dereference place and whole-value writes.
 Suggested phases:
 
 1. Lock semantics with checker and Go-target tests.
-2. Add lexer, parser, formatter, and Tree-sitter support for `*T`, `*mut T`,
+2. Add lexer, parser, formatter, and Tree-sitter support for `&T`, `&mut T`,
    `&`, `&mut`, and `.*`, accepting old forms with deprecation warnings.
 3. Introduce the canonical checker pointer type, read-only pointers, writable
    place rules, and binding field writes.
@@ -539,18 +553,18 @@ Suggested phases:
   `fn mut` calls on writable bindings.
 - **Read-only Go pointer parameters.** A per-API opt-in, such as an annotation,
   a curated set of read-only standard-library APIs, or a Go shim taking values,
-  could admit `*T` arguments where Go only reads.
-- **Pointers to trait-typed slots.** `*Trait` and `*mut Trait` could later
+  could admit `&T` arguments where Go only reads.
+- **Pointers to trait-typed slots.** `&Trait` and `&mut Trait` could later
   denote real pointers to trait-typed storage, lowering to Go `*Trait`.
 - **Trait value snapshots.** A named operation could restore snapshotting of
   `mut Trait` values if a need arises.
 
 ## Supersessions
 
-- **ADR 0020**: `mut T` sizedness boundaries become `*T` and `*mut T`.
+- **ADR 0020**: `mut T` sizedness boundaries become `&T` and `&mut T`.
 - **ADR 0022**: `mut T` no longer denotes a mutable reference. Pointers are
-  spelled `*T` and `*mut T`.
-- **ADR 0030**: Go `*T` maps to `*mut T` rather than `mut T`.
+  spelled `&T` and `&mut T`.
+- **ADR 0030**: Go `*T` maps to `&mut T` rather than `mut T`.
 - **ADR 0040**: Mutable access representation is chosen from pointer types,
   not `mut`.
 - **ADR 0045**: `mut place` becomes `&mut place`, and `&mut` requires a
@@ -561,10 +575,10 @@ Suggested phases:
   idempotence, borrowing of `let` bindings for mutation, the rejection of field
   writes on `mut` bindings, the rejection of whole-referent writes, and the
   explicit-reference requirement for Go slice and map parameters.
-- **ADR 0058**: Writable slice views use `*mut Slice<T>`.
+- **ADR 0058**: Writable slice views use `&mut Slice<T>`.
 - **ADR 0060**: `.*` replaces `.@`, and dereference becomes a place.
 - **ADR 0061**: `mut Trait` is retained with its representation. Its creation
-  syntax becomes widening from `*mut T`, mutable capture of trait-typed places
+  syntax becomes widening from `&mut T`, mutable capture of trait-typed places
   is removed, and `.@` snapshotting and its reflective runtime helper are
   removed.
 - **ADR 0062**: Spreading a pointer to a list uses `&mut args` or `&args`;
