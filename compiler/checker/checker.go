@@ -2162,6 +2162,11 @@ func (c *Checker) resolveType(t parse.DeclaredType) Type {
 			if i < len(ty.ParamMutability) {
 				mutable = ty.ParamMutability[i]
 			}
+			if pointer, ok := param.(*parse.MutableType); ok && pointer.Pointer && !pointer.IsNullable() {
+				// `fn(*mut T)` carries the same parameter metadata as a
+				// named `name: *mut T` parameter (see resolveParameterType).
+				mutable = true
+			}
 			paramType := c.resolveType(param)
 			if mutable {
 				// A `mut pkg::T` parameter in function-type position takes the

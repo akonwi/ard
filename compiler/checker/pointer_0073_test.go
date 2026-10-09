@@ -147,6 +147,12 @@ mut user = new_user()
 rename(&mut user)`},
 		{name: "generic pointer parameter infers from writable pointer", source: `fn read(pointer: *$T) $T { pointer.* }
 let box: Box = read(&mut Box{value: 1})`},
+		{name: "function type pointer parameter unifies with closure parameter", source: `fn update(value: $T, change: fn(*mut $T)) $T {
+  mut value = value
+  change(&mut value)
+  value
+}
+let box = update(Box{value: 1}, fn(box: *mut Box) { box.value = 2 })`},
 	}
 
 	for _, tt := range tests {
