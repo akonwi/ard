@@ -88,7 +88,7 @@ reader.name            // "Grace"
 
 Field access and method calls go through a pointer implicitly. A `&mut T` can be used wherever a `&T` is expected; the reverse is rejected.
 
-`&` works on any addressable place, but `&mut` requires a **writable place**: a `mut` binding, a field of one, or a place reached through a `&mut` pointer. Taking `&mut` of a fresh value creates new storage:
+`&` works on any addressable place. `&mut` needs a **writable place**: a `mut` binding, a field of one, or a place reached through a `&mut` pointer. A writable pointer can change or replace the value it points to, and a `let` value never changes, so `&mut` of a `let` binding is rejected. Rust's `let mut` and Zig's `var` follow the same rule. `&mut` of a fresh value, such as `&mut User{...}`, always works because it creates new storage:
 
 ```ard
 let fixed = User{name: "Ada"}
