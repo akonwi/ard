@@ -27,28 +27,28 @@ ffi::TakePtr(value)`, wantError: true},
 ffi::TakePtr(value)`, wantError: true},
 		{name: "pointer accepts explicit reference to let", source: `let value = ffi::Item{N: 1}
 ffi::TakePtr(mut value)`},
-		{name: "slice rejects ordinary mut binding", source: `mut values = [1, 2]
-ffi::TakeSlice(values)`, wantError: true},
+		{name: "slice accepts ordinary mut binding", source: `mut values = [1, 2]
+ffi::TakeSlice(values)`},
 		{name: "slice accepts actual reference", source: `let values = [1, 2]
 ffi::TakeSlice(mut values)`},
 		{name: "fresh slice requires explicit reference", source: `ffi::TakeSlice(mut [1, 2])`},
-		{name: "bare fresh slice is rejected", source: `ffi::TakeSlice([1, 2])`, wantError: true},
-		{name: "map rejects ordinary mut binding", source: `mut values = ["a": 1]
-ffi::TakeMap(values)`, wantError: true},
+		{name: "bare fresh slice is accepted", source: `ffi::TakeSlice([1, 2])`},
+		{name: "map accepts ordinary mut binding", source: `mut values = ["a": 1]
+ffi::TakeMap(values)`},
 		{name: "map accepts actual reference", source: `let values = ["a": 1]
 ffi::TakeMap(mut values)`},
 		{name: "fresh map requires explicit reference", source: `ffi::TakeMap(mut ["a": 1])`},
-		{name: "bare fresh map is rejected", source: `ffi::TakeMap(["a": 1])`, wantError: true},
-		{name: "named slice rejects bare value", source: `let values = [1, 2]
-ffi::TakeNumbers(values)`, wantError: true},
+		{name: "bare fresh map is accepted", source: `ffi::TakeMap(["a": 1])`},
+		{name: "named slice accepts bare value", source: `let values = [1, 2]
+ffi::TakeNumbers(values)`},
 		{name: "named slice accepts actual reference", source: `let values = [1, 2]
 ffi::TakeNumbers(mut values)`},
 		{name: "named slice accepts fresh literal reference", source: `ffi::TakeNumbers(mut [1, 2])`},
 		{name: "named slice types fresh empty literal", source: `ffi::TakeNumbers(mut [])`},
 		{name: "named slice binding borrow keeps descriptor reference", source: `let values: ffi::Numbers = [1, 2]
 ffi::TakeNumbers(mut values)`},
-		{name: "named map rejects bare value", source: `let values = ["a": 1]
-ffi::TakeScores(values)`, wantError: true},
+		{name: "named map accepts bare value", source: `let values = ["a": 1]
+ffi::TakeScores(values)`},
 		{name: "named map accepts actual reference", source: `let values = ["a": 1]
 ffi::TakeScores(mut values)`},
 		{name: "named map types fresh empty literal", source: `ffi::TakeScores(mut [:])`},
@@ -107,21 +107,21 @@ let same = left == right`},
 		{name: "method constraint validates pointer representation", source: `let value = ffi::Item{N: 1}
 let reference = mut value
 ffi::UseBumper(reference)`},
-		{name: "slice shaped generic rejects bare value", source: `let values = [1, 2]
-let size = ffi::SliceSize(values)`, wantError: true},
+		{name: "slice shaped generic accepts bare value", source: `let values = [1, 2]
+let size = ffi::SliceSize(values)`},
 		{name: "slice shaped generic infers from referent", source: `let values = [1, 2]
 let reference = mut values
 let size = ffi::SliceSize(reference)`},
 		{name: "slice shaped generic infers from Slice referent", source: `let view = [1, 2].slice().expect("bounds")
 let size = ffi::SliceSize(mut view)`},
 		{name: "generic Go callback Slice parameter is rejected", source: `let consume = ffi::SliceConsumer<Slice<Int>>()`, wantError: true},
-		{name: "map shaped generic rejects bare value", source: `let values = ["a": 1]
-let size = ffi::MapSize(values)`, wantError: true},
+		{name: "map shaped generic accepts bare value", source: `let values = ["a": 1]
+let size = ffi::MapSize(values)`},
 		{name: "map shaped generic infers from referent", source: `let values = ["a": 1]
 let reference = mut values
 let size = ffi::MapSize(reference)`},
-		{name: "explicit descriptor generic rejects bare value", source: `let values = [1, 2]
-let size = ffi::MixedSize<[Int], Int>(values)`, wantError: true},
+		{name: "explicit descriptor generic accepts bare value", source: `let values = [1, 2]
+let size = ffi::MixedSize<[Int], Int>(values)`},
 		{name: "mixed generic uses explicit descriptor instantiation", source: `let values = [1, 2]
 let reference = mut values
 let size = ffi::MixedSize<[Int], Int>(reference)`},

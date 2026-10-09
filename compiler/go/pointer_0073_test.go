@@ -270,3 +270,59 @@ func writeTestFile(t *testing.T, path string, content string) {
 		t.Fatal(err)
 	}
 }
+
+func TestADR0073GoDescriptorParametersAcceptValues(t *testing.T) {
+	projectDir := t.TempDir()
+	writeTestFile(t, filepath.Join(projectDir, "ard.toml"), "name = \"descriptors\"\nard = \">= 0.1.0\"\n")
+	writeTestFile(t, filepath.Join(projectDir, "go.mod"), "module descriptors\n\ngo 1.27\n")
+	writeTestFile(t, filepath.Join(projectDir, "ffi", "ffi.go"), `package ffi
+
+type Numbers []int
+type Sink struct{}
+
+func (Sink) Mutate(values []int) { values[0] = 7 }
+
+func MutateSlice(values []int) { values[0] = 9 }
+func MutateNumbers(values Numbers) { values[0] = 8 }
+func MutateMap(values map[string]int) { values["b"] = 2 }
+func Size(values []int) int { return len(values) }
+func ReplaceFirst[S ~[]E, E any](values S, replacement E) { values[0] = replacement }
+`)
+	mainPath := filepath.Join(projectDir, "main.ard")
+	writeTestFile(t, mainPath, `use go:descriptors/ffi
+
+fn main() {
+  let values = [1, 2]
+  ffi::MutateSlice(values)
+  if not values.at(0).or(0) == 9 { panic("Go slice write was not shared") }
+  ffi::MutateNumbers(values)
+  if not values.at(0).or(0) == 8 { panic("named Go slice write was not shared") }
+  let mutate = ffi::MutateSlice
+  mutate(values)
+  if not values.at(0).or(0) == 9 { panic("function value write was not shared") }
+  let sink = ffi::Sink{}
+  sink.Mutate(values)
+  if not values.at(0).or(0) == 7 { panic("method write was not shared") }
+  ffi::ReplaceFirst(values, 5)
+  if not values.at(0).or(0) == 5 { panic("generic write was not shared") }
+  if not ffi::Size([1, 2, 3]) == 3 { panic("list literal was not passed") }
+  if not ffi::Size(&values) == 2 { panic("read-only pointer was not projected") }
+
+  let mapping = ["a": 1]
+  ffi::MutateMap(mapping)
+  if not mapping.get("b").or(0) == 2 { panic("Go map write was not shared") }
+}
+`)
+
+	loaded, err := frontend.LoadModule(mainPath)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	if err := RunProgram(program, []string{"ard", "run", mainPath}, loaded.ProjectInfo); err != nil {
+		t.Fatalf("RunProgram: %v", err)
+	}
+}

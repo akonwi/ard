@@ -1542,18 +1542,19 @@ fmt::Println(a: "hello")`,
 	})
 }
 
-func TestGoSliceParametersRequireListReferences(t *testing.T) {
+// Go slice parameters accept ordinary lists (ADR 0073): Go has no read-only
+// slices and Ard lists already share storage between copies.
+func TestGoSliceParametersAcceptLists(t *testing.T) {
 	tests := []struct {
 		name      string
 		source    string
 		wantError bool
 	}{
 		{
-			name: "ordinary mut list is not an implicit reference",
+			name: "ordinary list is accepted",
 			source: `use go:sort
-mut values = [3, 1, 2]
+let values = [3, 1, 2]
 sort::Ints(values)`,
-			wantError: true,
 		},
 		{
 			name: "explicit reference to let list is accepted",
@@ -1695,10 +1696,9 @@ func TestFreshContainerLiteralsRequireExplicitReferences(t *testing.T) {
 		wantError bool
 	}{
 		{
-			name: "bare list literal is rejected for mutable Go slice parameter",
+			name: "bare list literal is accepted for Go slice parameter",
 			source: `use go:sort
 sort::Ints([3, 1, 2])`,
-			wantError: true,
 		},
 		{
 			name: "explicit fresh list reference is accepted",

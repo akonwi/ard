@@ -279,6 +279,40 @@ ffi::TakePtr(reader)`, wantError: true},
 writer.Bump()`},
 		{name: "mut binding writes foreign value field", source: `mut item = ffi::Item{N: 1}
 item.N = 2`},
+		{name: "Go slice parameter accepts let list", source: `let values = [1, 2]
+ffi::TakeSlice(values)`},
+		{name: "Go slice parameter accepts list literal", source: `ffi::TakeSlice([1, 2])`},
+		{name: "Go slice parameter types empty literal", source: `ffi::TakeSlice([])`},
+		{name: "Go slice parameter accepts writable pointer", source: `mut values = [1, 2]
+ffi::TakeSlice(&mut values)`},
+		{name: "Go slice parameter accepts read-only pointer", source: `let values = [1, 2]
+ffi::TakeSlice(&values)`},
+		{name: "Go slice parameter accepts Slice view", source: `let view = [1, 2].slice().expect("bounds")
+ffi::TakeSlice(view)`},
+		{name: "Go map parameter accepts let map", source: `let values = ["a": 1]
+ffi::TakeMap(values)`},
+		{name: "Go map parameter accepts map literal", source: `ffi::TakeMap(["a": 1])`},
+		{name: "named Go slice parameter accepts list", source: `let values = [1, 2]
+ffi::TakeNumbers(values)`},
+		{name: "named Go slice parameter types empty literal", source: `ffi::TakeNumbers([])`},
+		{name: "named Go map parameter accepts map", source: `let values = ["a": 1]
+ffi::TakeScores(values)`},
+		{name: "Go slice function value accepts list", source: `let values = [1, 2]
+let take = ffi::TakeSlice
+take(values)`},
+		{name: "Go slice method accepts list", source: `let values = [1, 2]
+let sink = ffi::Sink{}
+sink.Take(values)`},
+		{name: "slice shaped generic accepts list", source: `let values = [1, 2]
+let size = ffi::SliceSize(values)`},
+		{name: "map shaped generic accepts map", source: `let values = ["a": 1]
+let size = ffi::MapSize(values)`},
+		{name: "explicit descriptor generic accepts list", source: `let values = [1, 2]
+let size = ffi::MixedSize<[Int], Int>(values)`},
+		{name: "Go pointer to slice still requires a pointer", source: `let values = [1, 2]
+ffi::TakeSlicePtr(values)`, wantError: true},
+		{name: "Go pointer to slice accepts writable pointer", source: `mut values = [1, 2]
+ffi::TakeSlicePtr(&mut values)`},
 	}
 
 	for _, tt := range tests {

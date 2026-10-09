@@ -591,6 +591,59 @@ func (c *Checker) rejectsReadOnlyForeignPointerMethod(subj Expression, method st
 	return true
 }
 
+// descriptorArgumentExpectation returns the expected type used to check an
+// argument for a Go slice or map parameter (ADR 0073). Such parameters accept
+// ordinary list and map values, so a non-address-of argument checks against
+// the descriptor type itself, which types container literals contextually.
+func descriptorArgumentExpectation(parameter Parameter, expected Type, arg parse.Expression) Type {
+	if parameter.ForeignABI != ForeignParameterDescriptorValue {
+		return expected
+	}
+	if addressOf, ok := arg.(*parse.MutRef); ok {
+		if addressOf.Ampersand && addressOf.ReadOnly {
+			return readOnlyPointer(expected)
+		}
+		return expected
+	}
+	if ref, ok := expected.(*MutableRef); ok {
+		return ref.Of()
+	}
+	return expected
+}
+
+// checkDescriptorArgument checks an argument for a Go slice or map parameter
+// (ADR 0073). Literals and address-of expressions are checked against the
+// parameter's descriptor or pointer expectation; any other expression is
+// checked on its own so descriptor projections such as `Slice<T>` to `[]T`
+// are validated by the caller's compatibility check.
+func (c *Checker) checkDescriptorArgument(expr parse.Expression, parameter Parameter) Expression {
+	expected := descriptorArgumentExpectation(parameter, parameter.Type, expr)
+	switch expr.(type) {
+	case *parse.ListLiteral, *parse.MapLiteral, *parse.MutRef:
+		return descriptorArgument(parameter, c.checkExprAsArgument(expr, expected, parameter))
+	default:
+		return descriptorArgument(parameter, c.checkExpr(expr))
+	}
+}
+
+// descriptorArgument adapts an argument for a Go slice or map parameter
+// (ADR 0073). Go has no read-only slices or maps, and Ard lists and maps
+// already share storage between copies, so an ordinary value or read-only
+// pointer is accepted: it is passed as a fresh reference whose projected
+// descriptor shares the caller's storage, exactly as Go would receive it.
+func descriptorArgument(parameter Parameter, arg Expression) Expression {
+	if parameter.ForeignABI != ForeignParameterDescriptorValue || arg == nil {
+		return arg
+	}
+	if isReadOnlyPointer(arg.Type()) {
+		arg = observeReference(arg)
+	}
+	if isReferenceValued(arg) {
+		return arg
+	}
+	return &MutableRefExpr{Operand: arg, Mode: FreshValue, _type: MakeMutableRef(arg.Type())}
+}
+
 // pointerAsMutableRef views a pointer type as a MutableRef: an Ard pointer is
 // returned as-is, and a pointer-shaped foreign Go type is viewed as a writable
 // pointer to its value form. It returns nil for non-pointer types.
@@ -10247,7 +10300,13 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 				} else {
 					args = make([]Expression, len(resolvedExprs))
 					for i, expr := range resolvedExprs {
-						checkedArg := c.checkExprAsArgument(expr, effectiveFnDef.Parameters[i].Type, effectiveFnDef.Parameters[i])
+						parameter := effectiveFnDef.Parameters[i]
+						var checkedArg Expression
+						if parameter.ForeignABI == ForeignParameterDescriptorValue {
+							checkedArg = c.checkDescriptorArgument(expr, parameter)
+						} else {
+							checkedArg = c.checkExprAsArgument(expr, parameter.Type, parameter)
+						}
 						if checkedArg == nil {
 							return nil
 						}
@@ -14069,7 +14128,7 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 		// Anonymous functions also use checkExprAs so parameter types are inferred from
 		// the (possibly bound) paramType.
 		// For nullable parameters, use the inner type since literals can't be Maybe
-		expectedType := contextualParamType
+		expectedType := descriptorArgumentExpectation(fnDefCopy.Parameters[i], contextualParamType, resolvedExprs[i])
 		if maybeParam, isMaybe := contextualParamType.(*Maybe); isMaybe {
 			_, isLiteralOrFunc := resolvedExprs[i].(*parse.ListLiteral)
 			if !isLiteralOrFunc {
@@ -14138,6 +14197,7 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 			}
 		})
 
+		checkedArg = descriptorArgument(fnDefCopy.Parameters[i], checkedArg)
 		if checkedArg == nil {
 			return nil, nil
 		}
