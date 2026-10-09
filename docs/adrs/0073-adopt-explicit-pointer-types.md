@@ -481,7 +481,7 @@ Some programs need manual changes:
   fn shared_ref() &mut Box { shared }
   ```
 
-  Mutable module state remains a separate decision.
+  Mutable module state remains a separate decision (issue #517).
 - `mut` applied to a trait-typed place, which captured the current interface
   value under ADR 0061, has no direct replacement. Store a `mut Trait` value
   instead.
