@@ -1080,36 +1080,38 @@ func formatPath(inputPath string, checkOnly bool) ([]string, error) {
 }
 
 // migratePath rewrites deprecated pointer syntax in the .ard files under
-// inputPath and reports the uses that need a manual change. With checkOnly it
-// writes nothing and reports whether any deprecated syntax remains.
+// inputPath and reports the uses that need a manual change. Every file is
+// analyzed before any file is written, so a failure leaves the sources
+// untouched. With checkOnly it writes nothing and reports whether any
+// deprecated syntax remains or a file could not be analyzed.
 func migratePath(stdout io.Writer, stderr io.Writer, inputPath string, checkOnly bool) (bool, error) {
 	ardFiles, err := collectArdFiles(inputPath)
 	if err != nil {
 		return false, err
 	}
-	pending := false
 	displayRoot, err := os.Getwd()
 	if err != nil {
 		displayRoot = ""
 	}
+	results := make([]migrate.FileResult, 0, len(ardFiles))
 	for _, filePath := range ardFiles {
 		result, err := migrate.RewriteFile(filePath)
 		if err != nil {
 			return false, err
 		}
+		results = append(results, result)
+	}
+	pending := false
+	for _, result := range results {
 		if result.Changed() {
 			pending = true
 			if checkOnly {
-				fmt.Fprintf(stdout, "needs migration: %s\n", filePath)
+				fmt.Fprintf(stdout, "needs migration: %s\n", result.Path)
 			} else {
-				fileInfo, err := os.Stat(filePath)
-				if err != nil {
-					return false, fmt.Errorf("error reading file info %s - %w", filePath, err)
+				if err := writeFileAtomic(result.Path, result.Rewritten); err != nil {
+					return false, err
 				}
-				if err := os.WriteFile(filePath, result.Rewritten, fileInfo.Mode()); err != nil {
-					return false, fmt.Errorf("error writing file %s - %w", filePath, err)
-				}
-				fmt.Fprintf(stdout, "migrated: %s\n", filePath)
+				fmt.Fprintf(stdout, "migrated: %s\n", result.Path)
 			}
 		}
 		if len(result.Manual) > 0 {
@@ -1119,10 +1121,50 @@ func migratePath(stdout io.Writer, stderr io.Writer, inputPath string, checkOnly
 			}
 		}
 		if result.HasErrors {
-			fmt.Fprintf(stderr, "warning: %s has errors; run `ard check` after migrating\n", filePath)
+			// Errors can hide deprecated syntax from the checker, so the
+			// file's migration status is unknown.
+			pending = true
+			fmt.Fprintf(stderr, "warning: %s has errors; run `ard check` and migrate again\n", result.Path)
 		}
 	}
 	return pending, nil
+}
+
+// writeFileAtomic replaces path with data through a temporary file in the
+// same directory, preserving the original permissions.
+func writeFileAtomic(path string, data []byte) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("error reading file info %s - %w", path, err)
+	}
+	temp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*.tmp")
+	if err != nil {
+		return fmt.Errorf("error writing file %s - %w", path, err)
+	}
+	tempPath := temp.Name()
+	cleanup := func(err error) error {
+		temp.Close()
+		os.Remove(tempPath)
+		return fmt.Errorf("error writing file %s - %w", path, err)
+	}
+	if _, err := temp.Write(data); err != nil {
+		return cleanup(err)
+	}
+	if err := temp.Chmod(info.Mode().Perm()); err != nil {
+		return cleanup(err)
+	}
+	if err := temp.Sync(); err != nil {
+		return cleanup(err)
+	}
+	if err := temp.Close(); err != nil {
+		os.Remove(tempPath)
+		return fmt.Errorf("error writing file %s - %w", path, err)
+	}
+	if err := os.Rename(tempPath, path); err != nil {
+		os.Remove(tempPath)
+		return fmt.Errorf("error writing file %s - %w", path, err)
+	}
+	return nil
 }
 
 func collectArdFiles(inputPath string) ([]string, error) {

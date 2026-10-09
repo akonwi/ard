@@ -1271,6 +1271,21 @@ func TestMigratePath(t *testing.T) {
 	}
 }
 
+func TestMigratePathCheckReportsFilesWithErrors(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "main.ard"), []byte("fn main() {\n  let x =\n}\n"), 0o644); err != nil {
+		t.Fatalf("failed to write main: %v", err)
+	}
+	var stdout, stderr bytes.Buffer
+	pending, err := migratePath(&stdout, &stderr, dir, true)
+	if err != nil || !pending {
+		t.Fatalf("pending = %v, err = %v; a file that cannot be analyzed must fail the check", pending, err)
+	}
+}
+
 func TestTestCommand(t *testing.T) {
 	dir := t.TempDir()
 	projectDir := filepath.Join(dir, "project")

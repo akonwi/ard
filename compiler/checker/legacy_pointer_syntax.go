@@ -26,6 +26,7 @@ type legacyPointerSyntaxKind uint8
 
 const (
 	legacyPointerType legacyPointerSyntaxKind = iota
+	legacyRedundantTypeMut
 	legacyAddressOf
 	legacyRedundantMut
 	legacyTraitBorrow
@@ -56,6 +57,14 @@ func (d deprecatedPointerSyntaxDiagnostic) build() Diagnostic {
 		title = "Deprecated `mut T` pointer type"
 		text = "Writable pointer types are spelled `*mut T` (ADR 0073). In type position, `mut` is reserved for `mut Trait`."
 		label = "write `*mut` here"
+	case legacyRedundantTypeMut:
+		message = "Deprecated pointer type syntax: `mut` on a pointer type is redundant"
+		title = "Redundant `mut` on a pointer type"
+		text = "This type is already a pointer (ADR 0073)."
+		label = "remove `mut`"
+		if len(d.Fixes) == 0 {
+			text += " Here `mut` adds a second pointer layer, which has no `*mut` spelling; change the type manually."
+		}
 	case legacyAddressOf:
 		message = "Deprecated pointer syntax: write `&mut expression` instead of `mut expression`"
 		title = "Deprecated `mut` expression"
@@ -121,8 +130,9 @@ func (c *Checker) keywordEdit(start parse.Point, keyword string, text string) Te
 
 // reportLegacyPointerType reports a legacy `mut T` annotation whose `mut`
 // keyword starts at mutStart. `mut Trait` is the one remaining type-level
-// `mut` form and is not deprecated.
-func (c *Checker) reportLegacyPointerType(location parse.Location, mutStart parse.Point, inner Type) {
+// `mut` form and is not deprecated. In parameter position `mut` on a type
+// that is already a pointer is idempotent, so it can simply be removed.
+func (c *Checker) reportLegacyPointerType(location parse.Location, mutStart parse.Point, inner Type, parameter bool) {
 	if inner == nil {
 		return
 	}
@@ -134,6 +144,13 @@ func (c *Checker) reportLegacyPointerType(location parse.Location, mutStart pars
 		return
 	}
 	if isReferenceType(inner) {
+		if !parameter {
+			c.reportLegacyPointerSyntax(legacyRedundantTypeMut, location)
+			return
+		}
+		removal := c.keywordEdit(mutStart, "mut", "")
+		removal.TrimTrailingSpace = true
+		c.reportLegacyPointerSyntax(legacyRedundantTypeMut, location, removal)
 		return
 	}
 	c.reportLegacyPointerSyntax(legacyPointerType, location, c.insertEdit(mutStart, "*"))

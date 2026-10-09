@@ -1890,7 +1890,7 @@ func (c *Checker) validateMapKeyType(key Type, loc parse.Location) {
 func (c *Checker) resolveMutableTypeAnnotation(annotation parse.MutableType) Type {
 	inner := c.resolveType(annotation.Inner)
 	if !annotation.Pointer {
-		c.reportLegacyPointerType(annotation.GetLocation(), annotation.GetLocation().Start, inner)
+		c.reportLegacyPointerType(annotation.GetLocation(), annotation.GetLocation().Start, inner, false)
 		return c.makeMutableType(inner)
 	}
 	if !c.validPointerReferent(inner, annotation.Inner.GetLocation()) {
@@ -2178,7 +2178,7 @@ func (c *Checker) resolveType(t parse.DeclaredType) Type {
 			paramType := c.resolveType(param)
 			if mutable && i < len(ty.ParamMutLocations) {
 				mutLocation := ty.ParamMutLocations[i]
-				c.reportLegacyPointerType(parse.Location{Start: mutLocation.Start, End: param.GetLocation().End}, mutLocation.Start, paramType)
+				c.reportLegacyPointerType(parse.Location{Start: mutLocation.Start, End: param.GetLocation().End}, mutLocation.Start, paramType, true)
 			}
 			if mutable {
 				// A `mut pkg::T` parameter in function-type position takes the
@@ -13018,7 +13018,7 @@ func (c *Checker) resolveParameterType(t parse.DeclaredType) (Type, bool) {
 		return nil, !nullable
 	}
 	if !annotation.Pointer {
-		c.reportLegacyPointerType(annotation.GetLocation(), annotation.GetLocation().Start, base)
+		c.reportLegacyPointerType(annotation.GetLocation(), annotation.GetLocation().Start, base, true)
 	}
 	if annotation.Pointer && !c.validPointerReferent(base, inner.GetLocation()) {
 		return &TypeVar{name: "unknown"}, false

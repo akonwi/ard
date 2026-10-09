@@ -69,6 +69,18 @@ func TestRewritePointerSyntax(t *testing.T) {
 			invalid: true,
 		},
 		{
+			name:  "redundant mut on pointer parameter types",
+			input: "fn f(a: mut *mut Box, g: fn(mut *mut Box) Void) {}",
+			want:  "fn f(a: *mut Box, g: fn(*mut Box) Void) {}",
+		},
+		{
+			name:    "mut on a pointer type outside parameters needs a manual change",
+			input:   "struct Holder {\n  box: mut *mut Box,\n}",
+			want:    "struct Holder {\n  box: mut *mut Box,\n}",
+			manual:  1,
+			invalid: true,
+		},
+		{
 			name:  "borrow of mut binding",
 			input: "fn reset(box: mut Box) { box.value = 0 }\nmut box = Box{value: 1}\nreset(mut box)",
 			want:  "fn reset(box: *mut Box) { box.value = 0 }\nmut box = Box{value: 1}\nreset(&mut box)",
@@ -185,5 +197,27 @@ func assertNoErrors(t *testing.T, source []byte) {
 	}
 	if len(errors) > 0 {
 		t.Fatalf("rewritten source has errors: %s\n%s", strings.Join(errors, "; "), source)
+	}
+}
+
+func TestApplyRejectsPositionsPastTheirLine(t *testing.T) {
+	source := []byte("ab\r\ncd\n")
+	if _, err := migrate.Apply(source, []checker.TextEdit{{Start: parse.Point{Row: 1, Col: 4}, End: parse.Point{Row: 1, Col: 4}, NewText: "x"}}); err == nil {
+		t.Fatal("expected an error for a column past the end of line 1")
+	}
+	got, err := migrate.Apply(source, []checker.TextEdit{{Start: parse.Point{Row: 1, Col: 3}, End: parse.Point{Row: 1, Col: 3}, NewText: "x"}})
+	if err != nil || string(got) != "abx\r\ncd\n" {
+		t.Fatalf("insertion at end of line = %q, %v", got, err)
+	}
+}
+
+func TestApplyRejectsOverlappingEdits(t *testing.T) {
+	source := []byte("mut value")
+	_, err := migrate.Apply(source, []checker.TextEdit{
+		{Start: parse.Point{Row: 1, Col: 1}, End: parse.Point{Row: 1, Col: 5}, NewText: ""},
+		{Start: parse.Point{Row: 1, Col: 3}, End: parse.Point{Row: 1, Col: 6}, NewText: "x"},
+	})
+	if err == nil {
+		t.Fatal("expected overlapping edits to fail")
 	}
 }

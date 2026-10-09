@@ -110,13 +110,24 @@ func lineStartOffsets(source []byte) []int {
 	return starts
 }
 
+// offset converts a 1-based row and byte column to a byte offset. The column
+// may address the line's content or the position just after it, but never
+// spill into the next line.
 func offset(source []byte, lineStarts []int, point parse.Point) (int, error) {
 	if point.Row < 1 || point.Row > len(lineStarts) || point.Col < 1 {
 		return 0, fmt.Errorf("edit position %s is outside the source", point)
 	}
-	at := lineStarts[point.Row-1] + point.Col - 1
-	if at > len(source) {
-		return 0, fmt.Errorf("edit position %s is outside the source", point)
+	lineStart := lineStarts[point.Row-1]
+	lineEnd := len(source)
+	if point.Row < len(lineStarts) {
+		lineEnd = lineStarts[point.Row] - 1 // the '\n'
+	}
+	if lineEnd > lineStart && source[lineEnd-1] == '\r' {
+		lineEnd--
+	}
+	at := lineStart + point.Col - 1
+	if at > lineEnd {
+		return 0, fmt.Errorf("edit position %s is outside its line", point)
 	}
 	return at, nil
 }
