@@ -230,6 +230,34 @@ holder.box = &mut Box{value: 2}`, wantError: true},
 	}
 }
 
+func TestADR0073ParametersAreImmutable(t *testing.T) {
+	tests := []struct {
+		name      string
+		source    string
+		wantError bool
+	}{
+		{name: "pointer parameter allows field write", source: `fn rename(user: *mut User) {
+  user.name = "Grace"
+}`},
+		{name: "pointer parameter allows pointee replacement", source: `fn reset(box: *mut Box) {
+  box.* = Box{value: 0}
+}`},
+		{name: "pointer parameter slot cannot be rebound", source: `fn swap(box: *mut Box) { box = &mut Box{value: 0} }`, wantError: true},
+		{name: "legacy reference parameter slot cannot be rebound", source: `fn swap(box: mut Box) { box = mut Box{value: 0} }`, wantError: true},
+		{name: "value parameter can be shadowed as a writable local", source: `fn rename(user: User) User {
+  mut user = user
+  user.name = "Grace"
+  user
+}`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assertReferenceCheckerResult(t, pointerPrelude+tt.source, tt.wantError)
+		})
+	}
+}
+
 func TestADR0073PointerTypeDisplay(t *testing.T) {
 	source := pointerPrelude + `let reader = &new_user()
 let value: Int = reader`

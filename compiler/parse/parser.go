@@ -2973,8 +2973,9 @@ func (p *parser) functionDef(asMethod bool, isTest bool) (Statement, error) {
 				continue
 			}
 
-			// `mut` may not prefix a parameter name. Parameter mutability
-			// belongs in the type (`name: mut T`), not before the name.
+			// `mut` may not prefix a parameter name. Parameters are
+			// immutable bindings (ADR 0073): caller-visible mutation uses a
+			// `*mut T` parameter, and local mutation shadows the parameter.
 			// Named functions already reject `mut name: T` via the
 			// missing-colon path, but `consumeVariableName` treats `mut`
 			// as an identifier, so anonymous functions would otherwise
@@ -2982,7 +2983,7 @@ func (p *parser) functionDef(asMethod bool, isTest bool) (Statement, error) {
 			// Reject it explicitly and recover by parsing the real
 			// parameter that follows. (#286)
 			if p.check(mut) {
-				p.addError(p.peek(), "parameter mutability belongs in the type ('name: mut T'), not before the name")
+				p.addError(p.peek(), "parameters are immutable; use a '*mut T' parameter type or shadow it with 'mut name = name'")
 				p.advance() // consume 'mut' and continue with the parameter name
 			}
 			nameToken := p.consumeVariableName("Expected parameter name")

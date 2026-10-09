@@ -10450,7 +10450,7 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 			setup := func() {
 				c.scope.expectReturn(returnType)
 				for _, param := range params {
-					sym := c.scope.add(param.Name, param.Type, param.Mutable)
+					sym := c.scope.add(param.Name, param.Type, false)
 					sym.reference = param.Mutable
 					c.recordBinding(param.Loc, sym)
 				}
@@ -12775,7 +12775,7 @@ func (c *Checker) checkExprAsInner(expr parse.Expression, expectedType Type, exp
 			body := c.checkBlockWithExpected(s.Body, func() {
 				c.scope.expectReturn(returnType)
 				for _, param := range params {
-					sym := c.scope.add(param.Name, param.Type, param.Mutable)
+					sym := c.scope.add(param.Name, param.Type, false)
 					sym.reference = param.Mutable
 					c.recordBinding(param.Loc, sym)
 				}
@@ -13081,7 +13081,7 @@ func (c *Checker) checkFunctionBody(fn *FunctionDef, bodyStmts []parse.Statement
 		c.scope.expectReturn(returnType)
 		// Add parameters to scope
 		for _, param := range params {
-			sym := c.scope.add(param.Name, param.Type, param.Mutable)
+			sym := c.scope.add(param.Name, param.Type, false)
 			sym.reference = param.Mutable
 			c.recordBinding(param.Loc, sym)
 		}
@@ -13306,7 +13306,7 @@ func (c *Checker) checkFunctionWithSignature(def *parse.FunctionDeclaration, ini
 	body := c.checkBlockWithExpected(def.Body, func() {
 		c.scope.expectReturn(returnType)
 		for _, param := range params {
-			sym := c.scope.add(param.Name, param.Type, param.Mutable)
+			sym := c.scope.add(param.Name, param.Type, false)
 			sym.reference = param.Mutable
 			sym.foreignDescriptor = param.ForeignABI == ForeignParameterDescriptorValue
 			c.recordBinding(param.Loc, sym)

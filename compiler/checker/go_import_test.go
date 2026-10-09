@@ -98,7 +98,7 @@ impl io::Writer for Sink {
 			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Cannot call 'push' on foreign descriptor reference 'bytes': the Go ABI cannot propagate list growth"}},
 		},
 		{
-			name: "Go interface descriptor parameters reject whole-list assignment",
+			name: "Go interface descriptor parameters are immutable bindings",
 			input: `use go:io
 
 struct Sink {}
@@ -109,7 +109,7 @@ impl io::Writer for Sink {
     Result::ok(bytes.size())
   }
 }`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Cannot assign a value to pointer 'bytes'"}},
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Immutable variable: bytes"}},
 		},
 		{
 			name: "Go interface descriptor aliases reject list growth",
