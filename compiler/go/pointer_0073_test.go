@@ -69,6 +69,7 @@ func TestADR0073ScalarPointeeReplacement(t *testing.T) {
 	program := lowerParitySource(t, `
 		fn increment(count: *mut Int) {
 			count.* = count.* + 1
+			count.* =+ 1
 		}
 
 		fn main() Int {
@@ -78,8 +79,8 @@ func TestADR0073ScalarPointeeReplacement(t *testing.T) {
 			count
 		}
 	`)
-	if got := runGoTargetParityJSON(t, program); got != `3` {
-		t.Fatalf("result = %s, want 3", got)
+	if got := runGoTargetParityJSON(t, program); got != `5` {
+		t.Fatalf("result = %s, want 5", got)
 	}
 }
 
