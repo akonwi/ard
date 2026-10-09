@@ -54,7 +54,7 @@ fn inspect(counter: Counter) Int {
 ```
 
 `mut Counter` is a trait value that may call `fn mut` methods. It is not a
-pointer: create one by passing a `*mut T` whose `T` implements the trait. A
+pointer: create one by passing a `&mut T` whose `T` implements the trait. A
 `mut Counter` converts to an ordinary `Counter` without copying the
 underlying value:
 
@@ -67,11 +67,11 @@ impl Counter for Tally {
 }
 
 let tally = &mut Tally{count: 0}
-update(tally)              // *mut Tally widens to mut Counter
+update(tally)              // &mut Tally widens to mut Counter
 let total = inspect(tally) // 2
 ```
 
-`mut Trait` is the only type that uses `mut`. Pointer types such as `*Counter`
+`mut Trait` is the only type that uses `mut`. Pointer types such as `&Counter`
 are rejected; point to the concrete type instead. To keep an independent copy,
 dereference the concrete pointer before widening: `let copy: Counter = tally.*`.
 

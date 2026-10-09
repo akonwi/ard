@@ -78,7 +78,7 @@ fn main() {
 
       <article class="ard-feature">
         <h3>Mutable access</h3>
-        <p><code>mut name = expression</code> declares a writable binding. Shared storage is explicit: <code>&amp;mut value</code> creates a <code>*mut T</code> pointer, and <code>&amp;value</code> creates a read-only <code>*T</code>.</p>
+        <p><code>mut name = expression</code> declares a writable binding. Shared storage is explicit: <code>&amp;mut value</code> creates a <code>&amp;mut T</code> pointer, and <code>&amp;value</code> creates a read-only <code>&amp;T</code>.</p>
         <pre aria-label="Explicit mutability example"><code><b>impl</b> Board &#123;
 {'  '}<b>fn mut</b> play(player: Str, pos: Int) &#123;
 {'    '}self.cells.set(pos, player)

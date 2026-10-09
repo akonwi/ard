@@ -39,10 +39,10 @@ mut age = 30
 
 #### Pointers
 
-Ard shares storage through explicit pointers. `*T` is a read-only pointer and `*mut T` is a writable one. `&value` and `&mut value` create them, and postfix `.*` dereferences:
+Ard shares storage through explicit pointers. `&T` is a read-only pointer and `&mut T` is a writable one. `&value` and `&mut value` create them, and postfix `.*` dereferences:
 
 ```ard
-fn update_person(person: *mut Person) {
+fn update_person(person: &mut Person) {
     person.age = 99  // Mutates the caller's value
 }
 
@@ -62,7 +62,7 @@ Struct fields can also hold pointers:
 
 ```ard
 struct Context {
-    tree: *mut ViewTree,
+    tree: &mut ViewTree,
 }
 
 let ctx = Context { tree: &mut tree }
@@ -74,7 +74,7 @@ The `ctx` binding is immutable, but `ctx.tree` points to a writable `ViewTree`. 
 Optional pointers use grouping before `?`:
 
 ```ard
-let maybe_tree: (*mut ViewTree)? = Maybe::new()
+let maybe_tree: (&mut ViewTree)? = Maybe::new()
 ```
 
 #### Increment/Decrement short hand
@@ -406,7 +406,7 @@ let rect = image::Rectangle{
   Max: image::Point{X: 80, Y: 24},
 }
 
-fn mark_ok(resp: *mut gohttp::Response) {
+fn mark_ok(resp: &mut gohttp::Response) {
   resp.StatusCode = gohttp::StatusOK
 }
 ```

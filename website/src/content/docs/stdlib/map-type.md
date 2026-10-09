@@ -51,7 +51,7 @@ let names = scores.keys()
 
 ### `fn set(key: K, value: V)`
 
-Set `key` to `value` through a `*mut [K: V]` pointer.
+Set `key` to `value` through a `&mut [K: V]` pointer.
 
 ```ard
 let scores = &mut ["Ada": 10]
@@ -60,7 +60,7 @@ scores.set("Grace", 12)
 
 ### `fn delete(key: K)`
 
-Remove `key` through a `*mut [K: V]` pointer. Deleting an absent key is allowed.
+Remove `key` through a `&mut [K: V]` pointer. Deleting an absent key is allowed.
 
 ```ard
 let scores = &mut ["Ada": 10]

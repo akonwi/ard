@@ -193,7 +193,7 @@ impl Person {
 }
 ```
 
-A `fn mut` method needs a `*mut Person` receiver. Calling it does not take the receiver's address implicitly, so hold the value through a pointer, or take one with `&mut`:
+A `fn mut` method needs a `&mut Person` receiver. Calling it does not take the receiver's address implicitly, so hold the value through a pointer, or take one with `&mut`:
 
 ```ard
 struct Person {
@@ -208,23 +208,23 @@ impl Person {
 }
 
 let bob = &mut Person{name: "Bob", age: 30}
-bob.grow_older() // OK: bob is a *mut Person
+bob.grow_older() // OK: bob is a &mut Person
 
 mut alice = Person{name: "Alice", age: 30}
 alice.age = 31             // OK: field write on a mut binding
-// alice.grow_older()      // Error: requires a *mut Person receiver
+// alice.grow_older()      // Error: requires a &mut Person receiver
 (&mut alice).grow_older()  // OK
 ```
 
-Non-mutating methods accept any receiver, including `*Person` and `*mut Person` pointers.
+Non-mutating methods accept any receiver, including `&Person` and `&mut Person` pointers.
 
 ## Pointer-valued fields
 
-A field typed as `*mut T` or `*T` stores a pointer:
+A field typed as `&mut T` or `&T` stores a pointer:
 
 ```ard
 struct Session {
-  user: *mut Person,
+  user: &mut Person,
 }
 
 mut first = Person{name: "Ada", age: 30}

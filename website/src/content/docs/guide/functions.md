@@ -34,12 +34,12 @@ fn print_message(msg: Str) {
 
 ### Pointer parameters
 
-Parameters are immutable bindings. A function that changes the caller's value takes a `*mut T` pointer, and the caller passes one explicitly with `&mut`:
+Parameters are immutable bindings. A function that changes the caller's value takes a `&mut T` pointer, and the caller passes one explicitly with `&mut`:
 
 ```ard
 struct Person { name: Str, age: Int }
 
-fn grow_older(person: *mut Person) {
+fn grow_older(person: &mut Person) {
   person.age =+ 1
 }
 
@@ -50,24 +50,24 @@ let alice_pointer = &mut alice
 grow_older(alice_pointer)
 ```
 
-A `*T` parameter only reads through the pointer. Callers can pass `&value` or any `*mut T`:
+A `&T` parameter only reads through the pointer. Callers can pass `&value` or any `&mut T`:
 
 ```ard
-fn describe(person: *Person) Str {
+fn describe(person: &Person) Str {
   "{person.name} is {person.age}"
 }
 
 describe(&alice)
 ```
 
-Postfix `.*` reads the value at a pointer. Through a `*mut T`, it can also replace the whole pointee:
+Postfix `.*` reads the value at a pointer. Through a `&mut T`, it can also replace the whole pointee:
 
 ```ard
-fn snapshot(person: *Person) Person {
+fn snapshot(person: &Person) Person {
   person.*
 }
 
-fn reset(person: *mut Person) {
+fn reset(person: &mut Person) {
   person.* = Person{name: person.name, age: 0}
 }
 ```

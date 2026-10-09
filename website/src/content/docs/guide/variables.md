@@ -36,8 +36,8 @@ A pointer keeps its pointer type during inference:
 struct User { name: Str }
 
 mut user = User{name: "Ada"}
-let pointer = &mut user // inferred as *mut User
-let alias = pointer     // also *mut User; copies the pointer
+let pointer = &mut user // inferred as &mut User
+let alias = pointer     // also &mut User; copies the pointer
 ```
 
 ## Mutable bindings
@@ -71,34 +71,34 @@ A pointer shares storage. Ard has two pointer types:
 
 | Type | Created with | Meaning |
 | --- | --- | --- |
-| `*T` | `&value` | Read-only pointer: reads through the pointer only. |
-| `*mut T` | `&mut value` | Writable pointer: reads and writes through the pointer. |
+| `&T` | `&value` | Read-only pointer: reads through the pointer only. |
+| `&mut T` | `&mut value` | Writable pointer: reads and writes through the pointer. |
 
 ```ard
 struct User { name: Str }
 
 mut user = User{name: "Ada"}
 
-let reader = &user     // *User
-let writer = &mut user // *mut User
+let reader = &user     // &User
+let writer = &mut user // &mut User
 
 writer.name = "Grace"  // writes user
 reader.name            // "Grace"
 ```
 
-Field access and method calls go through a pointer implicitly. A `*mut T` can be used wherever a `*T` is expected; the reverse is rejected.
+Field access and method calls go through a pointer implicitly. A `&mut T` can be used wherever a `&T` is expected; the reverse is rejected.
 
-`&` works on any addressable place, but `&mut` requires a **writable place**: a `mut` binding, a field of one, or a place reached through a `*mut` pointer. Taking `&mut` of a fresh value creates new storage:
+`&` works on any addressable place, but `&mut` requires a **writable place**: a `mut` binding, a field of one, or a place reached through a `&mut` pointer. Taking `&mut` of a fresh value creates new storage:
 
 ```ard
 let fixed = User{name: "Ada"}
 let a = &fixed                    // OK: read-only pointer
 // let b = &mut fixed             // Error: fixed is not writable
 
-let fresh = &mut User{name: "Lin"} // *mut User to new storage
+let fresh = &mut User{name: "Lin"} // &mut User to new storage
 ```
 
-`*T` is read-only only through that pointer. Other `*mut T` pointers to the same storage can still write it.
+`&T` is read-only only through that pointer. Other `&mut T` pointers to the same storage can still write it.
 
 A pointer binding declared with `let` cannot be rebound, but it can still write through to its pointee. A `mut` pointer binding can also point somewhere else:
 
@@ -115,10 +115,10 @@ current.name = "Two"  // writes second
 
 ## Pointer parameters
 
-Parameters are immutable bindings. To let a function change the caller's value, take a `*mut T` parameter:
+Parameters are immutable bindings. To let a function change the caller's value, take a `&mut T` parameter:
 
 ```ard
-fn rename(user: *mut User, name: Str) {
+fn rename(user: &mut User, name: Str) {
   user.name = name
 }
 
@@ -146,7 +146,7 @@ let pointer = &mut user
 let snapshot: User = pointer.*
 ```
 
-`pointer.*` is also a place. Through a `*mut T` pointer it can be assigned, replacing the whole pointee:
+`pointer.*` is also a place. Through a `&mut T` pointer it can be assigned, replacing the whole pointee:
 
 ```ard
 pointer.* = User{name: "Grace"} // user is now Grace
@@ -177,12 +177,12 @@ let same_value = count_pointer.* == count
 
 ## Lists and maps
 
-Copying a list copies its descriptor and shares its backing storage. Copying a map shares its contents. To keep that sharing visible, in-place list and map operations such as `push`, `set`, `swap`, and `delete` require a `*mut` pointer. A `mut` binding can only replace the whole value:
+Copying a list copies its descriptor and shares its backing storage. Copying a map shares its contents. To keep that sharing visible, in-place list and map operations such as `push`, `set`, `swap`, and `delete` require a `&mut` pointer. A `mut` binding can only replace the whole value:
 
 ```ard
 mut values = [1, 2]
 values = [3]          // OK: replaces the value
-// values.push(4)     // Error: requires *mut [Int]
+// values.push(4)     // Error: requires &mut [Int]
 
 let items = &mut [1, 2]
 items.push(3)         // OK
@@ -194,7 +194,7 @@ Struct fields can store pointers. Writing through a pointer field targets the po
 
 ```ard
 struct Tree { value: Int }
-struct Context { tree: *mut Tree }
+struct Context { tree: &mut Tree }
 
 let context = Context{tree: &mut Tree{value: 1}}
 context.tree.value = 2                   // OK: writes the Tree
@@ -208,7 +208,7 @@ Earlier releases spelled pointers with `mut`. That syntax still works but report
 
 | Before | Now |
 | --- | --- |
-| `user: mut User` | `user: *mut User` |
+| `user: mut User` | `user: &mut User` |
 | `mut user` | `&mut user` |
 | `mut pointer` (already a pointer) | `pointer` |
 | `pointer.@` | `pointer.*` |

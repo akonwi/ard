@@ -138,7 +138,7 @@ odd.is_none() // true
 
 ### `fn set(value: $T)`
 
-Mutate a `Maybe<T>` slot to contain `value`. The receiver must be a `*mut` pointer.
+Mutate a `Maybe<T>` slot to contain `value`. The receiver must be a `&mut` pointer.
 
 ```ard
 let current = &mut Maybe::new<Int>()
@@ -148,7 +148,7 @@ current.expect("set") // 42
 
 ### `fn clear()`
 
-Mutate a `Maybe<T>` slot back to `none`. The receiver must be a `*mut` pointer.
+Mutate a `Maybe<T>` slot back to `none`. The receiver must be a `&mut` pointer.
 
 ```ard
 let current = &mut Maybe::new("ready")
