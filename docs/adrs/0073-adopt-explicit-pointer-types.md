@@ -458,8 +458,18 @@ a checker-backed rewrite tool rather than the syntax-only formatter.
 
 Some programs need manual changes:
 
-- `&mut` of a `let` binding is rejected. The diagnostic suggests changing the
-  binding to `mut`.
+- `&mut` of a `let` binding is rejected. For a local binding, the rewrite
+  tool changes the binding to `mut`.
+- Borrowing a module-level `let` has no direct replacement. ADR 0021 keeps
+  module-level `mut` bindings out of scope for imported modules, so the binding
+  cannot become a writable place. Store a pointer in the binding instead:
+
+  ```ard
+  let shared = &mut Box{number: 7}
+  fn shared_ref() *mut Box { shared }
+  ```
+
+  Mutable module state remains a separate decision.
 - `mut` applied to a trait-typed place, which captured the current interface
   value under ADR 0061, has no direct replacement. Store a `mut Trait` value
   instead.
