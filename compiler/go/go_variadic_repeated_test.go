@@ -23,8 +23,8 @@ fn call_sprint(sprint: fn(...Any) Str, values: [Any]) Str {
 
 fn main() Bool {
   let direct_values: [Any] = ["a", "b", 3]
-  let captured_values: [Any] = ["c", "d", 4]
-  let captured_reference = mut captured_values
+  mut captured_values: [Any] = ["c", "d", 4]
+  let captured_reference = &mut captured_values
   let sprint = fmt::Sprint
   fmt::Sprint(direct_values...) == "ab3" and sprint(captured_reference...) == "cd4" and call_sprint(sprint, captured_values) == "cd4"
 }`)

@@ -70,7 +70,7 @@ func TestGoTargetParityGenericMethodForwardReferences(t *testing.T) {
 				}
 
 				fn main() Bool {
-					let holder = mut Holder<Int>{items: [1]}
+					let holder = &mut Holder<Int>{items: [1]}
 					holder.reset()
 					holder.items.size() == 0
 				}
@@ -94,7 +94,7 @@ func TestGoTargetParityGenericMethodForwardReferences(t *testing.T) {
 				}
 
 				fn main() Bool {
-					let holder = mut Holder<Int>{items: [1]}
+					let holder = &mut Holder<Int>{items: [1]}
 					let reset = holder.reset_later()
 					reset()
 					holder.items.size() == 0
@@ -149,7 +149,7 @@ func TestGoTargetParityGenericMethodForwardReferences(t *testing.T) {
 				}
 
 				fn main() Bool {
-					let counter = mut Counter<Str>{marker: "ok", remaining: 3}
+					let counter = &mut Counter<Str>{marker: "ok", remaining: 3}
 					counter.first()
 					counter.remaining == 0 and counter.marker == "ok"
 				}
@@ -484,9 +484,9 @@ func TestGoTargetParityCoreCorpus(t *testing.T) {
 			name: "list sort with closure",
 			input: `
 				fn main() [Int] {
-					let values = mut [5, 1, 3]
+					let values = &mut [5, 1, 3]
 					values.sort(fn(a: Int, b: Int) Bool { a < b })
-					values.@
+					values.*
 				}
 			`,
 		},
@@ -528,7 +528,7 @@ func TestGoTargetParityCoreCorpus(t *testing.T) {
 				struct Person { name: Str, age: Int }
 
 				fn main() Int {
-					let person = mut Person{name: "Alice", age: 30}
+					let person = &mut Person{name: "Alice", age: 30}
 					person.age = 31
 					person.age
 				}
@@ -540,7 +540,7 @@ func TestGoTargetParityCoreCorpus(t *testing.T) {
 				struct Response { headers: [Str: Str] }
 
 				fn main() Str {
-					let res = mut Response{headers: [:]}
+					let res = &mut Response{headers: [:]}
 					let _ = res.headers.set("Content-Type", "application/json")
 					match res.headers.get("Content-Type") {
 						v => v,
@@ -623,7 +623,7 @@ func TestGoTargetParityUseKeywordAsMethodName(t *testing.T) {
 				}
 
 				fn main() Int {
-					let counter = mut Counter{number: 41}
+					let counter = &mut Counter{number: 41}
 					counter.mut()
 					counter.number
 				}
@@ -888,15 +888,15 @@ func TestGoTargetParityRecursiveGenericFunctionField(t *testing.T) {
 			input: `
 				struct Context<$T> {
 					state: $T,
-					handlers: [fn(mut Context<$T>)],
+					handlers: [fn(*mut Context<$T>)],
 				}
 
-				fn advance(context: mut Context<Int>) {
+				fn advance(context: *mut Context<Int>) {
 					context.state = context.state + 1
 				}
 
 				fn main() Int {
-					let context = mut Context<Int>{state: 41, handlers: [advance]}
+					let context = &mut Context<Int>{state: 41, handlers: [advance]}
 					let handler = context.handlers.at(0).expect("handler")
 					handler(context)
 					context.state
@@ -908,21 +908,21 @@ func TestGoTargetParityRecursiveGenericFunctionField(t *testing.T) {
 			input: `
 				struct Context<$T> {
 					state: $T,
-					handlers: [fn(mut Context<$T>)],
+					handlers: [fn(*mut Context<$T>)],
 				}
 
 				impl Context {
-					fn first() fn(mut Context<$T>) {
+					fn first() fn(*mut Context<$T>) {
 						self.handlers.at(0).expect("handler")
 					}
 				}
 
-				fn advance(context: mut Context<Int>) {
+				fn advance(context: *mut Context<Int>) {
 					context.state = context.state + 1
 				}
 
 				fn main() Int {
-					let context = mut Context<Int>{state: 41, handlers: [advance]}
+					let context = &mut Context<Int>{state: 41, handlers: [advance]}
 					context.first()(context)
 					context.state
 				}
@@ -1075,7 +1075,7 @@ func TestGoTargetSymbolicForeignGenericApplication(t *testing.T) {
 					pointer: atomic::Pointer<$T>,
 				}
 
-				fn inspect(holder: mut Holder<time::Time>) {
+				fn inspect(holder: *mut Holder<time::Time>) {
 					holder.pointer.Load()
 				}
 
@@ -1126,7 +1126,7 @@ func TestGoTargetGenericStructuralMapKeyUsesComparableConstraint(t *testing.T) {
 			name: "mutable generic field does not constrain referent",
 			input: `
 				struct Box<$T> {
-					value: mut $T,
+					value: *mut $T,
 				}
 
 				struct Index<$T> {
@@ -1608,7 +1608,7 @@ func TestGoTargetParityConcurrentMethodAccess(t *testing.T) {
 			}()
 			input := `
 				fn main() Int {
-					let list = mut [1,2,3]
+					let list = &mut [1,2,3]
 					list.push(4)
 					list.size()
 				}
@@ -1757,8 +1757,8 @@ func TestGoTargetParityMutableParameterClosureInFunctionTypedMap(t *testing.T) {
 
 		fn main() Int {
 			let base = 41
-			let handlers: mut [Str: fn(mut Box)] = mut [:]
-			handlers.set("a", fn(b: mut Box) {})
+			let handlers: *mut [Str: fn(*mut Box)] = &mut [:]
+			handlers.set("a", fn(b: *mut Box) {})
 			handlers.size() + base
 		}
 	`)
@@ -1855,11 +1855,11 @@ func TestGoTargetParityInlineClosureCaptureSnapshots(t *testing.T) {
 				struct Box { value: Int }
 
 				fn main() Int {
-					let first = Box{value: 1}
-					let second = Box{value: 2}
-					mut reference = mut first
+					mut first = Box{value: 1}
+					mut second = Box{value: 2}
+					mut reference = &mut first
 					let read = fn() Int { reference.value }
-					reference = mut second
+					reference = &mut second
 					read()
 				}
 			`,
@@ -2035,7 +2035,7 @@ func TestGoTargetParityMutatingTraitImplClosureCapturesSelf(t *testing.T) {
 		}
 
 		fn main() Int {
-			let box = mut Box{value: 0}
+			let box = &mut Box{value: 0}
 			box.init()
 			box.value
 		}
@@ -2065,8 +2065,8 @@ func TestGoTargetParityNativeTraitObjectMutableParameterFromTraitLocal(t *testin
 		}
 
 		fn main() Int {
-			let box = Box{value: 1}
-			let d: mut Draw = mut box
+			mut box = Box{value: 1}
+			let d: mut Draw = &mut box
 			apply(d)
 		}
 	`)
@@ -2095,8 +2095,8 @@ func TestGoTargetParityMutableTraitObjectParameterFromConcrete(t *testing.T) {
 		}
 
 		fn main() Int {
-			let leaf = Leaf{node_id: 42}
-			let leaf_reference: mut View = mut leaf
+			mut leaf = Leaf{node_id: 42}
+			let leaf_reference: mut View = &mut leaf
 			read_child(leaf_reference)
 		}
 	`)
@@ -2130,18 +2130,18 @@ func TestGoTargetParityEscapedMutableTraitObjectUpcastAliasesConcrete(t *testing
 		}
 
 		fn main() Int {
-			let leaf = Leaf{n: 1}
-			let branch = Branch{n: 10}
-			mut active: mut View = mut leaf
+			mut leaf = Leaf{n: 1}
+			mut branch = Branch{n: 10}
+			mut active: mut View = &mut leaf
 			let node = store(active)
 			let copied = node.view
 			let before = copied.value()
 
-			let leaf_reference = mut leaf
+			let leaf_reference = &mut leaf
 			leaf_reference.n = 2
 			let shared = node.view.value()
 
-			active = mut branch
+			active = &mut branch
 			let independently_rebound = node.view.value()
 			let rebound = active.value()
 
@@ -2178,7 +2178,7 @@ func TestGoTargetParityFallbackTraitMutableStorage(t *testing.T) {
 				let ordinary: Counter = reference
 				let snapshot: Counter = reference.@
 				let boxed: Any = reference
-				let recovered = unsafe::cast<mut Box>(boxed).expect("box pointer")
+				let recovered = unsafe::cast<*mut Box>(boxed).expect("box pointer")
 				recovered.value = 3
 				"{snapshot.value()}:{ordinary.value()}:{current.value()}:{reference.value()}"
 			}
@@ -2203,8 +2203,8 @@ func TestGoTargetParityFallbackTraitMutableStorage(t *testing.T) {
 			}
 
 			fn main() Int {
-				let box = Box{result: 40, maybe: 2}
-				let reference: mut View = mut box
+				mut box = Box{result: 40, maybe: 2}
+				let reference: mut View = &mut box
 				reference.result().or(0) + reference.maybe().or(0)
 			}
 		`)
@@ -2284,8 +2284,8 @@ func TestGoTargetParityMutatingTraitContractAcceptsReadOnlyImplementation(t *tes
 		}
 
 		fn main() Int {
-			let value = Value{number: 42}
-			read(mut value)
+			mut value = Value{number: 42}
+			read(&mut value)
 		}
 	`)
 	if got := runGoTargetParityJSON(t, program); got != "42" {
@@ -2326,9 +2326,9 @@ struct Device { value: Int }
 fn read(value: Reader) Int { value.act() }
 fn write(value: mut Writer) Int { value.act() }
 fn main() Int {
-  let device = Device{value: 1}
+  mut device = Device{value: 1}
   let before = read(device)
-  let after = write(mut device)
+  let after = write(&mut device)
   before * 10 + after
 }
 `)
@@ -2522,8 +2522,8 @@ func TestGoTargetParityMutatingTraitInterpolationUsesReferenceReceiver(t *testin
 		}
 
 		fn main() Str {
-			let counter = Counter{calls: 0}
-			let output = render(mut counter)
+			mut counter = Counter{calls: 0}
+			let output = render(&mut counter)
 			"{output}:{counter.calls}"
 		}
 	`)
@@ -2553,8 +2553,8 @@ func TestGoTargetParityMutableTraitMethodNamesDoNotCollideWithForwarderHooks(t *
 		}
 
 		fn main() Int {
-			let box = Box{n: 42}
-			let holder = Holder{weird: mut box}
+			mut box = Box{n: 42}
+			let holder = Holder{weird: &mut box}
 			holder.weird.ardMutTraitLoad_0()
 		}
 	`)
@@ -2597,25 +2597,25 @@ func TestGoTargetParityMutatingTraitDispatchUpdatesStoredTraitObject(t *testing.
 			}
 		}
 
-		fn run_typed(typed: mut AppRoot) Int {
+		fn run_typed(typed: *mut AppRoot) Int {
 			typed.view.handle_event()
 			typed.view.value()
 		}
 
-		fn run_any(any: mut AppRoot) Int {
+		fn run_any(any: *mut AppRoot) Int {
 			any.view.handle_event()
 			any.view.value()
 		}
 
 		fn main() Int {
-			let app = mut AppRoot{view: CounterView{count: 0}}
+			let app = &mut AppRoot{view: CounterView{count: 0}}
 			app.dispatch()
 			let field_result = app.current()
 
-			let typed_app = mut AppRoot{view: CounterView{count: 0}}
+			let typed_app = &mut AppRoot{view: CounterView{count: 0}}
 			let typed_result = run_typed(typed_app)
 
-			let any_app = mut AppRoot{view: CounterView{count: 0}}
+			let any_app = &mut AppRoot{view: CounterView{count: 0}}
 			let any_result = run_any(any_app)
 
 			field_result + typed_result + any_result
@@ -2632,10 +2632,10 @@ func TestGoTargetParityMutableReferenceFieldUpdatesSharedStorage(t *testing.T) {
 		}
 
 		struct Context {
-			tree: mut Tree,
+			tree: *mut Tree,
 		}
 
-		fn bump(tree: mut Tree) {
+		fn bump(tree: *mut Tree) {
 			tree.count = tree.count + 1
 		}
 
@@ -2644,21 +2644,21 @@ func TestGoTargetParityMutableReferenceFieldUpdatesSharedStorage(t *testing.T) {
 		}
 
 		struct Box {
-			value: mut Number,
+			value: *mut Number,
 		}
 
-		fn set(value: mut Number) {
+		fn set(value: *mut Number) {
 			value.value = 3
 		}
 
 		fn main() Int {
-			let tree = Tree{count: 0}
-			let ctx = Context{tree: mut tree}
+			mut tree = Tree{count: 0}
+			let ctx = Context{tree: &mut tree}
 			bump(ctx.tree)
 			ctx.tree.count = 2
 
-			let count = Number{value: 0}
-			let box = Box{value: mut count}
+			mut count = Number{value: 0}
+			let box = Box{value: &mut count}
 			set(box.value)
 
 			ctx.tree.count + tree.count + box.value.value + count.value
@@ -2675,18 +2675,18 @@ func TestGoTargetParityMutableReferenceReturnUpdatesSharedStorage(t *testing.T) 
 			name: Str,
 		}
 
-		fn get_user() mut User {
-			let user = User{name: "Ada"}
-			(mut user)
+		fn get_user() *mut User {
+			mut user = User{name: "Ada"}
+			(&mut user)
 		}
 
-		fn forward_user() mut User {
+		fn forward_user() *mut User {
 			get_user()
 		}
 
 		fn main() Str {
-			let user: mut User = forward_user()
-			let snapshot: User = user.@
+			let user: *mut User = forward_user()
+			let snapshot: User = user.*
 			user.name = "Joe"
 			snapshot.name + ":" + user.name
 		}
@@ -2703,14 +2703,14 @@ func TestGoTargetParityMutableReferenceReturnUpdatesSharedStorage(t *testing.T) 
 			}
 
 			impl User {
-				fn mut alias() mut User {
-					(mut self)
+				fn mut alias() *mut User {
+					(self)
 				}
 			}
 
 			fn main() Str {
-				let original = mut User{name: "Ada"}
-				let user: mut User = original.alias()
+				let original = &mut User{name: "Ada"}
+				let user: *mut User = original.alias()
 				user.name = "Joe"
 				original.name
 			}
@@ -2722,12 +2722,12 @@ func TestGoTargetParityMutableReferenceReturnUpdatesSharedStorage(t *testing.T) 
 
 	t.Run("descriptor-backed list", func(t *testing.T) {
 		program := lowerParitySource(t, `
-			fn get_values() mut [Int] {
-				(mut [1])
+			fn get_values() *mut [Int] {
+				(&mut [1])
 			}
 
 			fn main() Int {
-				let values: mut [Int] = get_values()
+				let values: *mut [Int] = get_values()
 				values.set(0, 2)
 				values.at(0).expect("bounds")
 			}
@@ -2763,12 +2763,12 @@ func TestGoTargetParityMutableReferenceReturnUpdatesSharedStorage(t *testing.T) 
 			}
 
 			fn borrow(view: mut View) mut View {
-				(mut view)
+				(view)
 			}
 
 			fn main() Int {
-				let leaf = Leaf{n: 1}
-				let node = Node{view: mut leaf}
+				mut leaf = Leaf{n: 1}
+				let node = Node{view: &mut leaf}
 				let view: mut View = borrow(node.view)
 				view.set(2)
 				leaf.n
@@ -2785,13 +2785,13 @@ func TestGoTargetParityMutableReferenceReturnUpdatesSharedStorage(t *testing.T) 
 				name: Str,
 			}
 
-			fn get_user() mut User {
-				(mut User{name: "Ada"})
+			fn get_user() *mut User {
+				(&mut User{name: "Ada"})
 			}
 
 			fn main() Str {
-				let getter: fn() mut User = get_user
-				let user: mut User = getter()
+				let getter: fn() *mut User = get_user
+				let user: *mut User = getter()
 				user.name = "Joe"
 				user.name
 			}
@@ -2830,12 +2830,12 @@ func TestGoTargetParityMutableReferenceParameterUpdatesCaller(t *testing.T) {
 				value: Int,
 			}
 
-			fn bump(c: mut Counter) {
+			fn bump(c: *mut Counter) {
 				c.value = c.value + 1
 			}
 
 			fn main() Int {
-				let counter = mut Counter{value: 0}
+				let counter = &mut Counter{value: 0}
 				bump(counter)
 				counter.value
 			}
@@ -2847,12 +2847,12 @@ func TestGoTargetParityMutableReferenceParameterUpdatesCaller(t *testing.T) {
 
 	t.Run("list descriptor element mutation", func(t *testing.T) {
 		program := lowerParitySource(t, `
-			fn replace_first(values: mut [Int]) {
+			fn replace_first(values: *mut [Int]) {
 				values.set(0, 1)
 			}
 
 			fn main() Int {
-				let values = mut [0]
+				let values = &mut [0]
 				replace_first(values)
 				values.at(0).expect("bounds")
 			}
@@ -2864,12 +2864,12 @@ func TestGoTargetParityMutableReferenceParameterUpdatesCaller(t *testing.T) {
 
 	t.Run("native mutable list parameter preserves growth", func(t *testing.T) {
 		program := lowerParitySource(t, `
-			fn append_one(values: mut [Int]) {
+			fn append_one(values: *mut [Int]) {
 				values.push(1)
 			}
 
 			fn main() Int {
-				let values: mut [Int] = mut []
+				let values: *mut [Int] = &mut []
 				append_one(values)
 				values.size()
 			}
@@ -2881,26 +2881,26 @@ func TestGoTargetParityMutableReferenceParameterUpdatesCaller(t *testing.T) {
 
 	t.Run("native mutable list references preserve descriptor writes", func(t *testing.T) {
 		program := lowerParitySource(t, `
-			type Grow = fn(mut [Int])
+			type Grow = fn(*mut [Int])
 
-			fn push_one(values: mut [Int]) {
+			fn push_one(values: *mut [Int]) {
 				values.push(1)
 			}
 
-			fn prepend_two(values: mut [Int]) {
+			fn prepend_two(values: *mut [Int]) {
 				values.prepend(2)
 			}
 
-			fn forward(values: mut [Int]) {
+			fn forward(values: *mut [Int]) {
 				push_one(values)
 			}
 
-			fn push_generic(values: mut [$T], value: $T) {
+			fn push_generic(values: *mut [$T], value: $T) {
 				values.push(value)
 			}
 
 
-			fn later(values: mut [Int]) fn() {
+			fn later(values: *mut [Int]) fn() {
 				fn() {
 					values.push(7)
 					()
@@ -2908,19 +2908,19 @@ func TestGoTargetParityMutableReferenceParameterUpdatesCaller(t *testing.T) {
 			}
 
 			fn main() Int {
-				mut values = mut [0]
+				mut values = &mut [0]
 				push_one(values)
 				prepend_two(values)
 				forward(values)
 				push_generic(values, 3)
-				let alias = mut values
+				let alias = values
 				alias.push(4)
 				let grow: Grow = push_one
 				grow(values)
 				let grow_later = later(values)
 				grow_later()
 				let before_replace = values.size()
-				values = mut [9, 8]
+				values = &mut [9, 8]
 				before_replace * 100 + values.at(0).expect("first") * 10 + values.size()
 			}
 		`)
@@ -2985,7 +2985,7 @@ func TestGoTargetParityMutMethodClosureCapturesSelf(t *testing.T) {
 		}
 
 		fn main() Int {
-			let box = mut Box{value: 0}
+			let box = &mut Box{value: 0}
 			box.bump_with_closure()
 			box.value
 		}
@@ -3086,10 +3086,10 @@ func TestGoTargetParityNestedGenericClosuresPreserveNamedTypeIdentity(t *testing
 
 		private struct Context<$T> {
 			state: $T,
-			next: fn(mut Value),
+			next: fn(*mut Value),
 		}
 
-		private type Handler = fn(mut Context<$T>, mut Value)
+		private type Handler = fn(*mut Context<$T>, *mut Value)
 
 		private struct Box<$T> {
 			state: $T,
@@ -3102,13 +3102,13 @@ func TestGoTargetParityNestedGenericClosuresPreserveNamedTypeIdentity(t *testing
 
 		impl Box {
 			fn handle() Int {
-				let context = mut Context<$T>{state: self.state, next: fn(value: mut Value) {}}
+				let context = &mut Context<$T>{state: self.state, next: fn(value: *mut Value) {}}
 				let handlers = self.handlers
-				context.next = fn(value: mut Value) {
+				context.next = fn(value: *mut Value) {
 					let handler = handlers.at(0).expect("handler")
 					handler(context, value)
 				}
-				let value = mut Value{number: 0}
+				let value = &mut Value{number: 0}
 				context.next(value)
 				value.number
 			}
@@ -3125,7 +3125,7 @@ func TestGoTargetParityNestedGenericClosuresPreserveNamedTypeIdentity(t *testing
 
 		fn main() Int {
 			let handlers = [
-				fn(context: mut Context<Int>, value: mut Value) {
+				fn(context: *mut Context<Int>, value: *mut Value) {
 					value.number = 42
 					observed = value.number
 				},
@@ -3471,7 +3471,7 @@ func TestGoTargetParityCollectionsMutation(t *testing.T) {
 			name: "list prepend grows list",
 			input: `
 				fn main() Int {
-					let list = mut [1,2,3]
+					let list = &mut [1,2,3]
 					list.prepend(4)
 					list.size()
 				}
@@ -3481,7 +3481,7 @@ func TestGoTargetParityCollectionsMutation(t *testing.T) {
 			name: "list push grows list",
 			input: `
 				fn main() Int {
-					let list = mut [1,2,3]
+					let list = &mut [1,2,3]
 					list.push(4)
 					list.size()
 				}
@@ -3491,7 +3491,7 @@ func TestGoTargetParityCollectionsMutation(t *testing.T) {
 			name: "list at after push",
 			input: `
 				fn main() Int {
-					let list = mut [1,2,3]
+					let list = &mut [1,2,3]
 					list.push(4)
 					list.at(3).expect("bounds")
 				}
@@ -3501,7 +3501,7 @@ func TestGoTargetParityCollectionsMutation(t *testing.T) {
 			name: "list set updates item",
 			input: `
 				fn main() Int {
-					let list = mut [1,2,3]
+					let list = &mut [1,2,3]
 					list.set(1, 10)
 					list.at(1).expect("bounds")
 				}
@@ -3511,7 +3511,7 @@ func TestGoTargetParityCollectionsMutation(t *testing.T) {
 			name: "list swap swaps values",
 			input: `
 				fn main() Int {
-					let list = mut [1,2,3]
+					let list = &mut [1,2,3]
 					list.swap(0,2)
 					list.at(0).expect("bounds")
 				}
@@ -3548,7 +3548,7 @@ func TestGoTargetParityCollectionsMutation(t *testing.T) {
 			name: "map delete removes key",
 			input: `
 				fn main() Bool {
-					let items = mut ["a": 1, "b": 2]
+					let items = &mut ["a": 1, "b": 2]
 					items.delete("a")
 					not items.has("a")
 				}
@@ -3580,8 +3580,8 @@ fn main() Bool {
 			input: `use ard/async
 struct Box { value: Int }
 fn main() Int {
-  let box = Box{value: 1}
-  let reference = mut box
+  mut box = Box{value: 1}
+  let reference = &mut box
   let done = Chan::new<Bool>()
   async::start(fn() {
     reference.value = 2
@@ -3597,10 +3597,10 @@ fn main() Int {
 			input: `use ard/async
 struct Box { value: Int }
 fn main() Int {
-  let box = Box{value: 1}
+  mut box = Box{value: 1}
   let done = Chan::new<Bool>()
   async::start(fn() {
-    let reference = mut box
+    let reference = &mut box
     reference.value = 2
     done.send(true)
   })
@@ -3614,12 +3614,12 @@ fn main() Int {
 			input: `use ard/async
 struct Box { value: Int }
 fn main() Int {
-  let first = Box{value: 1}
-  let second = Box{value: 2}
-  mut current = mut first
+  mut first = Box{value: 1}
+  mut second = Box{value: 2}
+  mut current = &mut first
   let done = Chan::new<Bool>()
   async::start(fn() {
-    current = mut second
+    current = &mut second
     done.send(true)
   })
   done.recv().expect("done")
@@ -3810,7 +3810,7 @@ func TestGoTargetParityMaybeResultCombinators(t *testing.T) {
 					fn mut bump() { self.value = self.value + 1 }
 				}
 				fn main() Int {
-					let counter = mut Counter{value: 0}
+					let counter = &mut Counter{value: 0}
 					let result: Void!Str = Result::ok(counter.bump())
 					counter.value
 				}
@@ -3889,7 +3889,7 @@ func TestGoTargetParityMaybeResultCombinators(t *testing.T) {
 					fn mut bump() { self.value = self.value + 1 }
 				}
 				fn main() Int {
-					let counter = mut Counter{value: 0}
+					let counter = &mut Counter{value: 0}
 					let result: Int!Void = Result::err(counter.bump())
 					counter.value
 				}

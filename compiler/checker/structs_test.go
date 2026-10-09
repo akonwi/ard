@@ -49,7 +49,7 @@ func TestRecursiveImplicitGenericStructLiteralDoesNotOverflow(t *testing.T) {
 	const helperEnv = "ARD_TEST_CHECKER_RECURSIVE_GENERIC_EXTRACTION"
 	const input = `
 struct Ref {
-  current: (mut Item)?,
+  current: (*mut Item)?,
 }
 
 struct Generic {
@@ -57,12 +57,12 @@ struct Generic {
 }
 
 struct Item {
-  ref: (mut Ref)?,
+  ref: (*mut Ref)?,
   generic: Generic,
 }
 
 fn main() {
-  let value = mut Ref{current: Maybe::new<mut Item>()}
+  let value = &mut Ref{current: Maybe::new<*mut Item>()}
 }
 `
 
@@ -102,10 +102,10 @@ func TestRecursiveGenericStructThroughFunctionField(t *testing.T) {
 		input: `
 struct Context<$T> {
   state: $T,
-  handlers: [fn(mut Context<$T>)],
+  handlers: [fn(*mut Context<$T>)],
 }
 
-fn use_context(context: mut Context<Int>) {
+fn use_context(context: *mut Context<Int>) {
   let handler = context.handlers.at(0).expect("handler")
   handler(context)
 }

@@ -2665,7 +2665,7 @@ func TestGenerics(t *testing.T) {
 						self.item = new
 					}
 				}
-				let int_box = mut Box{ item: 42 }
+				let int_box = &mut Box{ item: 42 }
 				let forty_four = int_box.item + 2
 
 				int_box.put(false) // not allowed
@@ -2707,7 +2707,7 @@ func TestGenerics(t *testing.T) {
 						self.second = new
 					}
 				}
-				let pair = mut Pair{ first: 42, second: "hello" }
+				let pair = &mut Pair{ first: 42, second: "hello" }
 				pair.swap_first(100)
 				pair.swap_second("world")
 				pair.swap_first("wrong") // type error

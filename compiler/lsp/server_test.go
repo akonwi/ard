@@ -2691,7 +2691,7 @@ func assertRenameEdits(t *testing.T, edit *protocol.WorkspaceEdit, filePath stri
 // referent (ADR 0045).
 func TestHoverOnMutRefBinding(t *testing.T) {
 	source := `mut counter = 0
-let r = mut counter
+let r = &mut counter
 let snapshot: Int = r
 ` + "\n"
 

@@ -53,26 +53,26 @@ fn age_from_match(user: User?, fallback: Int) Int {
   }
 }
 
-fn age_from_reference_match(user: mut Maybe<User>, fallback: Int) Int {
+fn age_from_reference_match(user: *mut Maybe<User>, fallback: Int) Int {
   match user.primary.age {
     age => age,
     _ => fallback,
   }
 }
 
-fn age_from_reference_try(user: mut Maybe<User>, fallback: Int) Int {
+fn age_from_reference_try(user: *mut Maybe<User>, fallback: Int) Int {
   let age = try user.primary.age -> _ { fallback }
   age
 }
 
-fn tracked(counter: mut Counter, user: User?) User? {
+fn tracked(counter: *mut Counter, user: User?) User? {
   counter.calls = counter.calls + 1
   user
 }
 
 fn main() {
   let primary = Profile{nickname: Maybe::new("primary"), age: 42}
-  let present: User? = Maybe::new(User{
+  mut present: User? = Maybe::new(User{
     profile: Maybe::new(Profile{nickname: Maybe::new("Ada"), age: 7}),
     primary: primary,
   })
@@ -84,7 +84,7 @@ fn main() {
     profile: Maybe::new(),
     primary: primary,
   })
-  let absent: User? = Maybe::new()
+  mut absent: User? = Maybe::new()
 
   if nickname_or(present, "missing") != "Ada" {
     panic("present optional field did not project")
@@ -121,8 +121,8 @@ fn main() {
     panic("match did not project required field")
   }
 
-  let present_reference = mut present
-  let absent_reference = mut absent
+  let present_reference = &mut present
+  let absent_reference = &mut absent
   if age_from_reference_match(present_reference, -1) != 42 or age_from_reference_match(absent_reference, -1) != -1 {
     panic("match did not project through a Maybe reference")
   }
@@ -130,7 +130,7 @@ fn main() {
     panic("try did not project through a Maybe reference")
   }
 
-  let counter = mut Counter{calls: 0}
+  let counter = &mut Counter{calls: 0}
   let tracked_name = match tracked(counter, present).profile.nickname {
     nickname => nickname,
     _ => "missing",

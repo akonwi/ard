@@ -22,7 +22,7 @@ func TestRunProgramMutRefExpressions(t *testing.T) {
   age: Int,
 }
 
-fn grow(person: mut Person) {
+fn grow(person: *mut Person) {
   person.age =+ 1
 }
 
@@ -32,8 +32,8 @@ fn make_person() Person {
 
 fn main() {
   // A let binding is stable addressable storage.
-  let alice = Person{age: 30}
-  let alice_ref = mut alice
+  mut alice = Person{age: 30}
+  let alice_ref = &mut alice
   grow(alice_ref)
   if not alice.age == 31 { panic("explicit reference write lost") }
 
@@ -43,23 +43,23 @@ fn main() {
   if not alice.age == 32 { panic("reference copy lost pointee identity") }
 
   // Value materialization is explicit and shallow.
-  let snapshot: Person = alice_ref.@
+  let snapshot: Person = alice_ref.*
   alias.age =+ 1
   if not snapshot.age == 32 { panic("deref snapshot tracked later mutation") }
 
   // Fresh storage from value expressions.
-  let fresh = mut Person{age: 30}
+  let fresh = &mut Person{age: 30}
   fresh.age = 99
   if not fresh.age == 99 { panic("fresh literal storage write lost") }
-  grow(mut Person{age: 1})
+  grow(&mut Person{age: 1})
 
-  let made = mut make_person()
+  let made = &mut make_person()
   made.age =+ 5
   if not made.age == 15 { panic("fresh call storage write lost") }
 
   // Descriptor-backed references update the referenced descriptor/storage.
-  let items = [1, 2]
-  let list_ref = mut items
+  mut items = [1, 2]
+  let list_ref = &mut items
   list_ref.set(0, 9)
   if not items.at(0).or(0) == 9 { panic("descriptor alias element write lost") }
 }

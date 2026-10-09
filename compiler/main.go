@@ -23,6 +23,7 @@ import (
 	gotarget "github.com/akonwi/ard/go"
 	"github.com/akonwi/ard/lsp"
 	"github.com/akonwi/ard/manifest"
+	"github.com/akonwi/ard/migrate"
 	"github.com/akonwi/ard/parse"
 	"github.com/akonwi/ard/version"
 )
@@ -159,6 +160,23 @@ func main() {
 				os.Exit(1)
 			}
 		}
+	case "migrate":
+		{
+			inputPath, checkOnly, err := parseFormatArgs(os.Args[2:])
+			if err != nil {
+				reportCLIError(os.Stderr, err)
+				os.Exit(1)
+			}
+			pending, err := migratePath(os.Stdout, os.Stderr, inputPath, checkOnly)
+			if err != nil {
+				reportCLIError(os.Stderr, err)
+				os.Exit(1)
+			}
+			if checkOnly && pending {
+				os.Exit(1)
+			}
+			os.Exit(0)
+		}
 	case "format":
 		{
 			inputPath, checkOnly, err := parseFormatArgs(os.Args[2:])
@@ -284,6 +302,7 @@ Commands:
   deps fetch                         Restore locked Git dependencies into the cache
   deps verify                        Verify cached dependencies against ard.lock
   format [--check] <path>            Format Ard source
+  migrate [--check] <path>           Rewrite deprecated syntax (ADR 0073 pointers)
   lsp                                Start the language server
   version                            Print compiler version
 `)
@@ -1058,6 +1077,82 @@ func formatPath(inputPath string, checkOnly bool) ([]string, error) {
 		}
 	}
 	return changedPaths, nil
+}
+
+// migratePath rewrites deprecated pointer syntax in the .ard files under
+// inputPath and reports the uses that need a manual change. With checkOnly it
+// writes nothing and reports whether any deprecated syntax remains.
+func migratePath(stdout io.Writer, stderr io.Writer, inputPath string, checkOnly bool) (bool, error) {
+	ardFiles, err := collectArdFiles(inputPath)
+	if err != nil {
+		return false, err
+	}
+	pending := false
+	displayRoot, err := os.Getwd()
+	if err != nil {
+		displayRoot = ""
+	}
+	for _, filePath := range ardFiles {
+		result, err := migrate.RewriteFile(filePath)
+		if err != nil {
+			return false, err
+		}
+		if result.Changed() {
+			pending = true
+			if checkOnly {
+				fmt.Fprintf(stdout, "needs migration: %s\n", filePath)
+			} else {
+				fileInfo, err := os.Stat(filePath)
+				if err != nil {
+					return false, fmt.Errorf("error reading file info %s - %w", filePath, err)
+				}
+				if err := os.WriteFile(filePath, result.Rewritten, fileInfo.Mode()); err != nil {
+					return false, fmt.Errorf("error writing file %s - %w", filePath, err)
+				}
+				fmt.Fprintf(stdout, "migrated: %s\n", filePath)
+			}
+		}
+		if len(result.Manual) > 0 {
+			pending = true
+			if err := diagnostics.RenderRelative(stderr, result.Manual, result.ProjectRoot, displayRoot); err != nil {
+				return false, fmt.Errorf("render diagnostics: %w", err)
+			}
+		}
+		if result.HasErrors {
+			fmt.Fprintf(stderr, "warning: %s has errors; run `ard check` after migrating\n", filePath)
+		}
+	}
+	return pending, nil
+}
+
+func collectArdFiles(inputPath string) ([]string, error) {
+	fileInfo, err := os.Stat(inputPath)
+	if err != nil {
+		return nil, fmt.Errorf("error reading path %s - %w", inputPath, err)
+	}
+	if !fileInfo.IsDir() {
+		return []string{inputPath}, nil
+	}
+	ardFiles := make([]string, 0)
+	err = filepath.WalkDir(inputPath, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			if entry.Name() == ".git" || entry.Name() == "ard-out" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if filepath.Ext(path) == ".ard" {
+			ardFiles = append(ardFiles, path)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("error walking directory %s - %w", inputPath, err)
+	}
+	return ardFiles, nil
 }
 
 func formatFile(inputPath string, checkOnly bool) (bool, error) {

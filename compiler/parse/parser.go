@@ -1868,12 +1868,17 @@ func (p *parser) tryParseType() DeclaredType {
 		// Parse parameter types
 		paramTypes := []DeclaredType{}
 		paramMutability := []bool{}
+		paramMutLocations := []Location{}
 		variadic := false
 		if hasLeftParen && !p.check(right_paren) {
 			for {
 				isVariadic := p.match(ellipsis)
 				// Skip 'mut' keyword if present (marks mutable parameters in type signatures)
 				isMutable := p.match(mut)
+				var mutLocation Location
+				if isMutable {
+					mutLocation = p.previous().getLocation()
+				}
 				paramType := p.parseType()
 				if paramType == nil {
 					p.recoverFromBadType()
@@ -1884,6 +1889,7 @@ func (p *parser) tryParseType() DeclaredType {
 				}
 				paramTypes = append(paramTypes, paramType)
 				paramMutability = append(paramMutability, isMutable)
+				paramMutLocations = append(paramMutLocations, mutLocation)
 				if isVariadic {
 					variadic = true
 				}
@@ -1905,6 +1911,7 @@ func (p *parser) tryParseType() DeclaredType {
 		}
 		if !hasMutableParam {
 			paramMutability = nil
+			paramMutLocations = nil
 		}
 
 		// Expect closing paren (only if we had opening paren)
@@ -1941,11 +1948,12 @@ func (p *parser) tryParseType() DeclaredType {
 		nullable := p.match(question_mark)
 
 		return &FunctionType{
-			Params:          paramTypes,
-			ParamMutability: paramMutability,
-			Variadic:        variadic,
-			Return:          returnType,
-			Nullable:        nullable,
+			Params:            paramTypes,
+			ParamMutability:   paramMutability,
+			ParamMutLocations: paramMutLocations,
+			Variadic:          variadic,
+			Return:            returnType,
+			Nullable:          nullable,
 			Location: Location{
 				Start: Point{Row: fnToken.line, Col: fnToken.column},
 				End:   Point{Row: p.previous().line, Col: p.previous().column},

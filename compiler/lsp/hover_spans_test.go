@@ -239,7 +239,7 @@ func TestSpanHoverMutParamRendering(t *testing.T) {
   cells: [Str],
 }
 
-fn native_mut(board: mut Board) {
+fn native_mut(board: *mut Board) {
   board.cells.push("x")
 }
 `

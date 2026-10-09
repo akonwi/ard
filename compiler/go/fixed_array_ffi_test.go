@@ -14,7 +14,7 @@ func TestGoTargetGoFixedArrayReturn(t *testing.T) {
 
 fn main() Bool {
   mut bytes = "hello".bytes()
-  let digest: [Byte; 32] = sha256::Sum256(mut bytes)
+  let digest: [Byte; 32] = sha256::Sum256(&mut bytes)
   digest.size() == 32 and digest.at(0).expect("digest") == 44
 }`)
 	if got := runGoTargetParityJSON(t, program); got != "true" {

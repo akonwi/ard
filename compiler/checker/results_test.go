@@ -335,7 +335,7 @@ func TestTry(t *testing.T) {
 				}
 
 				fn unwrap() Int {
-					let box = mut Box{value: 1}
+					let box = &mut Box{value: 1}
 					let value = try box.value_or_none() -> _ { 0 }
 					value
 				}

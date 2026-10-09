@@ -50,16 +50,16 @@ func TestMaybeMutableMethods(t *testing.T) {
 	run(t, []test{
 		{
 			name: "set and clear mutate through a reference",
-			input: `let value = Maybe::new<Int>()
-let m = mut value
+			input: `mut value = Maybe::new<Int>()
+let m = &mut value
 m.set(42)
 m.clear()
 let done: Bool = m.is_none()`,
 		},
 		{
 			name: "set requires an inner value",
-			input: `let value = Maybe::new<Int>()
-let m = mut value
+			input: `mut value = Maybe::new<Int>()
+let m = &mut value
 m.set("nope")`,
 			diagnostics: []checker.Diagnostic{
 				{Kind: checker.Error, Message: "Type mismatch: Expected Int, got Str"},

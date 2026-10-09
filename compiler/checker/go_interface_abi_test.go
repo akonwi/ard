@@ -93,7 +93,7 @@ func TestGoInterfaceMutParameterABI(t *testing.T) {
 struct Impl {}
 
 impl ffi::ValueTaker for Impl {
-  fn take(p: mut ffi::Payload) {
+  fn take(p: *mut ffi::Payload) {
   }
 }`,
 			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected ffi::Payload, got *mut ffi::Payload"}},
@@ -105,7 +105,7 @@ impl ffi::ValueTaker for Impl {
 struct Impl {}
 
 impl ffi::PointerTaker for Impl {
-  fn take(p: mut ffi::Payload) {
+  fn take(p: *mut ffi::Payload) {
     p.N = 1
   }
 }`,
@@ -232,7 +232,7 @@ impl ffi::Namer for Record {
 struct Impl {}
 
 impl ffi::ValueTaker for Impl {
-  fn take(p: mut Int) {
+  fn take(p: *mut Int) {
   }
 }`,
 			diagnostics: []checker.Diagnostic{

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -1226,6 +1227,50 @@ func TestFormatPath(t *testing.T) {
 		}
 	})
 }
+func TestMigratePath(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "shapes.ard"), []byte("struct Box {\n  value: Int,\n}\n\nfn reset(box: mut Box) {\n  box.value = 0\n}\n"), 0o644); err != nil {
+		t.Fatalf("failed to write module: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte("use demo/shapes\n\nfn main() {\n  let box = shapes::Box{value: 1}\n  shapes::reset(mut box)\n  let copy = (mut box).@\n}\n"), 0o644); err != nil {
+		t.Fatalf("failed to write main: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	pending, err := migratePath(&stdout, &stderr, dir, true)
+	if err != nil || !pending {
+		t.Fatalf("check mode: pending = %v, err = %v", pending, err)
+	}
+	if source, _ := os.ReadFile(mainPath); !strings.Contains(string(source), "mut box)") {
+		t.Fatalf("check mode rewrote %s", mainPath)
+	}
+
+	stdout.Reset()
+	if _, err := migratePath(&stdout, &stderr, dir, false); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	module, _ := os.ReadFile(filepath.Join(dir, "shapes.ard"))
+	if !strings.Contains(string(module), "fn reset(box: *mut Box)") {
+		t.Fatalf("module not migrated:\n%s", module)
+	}
+	main, _ := os.ReadFile(mainPath)
+	want := "use demo/shapes\n\nfn main() {\n  mut box = shapes::Box{value: 1}\n  shapes::reset(&mut box)\n  let copy = (&mut box).*\n}\n"
+	if string(main) != want {
+		t.Fatalf("main.ard =\n%s\nwant\n%s", main, want)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	pending, err = migratePath(&stdout, &stderr, dir, true)
+	if err != nil || pending {
+		t.Fatalf("after migration: pending = %v, err = %v, stderr = %s", pending, err, stderr.String())
+	}
+}
+
 func TestTestCommand(t *testing.T) {
 	dir := t.TempDir()
 	projectDir := filepath.Join(dir, "project")

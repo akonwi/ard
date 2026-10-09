@@ -53,7 +53,7 @@ func TestFieldAssignmentChecksValueType(t *testing.T) {
 }
 
 fn main() {
-  let s = mut S{n: 1}
+  let s = &mut S{n: 1}
   s.n = "oops"
 }
 `), "Type mismatch: Expected Int, got Str")
@@ -64,13 +64,13 @@ fn main() {
   n: Int,
 }
 
-fn f(s: mut S) {
+fn f(s: *mut S) {
   s.n = "oops"
 }
 
 fn main() {
-  let s = S{n: 1}
-  f(mut s)
+  mut s = S{n: 1}
+  f(&mut s)
 }
 `), "Type mismatch: Expected Int, got Str")
 	})
@@ -85,7 +85,7 @@ struct Outer {
 }
 
 fn main() {
-  let o = mut Outer{inner: Inner{n: 1}}
+  let o = &mut Outer{inner: Inner{n: 1}}
   o.inner.n = "oops"
 }
 `), "Type mismatch: Expected Int, got Str")
@@ -97,7 +97,7 @@ fn main() {
 }
 
 fn main() {
-  let s = mut S{n: 1}
+  let s = &mut S{n: 1}
   s.n = 2
 }
 `))
@@ -114,7 +114,7 @@ func TestFieldAssignmentMaybeWrapping(t *testing.T) {
 }
 
 fn main() {
-  let s = mut S{label: "one"}
+  let s = &mut S{label: "one"}
   s.label = "two"
 }
 `))
@@ -126,7 +126,7 @@ fn main() {
 }
 
 fn main() {
-  let s = mut S{label: "one"}
+  let s = &mut S{label: "one"}
   let name = "two"
   s.label = name
 }
@@ -139,8 +139,8 @@ fn main() {
 }
 
 fn main() {
-  let a = mut S{label: "one"}
-  let b = mut S{label: "two"}
+  let a = &mut S{label: "one"}
+  let b = &mut S{label: "two"}
   a.label = b.label
   a.label = Maybe::new()
 }
@@ -153,7 +153,7 @@ fn main() {
 }
 
 fn main() {
-  let s = mut S{label: "one"}
+  let s = &mut S{label: "one"}
   s.label = 42
 }
 `), "Type mismatch")
@@ -170,13 +170,13 @@ func TestMutableParameterTypeSyntax(t *testing.T) {
   n: Int,
 }
 
-fn f(s: mut S) {
+fn f(s: *mut S) {
   s.n = 2
 }
 
 fn main() {
-  let s = S{n: 1}
-  f(mut s)
+  mut s = S{n: 1}
+  f(&mut s)
 }
 `))
 	})
@@ -186,7 +186,7 @@ fn main() {
   n: Int,
 }
 
-fn f(s: mut S) {
+fn f(s: *mut S) {
   s.n = 2
 }
 
@@ -202,17 +202,17 @@ fn main() {
   n: Int,
 }
 
-fn inner(s: mut S) {
+fn inner(s: *mut S) {
   s.n = 3
 }
 
-fn outer(s: mut S) {
+fn outer(s: *mut S) {
   inner(s)
 }
 
 fn main() {
-  let s = S{n: 1}
-  outer(mut s)
+  mut s = S{n: 1}
+  outer(&mut s)
 }
 `))
 	})

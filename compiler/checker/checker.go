@@ -299,6 +299,7 @@ const (
 // ADR 0057). Explicit borrowing depends on addressability, not binding
 // mutability: `mut place` is legal on a `let` binding.
 func (c *Checker) checkMutRef(s *parse.MutRef) Expression {
+	c.markLegacyDerefBorrow(s)
 	return c.checkMutRefFromOperand(s, c.checkExpr(s.Operand))
 }
 
@@ -321,6 +322,7 @@ func (c *Checker) checkMutRefFromOperand(s *parse.MutRef, operand Expression) Ex
 	if s.Ampersand {
 		return c.checkAddressOf(s, operand)
 	}
+	c.reportLegacyAddressOf(s, operand)
 	// `mut` is idempotent on an existing reference value: the result copies
 	// the current handle rather than borrowing the slot that stores it.
 	if isReferenceValued(operand) {
@@ -468,6 +470,9 @@ func (c *Checker) checkDeref(s *parse.Deref) Expression {
 	operand := c.checkExpr(s.Operand)
 	if operand == nil {
 		return nil
+	}
+	if !s.Star && isReferenceValued(operand) {
+		c.reportLegacyDeref(s, operand.Type())
 	}
 	switch t := operand.Type().(type) {
 	case *MutableRef:
@@ -950,6 +955,8 @@ type Checker struct {
 	matchArmDiscardContext            bool
 	deferredWorkDepth                 int
 	reportedMapKeyErrors              map[parse.Location]bool
+	reportedLegacyPointerSyntax       map[legacyPointerSyntaxKey]bool
+	legacyDerefBorrowed               map[*parse.Deref]bool
 	emptyCollectionBinding            *collectionBindingContext
 	goTypesContext                    *gotypes.Context
 	spans                             *SpanIndex
@@ -1883,6 +1890,7 @@ func (c *Checker) validateMapKeyType(key Type, loc parse.Location) {
 func (c *Checker) resolveMutableTypeAnnotation(annotation parse.MutableType) Type {
 	inner := c.resolveType(annotation.Inner)
 	if !annotation.Pointer {
+		c.reportLegacyPointerType(annotation.GetLocation(), annotation.GetLocation().Start, inner)
 		return c.makeMutableType(inner)
 	}
 	if !c.validPointerReferent(inner, annotation.Inner.GetLocation()) {
@@ -2168,6 +2176,10 @@ func (c *Checker) resolveType(t parse.DeclaredType) Type {
 				mutable = true
 			}
 			paramType := c.resolveType(param)
+			if mutable && i < len(ty.ParamMutLocations) {
+				mutLocation := ty.ParamMutLocations[i]
+				c.reportLegacyPointerType(parse.Location{Start: mutLocation.Start, End: param.GetLocation().End}, mutLocation.Start, paramType)
+			}
 			if mutable {
 				// A `mut pkg::T` parameter in function-type position takes the
 				// foreign type's pointer form, matching named `mut` parameters,
@@ -4346,6 +4358,12 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				__type:  __type,
 			}
 			bound := c.scope.add(v.Name, v.__type, v.Mutable)
+			if !s.Mutable && c.scope.parent != nil {
+				// Module-level `mut` bindings are not supported in imported
+				// modules, so only local bindings get the migration fix.
+				letKeyword := s.GetLocation().Start
+				bound.letKeyword = &letKeyword
+			}
 			_, bindingIsReference := mutableRefBase(v.__type)
 			bound.foreignDescriptor = bindingIsReference && expressionUsesForeignDescriptor(val)
 			c.recordBindingWithSpan(s.NameLocation, s.GetLocation(), bound)
@@ -12998,6 +13016,9 @@ func (c *Checker) resolveParameterType(t parse.DeclaredType) (Type, bool) {
 	base := c.resolveType(inner)
 	if base == nil {
 		return nil, !nullable
+	}
+	if !annotation.Pointer {
+		c.reportLegacyPointerType(annotation.GetLocation(), annotation.GetLocation().Start, base)
 	}
 	if annotation.Pointer && !c.validPointerReferent(base, inner.GetLocation()) {
 		return &TypeVar{name: "unknown"}, false

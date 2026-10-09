@@ -162,6 +162,10 @@ type FunctionType struct {
 	Nullable        bool
 	Params          []DeclaredType
 	ParamMutability []bool
+	// ParamMutLocations records the legacy `mut` keyword of each mutable
+	// parameter, parallel to ParamMutability, so migration tooling can
+	// rewrite `fn(mut T)` to `fn(*mut T)` (ADR 0073).
+	ParamMutLocations []Location
 	// Variadic marks the final parameter as a repeated element in a callable
 	// type. Ard declarations remain fixed-arity; this syntax describes foreign
 	// variadic function values.

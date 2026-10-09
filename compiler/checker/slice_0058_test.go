@@ -25,11 +25,11 @@ fn main() Bool {
   let tail: Slice<Int>? = values.slice(start: 1)
   let computed: Slice<Int>? = values.slice(start: next_index())
   let head: Slice<Int>? = values.slice(end: 3)
-  let middle = values.slice(start: 1, end: 3).expect("bounds")
+  mut middle = values.slice(start: 1, end: 3).expect("bounds")
   let generic: Slice<Int> = identity(middle)
   let nested: Slice<Int>? = middle.slice(start: 1)
   let copied: [Int] = middle.to_list()
-  let writable: mut Slice<Int> = mut middle
+  let writable: *mut Slice<Int> = &mut middle
   let changed: Bool = writable.set(0, 99)
   writable.swap(0, 1)
   changed and (not middle.is_empty()) and middle.size() == 2 and middle.at(0).or(0) == 30 and copied.at(0).or(0) == 20 and generic.size() == 2 and consume(middle) == 129 and full.is_some() and tail.is_some() and computed.is_some() and head.is_some() and nested.is_some()
@@ -79,11 +79,11 @@ func TestSliceBuiltinNameCannotBeRedeclared(t *testing.T) {
 
 func TestSliceRejectsLengthChangingAndSortMethods(t *testing.T) {
 	for _, source := range []string{
-		`let view = [1, 2].slice().expect("bounds")
-let writable = mut view
+		`mut view = [1, 2].slice().expect("bounds")
+let writable = &mut view
 writable.push(3)`,
-		`let view = [2, 1].slice().expect("bounds")
-let writable = mut view
+		`mut view = [2, 1].slice().expect("bounds")
+let writable = &mut view
 writable.sort(fn(a, b) { a < b })`,
 	} {
 		result := parse.Parse([]byte(source), "test.ard")

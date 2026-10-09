@@ -9,7 +9,7 @@ func TestGoFixedArraysMapToFixedArrayTypes(t *testing.T) {
 			input: `use go:crypto/sha256
 fn digest() [Byte; 32] {
   mut bytes = "hello".bytes()
-  sha256::Sum256(mut bytes)
+  sha256::Sum256(&mut bytes)
 }`,
 		},
 	})

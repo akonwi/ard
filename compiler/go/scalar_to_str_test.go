@@ -20,7 +20,7 @@ func TestRunProgramGoInt64ToStr(t *testing.T) {
 	mainPath := filepath.Join(projectDir, "main.ard")
 	if err := os.WriteFile(mainPath, []byte(`use go:time
 
-fn render_duration(value: mut time::Duration) Str {
+fn render_duration(value: *mut time::Duration) Str {
   value.to_str()
 }
 
@@ -32,8 +32,8 @@ fn main() {
   if time::Second.to_str() != "1000000000" {
     panic("time.Duration.to_str mismatch")
   }
-  let duration: time::Duration = time::Second
-  if render_duration(mut duration) != "1000000000" {
+  mut duration: time::Duration = time::Second
+  if render_duration(&mut duration) != "1000000000" {
     panic("mut time.Duration.to_str mismatch")
   }
 }
@@ -65,13 +65,13 @@ func TestGoTargetWholeValueFloat64LiteralKeepsFloatType(t *testing.T) {
 }
 
 func TestGoTargetSizedScalarToStrMutableReference(t *testing.T) {
-	program := lowerParitySource(t, `fn render(value: mut Int64) Str {
+	program := lowerParitySource(t, `fn render(value: *mut Int64) Str {
   value.to_str()
 }
 
 fn main() Bool {
-  let value: Int64 = 42
-  render(mut value) == "42"
+  mut value: Int64 = 42
+  render(&mut value) == "42"
 }`)
 	if got := runGoTargetParityJSON(t, program); got != "true" {
 		t.Fatalf("mut Int64.to_str() result mismatch: got %s", got)

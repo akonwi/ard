@@ -21,11 +21,11 @@ func TestRunProgramPreservesMutableReferencesConvertedToAny(t *testing.T) {
 			fmt::Sprintf("%T", value)
 		}
 
-		fn generic_reference_type(value: mut $T) Str {
+		fn generic_reference_type(value: *mut $T) Str {
 			dynamic_type(value)
 		}
 
-		fn concrete_reference_type(value: mut User) Str {
+		fn concrete_reference_type(value: *mut User) Str {
 			dynamic_type(value)
 		}
 
@@ -58,15 +58,15 @@ func TestRunProgramPreservesMutableReferencesConvertedToAny(t *testing.T) {
 			value
 		}
 
-		fn maybe_reference_type(value: mut $T) Str {
+		fn maybe_reference_type(value: *mut $T) Str {
 			maybe_type(value)
 		}
 
-		fn explicit_maybe_reference(value: mut $T) Any? {
+		fn explicit_maybe_reference(value: *mut $T) Any? {
 			Maybe::new<Any>(value)
 		}
 
-		fn contextual_maybe_reference(value: mut $T) Any? {
+		fn contextual_maybe_reference(value: *mut $T) Any? {
 			Maybe::new(value)
 		}
 
@@ -78,32 +78,32 @@ func TestRunProgramPreservesMutableReferencesConvertedToAny(t *testing.T) {
 			maybe_type(value)
 		}
 
-		fn generic_optional_reference(value: mut $T) Str {
+		fn generic_optional_reference(value: *mut $T) Str {
 			maybe_with_witness(value, 1)
 		}
 
-		fn return_reference(value: mut $T) Any {
+		fn return_reference(value: *mut $T) Any {
 			value
 		}
 
-		fn box_reference(value: mut $T) Box {
+		fn box_reference(value: *mut $T) Box {
 			Box{value: value}
 		}
 
-		fn assign_reference(value: mut $T) Any {
+		fn assign_reference(value: *mut $T) Any {
 			mut boxed: Any = "initial"
 			boxed = value
 			boxed
 		}
 
-		fn unmarshal(data: [Byte], target: mut $T) Void!Error {
+		fn unmarshal(data: [Byte], target: *mut $T) Void!Error {
 			let input = mut data
 			json::Unmarshal(input, target)
 		}
 
 		fn main() {
-			let user = User{name: "Joe"}
-			let user_reference = mut user
+			mut user = User{name: "Joe"}
+			let user_reference = &mut user
 			if not generic_reference_type(user_reference) == "*test.User" {
 				panic("generic mutable reference lost identity")
 			}
@@ -116,7 +116,7 @@ func TestRunProgramPreservesMutableReferencesConvertedToAny(t *testing.T) {
 			if not maybe_reference_type(user_reference) == "*test.User" {
 				panic("Maybe<Any> conversion lost reference identity")
 			}
-			if not maybe_user_name(user_reference.@) == "Joe" {
+			if not maybe_user_name(user_reference.*) == "Joe" {
 				panic("explicit reference was not snapshotted before Maybe wrapping")
 			}
 			if not inferred_maybe_type(user_reference) == "*test.User" {
@@ -127,8 +127,8 @@ func TestRunProgramPreservesMutableReferencesConvertedToAny(t *testing.T) {
 			if not user.name == "Grace" {
 				panic("Maybe.expect lost mutable reference identity")
 			}
-			let fallback = User{name: "Fallback"}
-			let selected = identity_maybe(user_reference).or(mut fallback)
+			mut fallback = User{name: "Fallback"}
+			let selected = identity_maybe(user_reference).or(&mut fallback)
 			selected.name = "Selected"
 			if not user.name == "Selected" {
 				panic("Maybe.or lost mutable reference identity")
@@ -200,21 +200,21 @@ func GenericIsPointer[T any](value T) bool {
 
 struct User { name: Str }
 
-fn named_empty_reference(value: mut $T) Bool {
+fn named_empty_reference(value: *mut $T) Bool {
   ffi::IsPointer(value)
 }
 
-fn generic_inferred_reference(value: mut $T) Bool {
+fn generic_inferred_reference(value: *mut $T) Bool {
   ffi::GenericIsPointer(value)
 }
 
-fn explicit_any_reference(value: mut $T) Bool {
+fn explicit_any_reference(value: *mut $T) Bool {
   ffi::GenericIsPointer<Any>(value)
 }
 
 fn main() {
-  let user = User{name: "Joe"}
-  let reference = mut user
+  mut user = User{name: "Joe"}
+  let reference = &mut user
   if not named_empty_reference(reference) {
     panic("named empty interface lost reference identity")
   }

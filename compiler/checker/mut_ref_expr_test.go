@@ -13,64 +13,64 @@ func TestMutRefExpressions(t *testing.T) {
 	}{
 		{
 			name: "let storage can be explicitly referenced",
-			source: `let counter = 0
-let reference: mut Int = mut counter`,
+			source: `mut counter = 0
+let reference: *mut Int = &mut counter`,
 		},
 		{
 			name: "mut on an existing reference is idempotent",
-			source: `let counter = 0
-let reference = mut counter
-let again: mut Int = mut reference`,
+			source: `mut counter = 0
+let reference = &mut counter
+let again: *mut Int = reference`,
 		},
 		{
 			name: "unannotated binding preserves the reference",
-			source: `let counter = 0
-let reference = mut counter
-let alias: mut Int = reference`,
+			source: `mut counter = 0
+let reference = &mut counter
+let alias: *mut Int = reference`,
 		},
 		{
 			name: "ordinary mut binding does not implicitly satisfy reference parameter",
-			source: `fn take(value: mut Int) {}
+			source: `fn take(value: *mut Int) {}
 mut counter = 0
 take(counter)`,
 			wantError: true,
 		},
 		{
 			name: "explicit reference satisfies reference parameter",
-			source: `fn take(value: mut Int) {}
-let counter = 0
-take(mut counter)`,
+			source: `fn take(value: *mut Int) {}
+mut counter = 0
+take(&mut counter)`,
 		},
 		{
 			name: "reference does not implicitly materialize a value",
-			source: `let counter = 0
-let reference = mut counter
+			source: `mut counter = 0
+let reference = &mut counter
 let copy: Int = reference`,
 			wantError: true,
 		},
 		{
 			name: "explicit deref materializes a value",
-			source: `let counter = 0
-let reference = mut counter
-let copy: Int = reference.@`,
+			source: `mut counter = 0
+let reference = &mut counter
+let copy: Int = reference.*`,
 		},
 		{
 			name: "fresh literal storage remains supported",
 			source: `struct Person { age: Int }
-let reference = mut Person{age: 30}
+let reference = &mut Person{age: 30}
 reference.age = 99`,
 		},
 		{
 			name: "writable reference slot can rebind",
-			source: `let first = 0
-let second = 1
-mut reference = mut first
-reference = mut second`,
+			source: `mut first = 0
+mut second = 1
+mut reference = &mut first
+reference = &mut second`,
 		},
 		{
 			name: "whole list write through reference is rejected",
-			source: `let items = [1, 2]
-let reference = mut items
+			source: `mut items = [1, 2]
+let reference = &mut items
 reference = [9, 9]`,
 			wantError: true,
 		},

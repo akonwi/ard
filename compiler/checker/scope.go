@@ -5,6 +5,8 @@ import (
 	gotypes "go/types"
 	"slices"
 	"sync"
+
+	"github.com/akonwi/ard/parse"
 )
 
 type SymbolTable struct {
@@ -54,6 +56,9 @@ type Symbol struct {
 	foreignDescriptor   bool
 	typeDeclaration     bool
 	callableDeclaration *FunctionDef
+	// letKeyword locates the `let` keyword of an immutable variable
+	// declaration, for migration fixes that make the binding `mut`.
+	letKeyword *parse.Point
 }
 
 func (s Symbol) IsZero() bool {

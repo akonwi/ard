@@ -15,12 +15,12 @@ func TestADR0057ReferenceCopiesAndSlotRebinding(t *testing.T) {
 		struct Box { value: Int }
 
 		fn main() [Int] {
-			let first = Box{value: 1}
-			let second = Box{value: 2}
-			mut pointer = mut first
+			mut first = Box{value: 1}
+			mut second = Box{value: 2}
+			mut pointer = &mut first
 			let alias = pointer
-			let idempotent = mut alias
-			pointer = mut second
+			let idempotent = alias
+			pointer = &mut second
 			alias.value = 10
 			idempotent.value = 11
 			pointer.value = 20
@@ -38,7 +38,7 @@ func TestADR0057CopyProducingAccessorGetsFreshReferenceStorage(t *testing.T) {
 
 		fn main() [Int] {
 			let values = [Box{value: 1}]
-			let reference = mut values.at(0).expect("item")
+			let reference = &mut values.at(0).expect("item")
 			reference.value = 2
 			[reference.value, values.at(0).expect("item").value]
 		}
@@ -54,7 +54,7 @@ func TestADR0057ReferenceObservesOrdinaryTargetSlotReplacement(t *testing.T) {
 
 		fn main() Int {
 			mut target = Box{value: 1}
-			let reference = mut target
+			let reference = &mut target
 			target = Box{value: 2}
 			reference.value = 3
 			target.value
@@ -68,14 +68,14 @@ func TestADR0057ReferenceObservesOrdinaryTargetSlotReplacement(t *testing.T) {
 func TestADR0057ReferenceValuedFieldCopiesAndRebindsItsOwnSlot(t *testing.T) {
 	program := lowerParitySource(t, `
 		struct Box { value: Int }
-		struct Holder { item: mut Box }
+		struct Holder { item: *mut Box }
 
 		fn main() [Int] {
-			let first = Box{value: 1}
-			let second = Box{value: 2}
-			let holder = mut Holder{item: mut first}
+			mut first = Box{value: 1}
+			mut second = Box{value: 2}
+			let holder = &mut Holder{item: &mut first}
 			let copied = holder.item
-			holder.item = mut second
+			holder.item = &mut second
 			copied.value = 10
 			holder.item.value = 20
 			[first.value, second.value, copied.value, holder.item.value]
@@ -91,41 +91,41 @@ func TestADR0057EscapingReferencesKeepLocalParameterFieldAndContainerStorageAliv
 		struct Box { value: Int }
 		struct Owner { inner: Box }
 
-		fn from_local() mut Box {
-			let value = Box{value: 1}
-			(mut value)
+		fn from_local() *mut Box {
+			mut value = Box{value: 1}
+			(&mut value)
 		}
 
-		fn from_parameter(value: Box) mut Box { (mut value) }
+		fn from_parameter(value: Box) *mut Box { (mut value) }
 
-		fn from_field() mut Box {
-			let owner = Owner{inner: Box{value: 3}}
-			(mut owner.inner)
+		fn from_field() *mut Box {
+			mut owner = Owner{inner: Box{value: 3}}
+			(&mut owner.inner)
 		}
 
-		fn from_list() [mut Box] {
-			let value = Box{value: 4}
-			[mut value]
+		fn from_list() [*mut Box] {
+			mut value = Box{value: 4}
+			[&mut value]
 		}
 
-		fn from_maybe() (mut Box)? {
-			let value = Box{value: 5}
-			Maybe::new(mut value)
+		fn from_maybe() (*mut Box)? {
+			mut value = Box{value: 5}
+			Maybe::new(&mut value)
 		}
 
-		fn from_result() (mut Box)!Str {
-			let value = Box{value: 6}
-			Result::ok(mut value)
+		fn from_result() (*mut Box)!Str {
+			mut value = Box{value: 6}
+			Result::ok(&mut value)
 		}
 
 		fn retained_closure() fn() Int {
-			let value = Box{value: 7}
-			let reference = mut value
+			mut value = Box{value: 7}
+			let reference = &mut value
 			fn() Int { reference.value }
 		}
 
 		fn identity(value: $T) $T { value }
-		fn apply(callback: fn(mut Box) Int, value: mut Box) Int { callback(value) }
+		fn apply(callback: fn(*mut Box) Int, value: *mut Box) Int { callback(value) }
 
 		fn main() [Int] {
 			let local = from_local()
@@ -135,10 +135,10 @@ func TestADR0057EscapingReferencesKeepLocalParameterFieldAndContainerStorageAliv
 			let maybe = from_maybe().expect("maybe")
 			let result = from_result().expect("result")
 			let generic = identity(local)
-			let callback_value = apply(fn(value: mut Box) Int { value.value }, parameter)
+			let callback_value = apply(fn(value: *mut Box) Int { value.value }, parameter)
 			let closure = retained_closure()
 			let channel_source = from_local()
-			let channel = Chan::new<mut Box>(1)
+			let channel = Chan::new<*mut Box>(1)
 			select {
 				channel.send(channel_source) => {},
 				_ => panic("reference channel send would block"),
@@ -172,21 +172,21 @@ func TestADR0057DerefIsSingleEvaluationAndShallow(t *testing.T) {
 
 		struct Child { value: Int }
 		struct Payload {
-			child: mut Child,
+			child: *mut Child,
 			values: [Int],
 		}
 
-		fn load(reference: mut Payload) mut Payload {
+		fn load(reference: *mut Payload) *mut Payload {
 			calls =+ 1
 			reference
 		}
 
 		fn main() [Int] {
-			let child = Child{value: 1}
-			let payload = Payload{child: mut child, values: [1, 2]}
-			let reference = mut payload
-			let copy = load(reference).@
-			let copied_values = mut copy.values
+			mut child = Child{value: 1}
+			mut payload = Payload{child: &mut child, values: [1, 2]}
+			let reference = &mut payload
+			mut copy = load(reference).*
+			let copied_values = &mut copy.values
 			copied_values.set(0, 9)
 			copied_values.push(3)
 			copy.child.value = 7
@@ -209,11 +209,11 @@ func TestADR0057PostfixDerefResultCanBeCalled(t *testing.T) {
 		mut calls = 0
 
 		fn main() Int {
-			let reference = mut (fn() Int {
+			let reference = &mut ((fn() Int {
 				calls =+ 1
 				42
-			})
-			let result = reference.@()
+			}))
+			let result = reference.*()
 			if not calls == 1 { panic("dereferenced callable did not run exactly once") }
 			result
 		}
@@ -227,14 +227,14 @@ func TestADR0057DerefCopiesFixedArraysAndSharesMapDescriptors(t *testing.T) {
 	program := lowerParitySource(t, `
 		fn main() [Int] {
 			mut fixed: [Int; 2] = [1, 2]
-			let fixed_reference = mut fixed
-			let fixed_copy = fixed_reference.@
+			let fixed_reference = &mut fixed
+			let fixed_copy = fixed_reference.*
 			fixed = [3, 4]
 
-			let mapping = ["a": 1]
-			let map_reference = mut mapping
-			let map_copy = map_reference.@
-			let map_copy_reference = mut map_copy
+			mut mapping = ["a": 1]
+			let map_reference = &mut mapping
+			mut map_copy = map_reference.*
+			let map_copy_reference = &mut map_copy
 			map_copy_reference.set("b", 2)
 
 			[fixed_copy.at(0).or(0), fixed.at(0).or(0), mapping.get("b").or(0)]
@@ -250,12 +250,12 @@ func TestADR0057ClosureCaptureDistinguishesHandleCopyAndSlotRebind(t *testing.T)
 		struct Box { value: Int }
 
 		fn main() [Int] {
-			let first = Box{value: 1}
-			let second = Box{value: 2}
-			mut pointer = mut first
+			mut first = Box{value: 1}
+			mut second = Box{value: 2}
+			mut pointer = &mut first
 			let observe = fn() Int { pointer.value }
 			let mutate = fn() { pointer.value = 10 }
-			let make_rebinder = fn() { fn() { pointer = mut second } }
+			let make_rebinder = fn() { fn() { pointer = &mut second } }
 			let rebind = make_rebinder()
 			mutate()
 			rebind()
@@ -275,7 +275,7 @@ func TestADR0057InteriorBorrowOfCapturedStorageUsesOuterSlot(t *testing.T) {
 		fn main() Int {
 			mut outer = Outer{inner: Inner{value: 1}}
 			let update = fn() {
-				let reference = mut outer.inner
+				let reference = &mut outer.inner
 				reference.value = 42
 			}
 			update()
@@ -292,16 +292,16 @@ func TestADR0057ReferencesUsePointerIdentityForEqualityAndMapKeys(t *testing.T) 
 		struct Box { value: Int }
 
 		fn main() Str {
-			let first = Box{value: 1}
-			let second = Box{value: 1}
-			let copied_from = mut first
+			mut first = Box{value: 1}
+			mut second = Box{value: 1}
+			let copied_from = &mut first
 			let copied = copied_from
-			let borrowed_again = mut first
-			let other = mut second
+			let borrowed_again = &mut first
+			let other = &mut second
 			let copied_equal = copied_from == copied
 			let borrowed_equal = copied_from == borrowed_again
 			let distinct_equal_values = copied_from != other
-			let table: [mut Box: Str] = [copied_from: "first", other: "second"]
+			let table: [*mut Box: Str] = [copied_from: "first", other: "second"]
 			copied.value = 9
 			let stable_key = table.get(borrowed_again).or("missing")
 			"{copied_equal}:{borrowed_equal}:{distinct_equal_values}:{stable_key}"
@@ -319,10 +319,10 @@ func TestADR0057UnsafeCastMaterializesOrRecoversReferencesExplicitly(t *testing.
 		struct Box { value: Int }
 
 		fn main() [Int] {
-			let value = Box{value: 1}
-			let reference = mut value
+			mut value = Box{value: 1}
+			let reference = &mut value
 			let boxed: Any = reference
-			let recovered = unsafe::cast<mut Box>(boxed).expect("reference")
+			let recovered = unsafe::cast<*mut Box>(boxed).expect("reference")
 			let copy = unsafe::cast<Box>(boxed).expect("value")
 			recovered.value = 2
 			[value.value, copy.value]
@@ -336,12 +336,12 @@ func TestADR0057UnsafeCastMaterializesOrRecoversReferencesExplicitly(t *testing.
 func TestADR0057DescriptorReferencesUseStorageIdentity(t *testing.T) {
 	program := lowerParitySource(t, `
 		fn main() Str {
-			let values = [1, 2]
-			let first = mut values
-			let second = mut values
-			let copied_values = first.@
-			let copied_reference = mut copied_values
-			let table: [mut [Int]: Str] = [first: "values"]
+			mut values = [1, 2]
+			let first = &mut values
+			let second = &mut values
+			mut copied_values = first.*
+			let copied_reference = &mut copied_values
+			let table: [*mut [Int]: Str] = [first: "values"]
 			second.set(0, 9)
 			"{first == second}:{first != copied_reference}:{table.get(copied_reference).or(\"missing\")}:{copied_values.at(0).or(0)}"
 		}
@@ -354,15 +354,15 @@ func TestADR0057DescriptorReferencesUseStorageIdentity(t *testing.T) {
 func TestADR0057SanctionedReferenceAndChannelOperations(t *testing.T) {
 	program := lowerParitySource(t, `
 		fn main() [Int] {
-			let list = mut [1]
+			let list = &mut [1]
 			list.push(2)
 			list.set(0, 9)
 
-			let mapping = mut ["a": 1]
+			let mapping = &mut ["a": 1]
 			mapping.set("b", 2)
 			mapping.delete("a")
 
-			let maybe = mut Maybe::new<Int>()
+			let maybe = &mut Maybe::new<Int>()
 			maybe.set(7)
 
 			let channel = Chan::new<Int>(1)
@@ -755,8 +755,8 @@ func TestADR0061MutableTraitDereferenceCreatesShallowDynamicSnapshot(t *testing.
 		}
 
 		fn main() [Int] {
-			let box = Box{number: 1}
-			let reference: mut View = mut box
+			mut box = Box{number: 1}
+			let reference: mut View = &mut box
 			let snapshot: View = reference.@
 			reference.set(2)
 			[snapshot.value(), reference.value(), box.number]
@@ -778,7 +778,7 @@ func TestTraitProjectionBeforeImplementationIsOrderIndependent(t *testing.T) {
 		}
 
 		fn make() mut View {
-			(mut Item{n: 1})
+			(&mut Item{n: 1})
 		}
 
 		impl View for Item {
@@ -803,8 +803,8 @@ func TestTraitImplementationCanProjectMutatingSelfToTraitReference(t *testing.T)
 		}
 
 		fn main() Bool {
-			let node = Node{}
-			let reference = mut node
+			mut node = Node{}
+			let reference = &mut node
 			reference.self_reference() == reference
 		}
 	`)
@@ -824,8 +824,8 @@ func TestADR0057MixedConcreteAndTraitReferencesCompareTargetIdentity(t *testing.
 		}
 
 		fn main() Bool {
-			let box = Box{number: 1}
-			let concrete = mut box
+			mut box = Box{number: 1}
+			let concrete = &mut box
 			let widened: mut View = concrete
 			concrete == widened
 		}
@@ -854,27 +854,27 @@ func TestADR0061MutableTraitValuesUseNativeInterfaceIdentity(t *testing.T) {
 			fn value() Int { self.number }
 		}
 
-		fn project(value: mut Box) mut View { value }
+		fn project(value: *mut Box) mut View { value }
 
 		fn main() Str {
-			let box = Box{number: 1}
-			let other = Other{number: 2}
-			let source_replacement = Box{number: 9}
-			mut concrete = mut box
+			mut box = Box{number: 1}
+			mut other = Other{number: 2}
+			mut source_replacement = Box{number: 9}
+			mut concrete = &mut box
 			let view: mut View = concrete
-			let independent: mut View = mut box
+			let independent: mut View = &mut box
 			let escaped = project(concrete)
 			let copied = view
-			concrete = mut source_replacement
+			concrete = &mut source_replacement
 			let canonical = view == independent and view == escaped
 			let table: [mut View: Str] = [view: "box"]
 
 			mut rebound = view
-			rebound = mut other
+			rebound = &mut other
 			let independently_rebound = rebound != view
 
 			let boxed: Any = view
-			let recovered = unsafe::cast<mut Box>(boxed).expect("concrete pointer")
+			let recovered = unsafe::cast<*mut Box>(boxed).expect("concrete pointer")
 			let recovered_view = unsafe::cast<mut View>(boxed).expect("native trait interface")
 			let ordinary: View = view
 			recovered.number = 3
