@@ -101,11 +101,11 @@ func isTypeIdentStart(ch byte) bool {
 }
 
 // mutParamTypeString renders a parameter type with its mutability marker.
-// Pointer-form foreign types and mutable references already spell "mut " in
-// their type string; prepending the flag's marker again would double it.
+// Pointer types and mutable trait values already spell their `*`, `*mut `, or
+// `mut ` prefix; prepending the flag's marker again would double it.
 func mutParamTypeString(typeText string, mutable bool) string {
-	if !mutable || strings.HasPrefix(typeText, "mut ") {
+	if !mutable || strings.HasPrefix(typeText, "mut ") || strings.HasPrefix(typeText, "*") {
 		return typeText
 	}
-	return "mut " + typeText
+	return "*mut " + typeText
 }

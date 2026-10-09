@@ -77,8 +77,8 @@ let text = unsafe::cast<mut Str>(value)`)
 		t.Fatalf("unexpected diagnostics: %v", diagnostics)
 	}
 	got := module.Get("text").Type.String()
-	if got != "(mut Str)?" {
-		t.Fatalf("text type = %q, want (mut Str)?", got)
+	if got != "(*mut Str)?" {
+		t.Fatalf("text type = %q, want (*mut Str)?", got)
 	}
 }
 

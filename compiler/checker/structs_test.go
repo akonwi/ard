@@ -246,7 +246,7 @@ func TestStructs(t *testing.T) {
 						let p = Person{name: "Alice", age: 30, employed: true}
 						p.age = 31`, personStructInput),
 			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Cannot mutate 'p.age': it is an ordinary value, not a reference"},
+				{Kind: checker.Error, Message: "Cannot write to 'p.age': it is not a writable place"},
 			},
 		},
 		{
@@ -257,7 +257,7 @@ func TestStructs(t *testing.T) {
 			diagnostics: []checker.Diagnostic{
 				{Kind: checker.Error, Message: "Undefined variable: is_employed"},
 				// Checking continues after an undefined variable (#523).
-				{Kind: checker.Error, Message: "Cannot mutate 'p.age': it is an ordinary value, not a reference"},
+				{Kind: checker.Error, Message: "Cannot write to 'p.age': it is not a writable place"},
 			},
 		},
 	})
@@ -440,8 +440,8 @@ func TestMethods(t *testing.T) {
 					}
 				}`, shapeCode),
 			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Cannot mutate 'self.width': it is an ordinary value, not a reference"},
-				{Kind: checker.Error, Message: "Cannot mutate 'self.height': it is an ordinary value, not a reference"},
+				{Kind: checker.Error, Message: "Cannot write to 'self.width': it is not a writable place"},
+				{Kind: checker.Error, Message: "Cannot write to 'self.height': it is not a writable place"},
 			},
 		},
 		{
@@ -458,7 +458,7 @@ func TestMethods(t *testing.T) {
 				let square = Shape{width: 5, height: 5}
 				square.resize(8,8)`, shapeCode),
 			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Cannot call mutating method 'square.resize': receiver is not a reference"},
+				{Kind: checker.Error, Message: "Cannot call mutating method 'square.resize': receiver is not a writable pointer"},
 			},
 		},
 	})

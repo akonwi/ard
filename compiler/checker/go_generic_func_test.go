@@ -172,7 +172,7 @@ fn join() {
   let values = [mut first]
   ffi::JoinSlices((mut values)...)
 }`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Variadic spread does not support descriptor-reference element type mut [Str]"}},
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Variadic spread does not support descriptor-reference element type *mut [Str]"}},
 		},
 		{
 			name: "descriptor-value element remains rejected after callable assignment",
@@ -184,7 +184,7 @@ fn join() {
   let join: fn(...mut [Str]) = ffi::JoinSlices
   join((mut values)...)
 }`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Variadic spread does not support descriptor-reference element type mut [Str]"}},
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Variadic spread does not support descriptor-reference element type *mut [Str]"}},
 		},
 		{
 			name: "pointer-to-named-slice variadic element is conservatively rejected",
@@ -195,7 +195,7 @@ fn join() {
   let values = [first]
   ffi::NamedSlicePointers((mut values)...)
 }`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Variadic spread does not support descriptor-reference element type mut ffi::Strings"}},
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Variadic spread does not support descriptor-reference element type *mut ffi::Strings"}},
 		},
 		{
 			name: "exact pointer-to-descriptor variadic element spread is conservatively rejected",
@@ -206,7 +206,7 @@ fn join() {
   let values = [mut first]
   ffi::SlicePointers((mut values)...)
 }`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Variadic spread does not support descriptor-reference element type mut [Str]"}},
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Variadic spread does not support descriptor-reference element type *mut [Str]"}},
 		},
 		{
 			name: "reject uninferable call without type args",

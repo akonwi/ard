@@ -123,7 +123,10 @@ func (m *MutableRef) String() string {
 	if m.readOnly {
 		return "*" + m.of.String()
 	}
-	return "mut " + m.of.String()
+	if _, isTrait := m.of.(*Trait); isTrait {
+		return "mut " + m.of.String()
+	}
+	return "*mut " + m.of.String()
 }
 func (m *MutableRef) get(name string) Type {
 	if m == nil || m.of == nil {
@@ -1158,11 +1161,11 @@ func functionTypeString(f FunctionDef) string {
 func callableTypeString(params []Parameter, returnType Type) string {
 	paramStrs := make([]string, len(params))
 	for i := range params {
-		mutable, paramType := normalizedParamMutability(params[i])
-		paramStrs[i] = typeSyntaxString(paramType)
-		// A pointer-shaped foreign type renders its own `mut` prefix.
-		if foreign, ok := paramType.(*ForeignType); mutable && (!ok || !foreign.Pointer) {
-			paramStrs[i] = "mut " + paramStrs[i]
+		// Pointer types render their own `*`, `*mut`, or trait `mut` prefix; a
+		// legacy mutability flag on a plain type is a writable pointer.
+		paramStrs[i] = typeSyntaxString(params[i].Type)
+		if params[i].Mutable && !isReferenceType(params[i].Type) {
+			paramStrs[i] = "*mut " + paramStrs[i]
 		}
 		if params[i].Variadic {
 			paramStrs[i] = "..." + paramStrs[i]

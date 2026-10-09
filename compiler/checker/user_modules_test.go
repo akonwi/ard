@@ -113,7 +113,7 @@ fn invalid(value: counter::Counter) {
 	c := checker.New(mainPath, result.Program, resolver)
 	c.Check()
 	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeValueInteriorMutation)
-	if diagnostic.Message != "Cannot call mutating method 'value.set': receiver is not a reference" {
+	if diagnostic.Message != "Cannot call mutating method 'value.set': receiver is not a writable pointer" {
 		t.Fatalf("diagnostic = %#v", diagnostic)
 	}
 }

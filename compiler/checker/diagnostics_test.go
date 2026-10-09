@@ -1373,10 +1373,10 @@ func TestImmutablePropertyAssignmentHasStructuredLabels(t *testing.T) {
 
 	c := checker.New("main.ard", result.Program, nil)
 	c.Check()
-	// A field write on an ordinary value reports the ADR 0057 interior
+	// A field write through a non-writable place reports the interior
 	// mutation diagnostic with the same structured labels.
 	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeValueInteriorMutation)
-	if diagnostic.Primary.Span.Location != assignment.Target.GetLocation() || diagnostic.Primary.Message != "`box.value` holds an ordinary value" {
+	if diagnostic.Primary.Span.Location != assignment.Target.GetLocation() || diagnostic.Primary.Message != "`box.value` is not writable" {
 		t.Fatalf("primary = %#v", diagnostic.Primary)
 	}
 	if len(diagnostic.Secondary) != 1 || diagnostic.Secondary[0].Span.Location != declaration.NameLocation {
@@ -1394,7 +1394,7 @@ func TestOrdinaryMutableBindingReceiverRequiresReference(t *testing.T) {
 	c := checker.New("main.ard", result.Program, nil)
 	c.Check()
 	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeValueInteriorMutation)
-	if diagnostic.Title != "Mutating method requires a reference" || diagnostic.Primary.Message != "`.push()` requires an actual reference receiver" || strings.Contains(strings.ToLower(diagnostic.Text), "immutable") {
+	if diagnostic.Title != "Mutating method requires a writable pointer" || diagnostic.Primary.Message != "`.push()` requires a `*mut` receiver" || strings.Contains(strings.ToLower(diagnostic.Text), "immutable") {
 		t.Fatalf("diagnostic = %#v", diagnostic)
 	}
 	if len(diagnostic.Secondary) != 1 || diagnostic.Secondary[0].Span.Location != declaration.NameLocation {
@@ -1411,7 +1411,7 @@ func TestReferenceDestinationRequiresActualReference(t *testing.T) {
 	c := checker.New("main.ard", result.Program, nil)
 	c.Check()
 	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeReferenceDestination)
-	if diagnostic.Title != "Reference destination requires a reference" || !strings.Contains(diagnostic.Text, "explicit `mut`") {
+	if diagnostic.Title != "Pointer destination requires a pointer" || !strings.Contains(diagnostic.Text, "`&mut`") {
 		t.Fatalf("diagnostic = %#v", diagnostic)
 	}
 }
@@ -1425,7 +1425,7 @@ func TestReferenceParameterRequiresActualReference(t *testing.T) {
 	c := checker.New("main.ard", result.Program, nil)
 	c.Check()
 	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeReferenceDestination)
-	if diagnostic.Title != "Reference parameter requires a reference" || len(diagnostic.Secondary) != 1 {
+	if diagnostic.Title != "Pointer parameter requires a pointer" || len(diagnostic.Secondary) != 1 {
 		t.Fatalf("diagnostic = %#v", diagnostic)
 	}
 }
@@ -1439,7 +1439,7 @@ func TestReferenceValueDestinationSuggestsPostfixDereference(t *testing.T) {
 	c := checker.New("main.ard", result.Program, nil)
 	c.Check()
 	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeReferenceValueMaterialization)
-	if diagnostic.Title != "Value destination requires dereference" || !strings.Contains(diagnostic.Text, "reference.@") || !strings.Contains(diagnostic.Text, "shallow value copy") {
+	if diagnostic.Title != "Value destination requires dereference" || !strings.Contains(diagnostic.Text, "pointer.*") || !strings.Contains(diagnostic.Text, "shallow copy") {
 		t.Fatalf("diagnostic = %#v", diagnostic)
 	}
 }
@@ -1612,10 +1612,10 @@ fn forward(root: mut $W) {
 		t.Fatalf("diagnostics = %#v, want one", c.Diagnostics())
 	}
 	diagnostic := c.Diagnostics()[0]
-	if diagnostic.Code != checker.DiagnosticCodeIncorrectArgumentType || diagnostic.Message != "Type mismatch: Expected mut Widget, got mut $W" {
+	if diagnostic.Code != checker.DiagnosticCodeIncorrectArgumentType || diagnostic.Message != "Type mismatch: Expected mut Widget, got *mut $W" {
 		t.Fatalf("diagnostic = %#v", diagnostic)
 	}
-	if diagnostic.Primary.Span.Location != call.Args[0].Value.GetLocation() || diagnostic.Primary.Message != "this argument has type `mut $W`" {
+	if diagnostic.Primary.Span.Location != call.Args[0].Value.GetLocation() || diagnostic.Primary.Message != "this argument has type `*mut $W`" {
 		t.Fatalf("primary = %#v", diagnostic.Primary)
 	}
 	if len(diagnostic.Secondary) != 1 || diagnostic.Secondary[0].Span.Location != drive.Parameters[0].GetLocation() {

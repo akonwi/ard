@@ -194,7 +194,7 @@ fn main() {
   mut s = S{n: 1}
   f(s)
 }
-`), "Expected mut S")
+`), "Expected *mut S")
 	})
 
 	t.Run("mut parameter forwards to mut parameter", func(t *testing.T) {

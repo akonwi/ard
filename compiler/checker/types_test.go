@@ -108,7 +108,7 @@ func TestMaybeStringParenthesizesCompositeTypes(t *testing.T) {
 	if got, want := MakeMaybe(MakeResult(Int, Str)).String(), "(Int!Str)?"; got != want {
 		t.Fatalf("result maybe string = %q, want %q", got, want)
 	}
-	if got, want := MakeMaybe(MakeMutableRef(Int)).String(), "(mut Int)?"; got != want {
+	if got, want := MakeMaybe(MakeMutableRef(Int)).String(), "(*mut Int)?"; got != want {
 		t.Fatalf("mutable reference maybe string = %q, want %q", got, want)
 	}
 	if got, want := MakeMaybe(MakeResult(functionType, Str)).String(), "((fn(Int))!Str)?"; got != want {
@@ -119,7 +119,7 @@ func TestMaybeStringParenthesizesCompositeTypes(t *testing.T) {
 		Parameters: []Parameter{{Name: "callback", Type: functionType, Mutable: true}},
 		ReturnType: functionType,
 	}
-	if got, want := MakeMaybe(nestedFunctionType).String(), "(fn(mut fn(Int)) fn(Int))?"; got != want {
+	if got, want := MakeMaybe(nestedFunctionType).String(), "(fn(*mut fn(Int)) fn(Int))?"; got != want {
 		t.Fatalf("nested function maybe string = %q, want %q", got, want)
 	}
 }
@@ -229,7 +229,7 @@ func TestTypeRenderingIsFormatterCanonical(t *testing.T) {
 		},
 		ReturnType: Bool,
 	}
-	if got, want := fn.String(), "fn(Str, mut Int) Bool"; got != want {
+	if got, want := fn.String(), "fn(Str, *mut Int) Bool"; got != want {
 		t.Fatalf("function type = %q, want %q", got, want)
 	}
 	if got, want := MakeMap(Str, Int).String(), "[Str: Int]"; got != want {

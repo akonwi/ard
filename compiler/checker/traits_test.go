@@ -197,7 +197,7 @@ fn drive(root: mut Widget) {
 fn forward(root: mut $W) {
   drive(root)
 }`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected mut Widget, got mut $W"}},
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected mut Widget, got *mut $W"}},
 		},
 		{
 			name: "concrete implementation projects to mutable trait",
@@ -244,7 +244,7 @@ fn take(value: (mut Widget)?) {}
 fn forward(value: (mut $W)?) {
   take(value)
 }`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected (mut Widget)?, got (mut $W)?"}},
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected (mut Widget)?, got (*mut $W)?"}},
 		},
 		{
 			name: "list of generic references cannot project to list of trait references",
@@ -257,7 +257,7 @@ fn take(value: [mut Widget]) {}
 fn forward(value: [mut $W]) {
   take(value)
 }`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected [mut Widget], got [mut $W]"}},
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected [mut Widget], got [*mut $W]"}},
 		},
 		{
 			name: "inferred list rejects mixed trait and generic references",
@@ -279,7 +279,7 @@ fn combine(left: mut Widget, right: mut $W) {
 fn combine(left: mut Widget, right: mut $W) {
   let values = ["left": left, "right": right]
 }`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Map value type mismatch: Expected mut Widget, got mut $W"}},
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Map value type mismatch: Expected mut Widget, got *mut $W"}},
 		},
 		{
 			name: "if branches reject nested generic and trait references",
@@ -310,7 +310,7 @@ fn choose(condition: Bool, left: (mut Widget)?, right: (mut $W)?) {
     false => right,
   }
 }`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected (mut Widget)?, got (mut $W)?"}},
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected (mut Widget)?, got (*mut $W)?"}},
 		},
 		{
 			name: "nested reference forwards through the same inferred generic",
@@ -334,14 +334,14 @@ func TestGenericReferenceEqualityRequiresCompatibleReferents(t *testing.T) {
 fn compare(left: mut Widget, right: mut $W) {
   let equal = left == right
 }`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Invalid: mut Widget == mut $W"}},
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Invalid: mut Widget == *mut $W"}},
 		},
 		{
 			name: "distinct generic references cannot compare",
 			input: `fn compare(left: mut $T, right: mut $W) {
   let equal = left == right
 }`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Invalid: mut $T == mut $W"}},
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Invalid: *mut $T == *mut $W"}},
 		},
 		{
 			name: "reference equality rejects unresolved literal inference",
@@ -352,7 +352,7 @@ fn compare(left: mut Widget, right: mut $W) {
 fn compare() {
   let equal = mut Marker{value: 1} == mut Marker<Int>{value: 2}
 }`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Invalid: mut Marker<$T> == mut Marker<Int>"}},
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Invalid: *mut Marker<$T> == *mut Marker<Int>"}},
 		},
 		{
 			name: "references to the same generic can compare",
@@ -695,7 +695,7 @@ func TestTraitDefinitions(t *testing.T) {
 			}
 			`,
 			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Type mismatch: Expected mut Counter, got Counter"},
+				{Kind: checker.Error, Message: "Type mismatch: Expected *mut Counter, got Counter"},
 				{Kind: checker.Error, Message: "Trait method 'poke' parameter 'c' mutability mismatch"},
 			},
 		},
@@ -777,7 +777,7 @@ fn mutate(counter: Counter) {
   counter.set(2)
 }
 `,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Cannot call mutating method 'counter.set': receiver is not a reference"}},
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Cannot call mutating method 'counter.set': receiver is not a writable pointer"}},
 		},
 		{
 			name: "non-mutating contract rejects mutating implementation",
@@ -816,7 +816,7 @@ fn render(value: Renderable) Str {
   "{value}"
 }
 `,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Cannot call mutating method 'value.to_str': receiver is not a reference"}},
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Cannot call mutating method 'value.to_str': receiver is not a writable pointer"}},
 		},
 		{
 			name: "mutating trait interpolation accepts reference receiver",

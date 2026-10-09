@@ -87,7 +87,7 @@ func (f *ForeignType) String() string {
 		if f.ReadOnly {
 			return "*" + name
 		}
-		return "mut " + name
+		return "*mut " + name
 	}
 	return name
 }

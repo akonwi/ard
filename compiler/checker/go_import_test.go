@@ -109,7 +109,7 @@ impl io::Writer for Sink {
     Result::ok(bytes.size())
   }
 }`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Cannot assign through reference 'bytes': whole-referent assignment is not supported"}},
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Cannot assign a value to pointer 'bytes'"}},
 		},
 		{
 			name: "Go interface descriptor aliases reject list growth",
@@ -464,7 +464,7 @@ fn update() {
   let rect = image::Rect(1, 2, 3, 4)
   rect.Min.X = 10
 }`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Cannot mutate 'rect.Min.X': it is an ordinary value, not a reference"}},
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Cannot write to 'rect.Min.X': it is not a writable place"}},
 		},
 	})
 }
@@ -647,7 +647,7 @@ fn main() {
   let when = time::Now()
   let _ = when.UnmarshalText
 }`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Cannot access pointer receiver method time::Time.UnmarshalText on an ordinary value"}},
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Cannot access pointer receiver method time::Time.UnmarshalText on a value"}},
 		},
 	})
 }
@@ -747,7 +747,7 @@ fn main() {
   mut text = "2024-01-02T00:00:00Z".bytes()
   when.UnmarshalText(text)
 }`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Cannot call pointer receiver method time::Time.UnmarshalText on an ordinary value"}},
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Cannot call pointer receiver method time::Time.UnmarshalText on a value"}},
 		},
 	})
 }
@@ -822,7 +822,7 @@ fn main() {
   let month = time::January
   bump(mut month)
 }`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected mut Int, got mut time::Month"}},
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected *mut Int, got *mut time::Month"}},
 		},
 		{
 			name: "foreign scalar Maybe does not compare against primitive Maybe",
@@ -953,7 +953,7 @@ fn main() {
   mut s = "42"
   rewrite(s)
 }`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected mut json::Number, got Str"}},
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected *mut json::Number, got Str"}},
 		},
 	})
 }
@@ -1278,7 +1278,7 @@ fn main() {
 fn main() {
   os::Stdout = 5
 }`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected mut os::File, got Int"}},
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected *mut os::File, got Int"}},
 		},
 		{
 			name: "package constant assignment rejected",
