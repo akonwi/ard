@@ -45,12 +45,6 @@ func TestUnsupportedSourceCharactersReportLexErrors(t *testing.T) {
 			location: Location{Start: Point{Row: 2, Col: 3}, End: Point{Row: 2, Col: 3}},
 		},
 		{
-			name:     "ampersand",
-			source:   "&",
-			message:  "Unexpected character '&'",
-			location: Location{Start: Point{Row: 1, Col: 1}, End: Point{Row: 1, Col: 1}},
-		},
-		{
 			name:     "backslash",
 			source:   "\\",
 			message:  "Unexpected character '\\\\'",

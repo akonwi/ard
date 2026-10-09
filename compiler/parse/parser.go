@@ -1742,6 +1742,21 @@ func (p *parser) recoverFromBadType() {
 // they recurse through the reporting parseType and propagate nil upward
 // without adding further diagnostics.
 func (p *parser) tryParseType() DeclaredType {
+	if p.match(star) {
+		starToken := p.previous()
+		writable := p.match(mut)
+		inner := p.parseType()
+		if inner == nil {
+			return nil
+		}
+		return &MutableType{
+			Location: Location{Start: starToken.getLocation().Start, End: inner.GetLocation().End},
+			Inner:    inner,
+			Pointer:  true,
+			ReadOnly: !writable,
+		}
+	}
+
 	if p.match(mut) {
 		mutToken := p.previous()
 		inner := p.parseType()
@@ -3068,8 +3083,14 @@ func (p *parser) functionDef(asMethod bool, isTest bool) (Statement, error) {
 }
 
 func (p *parser) structInstance() (Expression, error) {
+	return p.structInstanceOr(p.iterRange)
+}
+
+// structInstanceOr parses a struct literal when one starts here, and
+// otherwise parses the expression with fallback.
+func (p *parser) structInstanceOr(fallback func() (Expression, error)) (Expression, error) {
 	if p.disallowStructInstance {
-		return p.iterRange()
+		return fallback()
 	}
 	// We are in a struct-allowing value position; let a nested `mut <operand>`
 	// pick up struct-literal operands in all forms. (#285)
@@ -3090,7 +3111,7 @@ func (p *parser) structInstance() (Expression, error) {
 	if p.check(identifier, left_brace) {
 		if p.peek().text == "unsafe" {
 			p.index = index
-			return p.iterRange()
+			return fallback()
 		}
 		if !p.check(identifier) {
 			p.addError(p.peek(), "Expected struct name")
@@ -3131,7 +3152,7 @@ func (p *parser) structInstance() (Expression, error) {
 		p.index = index
 	}
 
-	return p.iterRange()
+	return fallback()
 }
 
 // tryGenericStructInstance speculatively parses a struct instantiation with
@@ -3515,23 +3536,50 @@ func (p *parser) multiplication() (Expression, error) {
 	return left, nil
 }
 
+// addressOfOperand parses the operand of `&` or `&mut`. The operator binds
+// like other prefix unary operators: postfix operations belong to the
+// operand, while binary operators apply to the resulting pointer. In a value
+// position, a struct literal is parsed in every form (`&mut Name{}`,
+// `&mut pkg::Name{}`, generic literals); call()'s inline detection only sees
+// non-empty `Name{ field: ... }` on a bare identifier. In subject positions
+// (if/while/for/match) a following `{ ... }` is a block, not a struct. (#285)
+func (p *parser) addressOfOperand() (Expression, error) {
+	if p.structOperandAllowed {
+		return p.structInstanceOr(p.unary)
+	}
+	return p.unary()
+}
+
+// legacyMutRefOperand parses the operand of the legacy `mut <operand>`
+// reference expression, preserving its original broad precedence.
+func (p *parser) legacyMutRefOperand() (Expression, error) {
+	if p.structOperandAllowed {
+		return p.structInstance()
+	}
+	return p.unary()
+}
+
 func (p *parser) unary() (Expression, error) {
+	if p.match(ampersand) {
+		ampersandToken := p.previous()
+		writable := p.match(mut)
+		operand, err := p.addressOfOperand()
+		if err != nil {
+			return nil, err
+		}
+		return &MutRef{
+			Location: Location{
+				Start: ampersandToken.getLocation().Start,
+				End:   operand.GetLocation().End,
+			},
+			Operand:   operand,
+			Ampersand: true,
+			ReadOnly:  !writable,
+		}, nil
+	}
 	if p.match(mut) {
 		mutToken := p.previous()
-		// In a value position, parse the operand through structInstance() so a
-		// struct-literal operand is recognized in every form. call()'s inline
-		// detection only sees non-empty `Name{ field: ... }` on a bare
-		// identifier, so `mut Name{}`, `mut pkg::Name{}`, and generic struct
-		// literals would otherwise leave the braces dangling. In subject
-		// positions (if/while/for/match) a following `{ ... }` is a block, not
-		// a struct, so fall back to the plain unary operand there. (#285)
-		var operand Expression
-		var err error
-		if p.structOperandAllowed {
-			operand, err = p.structInstance()
-		} else {
-			operand, err = p.unary()
-		}
+		operand, err := p.legacyMutRefOperand()
 		if err != nil {
 			return nil, err
 		}
@@ -3607,11 +3655,11 @@ func (p *parser) memberAccess() (Expression, error) {
 
 		if p.previous().kind == dot {
 			dotToken := p.previous()
-			if p.check(at_sign) && adjacent(dotToken.getLocation(), p.peek()) {
-				atToken := p.advance()
+			if (p.check(at_sign) || p.check(star)) && adjacent(dotToken.getLocation(), p.peek()) {
+				operatorToken := p.advance()
 				operatorLocation := Location{
 					Start: Point{Row: dotToken.line, Col: dotToken.column},
-					End:   Point{Row: atToken.line, Col: atToken.column},
+					End:   Point{Row: operatorToken.line, Col: operatorToken.column},
 				}
 				expr = &Deref{
 					Location: Location{
@@ -3620,6 +3668,7 @@ func (p *parser) memberAccess() (Expression, error) {
 					},
 					Operand:          expr,
 					OperatorLocation: operatorLocation,
+					Star:             operatorToken.kind == star,
 				}
 				continue
 			}
