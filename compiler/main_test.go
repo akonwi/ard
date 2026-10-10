@@ -1854,3 +1854,23 @@ test fn embeds_in_tests() Void!Str {
 		t.Fatalf("embedded test workflow failed:\n%s", output)
 	}
 }
+
+// ard check collapses deprecated pointer uses into one line, but ard migrate
+// must still show each site it cannot fix, with its location.
+func TestMigratePathRendersManualSitesInFull(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	source := "struct Box {\n  value: Int,\n}\n\nlet shared = Box{value: 1}\n\nfn get() mut Box {\n  (mut shared)\n}\n"
+	if err := os.WriteFile(filepath.Join(dir, "main.ard"), []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	if _, err := migratePath(&stdout, &stderr, dir, false); err != nil {
+		t.Fatalf("migrate: %v\n%s", err, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "main.ard:8:") || strings.Contains(stderr.String(), "not shown") {
+		t.Fatalf("manual site should render in full:\n%s", stderr.String())
+	}
+}

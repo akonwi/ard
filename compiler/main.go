@@ -1116,7 +1116,7 @@ func migratePath(stdout io.Writer, stderr io.Writer, inputPath string, checkOnly
 		}
 		if len(result.Manual) > 0 {
 			pending = true
-			if err := diagnostics.RenderRelative(stderr, result.Manual, result.ProjectRoot, displayRoot); err != nil {
+			if err := diagnostics.RenderRelativeWithOptions(stderr, result.Manual, result.ProjectRoot, displayRoot, diagnostics.RenderOptions{ShowDeprecationWarnings: true}); err != nil {
 				return false, fmt.Errorf("render diagnostics: %w", err)
 			}
 		}
