@@ -977,14 +977,21 @@ func (p printer) renderExpressionDoc(expression parse.Expression, parentPreceden
 		copy := node
 		return dText(p.renderBinary(&copy, parentPrecedence))
 	case *parse.ChainedComparison:
+		// Comparisons are non-associative, so comparison operands keep their
+		// parentheses and the chain itself is wrapped when nested under another
+		// comparison (#519).
 		parts := make([]string, 0, len(node.Operands)*2)
 		for i, operand := range node.Operands {
 			if i > 0 {
 				parts = append(parts, p.operatorString(node.Operators[i-1]))
 			}
-			parts = append(parts, p.renderExpression(operand, precedenceCompare))
+			parts = append(parts, p.renderExpression(operand, precedenceCompare+1))
 		}
-		return dText(strings.Join(parts, " "))
+		text := strings.Join(parts, " ")
+		if precedenceCompare < parentPrecedence {
+			text = "(" + text + ")"
+		}
+		return dText(text)
 	case *parse.RangeExpression:
 		return dConcat(p.renderExpressionDoc(node.Start, precedenceCompare), dText(".."), p.renderExpressionDoc(node.End, precedenceCompare))
 	case parse.RangeExpression:
@@ -1698,7 +1705,14 @@ func (p printer) renderUnary(node *parse.UnaryExpression, parentPrecedence int) 
 
 func (p printer) renderBinary(node *parse.BinaryExpression, parentPrecedence int) string {
 	precedence := p.binaryPrecedence(node.Operator)
-	left := p.renderExpression(node.Left, precedence)
+	leftPrecedence := precedence
+	if isComparisonOperator(node.Operator) {
+		// Comparisons are non-associative: the parser folds `a op b op c` into a
+		// ChainedComparison, so a comparison on the left must keep its
+		// parentheses to preserve the tree (#519).
+		leftPrecedence = precedence + 1
+	}
+	left := p.renderExpression(node.Left, leftPrecedence)
 	rightPrecedence := precedence + 1
 	if node.Operator == parse.Or || node.Operator == parse.And {
 		rightPrecedence = precedence
@@ -1731,6 +1745,15 @@ func isUnaryNotExpression(expression parse.Expression) bool {
 		return node.Operator == parse.Not
 	case parse.UnaryExpression:
 		return node.Operator == parse.Not
+	default:
+		return false
+	}
+}
+
+func isComparisonOperator(operator parse.Operator) bool {
+	switch operator {
+	case parse.Equal, parse.NotEqual, parse.GreaterThan, parse.GreaterThanOrEqual, parse.LessThan, parse.LessThanOrEqual:
+		return true
 	default:
 		return false
 	}

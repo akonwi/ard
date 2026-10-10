@@ -301,6 +301,78 @@ func TestFormatPreservesParenthesesAroundTryPostfixTarget(t *testing.T) {
 	}
 }
 
+// Comparison operators are non-associative: the parser folds `a op b op c`
+// into a single ChainedComparison, and the checker rejects chains containing
+// == or !=. The formatter must keep parentheses around comparison operands of
+// comparisons so formatting never produces such a chain (#519).
+func TestFormatPreservesParenthesesAroundComparisonOperands(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "relational operands of not-equal",
+			input: "let x = (a > 0) != (b > 0)\n",
+			want:  "let x = (a > 0) != (b > 0)\n",
+		},
+		{
+			name:  "equality operands of not-equal",
+			input: "let x = (a == 0) != (b == 0)\n",
+			want:  "let x = (a == 0) != (b == 0)\n",
+		},
+		{
+			name:  "relational left operand of equal",
+			input: "let x = (a + 1 > b) == true\n",
+			want:  "let x = (a + 1 > b) == true\n",
+		},
+		{
+			name:  "chained comparison right operand of equal",
+			input: "let x = ok == (0 < n < 10)\n",
+			want:  "let x = ok == (0 < n < 10)\n",
+		},
+		{
+			name:  "chained comparison left operand of equal",
+			input: "let x = (0 < n < 10) == ok\n",
+			want:  "let x = (0 < n < 10) == ok\n",
+		},
+		{
+			name:  "chained comparison stays bare under and",
+			input: "let x = (0 < n < 10) and ok\n",
+			want:  "let x = 0 < n < 10 and ok\n",
+		},
+		{
+			name:  "comparison operands under and stay bare",
+			input: "let x = (a > 0) and (b > 0)\n",
+			want:  "let x = a > 0 and b > 0\n",
+		},
+		{
+			name:  "higher precedence operand of comparison stays bare",
+			input: "let x = (a + 1) > b\n",
+			want:  "let x = a + 1 > b\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			formatted, err := Format([]byte(tt.input), "test.ard")
+			if err != nil {
+				t.Fatalf("format: %v", err)
+			}
+			if string(formatted) != tt.want {
+				t.Fatalf("formatted = %q, want %q", string(formatted), tt.want)
+			}
+			again, err := Format(formatted, "test.ard")
+			if err != nil {
+				t.Fatalf("second format: %v", err)
+			}
+			if string(again) != tt.want {
+				t.Fatalf("formatter is not idempotent: %q", string(again))
+			}
+		})
+	}
+}
+
 func TestFormatExpandedLiteralsIsIdempotent(t *testing.T) {
 	tests := []struct {
 		name  string
