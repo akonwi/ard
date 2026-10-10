@@ -1,6 +1,10 @@
 package checker
 
-import "github.com/akonwi/ard/parse"
+import (
+	"strings"
+
+	"github.com/akonwi/ard/parse"
+)
 
 // TextEdit is a machine-applicable source change attached to a diagnostic.
 // Start is inclusive and End is exclusive; both use the parser's 1-based
@@ -37,6 +41,27 @@ const (
 type legacyPointerSyntaxKey struct {
 	location parse.Location
 	kind     legacyPointerSyntaxKind
+}
+
+// legacyBorrowFunction identifies the body that owns a value parameter. It
+// lets migration insert a writable shadow at the start of that body, rather
+// than at an individual borrow site (which could be inside a loop).
+type legacyBorrowFunction struct {
+	declaration parse.Location
+	firstBody   parse.Point
+}
+
+type legacyBorrowParameter struct {
+	name     string
+	function *legacyBorrowFunction
+}
+
+func newLegacyBorrowFunction(declaration parse.Location, body []parse.Statement) *legacyBorrowFunction {
+	function := &legacyBorrowFunction{declaration: declaration}
+	if len(body) > 0 && body[0] != nil {
+		function.firstBody = body[0].GetLocation().Start
+	}
+	return function
 }
 
 // deprecatedPointerSyntaxDiagnostic reports a legacy ADR 0057 reference form
@@ -173,6 +198,15 @@ func (c *Checker) reportLegacyAddressOf(s *parse.MutRef, operand Expression) {
 		c.reportLegacyPointerSyntax(legacyTraitBorrow, location)
 		return
 	}
+	if c.legacyDescriptorArgument == s && c.isAddressablePlace(operand) && !c.isWritablePlace(operand) {
+		// Go []T and map[K]V parameters take a descriptor value. For an
+		// immutable operand, preserving the legacy borrow would require an
+		// unnecessary writable copy; pass the value directly instead.
+		removal := c.keywordEdit(location.Start, "mut", "")
+		removal.TrimTrailingSpace = true
+		c.reportLegacyPointerSyntax(legacyAddressOf, location, removal)
+		return
+	}
 	if legacyDeref, ok := s.Operand.(*parse.Deref); ok && !legacyDeref.Star {
 		// `mut pointer.@` borrows a fresh copy of the pointee, but
 		// `&mut pointer.*` would alias it. Neither half rewrites
@@ -193,11 +227,13 @@ func (c *Checker) legacyAddressOfFixes(s *parse.MutRef, operand Expression) ([]T
 	if c.isAddressablePlace(operand) && !c.isWritablePlace(operand) {
 		// ADR 0057 borrowed `let` bindings; `&mut` requires a writable
 		// place. Making the root binding `mut` keeps the program valid.
-		root := c.legacyBorrowRootLet(operand)
-		if root == nil {
+		if root := c.legacyBorrowRootLet(operand); root != nil {
+			fixes = append(fixes, c.keywordEdit(*root, "let", "mut"))
+		} else if parameter := c.legacyBorrowRootParameter(operand); parameter != nil {
+			fixes = append(fixes, c.legacyBorrowParameterShadow(*parameter))
+		} else {
 			return nil, false
 		}
-		fixes = append(fixes, c.keywordEdit(*root, "let", "mut"))
 	} else if !c.isAddressablePlace(operand) && isPlaceExpression(operand) {
 		return nil, false
 	}
@@ -227,10 +263,30 @@ func isPlaceExpression(expr Expression) bool {
 // legacy borrow reaches through inline fields only, or nil when the borrow
 // cannot be made writable by changing that binding.
 func (c *Checker) legacyBorrowRootLet(expr Expression) *parse.Point {
+	root := legacyBorrowRootVariable(expr)
+	if root == nil {
+		return nil
+	}
+	return root.sym.letKeyword
+}
+
+// legacyBorrowRootParameter returns a value parameter reached through inline
+// fields. Captures are intentionally left manual: the shadow would be outside
+// the closure that reports this diagnostic, and changing capture storage is
+// not a mechanical rewrite.
+func (c *Checker) legacyBorrowRootParameter(expr Expression) *legacyBorrowParameter {
+	root := legacyBorrowRootVariable(expr)
+	if root == nil || root.sym.legacyBorrowParameter == nil || c.legacyBorrowFunction != root.sym.legacyBorrowParameter.function {
+		return nil
+	}
+	return root.sym.legacyBorrowParameter
+}
+
+func legacyBorrowRootVariable(expr Expression) *Variable {
 	for {
 		switch e := expr.(type) {
 		case *Variable:
-			return e.sym.letKeyword
+			return e
 		case *InstanceProperty:
 			if isReferenceValued(e.Subject) {
 				return nil
@@ -245,6 +301,15 @@ func (c *Checker) legacyBorrowRootLet(expr Expression) *parse.Point {
 			return nil
 		}
 	}
+}
+
+func (c *Checker) legacyBorrowParameterShadow(parameter legacyBorrowParameter) TextEdit {
+	at := parameter.function.firstBody
+	indent := ""
+	if at.Row != parameter.function.declaration.Start.Row {
+		indent = strings.Repeat(" ", at.Col-1)
+	}
+	return c.insertEdit(at, "mut "+parameter.name+" = "+parameter.name+"\n"+indent)
 }
 
 // addressOfOperandNeedsParens reports whether operand would no longer be the

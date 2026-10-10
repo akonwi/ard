@@ -1,6 +1,8 @@
 package migrate_test
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -134,9 +136,24 @@ func TestRewritePointerSyntax(t *testing.T) {
 			manual: 1,
 		},
 		{
-			name:   "parameter borrow needs a manual change",
-			input:  "fn reset(box: mut Box) { box.value = 0 }\nfn local(box: Box) { reset(mut box) }",
-			want:   "fn reset(box: &mut Box) { box.value = 0 }\nfn local(box: Box) { reset(mut box) }",
+			name:  "parameter borrow shadows at function start",
+			input: "fn reset(box: mut Box) { box.value = 0 }\nfn local(box: Box) { reset(mut box) }",
+			want:  "fn reset(box: &mut Box) { box.value = 0 }\nfn local(box: Box) { mut box = box\nreset(&mut box) }",
+		},
+		{
+			name:  "parameter field borrow shadows once at function start",
+			input: "struct Pair {\n  left: Box,\n}\nfn reset(box: mut Box) { box.value = 0 }\nfn local(pair: Pair) {\n  reset(mut pair.left)\n  reset(mut pair.left)\n}",
+			want:  "struct Pair {\n  left: Box,\n}\nfn reset(box: &mut Box) { box.value = 0 }\nfn local(pair: Pair) {\n  mut pair = pair\n  reset(&mut pair.left)\n  reset(&mut pair.left)\n}",
+		},
+		{
+			name:  "anonymous function parameter shadows at body start",
+			input: "fn reset(box: mut Box) { box.value = 0 }\nlet callback = fn(box: Box) { reset(mut box) }",
+			want:  "fn reset(box: &mut Box) { box.value = 0 }\nlet callback = fn(box: Box) { mut box = box\nreset(&mut box) }",
+		},
+		{
+			name:   "parameter borrow in nested closure needs a manual change",
+			input:  "fn reset(box: mut Box) { box.value = 0 }\nfn local(box: Box) {\n  let callback = fn() { reset(mut box) }\n  callback()\n}",
+			want:   "fn reset(box: &mut Box) { box.value = 0 }\nfn local(box: Box) {\n  let callback = fn() { reset(mut box) }\n  callback()\n}",
 			manual: 1,
 		},
 		{
@@ -163,6 +180,57 @@ func TestRewritePointerSyntax(t *testing.T) {
 				assertNoErrors(t, got)
 			}
 		})
+	}
+}
+
+func TestRewriteGoDescriptorArguments(t *testing.T) {
+	root := t.TempDir()
+	for path, source := range map[string]string{
+		"ard.toml": "name = \"migration-test\"\nard = \">= 0.13.0\"\n",
+		"go.mod":   "module example.com/app\n\ngo 1.24\n",
+		"ffi/ffi.go": `package ffi
+func TakeSlice([]int) {}
+func TakeMap(map[string]int) {}
+func TakeSlicePtr(*[]int) {}
+`,
+		"main.ard": `use go:example.com/app/ffi
+
+fn main(values: [Int], entries: [Str: Int]) {
+  ffi::TakeSlice(mut values)
+  ffi::TakeMap(mut entries)
+  mut writable = [1, 2]
+  ffi::TakeSlice(mut writable)
+  ffi::TakeSlicePtr(mut values)
+}`,
+	} {
+		fullPath := filepath.Join(root, path)
+		if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(fullPath, []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	result, err := migrate.RewriteFile(filepath.Join(root, "main.ard"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `use go:example.com/app/ffi
+
+fn main(values: [Int], entries: [Str: Int]) {
+  mut values = values
+  ffi::TakeSlice(values)
+  ffi::TakeMap(entries)
+  mut writable = [1, 2]
+  ffi::TakeSlice(&mut writable)
+  ffi::TakeSlicePtr(&mut values)
+}`
+	if got := string(result.Rewritten); got != want {
+		t.Fatalf("rewrite mismatch\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+	if len(result.Manual) != 0 {
+		t.Fatalf("manual deprecations = %d, want 0: %v", len(result.Manual), result.Manual)
 	}
 }
 

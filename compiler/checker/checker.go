@@ -623,6 +623,9 @@ func descriptorArgumentExpectation(parameter Parameter, expected Type, arg parse
 // are validated by the caller's compatibility check.
 func (c *Checker) checkDescriptorArgument(expr parse.Expression, parameter Parameter) Expression {
 	expected := descriptorArgumentExpectation(parameter, parameter.Type, expr)
+	previousLegacyDescriptorArgument := c.legacyDescriptorArgument
+	c.legacyDescriptorArgument, _ = expr.(*parse.MutRef)
+	defer func() { c.legacyDescriptorArgument = previousLegacyDescriptorArgument }()
 	switch expr.(type) {
 	case *parse.ListLiteral, *parse.MapLiteral, *parse.MutRef:
 		return descriptorArgument(parameter, c.checkExprAsArgument(expr, expected, parameter))
@@ -957,6 +960,8 @@ type Checker struct {
 	reportedMapKeyErrors              map[parse.Location]bool
 	reportedLegacyPointerSyntax       map[legacyPointerSyntaxKey]bool
 	legacyDerefBorrowed               map[*parse.Deref]bool
+	legacyBorrowFunction              *legacyBorrowFunction
+	legacyDescriptorArgument          *parse.MutRef
 	emptyCollectionBinding            *collectionBindingContext
 	goTypesContext                    *gotypes.Context
 	spans                             *SpanIndex
@@ -10470,11 +10475,13 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 			}
 
 			// Check body
+			legacyBorrowFunction := newLegacyBorrowFunction(s.GetLocation(), s.Body)
 			setup := func() {
 				c.scope.expectReturn(returnType)
 				for _, param := range params {
 					sym := c.scope.add(param.Name, param.Type, false)
 					sym.reference = param.Mutable
+					sym.legacyBorrowParameter = &legacyBorrowParameter{name: param.Name, function: legacyBorrowFunction}
 					c.recordBinding(param.Loc, sym)
 				}
 			}
@@ -10482,6 +10489,8 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 			c.pushConstraintFunction(fn, s.GetLocation())
 			previousDeferredWorkDepth := c.deferredWorkDepth
 			c.deferredWorkDepth = 0
+			previousLegacyBorrowFunction := c.legacyBorrowFunction
+			c.legacyBorrowFunction = legacyBorrowFunction
 			var body *Block
 			if fn.InferReturnTypeFromBody {
 				// Without a return annotation, the closure adopts its body's
@@ -10498,6 +10507,7 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 				body = c.checkBlockWithExpected(s.Body, setup, returnType, true)
 			}
 			c.deferredWorkDepth = previousDeferredWorkDepth
+			c.legacyBorrowFunction = previousLegacyBorrowFunction
 			c.popConstraintFunction()
 			c.popFunctionGenericContext()
 			c.recordComparableConstraintClosure(parentConstraintFunction, fn, s.GetLocation())
@@ -13329,15 +13339,20 @@ func (c *Checker) checkFunctionWithSignature(def *parse.FunctionDeclaration, ini
 	parentConstraintFunction := c.currentConstraintFunction()
 	c.pushFunctionGenericContext(fn, extraGenericParams...)
 	c.pushConstraintFunction(fn, def.GetLocation())
+	previousLegacyBorrowFunction := c.legacyBorrowFunction
+	legacyBorrowFunction := newLegacyBorrowFunction(def.GetLocation(), def.Body)
+	c.legacyBorrowFunction = legacyBorrowFunction
 	body := c.checkBlockWithExpected(def.Body, func() {
 		c.scope.expectReturn(returnType)
 		for _, param := range params {
 			sym := c.scope.add(param.Name, param.Type, false)
 			sym.reference = param.Mutable
 			sym.foreignDescriptor = param.ForeignABI == ForeignParameterDescriptorValue
+			sym.legacyBorrowParameter = &legacyBorrowParameter{name: param.Name, function: legacyBorrowFunction}
 			c.recordBinding(param.Loc, sym)
 		}
 	}, returnType, true)
+	c.legacyBorrowFunction = previousLegacyBorrowFunction
 	c.popConstraintFunction()
 	c.popFunctionGenericContext()
 	c.recordComparableConstraintClosure(parentConstraintFunction, fn, def.GetLocation())
@@ -14170,6 +14185,11 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 		}
 
 		var checkedArg Expression
+		previousLegacyDescriptorArgument := c.legacyDescriptorArgument
+		c.legacyDescriptorArgument = nil
+		if fnDefCopy.Parameters[i].ForeignABI == ForeignParameterDescriptorValue {
+			c.legacyDescriptorArgument, _ = resolvedExprs[i].(*parse.MutRef)
+		}
 		c.withValueExprContext(func() {
 			switch arg := resolvedExprs[i].(type) {
 			case *parse.ListLiteral, *parse.MapLiteral:
@@ -14222,6 +14242,7 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 				checkedArg = c.checkExpr(resolvedExprs[i])
 			}
 		})
+		c.legacyDescriptorArgument = previousLegacyDescriptorArgument
 
 		checkedArg = descriptorArgument(fnDefCopy.Parameters[i], checkedArg)
 		if checkedArg == nil {
