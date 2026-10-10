@@ -472,11 +472,14 @@ Some programs need manual changes:
 
 - `&mut` of a `let` binding is rejected. For a local binding, the rewrite
   tool changes the binding to `mut`.
-- Borrowing a value parameter is rewritten by adding `mut name = name` at the
-  start of its function or closure body, then changing the borrow to
-  `&mut name`. This preserves the parameter slot across loops and rewrites
-  multiple borrows with one shadow. Captures of an outer parameter remain
-  manual because changing closure capture storage is not mechanical.
+- Borrowing a value parameter, `for` binding, or a multi-statement `match`
+  binding is rewritten by adding `mut name = name` at the start of its
+  function, closure, loop, or arm body, then changing the borrow to
+  `&mut name`. This preserves the binding's lifetime and rewrites multiple
+  borrows with one shadow. Captures of an outer parameter remain manual because
+  changing closure capture storage is not mechanical. Single-statement match
+  arms stay manual because the parser cannot distinguish a braced block from
+  an expression arm without changing the arm's form.
 - At a Go `[]T` or `map[K]V` parameter, an immutable legacy `mut value` is
   rewritten to `value`: descriptor parameters accept ordinary values. A
   writable operand stays `&mut value` to preserve the explicit mutation

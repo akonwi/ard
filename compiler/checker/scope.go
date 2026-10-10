@@ -69,10 +69,11 @@ func (s Symbol) IsZero() bool {
 }
 
 func makeScope(parent *SymbolTable) SymbolTable {
-	return SymbolTable{
+	scope := SymbolTable{
 		parent:  parent,
 		symbols: map[string]*Symbol{},
 	}
+	return scope
 }
 
 func (st *SymbolTable) add(name string, type_ Type, mutable bool) *Symbol {

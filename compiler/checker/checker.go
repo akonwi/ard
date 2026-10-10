@@ -961,6 +961,7 @@ type Checker struct {
 	reportedLegacyPointerSyntax       map[legacyPointerSyntaxKey]bool
 	legacyDerefBorrowed               map[*parse.Deref]bool
 	legacyBorrowFunction              *legacyBorrowFunction
+	legacyBorrowFunctionScope         *legacyBorrowFunction
 	legacyDescriptorArgument          *parse.MutRef
 	emptyCollectionBinding            *collectionBindingContext
 	goTypesContext                    *gotypes.Context
@@ -4740,12 +4741,12 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					Start:  start,
 					End:    end,
 				}
-				body := c.checkBlock(s.Body, c.markLoopScope(func() {
-					c.recordBinding(s.Cursor.GetLocation(), c.scope.add(s.Cursor.Name, start.Type(), false))
+				body := c.checkLoopBody(s.GetLocation(), s.Body, func() {
+					c.recordBinding(s.Cursor.GetLocation(), c.legacyBorrowBinding(c.scope.add(s.Cursor.Name, start.Type(), false)))
 					if loop.Index != "" {
-						c.recordBinding(s.Cursor2.GetLocation(), c.scope.add(loop.Index, Int, false))
+						c.recordBinding(s.Cursor2.GetLocation(), c.legacyBorrowBinding(c.scope.add(loop.Index, Int, false)))
 					}
-				}))
+				})
 				loop.Body = body
 				return &Statement{Stmt: loop}
 			}
@@ -4773,13 +4774,13 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				}
 
 				// Create a new scope for the loop body where the cursor is defined
-				body := c.checkBlock(s.Body, c.markLoopScope(func() {
+				body := c.checkLoopBody(s.GetLocation(), s.Body, func() {
 					// Direct string iteration yields Unicode scalar values.
-					c.recordBinding(s.Cursor.GetLocation(), c.scope.add(s.Cursor.Name, Rune, false))
+					c.recordBinding(s.Cursor.GetLocation(), c.legacyBorrowBinding(c.scope.add(s.Cursor.Name, Rune, false)))
 					if loop.Index != "" {
-						c.recordBinding(s.Cursor2.GetLocation(), c.scope.add(loop.Index, Int, false))
+						c.recordBinding(s.Cursor2.GetLocation(), c.legacyBorrowBinding(c.scope.add(loop.Index, Int, false)))
 					}
-				}))
+				})
 
 				loop.Body = body
 				return &Statement{Stmt: loop}
@@ -4796,13 +4797,13 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				}
 
 				// Create a new scope for the loop body where the cursor is defined
-				body := c.checkBlock(s.Body, c.markLoopScope(func() {
+				body := c.checkLoopBody(s.GetLocation(), s.Body, func() {
 					// Add the cursor variable to the scope
-					c.recordBinding(s.Cursor.GetLocation(), c.scope.add(s.Cursor.Name, Int, false))
+					c.recordBinding(s.Cursor.GetLocation(), c.legacyBorrowBinding(c.scope.add(s.Cursor.Name, Int, false)))
 					if loop.Index != "" {
-						c.recordBinding(s.Cursor2.GetLocation(), c.scope.add(loop.Index, Int, false))
+						c.recordBinding(s.Cursor2.GetLocation(), c.legacyBorrowBinding(c.scope.add(loop.Index, Int, false)))
 					}
-				}))
+				})
 
 				loop.Body = body
 				return &Statement{Stmt: loop}
@@ -4817,13 +4818,13 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				}
 				cursorMutable := false // ADR 0073: only `mut` declarations create writable slots
 
-				body := c.checkBlock(s.Body, c.markLoopScope(func() {
+				body := c.checkLoopBody(s.GetLocation(), s.Body, func() {
 					// Add the cursor variable to the scope
-					c.recordBinding(s.Cursor.GetLocation(), c.scope.add(s.Cursor.Name, listType.of, cursorMutable))
+					c.recordBinding(s.Cursor.GetLocation(), c.legacyBorrowBinding(c.scope.add(s.Cursor.Name, listType.of, cursorMutable)))
 					if loop.Index != "" {
-						c.recordBinding(s.Cursor2.GetLocation(), c.scope.add(loop.Index, Int, false))
+						c.recordBinding(s.Cursor2.GetLocation(), c.legacyBorrowBinding(c.scope.add(loop.Index, Int, false)))
 					}
-				}))
+				})
 
 				loop.Body = body
 				return &Statement{Stmt: loop}
@@ -4836,12 +4837,12 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					List:   iterValue,
 				}
 				cursorMutable := false // ADR 0073: only `mut` declarations create writable slots
-				body := c.checkBlock(s.Body, c.markLoopScope(func() {
-					c.recordBinding(s.Cursor.GetLocation(), c.scope.add(s.Cursor.Name, sliceType.of, cursorMutable))
+				body := c.checkLoopBody(s.GetLocation(), s.Body, func() {
+					c.recordBinding(s.Cursor.GetLocation(), c.legacyBorrowBinding(c.scope.add(s.Cursor.Name, sliceType.of, cursorMutable)))
 					if loop.Index != "" {
-						c.recordBinding(s.Cursor2.GetLocation(), c.scope.add(loop.Index, Int, false))
+						c.recordBinding(s.Cursor2.GetLocation(), c.legacyBorrowBinding(c.scope.add(loop.Index, Int, false)))
 					}
-				}))
+				})
 				loop.Body = body
 				return &Statement{Stmt: loop}
 			}
@@ -4852,12 +4853,12 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					Index:  s.Cursor2.Name,
 					List:   iterValue,
 				}
-				body := c.checkBlock(s.Body, c.markLoopScope(func() {
-					c.recordBinding(s.Cursor.GetLocation(), c.scope.add(s.Cursor.Name, arrayType.of, false))
+				body := c.checkLoopBody(s.GetLocation(), s.Body, func() {
+					c.recordBinding(s.Cursor.GetLocation(), c.legacyBorrowBinding(c.scope.add(s.Cursor.Name, arrayType.of, false)))
 					if loop.Index != "" {
-						c.recordBinding(s.Cursor2.GetLocation(), c.scope.add(loop.Index, Int, false))
+						c.recordBinding(s.Cursor2.GetLocation(), c.legacyBorrowBinding(c.scope.add(loop.Index, Int, false)))
 					}
-				}))
+				})
 
 				loop.Body = body
 				return &Statement{Stmt: loop}
@@ -4876,11 +4877,11 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				}
 
 				valueMutable := false // ADR 0073: only `mut` declarations create writable slots
-				body := c.checkBlock(s.Body, c.markLoopScope(func() {
+				body := c.checkLoopBody(s.GetLocation(), s.Body, func() {
 					// Add the cursors to the scope
-					c.recordBinding(s.Cursor.GetLocation(), c.scope.add(loop.Key, mapType.Key(), false))
-					c.recordBinding(s.Cursor2.GetLocation(), c.scope.add(loop.Val, mapType.Value(), valueMutable))
-				}))
+					c.recordBinding(s.Cursor.GetLocation(), c.legacyBorrowBinding(c.scope.add(loop.Key, mapType.Key(), false)))
+					c.recordBinding(s.Cursor2.GetLocation(), c.legacyBorrowBinding(c.scope.add(loop.Val, mapType.Value(), valueMutable)))
+				})
 
 				loop.Body = body
 				return &Statement{Stmt: loop}
@@ -10490,7 +10491,10 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 			previousDeferredWorkDepth := c.deferredWorkDepth
 			c.deferredWorkDepth = 0
 			previousLegacyBorrowFunction := c.legacyBorrowFunction
+			previousLegacyBorrowFunctionScope := c.legacyBorrowFunctionScope
+			legacyBorrowFunction.function = legacyBorrowFunction
 			c.legacyBorrowFunction = legacyBorrowFunction
+			c.legacyBorrowFunctionScope = legacyBorrowFunction
 			var body *Block
 			if fn.InferReturnTypeFromBody {
 				// Without a return annotation, the closure adopts its body's
@@ -10508,6 +10512,7 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 			}
 			c.deferredWorkDepth = previousDeferredWorkDepth
 			c.legacyBorrowFunction = previousLegacyBorrowFunction
+			c.legacyBorrowFunctionScope = previousLegacyBorrowFunctionScope
 			c.popConstraintFunction()
 			c.popFunctionGenericContext()
 			c.recordComparableConstraintClosure(parentConstraintFunction, fn, s.GetLocation())
@@ -10696,10 +10701,13 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 					} else {
 						// This is the Some case with a variable binding
 						// Create a new scope for the body with the pattern bound to the unwrapped value
-						someBody = c.checkMatchArmBlock(matchCase.Body, func() {
+						someBody = c.checkMatchArmBlockWithLegacyBinding(matchCase, func() {
 							// Add the pattern name as a variable in the scope with the inner type
 							// For example, if the Maybe is Str?, the pattern should be a Str
-							c.scope.add(id.Name, maybeType.of, bindingMutable)
+							binding := c.scope.add(id.Name, maybeType.of, bindingMutable)
+							if matchCaseAllowsLegacyBorrowShadow(matchCase) {
+								c.legacyBorrowBinding(binding)
+							}
 						})
 
 						// Create an identifier to use in the Match struct
@@ -13340,8 +13348,11 @@ func (c *Checker) checkFunctionWithSignature(def *parse.FunctionDeclaration, ini
 	c.pushFunctionGenericContext(fn, extraGenericParams...)
 	c.pushConstraintFunction(fn, def.GetLocation())
 	previousLegacyBorrowFunction := c.legacyBorrowFunction
+	previousLegacyBorrowFunctionScope := c.legacyBorrowFunctionScope
 	legacyBorrowFunction := newLegacyBorrowFunction(def.GetLocation(), def.Body)
+	legacyBorrowFunction.function = legacyBorrowFunction
 	c.legacyBorrowFunction = legacyBorrowFunction
+	c.legacyBorrowFunctionScope = legacyBorrowFunction
 	body := c.checkBlockWithExpected(def.Body, func() {
 		c.scope.expectReturn(returnType)
 		for _, param := range params {
@@ -13353,6 +13364,7 @@ func (c *Checker) checkFunctionWithSignature(def *parse.FunctionDeclaration, ini
 		}
 	}, returnType, true)
 	c.legacyBorrowFunction = previousLegacyBorrowFunction
+	c.legacyBorrowFunctionScope = previousLegacyBorrowFunctionScope
 	c.popConstraintFunction()
 	c.popFunctionGenericContext()
 	c.recordComparableConstraintClosure(parentConstraintFunction, fn, def.GetLocation())

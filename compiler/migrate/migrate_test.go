@@ -146,6 +146,32 @@ func TestRewritePointerSyntax(t *testing.T) {
 			want:  "struct Pair {\n  left: Box,\n}\nfn reset(box: &mut Box) { box.value = 0 }\nfn local(pair: Pair) {\n  mut pair = pair\n  reset(&mut pair.left)\n  reset(&mut pair.left)\n}",
 		},
 		{
+			name:  "for binding shadows at loop body start",
+			input: "fn reset(box: mut Box) { box.value = 0 }\nfn main() {\n  for box in [Box{value: 1}] {\n    reset(mut box)\n  }\n}",
+			want:  "fn reset(box: &mut Box) { box.value = 0 }\nfn main() {\n  for box in [Box{value: 1}] {\n    mut box = box\n    reset(&mut box)\n  }\n}",
+		},
+		{
+			name:  "for value and index bindings shadow independently",
+			input: "fn reset(box: mut Box) { box.value = 0 }\nfn main() {\n  for box, index in [Box{value: 1}] {\n    reset(mut box)\n    let copy = mut index\n    copy.* = 1\n  }\n}",
+			want:  "fn reset(box: &mut Box) { box.value = 0 }\nfn main() {\n  for box, index in [Box{value: 1}] {\n    mut box = box\n    mut index = index\n    reset(&mut box)\n    let copy = &mut index\n    copy.* = 1\n  }\n}",
+		},
+		{
+			name:  "field of for binding shadows root at loop body start",
+			input: "struct Pair {\n  left: Box,\n}\nfn reset(box: mut Box) { box.value = 0 }\nfn main() {\n  for pair in [Pair{left: Box{value: 1}}] {\n    reset(mut pair.left)\n  }\n}",
+			want:  "struct Pair {\n  left: Box,\n}\nfn reset(box: &mut Box) { box.value = 0 }\nfn main() {\n  for pair in [Pair{left: Box{value: 1}}] {\n    mut pair = pair\n    reset(&mut pair.left)\n  }\n}",
+		},
+		{
+			name:  "match binding with block body shadows at arm start",
+			input: "fn reset(box: mut Box) { box.value = 0 }\nfn main() {\n  let value = Maybe::new<Box>(Box{value: 1})\n  match value {\n    box => {\n      let original = box\n      reset(mut box)\n    },\n    _ => {},\n  }\n}",
+			want:  "fn reset(box: &mut Box) { box.value = 0 }\nfn main() {\n  let value = Maybe::new<Box>(Box{value: 1})\n  match value {\n    box => {\n      mut box = box\n      let original = box\n      reset(&mut box)\n    },\n    _ => {},\n  }\n}",
+		},
+		{
+			name:   "match binding with expression body needs a manual change",
+			input:  "fn reset(box: mut Box) { box.value = 0 }\nfn main() {\n  let value = Maybe::new<Box>(Box{value: 1})\n  match value {\n    box => reset(mut box),\n    _ => {},\n  }\n}",
+			want:   "fn reset(box: &mut Box) { box.value = 0 }\nfn main() {\n  let value = Maybe::new<Box>(Box{value: 1})\n  match value {\n    box => reset(mut box),\n    _ => {},\n  }\n}",
+			manual: 1,
+		},
+		{
 			name:  "anonymous function parameter shadows at body start",
 			input: "fn reset(box: mut Box) { box.value = 0 }\nlet callback = fn(box: Box) { reset(mut box) }",
 			want:  "fn reset(box: &mut Box) { box.value = 0 }\nlet callback = fn(box: Box) { mut box = box\nreset(&mut box) }",

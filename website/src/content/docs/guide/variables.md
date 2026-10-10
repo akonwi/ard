@@ -215,7 +215,7 @@ Earlier releases spelled pointers with `mut`. That syntax still works but report
 
 `mut Trait` is unchanged; see [Traits](/advanced/traits/).
 
-`ard migrate <path>` rewrites the mechanical cases in place. Use `ard migrate --check <path>` to list files that still need migration without changing them. Borrowing a value parameter is rewritten by adding `mut name = name` at the start of its function or closure body. For Go `[]T` and `map[K]V` parameters, an immutable `mut value` is rewritten to `value`; writable operands remain explicit `&mut value`. Some uses still need a manual change and are reported instead, including captures of outer parameters, non-`mut` method receivers, trait-typed places, and Go `*[]T` or `*map[K]V` parameters.
+`ard migrate <path>` rewrites the mechanical cases in place. Use `ard migrate --check <path>` to list files that still need migration without changing them. Borrowing a value parameter, `for` binding, or multi-statement `match` binding is rewritten by adding `mut name = name` at the start of its containing body. Single-statement match arms stay manual because they may be expression arms. For Go `[]T` and `map[K]V` parameters, an immutable `mut value` is rewritten to `value`; writable operands remain explicit `&mut value`. Some uses still need a manual change and are reported instead, including captures of outer parameters, non-`mut` method receivers, trait-typed places, and Go `*[]T` or `*map[K]V` parameters.
 
 ## Shadowing
 

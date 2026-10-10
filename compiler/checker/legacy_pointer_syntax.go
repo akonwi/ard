@@ -49,6 +49,7 @@ type legacyPointerSyntaxKey struct {
 type legacyBorrowFunction struct {
 	declaration parse.Location
 	firstBody   parse.Point
+	function    *legacyBorrowFunction
 }
 
 type legacyBorrowParameter struct {
@@ -62,6 +63,51 @@ func newLegacyBorrowFunction(declaration parse.Location, body []parse.Statement)
 		function.firstBody = body[0].GetLocation().Start
 	}
 	return function
+}
+
+// checkLegacyBorrowBlock checks a body whose immutable bindings may be
+// shadowed at its start by migration. Keeping the context active throughout
+// the body prevents a nested closure from receiving a fix for a capture.
+func (c *Checker) checkLegacyBorrowBlock(declaration parse.Location, body []parse.Statement, check func() *Block) *Block {
+	previous := c.legacyBorrowFunction
+	context := newLegacyBorrowFunction(declaration, body)
+	context.function = c.legacyBorrowFunctionScope
+	c.legacyBorrowFunction = context
+	defer func() { c.legacyBorrowFunction = previous }()
+	return check()
+}
+
+func (c *Checker) checkLoopBody(declaration parse.Location, body []parse.Statement, setup func()) *Block {
+	return c.checkLegacyBorrowBlock(declaration, body, func() *Block {
+		return c.checkBlock(body, c.markLoopScope(setup))
+	})
+}
+
+func (c *Checker) legacyBorrowBinding(sym *Symbol) *Symbol {
+	if c.legacyBorrowFunction != nil {
+		sym.legacyBorrowParameter = &legacyBorrowParameter{name: sym.Name, function: c.legacyBorrowFunction}
+	}
+	return sym
+}
+
+// checkMatchArmBlockWithLegacyBinding handles multiline arm bodies only.
+// Expression arms are left manual rather than changing their expression/value
+// behavior by introducing a block.
+func matchCaseAllowsLegacyBorrowShadow(matchCase parse.MatchCase) bool {
+	// The parser deliberately flattens an arm body, so a one-statement body
+	// does not reveal whether it was an expression arm or a braced block.
+	// Leave that ambiguous case manual rather than inserting an invalid
+	// declaration before an expression.
+	return len(matchCase.Body) > 1
+}
+
+func (c *Checker) checkMatchArmBlockWithLegacyBinding(matchCase parse.MatchCase, setup func()) *Block {
+	if !matchCaseAllowsLegacyBorrowShadow(matchCase) {
+		return c.checkMatchArmBlock(matchCase.Body, setup)
+	}
+	return c.checkLegacyBorrowBlock(matchCase.GetLocation(), matchCase.Body, func() *Block {
+		return c.checkMatchArmBlock(matchCase.Body, setup)
+	})
 }
 
 // deprecatedPointerSyntaxDiagnostic reports a legacy ADR 0057 reference form
@@ -276,7 +322,7 @@ func (c *Checker) legacyBorrowRootLet(expr Expression) *parse.Point {
 // not a mechanical rewrite.
 func (c *Checker) legacyBorrowRootParameter(expr Expression) *legacyBorrowParameter {
 	root := legacyBorrowRootVariable(expr)
-	if root == nil || root.sym.legacyBorrowParameter == nil || c.legacyBorrowFunction != root.sym.legacyBorrowParameter.function {
+	if root == nil || root.sym.legacyBorrowParameter == nil || c.legacyBorrowFunctionScope != root.sym.legacyBorrowParameter.function.function {
 		return nil
 	}
 	return root.sym.legacyBorrowParameter
