@@ -6216,7 +6216,7 @@ func (l *lowerer) ensureModuleGlobalsDeclared(modulePath string) error {
 	}
 	for _, stmt := range prog.Statements {
 		def, ok := stmt.Stmt.(*checker.VariableDef)
-		if !ok || def.Mutable {
+		if !ok {
 			continue
 		}
 		if _, err := l.declareGlobal(modID, def); err != nil {
@@ -6247,7 +6247,7 @@ func (l *lowerer) lowerModuleGlobals(modulePath string) error {
 	modID := l.internModule(modulePath)
 	for _, stmt := range mod.Program().Statements {
 		def, ok := stmt.Stmt.(*checker.VariableDef)
-		if !ok || def.Mutable {
+		if !ok {
 			continue
 		}
 		if err := l.lowerGlobal(modID, def); err != nil {
