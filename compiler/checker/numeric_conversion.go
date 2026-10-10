@@ -236,8 +236,8 @@ func conversionTierFor(src, dst numericClass) (tiers []ConversionTier, ok bool) 
 	return []ConversionTier{ConversionTry, ConversionFit}, true
 }
 
-// conversionTierAllowed reports whether tier is the valid spelling for
-// src -> dst, along with the tiers that are valid when it is not.
+// conversionTierAllowed reports whether tier is a valid spelling for
+// src -> dst, along with the tiers that are valid for the pair.
 func conversionTierAllowed(src, dst numericClass, tier ConversionTier) (bool, []ConversionTier) {
 	tiers, ok := conversionTierFor(src, dst)
 	if !ok {

@@ -46,8 +46,8 @@ and target types statically, so it can reject the wrong tier.
 | tier | spelling | returns | permitted when |
 |---|---|---|---|
 | lossless | `T::from(x)` | `T` | every source value is exactly representable in `T` |
-| checked | `T::try(x)` | `T?` | the pair is fallible |
-| forced | `T::fit(x)` | `T` | the pair is lossy but total |
+| checked | `T::try(x)` | `T?` | the pair is fallible: some source values do not fit `T` |
+| forced | `T::fit(x)` | `T` | the pair is not lossless and `T` is not `Rune` |
 
 ```ard
 let wide: Float64 = Float64::from(ratio)              // Float32 → Float64
@@ -55,9 +55,12 @@ let ms: Int = try Int::try(elapsed).ok_or("too big")  // Int64 → Int?
 let low: Byte = Byte::fit(hash)                       // Int → Byte, wraps
 ```
 
-Exactly one tier compiles for any given source/target pair. Using the wrong
-tier is a compile error naming the right one, so each conversion has a single
-spelling and the lossy spellings always announce themselves.
+`from` compiles only for lossless pairs, and `try` and `fit` never compile for
+them. Using the wrong tier is a compile error naming the valid ones, so the
+lossy spellings always announce themselves. A lossy pair may accept both `try`
+and `fit`, which choose between handling a value that does not fit and forcing
+one: most pairs accept both, integer → float accepts only `fit` (it can round
+but never fails), and a non-lossless conversion into `Rune` accepts only `try`.
 
 ### Targets and sources
 
@@ -362,7 +365,7 @@ does not document at all.
 
 ## Consequences
 
-- One spelling per conversion, with the target type as the namespace, so
+- One family of spellings, with the target type as the namespace, so
   discovery is "what does `Int::` offer".
 - Accidental narrowing is a compile error. Code that intends narrowing says so
   with `fit`; code that needs a guarantee gets `try`.
