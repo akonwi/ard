@@ -3369,7 +3369,7 @@ func (p *parser) and() (Expression, error) {
 }
 
 func (p *parser) comparison() (Expression, error) {
-	left, err := p.modulo()
+	left, err := p.addition()
 	if err != nil {
 		return nil, err
 	}
@@ -3397,7 +3397,7 @@ func (p *parser) comparison() (Expression, error) {
 		operator = NotEqual
 	}
 
-	right, err := p.modulo()
+	right, err := p.addition()
 	if err != nil {
 		return nil, err
 	}
@@ -3433,7 +3433,7 @@ func (p *parser) comparison() (Expression, error) {
 				op = NotEqual
 			}
 
-			nextRight, err := p.modulo()
+			nextRight, err := p.addition()
 			if err != nil {
 				return nil, err
 			}
@@ -3462,29 +3462,6 @@ func (p *parser) comparison() (Expression, error) {
 		Left:     left,
 		Right:    right,
 	}, nil
-}
-
-func (p *parser) modulo() (Expression, error) {
-	left, err := p.addition()
-	if err != nil {
-		return nil, err
-	}
-	if p.match(percent) {
-		right, err := p.addition()
-		if err != nil {
-			return nil, err
-		}
-		return &BinaryExpression{
-			Location: Location{
-				Start: left.GetLocation().Start,
-				End:   right.GetLocation().End,
-			},
-			Operator: Modulo,
-			Left:     left,
-			Right:    right,
-		}, nil
-	}
-	return left, nil
 }
 
 func (p *parser) addition() (Expression, error) {
@@ -3521,11 +3498,15 @@ func (p *parser) multiplication() (Expression, error) {
 	if err != nil {
 		return nil, err
 	}
-	for p.match(star, slash) {
-		opToken := p.previous()
-		operator := Multiply
-		if opToken.kind == slash {
+	for p.match(star, slash, percent) {
+		var operator Operator
+		switch p.previous().kind {
+		case star:
+			operator = Multiply
+		case slash:
 			operator = Divide
+		case percent:
+			operator = Modulo
 		}
 
 		right, err := p.unary()

@@ -373,6 +373,61 @@ func TestFormatPreservesParenthesesAroundComparisonOperands(t *testing.T) {
 	}
 }
 
+// `%` shares precedence and left associativity with `*` and `/`, so the
+// formatter only drops parentheses the parser does not need. (#530)
+func TestFormatModuloPrecedence(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "modulo operand of addition stays bare",
+			input: "let x = (7 % 3) + 1\n",
+			want:  "let x = 7 % 3 + 1\n",
+		},
+		{
+			name:  "addition operand of modulo keeps parentheses",
+			input: "let x = 7 % (3 + 1)\n",
+			want:  "let x = 7 % (3 + 1)\n",
+		},
+		{
+			name:  "right operand of modulo keeps parentheses for same precedence",
+			input: "let x = 7 % (3 * 2)\n",
+			want:  "let x = 7 % (3 * 2)\n",
+		},
+		{
+			name:  "chained modulo stays left associative",
+			input: "let x = (20 % 7) % 4\n",
+			want:  "let x = 20 % 7 % 4\n",
+		},
+		{
+			name:  "wrap-around modulo",
+			input: "let x = ((a + d) % c + c) % c\n",
+			want:  "let x = ((a + d) % c + c) % c\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			formatted, err := Format([]byte(tt.input), "test.ard")
+			if err != nil {
+				t.Fatalf("format: %v", err)
+			}
+			if string(formatted) != tt.want {
+				t.Fatalf("formatted = %q, want %q", string(formatted), tt.want)
+			}
+			again, err := Format(formatted, "test.ard")
+			if err != nil {
+				t.Fatalf("second format: %v", err)
+			}
+			if string(again) != tt.want {
+				t.Fatalf("formatter is not idempotent: %q", string(again))
+			}
+		})
+	}
+}
+
 func TestFormatExpandedLiteralsIsIdempotent(t *testing.T) {
 	tests := []struct {
 		name  string
