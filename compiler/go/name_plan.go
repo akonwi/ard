@@ -209,9 +209,6 @@ func (p *topLevelNamePlanner) traitName(trait air.Trait) string {
 }
 
 func (p *topLevelNamePlanner) functionName(fn air.Function) string {
-	if fn.IsScript {
-		return fmt.Sprintf("ArdScript_%d", fn.ID)
-	}
 	key := topLevelNameKey{kind: topLevelNameFunction, id: int(fn.ID)}
 	name, ok := p.naturalName(key)
 	if !ok {

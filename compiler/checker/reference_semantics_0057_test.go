@@ -532,7 +532,7 @@ func assertReferenceCheckerResult(t *testing.T, source string, wantError bool) {
 	if strings.Contains(source, ".@") && !containsParsedDeref(reflect.ValueOf(result.Program)) {
 		t.Fatal("parser did not produce a dereference expression")
 	}
-	checked := checker.New("test.ard", result.Program, nil)
+	checked := checker.New("test.ard", checker.WrapStatementRuns(result.Program), nil)
 	checked.Check()
 	if wantError {
 		targetRow := lastSourceRow(source)

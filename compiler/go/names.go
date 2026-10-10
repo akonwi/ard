@@ -144,11 +144,6 @@ func legacyGlobalName(program *air.Program, global air.Global) string {
 }
 
 func functionName(program *air.Program, fn air.Function) string {
-	// Script roots (top-level statement programs) are exported so the synthetic
-	// main package can call them across the package boundary.
-	if fn.IsScript {
-		return fmt.Sprintf("ArdScript_%d", fn.ID)
-	}
 	if name, ok := naturalFunctionName(program, fn); ok {
 		return name
 	}
@@ -167,15 +162,12 @@ func naturalFunctionName(program *air.Program, fn air.Function) (string, bool) {
 }
 
 func naturalFunctionNameEligible(fn air.Function) bool {
-	return fn.Name != "" && !fn.IsScript && fn.Receiver == air.NoType && len(fn.Captures) == 0 && !strings.HasPrefix(fn.Name, "anon_func_")
+	return fn.Name != "" && fn.Receiver == air.NoType && len(fn.Captures) == 0 && !strings.HasPrefix(fn.Name, "anon_func_")
 }
 
 func legacyFunctionName(program *air.Program, fn air.Function) string {
 	moduleName := moduleName(program, fn.Module)
 	suffix := sanitizeName(fn.Name)
-	if fn.IsScript {
-		suffix = "script"
-	}
 	if suffix == "" {
 		suffix = fmt.Sprintf("fn_%d", fn.ID)
 	}

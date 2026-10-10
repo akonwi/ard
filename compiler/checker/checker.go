@@ -1056,15 +1056,19 @@ func (c *Checker) Diagnostics() []Diagnostic {
 	return c.diagnostics
 }
 
-func isTopLevelExecutableStatement(stmt parse.Statement) bool {
+// IsTopLevelDeclaration reports whether a module-level statement is a
+// declaration. Only declarations may appear at the top level of a module;
+// executable statements belong in `main` or another function (#533).
+func IsTopLevelDeclaration(stmt parse.Statement) bool {
 	if isTopLevelTypeDeclaration(stmt) {
-		return false
+		return true
 	}
 	switch stmt.(type) {
-	case *parse.FunctionDeclaration, *parse.StaticFunctionDeclaration, *parse.VariableDeclaration:
-		return false
-	default:
+	case *parse.FunctionDeclaration, *parse.StaticFunctionDeclaration, *parse.VariableDeclaration,
+		*parse.ImplBlock, *parse.TraitImplementation, *parse.Comment:
 		return true
+	default:
+		return false
 	}
 }
 
@@ -1404,15 +1408,11 @@ func (c *Checker) Check() {
 		if isTopLevelTypeDeclaration(c.input.Statements[i]) {
 			continue
 		}
-		if isTopLevelExecutableStatement(c.input.Statements[i]) {
-			previousScript := c.scope.inScript
-			c.scope.inScript = true
-			stmt := c.checkStmt(&c.input.Statements[i])
-			c.scope.inScript = previousScript
-			if stmt != nil {
-				c.program.Statements = append(c.program.Statements, *stmt)
-			}
-		} else if stmt := c.checkStmt(&c.input.Statements[i]); stmt != nil {
+		if !IsTopLevelDeclaration(c.input.Statements[i]) {
+			c.addDiagnostic(topLevelStatementDiagnostic{Span: c.sourceSpan(c.input.Statements[i].GetLocation())}.build())
+			continue
+		}
+		if stmt := c.checkStmt(&c.input.Statements[i]); stmt != nil {
 			c.program.Statements = append(c.program.Statements, *stmt)
 		}
 	}
@@ -3668,8 +3668,8 @@ func checkedBlockHasWork(block *Block) bool {
 }
 
 func (c *Checker) checkDefer(s *parse.Defer) *Statement {
-	if c.scope.getReturnType() == nil && !c.scope.insideScript() {
-		legacy := "defer can only be used inside a function, method, closure, or script body"
+	if c.scope.getReturnType() == nil {
+		legacy := "defer can only be used inside a function, method, or closure body"
 		c.addDiagnostic(invalidDeferDiagnostic{Span: c.sourceSpan(s.GetLocation()), LegacyMessage: legacy, Label: "`defer` cannot be used in a module initializer"}.build())
 		return nil
 	}

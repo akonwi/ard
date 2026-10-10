@@ -319,7 +319,9 @@ func TestLowerTinyProgram(t *testing.T) {
 			a + b
 		}
 
-		add(1, 2)
+		fn main() Int {
+			add(1, 2)
+		}
 	`)
 
 	add := findFunction(t, program, "add")
@@ -340,22 +342,25 @@ func TestLowerTinyProgram(t *testing.T) {
 		t.Fatalf("add right = %#v, want local 1", addPayload.Right)
 	}
 
-	if program.Entry != NoFunction {
-		t.Fatalf("entry = %d, want no entry for script-only program", program.Entry)
+	entry := entryFunction(t, program)
+	if entry.Body.Result == nil || entry.Body.Result.Kind != ExprCall {
+		t.Fatalf("main result = %#v, want ExprCall", entry.Body.Result)
 	}
-	if program.Script == NoFunction {
-		t.Fatal("script = NoFunction, want generated script function")
+	if entry.Body.Result.CallPayload().Function != add.ID {
+		t.Fatalf("main calls function %d, want add %d", entry.Body.Result.CallPayload().Function, add.ID)
 	}
-	script := program.Functions[program.Script]
-	if script.Body.Result == nil || script.Body.Result.Kind != ExprCall {
-		t.Fatalf("script result = %#v, want ExprCall", script.Body.Result)
+	if got := len(entry.Body.Result.Args); got != 2 {
+		t.Fatalf("main call arg count = %d, want 2", got)
 	}
-	if script.Body.Result.CallPayload().Function != add.ID {
-		t.Fatalf("script calls function %d, want add %d", script.Body.Result.CallPayload().Function, add.ID)
+}
+
+// entryFunction returns the program's `main`, its only entry point.
+func entryFunction(t *testing.T, program *Program) Function {
+	t.Helper()
+	if program.Entry == NoFunction {
+		t.Fatal("entry = NoFunction, want main function")
 	}
-	if got := len(script.Body.Result.Args); got != 2 {
-		t.Fatalf("script call arg count = %d, want 2", got)
-	}
+	return program.Functions[program.Entry]
 }
 func TestLowerNestedBlockShadowDoesNotLeakInnerLocal(t *testing.T) {
 	program := lowerSource(t, `
@@ -371,7 +376,9 @@ func TestLowerNestedBlockShadowDoesNotLeakInnerLocal(t *testing.T) {
 			x + r
 		}
 
-		f(5)
+		fn main() {
+			f(5)
+		}
 	`)
 	f := findFunction(t, program, "f")
 	// The outer x is the first local named "x"; an inner x is declared inside the
@@ -588,9 +595,6 @@ func TestLowerMainEntrypoint(t *testing.T) {
 	if program.Entry == NoFunction {
 		t.Fatal("entry = NoFunction, want main function")
 	}
-	if program.Script != NoFunction {
-		t.Fatalf("script = %d, want no generated script function", program.Script)
-	}
 	entry := program.Functions[program.Entry]
 	if entry.Name != "main" {
 		t.Fatalf("entry name = %q, want main", entry.Name)
@@ -694,14 +698,14 @@ func TestLowerEmptyTemplateStringCarriesPayload(t *testing.T) {
 }
 
 func TestLowerRawStrings(t *testing.T) {
-	literalProgram := lowerSource(t, "`\n  first\n  second\n  `")
-	literal := literalProgram.Functions[literalProgram.Script].Body.Result
+	literalProgram := lowerSource(t, "fn main() Str {\n`\n  first\n  second\n  `\n}")
+	literal := entryFunction(t, literalProgram).Body.Result
 	if literal == nil || literal.Kind != ExprConstStr || literal.TextPayload().Value != "first\nsecond" {
 		t.Fatalf("raw literal = %#v, want exact ExprConstStr", literal)
 	}
 
-	templateProgram := lowerSource(t, "let name = \"Ada\"\n`Hello, {name}`")
-	template := templateProgram.Functions[templateProgram.Script].Body.Result
+	templateProgram := lowerSource(t, "let name = \"Ada\"\nfn main() Str {\n`Hello, {name}`\n}")
+	template := entryFunction(t, templateProgram).Body.Result
 	if template == nil || template.Kind != ExprStrConcat {
 		t.Fatalf("raw interpolation = %#v, want ExprStrConcat", template)
 	}
@@ -711,15 +715,18 @@ func TestLowerTemplateString(t *testing.T) {
 	program := lowerSource(t, `
 		let name = "Ada"
 		let age = 42
-		"{name} is {age}"
+
+		fn main() Str {
+			"{name} is {age}"
+		}
 	`)
 
-	script := program.Functions[program.Script]
-	if script.Body.Result == nil || script.Body.Result.Kind != ExprStrConcat {
-		t.Fatalf("script result = %#v, want ExprStrConcat", script.Body.Result)
+	entry := entryFunction(t, program)
+	if entry.Body.Result == nil || entry.Body.Result.Kind != ExprStrConcat {
+		t.Fatalf("main result = %#v, want ExprStrConcat", entry.Body.Result)
 	}
-	if !containsExprKind(script.Body.Result, ExprToStr) {
-		t.Fatalf("script result = %#v, want ExprToStr inside concat tree", script.Body.Result)
+	if !containsExprKind(entry.Body.Result, ExprToStr) {
+		t.Fatalf("main result = %#v, want ExprToStr inside concat tree", entry.Body.Result)
 	}
 }
 
@@ -765,21 +772,24 @@ func TestLowerSizedScalarToStrObservesMutableReference(t *testing.T) {
 func TestLowerWhileLoop(t *testing.T) {
 	program := lowerSource(t, `
 		mut count = 0
-		while count < 3 {
-			count = count + 1
+
+		fn main() Int {
+			while count < 3 {
+				count = count + 1
+			}
+			count
 		}
-		count
 	`)
 
-	// Module-level `mut count` is an AIR global, so the script holds only the loop.
-	script := program.Functions[program.Script]
-	if len(script.Body.Stmts) != 1 {
-		t.Fatalf("script stmt count = %d, want while only", len(script.Body.Stmts))
+	// Module-level `mut count` is an AIR global, so main holds only the loop.
+	entry := entryFunction(t, program)
+	if len(entry.Body.Stmts) != 1 {
+		t.Fatalf("main stmt count = %d, want while only", len(entry.Body.Stmts))
 	}
 	if len(program.Globals) != 1 || program.Globals[0].Name != "count" {
 		t.Fatalf("globals = %#v, want mut count", program.Globals)
 	}
-	loop := script.Body.Stmts[0]
+	loop := entry.Body.Stmts[0]
 	if loop.Kind != StmtWhile {
 		t.Fatalf("first stmt = %#v, want StmtWhile", loop)
 	}
@@ -1190,7 +1200,9 @@ func TestLowerTraitObjectDispatch(t *testing.T) {
 			speaker.speak()
 		}
 
-		describe(Dog{name: "Ada"})
+		fn main() Str {
+			describe(Dog{name: "Ada"})
+		}
 	`)
 
 	describe := findFunction(t, program, "describe")
@@ -1201,15 +1213,15 @@ func TestLowerTraitObjectDispatch(t *testing.T) {
 		t.Fatalf("trait method index = %d, want 0", describe.Body.Result.TraitPayload().Method)
 	}
 
-	script := program.Functions[program.Script]
-	if script.Body.Result == nil || script.Body.Result.Kind != ExprCall {
-		t.Fatalf("script result = %#v, want ExprCall", script.Body.Result)
+	entry := entryFunction(t, program)
+	if entry.Body.Result == nil || entry.Body.Result.Kind != ExprCall {
+		t.Fatalf("main result = %#v, want ExprCall", entry.Body.Result)
 	}
-	if len(script.Body.Result.Args) != 1 || script.Body.Result.Args[0].Kind != ExprTraitUpcast {
-		t.Fatalf("script arg = %#v, want ExprTraitUpcast", script.Body.Result.Args)
+	if len(entry.Body.Result.Args) != 1 || entry.Body.Result.Args[0].Kind != ExprTraitUpcast {
+		t.Fatalf("main arg = %#v, want ExprTraitUpcast", entry.Body.Result.Args)
 	}
-	if script.Body.Result.Args[0].TraitPayload().Impl != program.Impls[0].ID {
-		t.Fatalf("upcast impl = %d, want %d", script.Body.Result.Args[0].TraitPayload().Impl, program.Impls[0].ID)
+	if entry.Body.Result.Args[0].TraitPayload().Impl != program.Impls[0].ID {
+		t.Fatalf("upcast impl = %d, want %d", entry.Body.Result.Args[0].TraitPayload().Impl, program.Impls[0].ID)
 	}
 }
 func TestLowerTraitObjectDispatchUsesResolvedMethodSlot(t *testing.T) {
@@ -2468,9 +2480,8 @@ func TestLowerTestsManifest(t *testing.T) {
 }
 func TestValidateRejectsBadTypeReference(t *testing.T) {
 	program := &Program{
-		Types:  []TypeInfo{{ID: 1, Kind: TypeReference, Name: "mut Missing", Elem: 99}},
-		Entry:  NoFunction,
-		Script: NoFunction,
+		Types: []TypeInfo{{ID: 1, Kind: TypeReference, Name: "mut Missing", Elem: 99}},
+		Entry: NoFunction,
 	}
 	if err := Validate(program); err == nil {
 		t.Fatalf("Validate succeeded, want invalid reference elem error")
@@ -2565,8 +2576,7 @@ func TestValidateRejectsInvalidExprInForeignTypeCase(t *testing.T) {
 				}}},
 			}}}},
 		}},
-		Entry:  0,
-		Script: NoFunction,
+		Entry: 0,
 	}
 
 	if err := Validate(program); err == nil || !strings.Contains(err.Error(), "invalid local") {
@@ -2595,8 +2605,7 @@ func TestValidateRejectsInvalidSelectArmOperand(t *testing.T) {
 				}}},
 			}},
 		}},
-		Entry:  0,
-		Script: NoFunction,
+		Entry: 0,
 	}
 
 	if err := Validate(program); err == nil || !strings.Contains(err.Error(), "invalid local") {
@@ -2621,8 +2630,7 @@ func TestValidateRejectsMutableReferenceWithoutMode(t *testing.T) {
 				Payload: &ReferenceExprPayload{},
 			}},
 		}},
-		Entry:  0,
-		Script: NoFunction,
+		Entry: 0,
 	}
 	if err := Validate(program); err == nil {
 		t.Fatalf("Validate succeeded, want invalid reference mode error")

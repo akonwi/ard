@@ -3,7 +3,9 @@ title: Modules
 description: Learn about Ard's module system, imports, and code organization.
 ---
 
-Each Ard file is a module. A file with a `main` function can be run as a program; other files can be imported by path.
+Each Ard file is a module. The top level of a module holds only declarations: imports, `let` and `mut` bindings, functions, types, traits, and impls. Statements such as calls, assignments, and loops belong inside functions; program code starts in `fn main()`.
+
+A file with a `main` function can be run as a program; other files can be imported by path.
 
 ```ard
 use go:fmt

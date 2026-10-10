@@ -141,7 +141,7 @@ func run(t *testing.T, tests []test) {
 			if len(result.Errors) > 0 {
 				t.Fatalf("Parse errors: %v", result.Errors[0].Message)
 			}
-			ast := result.Program
+			ast := checker.WrapStatementRuns(result.Program)
 			var options []checker.CheckOptions
 			if strings.Contains(tt.input, "use go:") {
 				options = append(options, checker.CheckOptions{GoResolver: standardLibraryGoResolver(t)})
@@ -161,7 +161,7 @@ func run(t *testing.T, tests []test) {
 					}
 				}
 				if len(tt.output.Statements) > 0 {
-					if diff := cmp.Diff(tt.output.Statements, c.Module().Program().Statements, compareOptions); diff != "" {
+					if diff := cmp.Diff(tt.output.Statements, checker.UnwrapStatementRuns(c.Module().Program().Statements), compareOptions); diff != "" {
 						t.Fatalf("Program statements mismatch (-want +got):\n%s", diff)
 					}
 				}
@@ -1213,6 +1213,8 @@ func TestIfStatements(t *testing.T) {
 							Branches: []checker.IfBranch{{
 								Condition: &checker.Variable{},
 								Body: &checker.Block{
+									// The `if` is the final statement of a Void body, so its value is discarded.
+									DiscardFinalValue: true,
 									Stmts: []checker.Statement{
 										{Expr: &checker.StrLiteral{"on"}},
 									},
@@ -1250,12 +1252,16 @@ func TestIfStatements(t *testing.T) {
 							Branches: []checker.IfBranch{{
 								Condition: &checker.BoolLiteral{true},
 								Body: &checker.Block{
+									// The `if` is the final statement of a Void body, so its value is discarded.
+									DiscardFinalValue: true,
 									Stmts: []checker.Statement{
 										{Expr: &checker.StrLiteral{"bar"}},
 									},
 								},
 							}},
 							Else: &checker.Block{
+								// The `if` is the final statement of a Void body, so its value is discarded.
+								DiscardFinalValue: true,
 								Stmts: []checker.Statement{
 									{Expr: &checker.StrLiteral{"baz"}},
 								},
@@ -1284,6 +1290,8 @@ func TestIfStatements(t *testing.T) {
 								{
 									Condition: &checker.BoolLiteral{true},
 									Body: &checker.Block{
+										// The `if` is the final statement of a Void body, so its value is discarded.
+										DiscardFinalValue: true,
 										Stmts: []checker.Statement{
 											{Expr: &checker.StrLiteral{"bar"}},
 										},
@@ -1292,6 +1300,8 @@ func TestIfStatements(t *testing.T) {
 								{
 									Condition: &checker.BoolLiteral{false},
 									Body: &checker.Block{
+										// The `if` is the final statement of a Void body, so its value is discarded.
+										DiscardFinalValue: true,
 										Stmts: []checker.Statement{
 											{Expr: &checker.StrLiteral{"baz"}},
 										},
@@ -1299,6 +1309,8 @@ func TestIfStatements(t *testing.T) {
 								},
 							},
 							Else: &checker.Block{
+								// The `if` is the final statement of a Void body, so its value is discarded.
+								DiscardFinalValue: true,
 								Stmts: []checker.Statement{
 									{Expr: &checker.StrLiteral{"qux"}},
 								},
@@ -1311,10 +1323,12 @@ func TestIfStatements(t *testing.T) {
 		{
 			name: "Branches must have consistent return type",
 			input: strings.Join([]string{
-				"if true {",
-				"  1",
-				"} else {",
-				"  false",
+				"fn pick() Int {",
+				"  if true {",
+				"    1",
+				"  } else {",
+				"    false",
+				"  }",
 				"}",
 			}, "\n"),
 			diagnostics: []checker.Diagnostic{
@@ -1548,7 +1562,7 @@ func TestUnsupportedSameTypeRangeReportsDiagnostic(t *testing.T) {
 			if len(result.Errors) > 0 {
 				t.Fatalf("parse errors: %v", result.Errors)
 			}
-			c := checker.New("test.ard", result.Program, nil)
+			c := checker.New("test.ard", checker.WrapStatementRuns(result.Program), nil)
 			defer func() {
 				if recovered := recover(); recovered != nil {
 					t.Fatalf("checker panicked: %v", recovered)
@@ -2798,7 +2812,7 @@ func TestReservedBuiltinStructDiagnosticLocation(t *testing.T) {
 	if len(result.Errors) > 0 {
 		t.Fatalf("parse error: %s", result.Errors[0].Message)
 	}
-	c := checker.New("test.ard", result.Program, nil)
+	c := checker.New("test.ard", checker.WrapStatementRuns(result.Program), nil)
 	c.Check()
 	diagnostics := c.Diagnostics()
 	if len(diagnostics) != 1 {

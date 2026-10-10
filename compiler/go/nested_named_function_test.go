@@ -277,15 +277,17 @@ func TestRunProgramNestedNamedFunctionAdditionalContexts(t *testing.T) {
 			`,
 		},
 		{
-			name: "top-level script block",
+			name: "block inside main assigns module mut",
 			source: `
 				mut observed = 0
-				if true {
-					let local = 42
-					fn inner() { observed = local }
-					inner()
+				fn main() {
+					if true {
+						let local = 42
+						fn inner() { observed = local }
+						inner()
+					}
+					if observed != 42 { panic("bad block-local function") }
 				}
-				if observed != 42 { panic("bad script local function") }
 			`,
 		},
 	}

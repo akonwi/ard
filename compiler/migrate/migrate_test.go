@@ -84,8 +84,8 @@ func TestRewritePointerSyntax(t *testing.T) {
 		},
 		{
 			name:  "borrow of mut binding",
-			input: "fn reset(box: mut Box) { box.value = 0 }\nmut box = Box{value: 1}\nreset(mut box)",
-			want:  "fn reset(box: &mut Box) { box.value = 0 }\nmut box = Box{value: 1}\nreset(&mut box)",
+			input: "fn reset(box: mut Box) { box.value = 0 }\nmut box = Box{value: 1}\nfn main() {\n  reset(mut box)\n}",
+			want:  "fn reset(box: &mut Box) { box.value = 0 }\nmut box = Box{value: 1}\nfn main() {\n  reset(&mut box)\n}",
 		},
 		{
 			name:  "borrow of let binding makes it mut",
@@ -110,8 +110,8 @@ func TestRewritePointerSyntax(t *testing.T) {
 		},
 		{
 			name:  "fresh values",
-			input: "let a = mut Box{value: 1}\nlet b = mut [1, 2]\na.set(2)\nb.push(3)",
-			want:  "let a = &mut Box{value: 1}\nlet b = &mut [1, 2]\na.set(2)\nb.push(3)",
+			input: "let a = mut Box{value: 1}\nlet b = mut [1, 2]\nfn main() {\n  a.set(2)\n  b.push(3)\n}",
+			want:  "let a = &mut Box{value: 1}\nlet b = &mut [1, 2]\nfn main() {\n  a.set(2)\n  b.push(3)\n}",
 		},
 		{
 			name:  "dereference",
@@ -120,8 +120,8 @@ func TestRewritePointerSyntax(t *testing.T) {
 		},
 		{
 			name:  "loose operand is parenthesized",
-			input: "let n = mut 1 + 2\nn.* = 4",
-			want:  "let n = &mut (1 + 2)\nn.* = 4",
+			input: "let n = mut 1 + 2\nfn main() {\n  n.* = 4\n}",
+			want:  "let n = &mut (1 + 2)\nfn main() {\n  n.* = 4\n}",
 		},
 		{
 			name:   "trait snapshot needs a manual change",
@@ -131,8 +131,8 @@ func TestRewritePointerSyntax(t *testing.T) {
 		},
 		{
 			name:   "trait borrow needs a manual change",
-			input:  "fn show(view: mut View) Int { view.value() }\nlet view: View = Box{value: 1}\nshow(mut view)",
-			want:   "fn show(view: mut View) Int { view.value() }\nlet view: View = Box{value: 1}\nshow(mut view)",
+			input:  "fn show(view: mut View) Int { view.value() }\nlet view: View = Box{value: 1}\nfn main() {\n  show(mut view)\n}",
+			want:   "fn show(view: mut View) Int { view.value() }\nlet view: View = Box{value: 1}\nfn main() {\n  show(mut view)\n}",
 			manual: 1,
 		},
 		{

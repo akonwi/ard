@@ -48,5 +48,3 @@ fn main() {
     fmt::Println("Unable to read input")
   }
 }
-
-main()

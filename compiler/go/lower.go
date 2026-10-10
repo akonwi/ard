@@ -149,8 +149,8 @@ func lowerProgram(program *air.Program, options Options) (map[string]*ast.File, 
 			}
 			files["main.go"] = mainFile
 		} else {
-			// A program with no entry or script root still emits an empty main so
-			// the workspace builds and runs as a no-op.
+			// A program with no entry root still emits an empty main so the
+			// workspace builds.
 			files["main.go"] = &ast.File{Name: ast.NewIdent("main"), Decls: []ast.Decl{
 				&ast.FuncDecl{Name: ast.NewIdent("main"), Type: &ast.FuncType{Params: &ast.FieldList{}}, Body: &ast.BlockStmt{}},
 			}}

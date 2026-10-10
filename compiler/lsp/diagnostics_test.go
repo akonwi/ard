@@ -235,7 +235,7 @@ func TestPublishDiagnosticsIncludesCrossFileParameterProvenance(t *testing.T) {
 		t.Fatal(err)
 	}
 	mainPath := filepath.Join(root, "main.ard")
-	mainSource := "use app/api\n\napi::greet(42)\n"
+	mainSource := "use app/api\n\nfn main() {\n  api::greet(42)\n}\n"
 	if err := os.WriteFile(mainPath, []byte(mainSource), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -253,8 +253,8 @@ func TestPublishDiagnosticsIncludesCrossFileParameterProvenance(t *testing.T) {
 		t.Fatalf("diagnostics = %#v, want one", params.Diagnostics)
 	}
 	diagnostic := params.Diagnostics[0]
-	if diagnostic.Range.Start.Line != 2 || diagnostic.Range.Start.Character != 11 || diagnostic.Range.End.Character != 13 {
-		t.Fatalf("primary range = %#v, want line 3 `42`", diagnostic.Range)
+	if diagnostic.Range.Start.Line != 3 || diagnostic.Range.Start.Character != 13 || diagnostic.Range.End.Character != 15 {
+		t.Fatalf("primary range = %#v, want line 4 `42`", diagnostic.Range)
 	}
 	if len(diagnostic.RelatedInformation) != 1 {
 		t.Fatalf("related information = %#v, want parameter declaration", diagnostic.RelatedInformation)
@@ -281,7 +281,7 @@ func TestPublishDiagnosticsUsesImportedOverlayAndClearsAfterUpdate(t *testing.T)
 		t.Fatal(err)
 	}
 	mainPath := filepath.Join(root, "main.ard")
-	mainSource := "use app/api\n\napi::greet(42)\n"
+	mainSource := "use app/api\n\nfn main() {\n  api::greet(42)\n}\n"
 	if err := os.WriteFile(mainPath, []byte(mainSource), 0o644); err != nil {
 		t.Fatal(err)
 	}

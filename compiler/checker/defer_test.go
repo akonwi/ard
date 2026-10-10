@@ -15,10 +15,12 @@ func TestDeferDiagnostics(t *testing.T) {
 		diagnostics []checker.Diagnostic
 	}{
 		{
-			name: "defer is allowed in script bodies",
+			name: "defer is allowed in function bodies",
 			input: `fn cleanup() {}
 
-defer cleanup()`,
+fn main() {
+  defer cleanup()
+}`,
 			diagnostics: []checker.Diagnostic{},
 		},
 		{
@@ -29,7 +31,7 @@ let global = {
   defer cleanup()
   1
 }`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "defer can only be used inside a function, method, closure, or script body"}},
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "defer can only be used inside a function, method, or closure body"}},
 		},
 		{
 			name: "try is rejected in deferred block",
