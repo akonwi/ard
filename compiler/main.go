@@ -1446,24 +1446,36 @@ func loadGoTestModules(profile *pipelineProfile, inputPath string, files []strin
 	}
 	loaded := make([]loadedGoTestModule, 0, len(files))
 	if err := profile.Time("frontend.check_discovered_modules", func() error {
+		// Diagnostics are rendered once for the whole run so collapsed-warning
+		// summaries cover every test file in a single line each (#529).
+		root := startDir
+		if projectInfo != nil && projectInfo.RootPath != "" {
+			root = projectInfo.RootPath
+		}
+		var collected []checker.Diagnostic
 		for _, path := range files {
-			module, err := loadGoTestModule(path, parsedFiles[path], resolver, projectInfo, goResolver)
-			if err != nil {
-				return err
+			c := checkGoTestModule(path, parsedFiles[path], resolver, projectInfo, goResolver)
+			collected = append(collected, c.Diagnostics()...)
+			if c.HasErrors() {
+				if err := renderTestDiagnostics(collected, root); err != nil {
+					return err
+				}
+				return diagnostics.AlreadyReported(fmt.Errorf("type errors"))
 			}
+			module := c.Module()
 			loaded = append(loaded, loadedGoTestModule{
 				module: module,
 				tests:  collectTests(module, path, filter),
 			})
 		}
-		return nil
+		return renderTestDiagnostics(collected, root)
 	}); err != nil {
 		return nil, projectInfo, err
 	}
 	return loaded, projectInfo, nil
 }
 
-func loadGoTestModule(path string, program *parse.Program, resolver *checker.ModuleResolver, projectInfo *checker.ProjectInfo, goResolver checker.GoPackageResolver) (checker.Module, error) {
+func checkGoTestModule(path string, program *parse.Program, resolver *checker.ModuleResolver, projectInfo *checker.ProjectInfo, goResolver checker.GoPackageResolver) *checker.Checker {
 	modulePath := goTestModulePath(projectInfo, path)
 	filePath := path
 	if projectInfo != nil && projectInfo.RootPath != "" {
@@ -1477,23 +1489,65 @@ func loadGoTestModule(path string, program *parse.Program, resolver *checker.Mod
 	options := checker.CheckOptions{ModulePath: modulePath, GoResolver: goResolver}
 	c := checker.New(filePath, program, resolver, options)
 	c.Check()
-	if len(c.Diagnostics()) > 0 {
-		root := filepath.Dir(path)
-		if projectInfo != nil && projectInfo.RootPath != "" {
-			root = projectInfo.RootPath
-		}
-		displayRoot, err := os.Getwd()
-		if err != nil {
-			displayRoot = root
-		}
-		if err := diagnostics.RenderRelative(os.Stderr, c.Diagnostics(), root, displayRoot); err != nil {
-			return nil, fmt.Errorf("render diagnostics: %w", err)
-		}
+	return c
+}
+
+// renderTestDiagnostics renders the diagnostics collected across every test
+// file of a run. A project module can be checked both as a test entry and
+// again as another test file's import (entries are not in the module cache),
+// so identical diagnostics are reported once.
+func renderTestDiagnostics(collected []checker.Diagnostic, root string) error {
+	unique := dedupeDiagnostics(collected, root)
+	if len(unique) == 0 {
+		return nil
 	}
-	if c.HasErrors() {
-		return nil, diagnostics.AlreadyReported(fmt.Errorf("type errors"))
+	displayRoot, err := os.Getwd()
+	if err != nil {
+		displayRoot = root
 	}
-	return c.Module(), nil
+	if err := diagnostics.RenderRelative(os.Stderr, unique, root, displayRoot); err != nil {
+		return fmt.Errorf("render diagnostics: %w", err)
+	}
+	return nil
+}
+
+type diagnosticKey struct {
+	kind       checker.DiagnosticKind
+	code       checker.DiagnosticCode
+	title      string
+	message    string
+	file       string
+	location   parse.Location
+	dependency string
+}
+
+// dedupeDiagnostics drops repeated diagnostics, keeping first-seen order.
+// Entry modules report project-relative paths while imported modules report
+// absolute ones, so paths are resolved against root before comparing.
+func dedupeDiagnostics(collected []checker.Diagnostic, root string) []checker.Diagnostic {
+	seen := make(map[diagnosticKey]bool, len(collected))
+	unique := make([]checker.Diagnostic, 0, len(collected))
+	for _, diagnostic := range collected {
+		file := diagnostic.Primary.Span.FilePath
+		if file != "" && !filepath.IsAbs(file) {
+			file = filepath.Join(root, file)
+		}
+		key := diagnosticKey{
+			kind:       diagnostic.Kind,
+			code:       diagnostic.Code,
+			title:      diagnostic.Title,
+			message:    diagnostic.Message,
+			file:       filepath.Clean(file),
+			location:   diagnostic.Primary.Span.Location,
+			dependency: diagnostic.Dependency,
+		}
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		unique = append(unique, diagnostic)
+	}
+	return unique
 }
 
 func goTestModulePath(projectInfo *checker.ProjectInfo, filePath string) string {

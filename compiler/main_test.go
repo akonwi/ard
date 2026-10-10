@@ -1435,6 +1435,78 @@ test fn same() Void!Str {
 		t.Fatalf("output missing same-named test display paths:\n%s", output)
 	}
 }
+
+// `ard test` checks each test file separately against a shared module cache,
+// so an imported module's warnings attach to whichever test file imports it
+// first. The collapsed-warning summaries must still cover the whole run in a
+// single line each, as they do for `ard check`. (#529)
+func TestTestCommandSummarizesCollapsedWarningsOncePerRun(t *testing.T) {
+	const warningLet = "let signal: Void? = Maybe::new()\n"
+	const deprecatedPointer = "struct Box {\n  value: Int,\n}\n\nlet shared = Box{value: 1}\n\nfn get() mut Box {\n  (mut shared)\n}\n"
+	workspace := t.TempDir()
+	app := filepath.Join(workspace, "app")
+	files := map[string]string{
+		filepath.Join(workspace, "alpha-src", "ard.toml"):  "name = \"alpha\"\nard = \">= 0.1.0\"\n",
+		filepath.Join(workspace, "alpha-src", "alpha.ard"): warningLet + "let other: Void? = Maybe::new()\n\nfn answer() Int { 1 }\n",
+		filepath.Join(workspace, "beta-src", "ard.toml"):   "name = \"beta\"\nard = \">= 0.1.0\"\n",
+		filepath.Join(workspace, "beta-src", "beta.ard"):   warningLet + "\nfn answer() Int { 2 }\n",
+		filepath.Join(app, "ard.toml"):                     "name = \"app\"\nard = \">= 0.1.0\"\n\n[dependencies]\nalpha = { path = \"../alpha-src\" }\nbeta = { path = \"../beta-src\" }\n",
+		filepath.Join(app, "one.ard"):                      deprecatedPointer + "\n" + warningLet,
+		filepath.Join(app, "two.ard"):                      deprecatedPointer,
+		filepath.Join(app, "test", "a.ard"): `use ard/testing
+use alpha
+use app/one
+
+test fn uses_alpha() Void!Str {
+  testing::assert(alpha::answer() == 1, "alpha")
+}
+`,
+		filepath.Join(app, "test", "b.ard"): `use ard/testing
+use beta
+use app/two
+
+test fn uses_beta() Void!Str {
+  testing::assert(beta::answer() == 2, "beta")
+}
+`,
+	}
+	for path, contents := range files {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var ok bool
+	stderr := captureStderr(t, func() {
+		captureStdout(t, func() {
+			ok = runTests(app, "", false)
+		})
+	})
+	if !ok {
+		t.Fatalf("expected tests to pass\n%s", stderr)
+	}
+	if got := strings.Count(stderr, "from dependencies not shown"); got != 1 {
+		t.Fatalf("dependency summary lines = %d, want 1:\n%s", got, stderr)
+	}
+	if !strings.Contains(stderr, "warning: 3 warnings from dependencies not shown: alpha (2), beta (1)\n") {
+		t.Fatalf("dependency summary should cover the whole run:\n%s", stderr)
+	}
+	if got := strings.Count(stderr, "deprecated pointer"); got != 1 {
+		t.Fatalf("deprecated pointer summary lines = %d, want 1:\n%s", got, stderr)
+	}
+	// one.ard and two.ard are test entries and also imported by test files;
+	// their diagnostics must be counted and rendered once.
+	if !strings.Contains(stderr, "warning: 4 deprecated pointer uses in 2 files not shown") {
+		t.Fatalf("deprecated pointer summary should count each use once:\n%s", stderr)
+	}
+	if got := strings.Count(stderr, "one.ard:11:"); got != 1 {
+		t.Fatalf("project warning rendered %d times, want 1:\n%s", got, stderr)
+	}
+}
+
 func TestTestCommandSupportsImportedHelperWithCollidingGeneratedModuleName(t *testing.T) {
 	dir := t.TempDir()
 	projectDir := filepath.Join(dir, "project")
