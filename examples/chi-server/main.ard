@@ -31,27 +31,21 @@ fn service() mut chi::Mux {
   router.Use(middleware::RequestID)
   router.Use(middleware::Logger)
 
-  router.Get(
-    "/",
-    fn(w: http::ResponseWriter, r: mut http::Request) {
-      let body = mut "sup".bytes()
-      w.Write(body)
-    },
-  )
+  router.Get("/", fn(w: http::ResponseWriter, r: mut http::Request) {
+    let body = mut "sup".bytes()
+    w.Write(body)
+  })
 
   router.Mount("/static", http::StripPrefix("/static", files))
 
-  router.Get(
-    "/slow",
-    fn(w: http::ResponseWriter, r: mut http::Request) {
-      // Simulates some hard work. We want this handler to complete
-      // successfully during a shutdown signal.
-      time::Sleep(5 * time::Second)
+  router.Get("/slow", fn(w: http::ResponseWriter, r: mut http::Request) {
+    // Simulates some hard work. We want this handler to complete
+    // successfully during a shutdown signal.
+    time::Sleep(5 * time::Second)
 
-      let body = mut "all done.\n".bytes()
-      w.Write(body)
-    },
-  )
+    let body = mut "all done.\n".bytes()
+    w.Write(body)
+  })
 
   router
 }
@@ -65,19 +59,17 @@ fn main() {
   signal::Notify(interrupts.sender(), syscall::SIGINT, syscall::SIGTERM)
 
   // Run the server in the background
-  async::start(
-    fn() {
-      match server.ListenAndServe() {
-        ok => (),
-        err(error) => {
-          match errors::Is(error, http::ErrServerClosed) {
-            true => (),
-            false => panic(error),
-          }
-        },
-      }
-    },
-  )
+  async::start(fn() {
+    match server.ListenAndServe() {
+      ok => (),
+      err(error) => {
+        match errors::Is(error, http::ErrServerClosed) {
+          true => (),
+          false => panic(error),
+        }
+      },
+    }
+  })
   fmt::Println("listening on {server.Addr}")
 
   // Wait for a shutdown signal
