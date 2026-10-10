@@ -141,18 +141,14 @@ func TestNaturalFunctionAndGlobalNamesUseVisibility(t *testing.T) {
 }
 func TestNaturalFunctionNameFallsBackForSyntheticFunctions(t *testing.T) {
 	program := &air.Program{Functions: []air.Function{
-		{ID: 0, Module: 0, Name: "main", IsScript: true},
-		{ID: 1, Module: 0, Name: "User.ToString.to_str", Receiver: 1},
-		{ID: 2, Module: 0, Name: "anon_func_2"},
+		{ID: 0, Module: 0, Name: "User.ToString.to_str", Receiver: 1},
+		{ID: 1, Module: 0, Name: "anon_func_1"},
 	}}
-	if got := functionName(program, program.Functions[0]); got != "ArdScript_0" {
-		t.Fatalf("script function = %q, want ArdScript_0", got)
-	}
-	if got := functionName(program, program.Functions[1]); got != "Module_0__User_ToString_to_str" {
+	if got := functionName(program, program.Functions[0]); got != "Module_0__User_ToString_to_str" {
 		t.Fatalf("method helper function = %q, want Module_0__User_ToString_to_str", got)
 	}
-	if got := functionName(program, program.Functions[2]); got != "module_0__anon_func_2" {
-		t.Fatalf("closure helper function = %q, want module_0__anon_func_2", got)
+	if got := functionName(program, program.Functions[1]); got != "module_0__anon_func_1" {
+		t.Fatalf("closure helper function = %q, want module_0__anon_func_1", got)
 	}
 }
 func TestNaturalTopLevelNamesAliasSpecialGoNames(t *testing.T) {

@@ -248,7 +248,7 @@ impl ffi::ValueTaker for Impl {
 			if len(result.Errors) > 0 {
 				t.Fatalf("parse error: %s", result.Errors[0].Message)
 			}
-			c := checker.New("test.ard", result.Program, nil, checker.CheckOptions{GoResolver: resolver})
+			c := checker.New("test.ard", checker.WrapStatementRuns(result.Program), nil, checker.CheckOptions{GoResolver: resolver})
 			c.Check()
 			if len(tt.diagnostics) > 0 || c.HasErrors() {
 				if diff := cmp.Diff(tt.diagnostics, c.Diagnostics(), compareOptions); diff != "" {
@@ -290,7 +290,7 @@ person.name()
 		if len(result.Errors) > 0 {
 			t.Fatalf("parse error: %s", result.Errors[0].Message)
 		}
-		c := checker.New("test.ard", result.Program, nil, checker.CheckOptions{GoResolver: resolver})
+		c := checker.New("test.ard", checker.WrapStatementRuns(result.Program), nil, checker.CheckOptions{GoResolver: resolver})
 		c.Check()
 		diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeAmbiguousTraitMethod)
 		if diagnostic.Message != "Method 'name' is ambiguous on Person" {
@@ -332,12 +332,12 @@ pass(person)
 		if len(result.Errors) > 0 {
 			t.Fatalf("parse error: %s", result.Errors[0].Message)
 		}
-		c := checker.New("test.ard", result.Program, nil, checker.CheckOptions{GoResolver: resolver})
+		c := checker.New("test.ard", checker.WrapStatementRuns(result.Program), nil, checker.CheckOptions{GoResolver: resolver})
 		c.Check()
 		if c.HasErrors() {
 			t.Fatalf("checker diagnostics: %v", c.Diagnostics())
 		}
-		statements := c.Module().Program().Statements
+		statements := checker.UnwrapStatementRuns(c.Module().Program().Statements)
 		call, ok := statements[len(statements)-1].Expr.(*checker.FunctionCall)
 		if !ok || len(call.Args) != 1 {
 			t.Fatalf("last expression = %#v, want one-argument function call", statements[len(statements)-1].Expr)
@@ -387,7 +387,7 @@ struct Problem {}
 		if len(result.Errors) > 0 {
 			t.Fatalf("parse error: %s", result.Errors[0].Message)
 		}
-		c := checker.New("test.ard", result.Program, nil, checker.CheckOptions{GoResolver: resolver})
+		c := checker.New("test.ard", checker.WrapStatementRuns(result.Program), nil, checker.CheckOptions{GoResolver: resolver})
 		c.Check()
 		diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeDuplicateMethod)
 		if diagnostic.Message != "Duplicate method: error" {
@@ -421,7 +421,7 @@ impl ffi::Namer for User {
 		}
 	}
 
-	c := checker.New("test.ard", result.Program, nil, checker.CheckOptions{GoResolver: resolver})
+	c := checker.New("test.ard", checker.WrapStatementRuns(result.Program), nil, checker.CheckOptions{GoResolver: resolver})
 	c.Check()
 	if len(c.Diagnostics()) != 1 {
 		t.Fatalf("diagnostics = %#v, want one", c.Diagnostics())

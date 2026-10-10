@@ -112,8 +112,7 @@ type functionLowerer struct {
 func newLowerer(options LowerOptions, rootCount int) *lowerer {
 	l := &lowerer{
 		program: Program{
-			Entry:  NoFunction,
-			Script: NoFunction,
+			Entry: NoFunction,
 		},
 		moduleByPath:  map[string]ModuleID{},
 		moduleByName:  map[string]checker.Module{},
@@ -471,24 +470,6 @@ func (l *lowerer) lowerModule(module checker.Module) error {
 				return err
 			}
 		}
-	}
-
-	topLevel := topLevelExecutableStatements(prog.Statements)
-	if len(topLevel) > 0 {
-		scriptID, err := l.declareScriptFunction(modID)
-		if err != nil {
-			return err
-		}
-		fn := l.program.Functions[scriptID]
-		fl := &functionLowerer{l: l, locals: map[string]LocalID{}, fn: &fn}
-		body, err := fl.lowerBlock(topLevel)
-		if err != nil {
-			return err
-		}
-		fn.Body = body
-		l.program.Functions[scriptID] = fn
-		l.program.Script = scriptID
-		mod.Functions = appendUniqueFunction(mod.Functions, scriptID)
 	}
 
 	l.loweredModules[path] = true
@@ -849,29 +830,6 @@ func lowerForeignResultShape(shape checker.ForeignResultShape) ForeignResultShap
 	default:
 		return ForeignResultUnknown
 	}
-}
-
-func (l *lowerer) declareScriptFunction(module ModuleID) (FunctionID, error) {
-	key := functionKey(module, "<script>")
-	if id, ok := l.functions[key]; ok {
-		return id, nil
-	}
-	returnType, err := l.internType(checker.Void)
-	if err != nil {
-		return NoFunction, err
-	}
-	id := FunctionID(len(l.program.Functions))
-	l.functions[key] = id
-	l.program.Functions = append(l.program.Functions, Function{
-		ID:       id,
-		Module:   module,
-		Name:     "<script>",
-		IsScript: true,
-		Signature: Signature{
-			Return: returnType,
-		},
-	})
-	return id, nil
 }
 
 func (l *lowerer) lowerFunction(module ModuleID, def *checker.FunctionDef) error {
@@ -6330,27 +6288,6 @@ func (l *lowerer) lookupImpl(trait TraitID, forType TypeID) (ImplID, bool) {
 		}
 	}
 	return 0, false
-}
-
-func topLevelExecutableStatements(stmts []checker.Statement) []checker.Statement {
-	filtered := make([]checker.Statement, 0, len(stmts))
-	for _, stmt := range stmts {
-		switch stmt.Expr.(type) {
-		case *checker.FunctionDef:
-			continue
-		}
-		if stmt.Stmt != nil {
-			switch stmt.Stmt.(type) {
-			case *checker.StructDef, *checker.Enum, *checker.Union:
-				continue
-			case *checker.VariableDef:
-				// Module-level variables (both let and mut) are AIR globals.
-				continue
-			}
-		}
-		filtered = append(filtered, stmt)
-	}
-	return filtered
 }
 
 func lowerStructFieldInfo(def *checker.StructDef, name string, typeID TypeID, index int) FieldInfo {

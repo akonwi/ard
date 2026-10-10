@@ -27,7 +27,7 @@ func TestExplicitNullableVoidHasStructuredWarning(t *testing.T) {
 				t.Fatalf("parse errors: %v", result.Errors)
 			}
 			declaration := result.Program.Statements[0].(*parse.VariableDeclaration)
-			c := checker.New("main.ard", result.Program, nil)
+			c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 			c.Check()
 
 			if c.HasErrors() {
@@ -52,7 +52,7 @@ func TestPrefixDerefSyntaxNoLongerChecksAsDereference(t *testing.T) {
 	if len(result.Errors) > 0 {
 		t.Fatalf("parse errors: %v", result.Errors)
 	}
-	c := checker.New("main.ard", result.Program, nil)
+	c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 	c.Check()
 
 	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeUndefinedName)
@@ -66,7 +66,7 @@ func TestPostfixDerefSyntaxDoesNotWarn(t *testing.T) {
 	if len(result.Errors) > 0 {
 		t.Fatalf("parse errors: %v", result.Errors)
 	}
-	c := checker.New("main.ard", result.Program, nil)
+	c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 	c.Check()
 	if len(c.Diagnostics()) != 0 {
 		t.Fatalf("diagnostics = %#v, want none", c.Diagnostics())
@@ -81,7 +81,7 @@ func TestInferredMaybeVoidAndVoidResultDoNotWarn(t *testing.T) {
 	if len(result.Errors) > 0 {
 		t.Fatalf("parse errors: %v", result.Errors)
 	}
-	c := checker.New("main.ard", result.Program, nil)
+	c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 	c.Check()
 	if len(c.Diagnostics()) != 0 {
 		t.Fatalf("diagnostics = %#v, want none", c.Diagnostics())
@@ -120,7 +120,7 @@ func TestRemainingUnresolvedReferencesHaveStructuredDiagnostics(t *testing.T) {
 			if len(result.Errors) > 0 {
 				t.Fatalf("parse errors: %v", result.Errors)
 			}
-			c := checker.New("main.ard", result.Program, nil)
+			c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 			c.Check()
 			for _, diagnostic := range c.Diagnostics() {
 				if diagnostic.Message == tt.message {
@@ -165,7 +165,7 @@ func TestTypeAndValueSymbolsStayInTheirNamespaces(t *testing.T) {
 			if len(result.Errors) > 0 {
 				t.Fatalf("parse errors: %v", result.Errors)
 			}
-			c := checker.New("main.ard", result.Program, nil)
+			c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 			c.Check()
 			diagnostic := requireDiagnosticCode(t, c.Diagnostics(), tt.code)
 			if diagnostic.Message != tt.message || diagnostic.Primary.Message == "" {
@@ -213,7 +213,7 @@ func TestUndefinedMembersInMaybeAccessorChainsHaveStructuredDiagnostics(t *testi
 			function := result.Program.Statements[len(result.Program.Statements)-1].(*parse.FunctionDeclaration)
 			tryExpr := function.Body[len(function.Body)-1].(*parse.Try)
 			location := tt.location(tryExpr.Expression)
-			c := checker.New("main.ard", result.Program, nil)
+			c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 			c.Check()
 			if len(c.Diagnostics()) != 1 {
 				t.Fatalf("diagnostics = %#v, want one", c.Diagnostics())
@@ -247,7 +247,7 @@ func TestUndefinedNamesHaveStructuredDiagnostics(t *testing.T) {
 				t.Fatalf("parse errors: %v", result.Errors)
 			}
 			location := result.Program.Statements[0].GetLocation()
-			c := checker.New("main.ard", result.Program, nil)
+			c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 			c.Check()
 			if len(c.Diagnostics()) != 1 {
 				t.Fatalf("diagnostics = %#v, want one", c.Diagnostics())
@@ -272,7 +272,7 @@ func TestUndefinedInstanceMembersHaveStructuredDiagnostics(t *testing.T) {
 	property := result.Program.Statements[0].(*parse.InstanceProperty)
 	method := result.Program.Statements[1].(*parse.InstanceMethod)
 
-	c := checker.New(filePath, result.Program, nil)
+	c := checker.New(filePath, checker.WrapStatementRuns(result.Program), nil)
 	c.Check()
 	if len(c.Diagnostics()) != 2 {
 		t.Fatalf("diagnostics = %#v, want two", c.Diagnostics())
@@ -310,7 +310,7 @@ func TestEmptyCollectionDiagnosticsLabelVariableBindings(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			result := parse.Parse([]byte(tt.source), "main.ard")
 			declaration := result.Program.Statements[0].(*parse.VariableDeclaration)
-			c := checker.New("main.ard", result.Program, nil)
+			c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 			c.Check()
 			diagnostic := requireDiagnosticCode(t, c.Diagnostics(), tt.code)
 			if diagnostic.Primary.Span.Location != declaration.NameLocation || len(diagnostic.Secondary) != 1 || diagnostic.Secondary[0].Span.Location != tt.literalLoc(declaration) {
@@ -324,7 +324,7 @@ func TestNestedEmptyCollectionDoesNotInheritOuterBinding(t *testing.T) {
 	source := "fn id(value: $T) $T { value }\nlet values = [id([])]\n"
 	result := parse.Parse([]byte(source), "main.ard")
 	declaration := result.Program.Statements[1].(*parse.VariableDeclaration)
-	c := checker.New("main.ard", result.Program, nil)
+	c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 	c.Check()
 	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeUntypedEmptyList)
 	if diagnostic.Primary.Span.Location == declaration.NameLocation || len(diagnostic.Secondary) != 0 {
@@ -335,7 +335,7 @@ func TestNestedEmptyCollectionDoesNotInheritOuterBinding(t *testing.T) {
 func TestEmptyCollectionWithoutBindingLabelsLiteral(t *testing.T) {
 	result := parse.Parse([]byte("[]\n"), "main.ard")
 	literal := result.Program.Statements[0]
-	c := checker.New("main.ard", result.Program, nil)
+	c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 	c.Check()
 	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeUntypedEmptyList)
 	if diagnostic.Primary.Span.Location != literal.GetLocation() || len(diagnostic.Secondary) != 0 {
@@ -382,7 +382,7 @@ func TestStructLiteralDiagnosticsAreStructured(t *testing.T) {
 			if len(result.Errors) > 0 {
 				t.Fatalf("parse errors: %v", result.Errors)
 			}
-			c := checker.New("main.ard", result.Program, nil, checker.CheckOptions{GoResolver: standardLibraryGoResolver(t)})
+			c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil, checker.CheckOptions{GoResolver: standardLibraryGoResolver(t)})
 			c.Check()
 			diagnostic := requireDiagnosticCode(t, c.Diagnostics(), tt.code)
 			if diagnostic.Message != tt.legacyMessage || len(diagnostic.Secondary) != tt.secondaries {
@@ -423,7 +423,7 @@ func TestGenericGoFunctionDiagnosticsAreStructured(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := parse.Parse([]byte(tt.source), "main.ard")
-			c := checker.New("main.ard", result.Program, nil, checker.CheckOptions{GoResolver: resolver})
+			c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil, checker.CheckOptions{GoResolver: resolver})
 			c.Check()
 			diagnostic := requireDiagnosticCode(t, c.Diagnostics(), tt.code)
 			if diagnostic.Message != tt.legacyMessage || diagnostic.Primary.Span.FilePath != "main.ard" || len(diagnostic.Secondary) != tt.secondaries {
@@ -438,7 +438,7 @@ func TestNestedGenericGoFunctionConflictLabelsBoundType(t *testing.T) {
 	writeGoGenericFuncPackage(t, root)
 	resolver := checker.NewGoPackagesResolver(root, nil)
 	result := parse.Parse([]byte("use go:example.com/app/ffi\nlet value = ffi::SlicePair([\"first\"], [2])\n"), "main.ard")
-	c := checker.New("main.ard", result.Program, nil, checker.CheckOptions{GoResolver: resolver})
+	c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil, checker.CheckOptions{GoResolver: resolver})
 	c.Check()
 	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeConflictingGoTypeInference)
 	if diagnostic.Message != "Conflicting inferred type arguments for T: Str and [Int]" || diagnostic.Primary.Message != "this infers `T` as `Int`" {
@@ -473,7 +473,7 @@ func TestGenericGoStructInferenceDiagnosticsAreStructured(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := parse.Parse([]byte(tt.source), "main.ard")
-			c := checker.New("main.ard", result.Program, nil, checker.CheckOptions{GoResolver: resolver})
+			c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil, checker.CheckOptions{GoResolver: resolver})
 			c.Check()
 			diagnostic := requireDiagnosticCode(t, c.Diagnostics(), tt.code)
 			if diagnostic.Message != tt.legacyMessage || len(diagnostic.Secondary) != tt.secondaries {
@@ -485,7 +485,7 @@ func TestGenericGoStructInferenceDiagnosticsAreStructured(t *testing.T) {
 
 func TestGenericGoFunctionValueDiagnosticIsStructured(t *testing.T) {
 	result := parse.Parse([]byte("use go:slices\nlet sort = slices::Sort\n"), "main.ard")
-	c := checker.New("main.ard", result.Program, nil, checker.CheckOptions{GoResolver: standardLibraryGoResolver(t)})
+	c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil, checker.CheckOptions{GoResolver: standardLibraryGoResolver(t)})
 	c.Check()
 	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeInvalidGoFunctionValue)
 	if diagnostic.Message != "Generic Go function slices::Sort cannot be referenced as a value; wrap it in a closure so its type parameters are fixed" {
@@ -501,7 +501,7 @@ func TestControlFlowDiagnosticsAreStructured(t *testing.T) {
 		legacyMessage string
 		secondaries   int
 	}{
-		{"defer placement", "fn cleanup() {}\nlet global = {\n  defer cleanup()\n  1\n}\n", checker.DiagnosticCodeInvalidDefer, "defer can only be used inside a function, method, closure, or script body", 0},
+		{"defer placement", "fn cleanup() {}\nlet global = {\n  defer cleanup()\n  1\n}\n", checker.DiagnosticCodeInvalidDefer, "defer can only be used inside a function, method, or closure body", 0},
 		{"defer call form", "fn main() { defer 42 }\n", checker.DiagnosticCodeInvalidDefer, "defer call form requires a call expression", 0},
 		{"empty defer block", "fn main() { defer {} }\n", checker.DiagnosticCodeInvalidDefer, "deferred block has no statements", 0},
 		{"break", "break\n", checker.DiagnosticCodeInvalidBreak, "break can only be used inside a loop", 0},
@@ -519,7 +519,7 @@ func TestControlFlowDiagnosticsAreStructured(t *testing.T) {
 			if len(result.Errors) > 0 {
 				t.Fatalf("parse errors: %v", result.Errors)
 			}
-			c := checker.New("main.ard", result.Program, nil)
+			c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 			c.Check()
 			diagnostic := requireDiagnosticCode(t, c.Diagnostics(), tt.code)
 			if diagnostic.Message != tt.legacyMessage || diagnostic.Primary.Message == "" || len(diagnostic.Secondary) != tt.secondaries {
@@ -558,7 +558,7 @@ func TestOperatorDiagnosticsAreStructured(t *testing.T) {
 			if len(result.Errors) > 0 {
 				t.Fatalf("parse errors: %v", result.Errors)
 			}
-			c := checker.New("main.ard", result.Program, nil)
+			c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 			c.Check()
 			diagnostic := requireDiagnosticCode(t, c.Diagnostics(), tt.code)
 			if diagnostic.Message != tt.legacyMessage || diagnostic.Primary.Message == "" || len(diagnostic.Secondary) != tt.secondaries {
@@ -573,7 +573,7 @@ func TestOperatorDiagnosticLabelSpans(t *testing.T) {
 	unary := result.Program.Statements[0].(*parse.UnaryExpression)
 	binary := result.Program.Statements[1].(*parse.BinaryExpression)
 	chain := result.Program.Statements[2].(*parse.ChainedComparison)
-	c := checker.New("main.ard", result.Program, nil)
+	c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 	c.Check()
 
 	unaryDiagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeInvalidUnaryOperator)
@@ -594,7 +594,7 @@ func TestNonBooleanIfConditionDiagnosticIsStructured(t *testing.T) {
 	result := parse.Parse([]byte("if true {\n} else if 42 {\n}\n"), "main.ard")
 	chain := result.Program.Statements[0].(*parse.IfStatement)
 	invalidBranch := chain.Else.(*parse.IfStatement)
-	c := checker.New("main.ard", result.Program, nil)
+	c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 	c.Check()
 	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeNonBooleanIfCondition)
 	if diagnostic.Message != "If conditions must be boolean expressions" || diagnostic.Title != "Invalid if condition" || diagnostic.Primary.Span.Location != invalidBranch.Condition.GetLocation() || diagnostic.Primary.Message != "expected `Bool`, but found `Int`" {
@@ -626,7 +626,7 @@ func TestMatchAndPatternDiagnosticsAreStructured(t *testing.T) {
 			if len(result.Errors) > 0 {
 				t.Fatalf("parse errors: %v", result.Errors)
 			}
-			c := checker.New("main.ard", result.Program, nil)
+			c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 			c.Check()
 			diagnostic := requireDiagnosticCode(t, c.Diagnostics(), tt.code)
 			if diagnostic.Kind != tt.kind || diagnostic.Message != tt.legacyMessage || diagnostic.Primary.Message == "" || len(diagnostic.Secondary) != tt.secondaries {
@@ -639,7 +639,7 @@ func TestMatchAndPatternDiagnosticsAreStructured(t *testing.T) {
 func TestDuplicateBooleanMatchLabelsBothCases(t *testing.T) {
 	result := parse.Parse([]byte("match true {\n  true => 1,\n  true => 2,\n  false => 0,\n}\n"), "main.ard")
 	match := result.Program.Statements[0].(*parse.MatchExpression)
-	c := checker.New("main.ard", result.Program, nil)
+	c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 	c.Check()
 	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeDuplicateMatchArm)
 	if diagnostic.Primary.Span.Location != match.Cases[1].Pattern.GetLocation() || len(diagnostic.Secondary) != 1 || diagnostic.Secondary[0].Span.Location != match.Cases[0].Pattern.GetLocation() {
@@ -653,7 +653,7 @@ func TestInvalidTryDiagnosticsAreStructured(t *testing.T) {
 		source        string
 		legacyMessage string
 	}{
-		{"outside function", "let res: Int!Str = Result::ok(1)\ntry res\n", "The `try` keyword can only be used in a function body"},
+		{"outside function", "let res: Int!Str = Result::ok(1)\nlet value = try res\n", "The `try` keyword can only be used in a function body"},
 		{"requires Result return", "fn run() Int {\n  let res: Int!Str = Result::ok(1)\n  try res\n}\n", "try without catch clause requires function to return a Result type"},
 		{"requires Maybe return", "fn run() Int {\n  let value: Int? = Maybe::new(1)\n  try value\n}\n", "try without catch clause on Maybe requires function to return a Maybe type"},
 		{"invalid operand", "fn run() Str {\n  try \"value\"\n}\n", "try can only be used on Result or Maybe types, got: Str"},
@@ -665,7 +665,7 @@ func TestInvalidTryDiagnosticsAreStructured(t *testing.T) {
 			if len(result.Errors) > 0 {
 				t.Fatalf("parse errors: %v", result.Errors)
 			}
-			c := checker.New("main.ard", result.Program, nil)
+			c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 			c.Check()
 			diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeInvalidTry)
 			if diagnostic.Message != tt.legacyMessage || diagnostic.Primary.Message == "" {
@@ -679,7 +679,7 @@ func TestTryCatchMismatchLabelsCatchResult(t *testing.T) {
 	result := parse.Parse([]byte("fn run() Str {\n  try Result::err(\"bad\") -> error {\n    42\n  }\n}\n"), "main.ard")
 	function := result.Program.Statements[0].(*parse.FunctionDeclaration)
 	tryExpr := function.Body[0].(*parse.Try)
-	c := checker.New("main.ard", result.Program, nil)
+	c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 	c.Check()
 	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeTypeMismatch)
 	if diagnostic.Message != "Type mismatch: Expected Str, got Int" || diagnostic.Primary.Span.Location != tryExpr.CatchBlock[0].GetLocation() {
@@ -705,7 +705,7 @@ func TestMaybeNewInvalidFormsUseStructuredDiagnostics(t *testing.T) {
 			if len(result.Errors) > 0 {
 				t.Fatalf("parse errors: %v", result.Errors)
 			}
-			c := checker.New("main.ard", result.Program, nil)
+			c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 			c.Check()
 			diagnostic := requireDiagnosticCode(t, c.Diagnostics(), tt.code)
 			if diagnostic.Message != tt.message || diagnostic.Primary.Message == "" {
@@ -737,7 +737,7 @@ func TestLiteralAndConversionDiagnosticsAreStructured(t *testing.T) {
 			if len(result.Errors) > 0 {
 				t.Fatalf("parse errors: %v", result.Errors)
 			}
-			c := checker.New("main.ard", result.Program, nil)
+			c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 			c.Check()
 			diagnostic := requireDiagnosticCode(t, c.Diagnostics(), tt.code)
 			if diagnostic.Message != tt.message || diagnostic.Primary.Message == "" {
@@ -749,7 +749,7 @@ func TestLiteralAndConversionDiagnosticsAreStructured(t *testing.T) {
 
 func TestInvalidRuneDiagnosticLabelsFullSourceLiteral(t *testing.T) {
 	result := parse.Parse([]byte("'ab'\n"), "main.ard")
-	c := checker.New("main.ard", result.Program, nil)
+	c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 	c.Check()
 	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeInvalidLiteral)
 	if diagnostic.Primary.Span.Location.Start.Col != 1 || diagnostic.Primary.Span.Location.End.Col != 4 {
@@ -759,7 +759,7 @@ func TestInvalidRuneDiagnosticLabelsFullSourceLiteral(t *testing.T) {
 
 func TestNegativeNumericOverflowLabelsUnaryExpression(t *testing.T) {
 	result := parse.Parse([]byte("let value: Uint8 = -1\n"), "main.ard")
-	c := checker.New("main.ard", result.Program, nil)
+	c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 	c.Check()
 	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeNumericLiteralOverflow)
 	if diagnostic.Primary.Span.Location.Start.Col != 20 || diagnostic.Primary.Span.Location.End.Col != 21 {
@@ -789,7 +789,7 @@ func TestUnsafeAPIErrorsReuseStandardDiagnostics(t *testing.T) {
 			if len(result.Errors) > 0 {
 				t.Fatalf("parse errors: %v", result.Errors)
 			}
-			c := checker.New("main.ard", result.Program, nil)
+			c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 			c.Check()
 			diagnostic := requireDiagnosticCode(t, c.Diagnostics(), tt.code)
 			if diagnostic.Message != tt.message || diagnostic.Primary.Message == "" {
@@ -803,7 +803,7 @@ func TestGenericHelperErrorsUseTypedDiagnostics(t *testing.T) {
 	t.Run("struct field unification", func(t *testing.T) {
 		source := "struct Box<$T> {\n  value: $T\n}\nBox<Str>{ value: 1 }\n"
 		result := parse.Parse([]byte(source), "main.ard")
-		c := checker.New("main.ard", result.Program, nil)
+		c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 		c.Check()
 		diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeTypeMismatch)
 		if diagnostic.Message != "type mismatch: expected Str, got Int" || diagnostic.Primary.Span.Location.Start.Row != 4 || diagnostic.Primary.Span.Location.Start.Col != 18 {
@@ -814,7 +814,7 @@ func TestGenericHelperErrorsUseTypedDiagnostics(t *testing.T) {
 	t.Run("explicit generic function argument", func(t *testing.T) {
 		source := "fn identity(of: $T) $T { of }\nidentity<Str>(1)\n"
 		result := parse.Parse([]byte(source), "main.ard")
-		c := checker.New("main.ard", result.Program, nil)
+		c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 		c.Check()
 		diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeIncorrectArgumentType)
 		if diagnostic.Message != "type mismatch: expected Str, got Int" || diagnostic.Primary.Span.Location.Start.Row != 2 || diagnostic.Primary.Span.Location.Start.Col != 15 || len(diagnostic.Secondary) != 2 {
@@ -829,7 +829,7 @@ func TestGenericHelperErrorsUseTypedDiagnostics(t *testing.T) {
 func TestExplicitGenericMismatchWithOmittedArgumentDoesNotPanic(t *testing.T) {
 	source := "fn f(a: $T?, b: $T) $T { b }\nf<Str>(b: 1)\n"
 	result := parse.Parse([]byte(source), "main.ard")
-	c := checker.New("main.ard", result.Program, nil)
+	c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 	c.Check()
 	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeIncorrectArgumentType)
 	if diagnostic.Primary.Span.Location.Start.Row != 2 || diagnostic.Primary.Span.Location.Start.Col != 11 || len(diagnostic.Secondary) != 2 {
@@ -843,7 +843,7 @@ func TestExplicitGenericMismatchWithOmittedArgumentDoesNotPanic(t *testing.T) {
 func TestExpectedReturnConflictLabelsAnnotationAndArgumentEvidence(t *testing.T) {
 	source := "fn identity(value: $T) $T { value }\nlet value: Str = identity(1)\n"
 	result := parse.Parse([]byte(source), "main.ard")
-	c := checker.New("main.ard", result.Program, nil)
+	c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 	c.Check()
 	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeTypeMismatch)
 	if diagnostic.Primary.Span.Location.Start.Row != 2 || diagnostic.Primary.Span.Location.Start.Col != 12 || !strings.Contains(diagnostic.Primary.Message, "annotation") {
@@ -857,7 +857,7 @@ func TestExpectedReturnConflictLabelsAnnotationAndArgumentEvidence(t *testing.T)
 func TestGenericConflictLabelsEstablishingArgument(t *testing.T) {
 	source := "fn same(first: $T, second: $T) {}\nsame(1, \"x\")\n"
 	result := parse.Parse([]byte(source), "main.ard")
-	c := checker.New("main.ard", result.Program, nil)
+	c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 	c.Check()
 	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeIncorrectArgumentType)
 	if len(diagnostic.Secondary) != 2 {
@@ -872,7 +872,7 @@ func TestGenericConflictLabelsEstablishingArgument(t *testing.T) {
 func TestExplicitGenericConflictUsesMatchingGenericOrigin(t *testing.T) {
 	source := "fn pair(a: $A, b: $B) {}\npair<Str, Str>(\"ok\", 1)\n"
 	result := parse.Parse([]byte(source), "main.ard")
-	c := checker.New("main.ard", result.Program, nil)
+	c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 	c.Check()
 	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeIncorrectArgumentType)
 	if len(diagnostic.Secondary) != 2 {
@@ -893,7 +893,7 @@ func TestRangeInRawInterpolationReportsDiagnostic(t *testing.T) {
 		if len(result.Errors) > 0 {
 			t.Fatalf("source %q parse errors: %#v", source, result.Errors)
 		}
-		c := checker.New("main.ard", result.Program, nil)
+		c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 		c.Check()
 		diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeInvalidRange)
 		if diagnostic.Primary.Span.Location.Start.Row != 1 || diagnostic.Primary.Span.Location.Start.Col == 0 {
@@ -923,7 +923,7 @@ func TestStringTypeMismatchSpansSourceLiteral(t *testing.T) {
 			if len(result.Errors) > 0 {
 				t.Fatalf("parse errors: %#v", result.Errors)
 			}
-			c := checker.New("main.ard", result.Program, nil)
+			c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 			c.Check()
 			diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeTypeMismatch)
 			if diagnostic.Primary.Span.Location.Start != (parse.Point{Row: 1, Col: 18}) || diagnostic.Primary.Span.Location.End != tt.end {
@@ -936,7 +936,7 @@ func TestStringTypeMismatchSpansSourceLiteral(t *testing.T) {
 func TestFailedMethodTargetDoesNotAddVoidCascade(t *testing.T) {
 	for _, source := range []string{"missing.foo()\n", "let value: Int = missing.foo()\n"} {
 		result := parse.Parse([]byte(source), "main.ard")
-		c := checker.New("main.ard", result.Program, nil)
+		c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 		c.Check()
 		if len(c.Diagnostics()) != 1 || c.Diagnostics()[0].Code != checker.DiagnosticCodeUndefinedName {
 			t.Fatalf("source %q diagnostics = %#v", source, c.Diagnostics())
@@ -950,7 +950,7 @@ func TestNestedTraitPathDiagnosesInsteadOfPanicking(t *testing.T) {
 	if len(result.Errors) > 0 {
 		t.Fatalf("parse errors: %#v", result.Errors)
 	}
-	c := checker.New("main.ard", result.Program, nil)
+	c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 	c.Check()
 	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeUndefinedTrait)
 	if diagnostic.Primary.Message == "" {
@@ -986,7 +986,7 @@ func TestQualifiedStaticFailuresReuseStructuredDiagnostics(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			source := "use app/util\n" + tt.expression + "\n"
 			result := parse.Parse([]byte(source), filepath.Join(root, "main.ard"))
-			c := checker.New(filepath.Join(root, "main.ard"), result.Program, resolver)
+			c := checker.New(filepath.Join(root, "main.ard"), checker.WrapStatementRuns(result.Program), resolver)
 			c.Check()
 			diagnostic := requireDiagnosticCode(t, c.Diagnostics(), tt.code)
 			if diagnostic.Primary.Message == "" {
@@ -1000,7 +1000,7 @@ func TestEnumDeclarationDiagnosticsAreStructured(t *testing.T) {
 	t.Run("empty", func(t *testing.T) {
 		result := parse.Parse([]byte("enum Empty {}\n"), "main.ard")
 		enum := result.Program.Statements[0].(*parse.EnumDefinition)
-		c := checker.New("main.ard", result.Program, nil)
+		c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 		c.Check()
 		diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeEmptyEnum)
 		if diagnostic.Primary.Span.Location != enum.GetLocation() || diagnostic.Message != "Enums must have at least one variant" {
@@ -1012,7 +1012,7 @@ func TestEnumDeclarationDiagnosticsAreStructured(t *testing.T) {
 		source := "enum Color {\n  Blue,\n  Green,\n  Blue\n}\n"
 		result := parse.Parse([]byte(source), "main.ard")
 		enum := result.Program.Statements[0].(*parse.EnumDefinition)
-		c := checker.New("main.ard", result.Program, nil)
+		c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 		c.Check()
 		diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeDuplicateEnumVariant)
 		if diagnostic.Primary.Span.Location != enum.GetLocation() || diagnostic.Message != "Duplicate variant: Blue" {
@@ -1023,7 +1023,7 @@ func TestEnumDeclarationDiagnosticsAreStructured(t *testing.T) {
 	t.Run("invalid discriminant", func(t *testing.T) {
 		result := parse.Parse([]byte("enum Status { Ready = \"ready\" }\n"), "main.ard")
 		enum := result.Program.Statements[0].(*parse.EnumDefinition)
-		c := checker.New("main.ard", result.Program, nil)
+		c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 		c.Check()
 		diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeInvalidEnumDiscriminant)
 		if diagnostic.Primary.Span.Location != enum.Variants[0].Value.GetLocation() {
@@ -1035,7 +1035,7 @@ func TestEnumDeclarationDiagnosticsAreStructured(t *testing.T) {
 		source := "enum Status {\n  Pending = 1,\n  Active = 1\n}\n"
 		result := parse.Parse([]byte(source), "main.ard")
 		enum := result.Program.Statements[0].(*parse.EnumDefinition)
-		c := checker.New("main.ard", result.Program, nil)
+		c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 		c.Check()
 		diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeDuplicateEnumDiscriminant)
 		if diagnostic.Primary.Span.Location != enum.Variants[1].Value.GetLocation() || len(diagnostic.Secondary) != 1 || diagnostic.Secondary[0].Span.Location != enum.Variants[0].Value.GetLocation() {
@@ -1047,7 +1047,7 @@ func TestEnumDeclarationDiagnosticsAreStructured(t *testing.T) {
 		source := "enum Status {\n  First = 1,\n  Second,\n  Third = 2\n}\n"
 		result := parse.Parse([]byte(source), "main.ard")
 		enum := result.Program.Statements[0].(*parse.EnumDefinition)
-		c := checker.New("main.ard", result.Program, nil)
+		c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 		c.Check()
 		diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeDuplicateEnumDiscriminant)
 		if diagnostic.Primary.Span.Location != enum.Variants[2].Value.GetLocation() || len(diagnostic.Secondary) != 0 {
@@ -1142,7 +1142,7 @@ func TestImplementationDiagnosticsAreStructured(t *testing.T) {
 			if len(result.Errors) > 0 {
 				t.Fatalf("parse errors: %v", result.Errors)
 			}
-			c := checker.New("main.ard", result.Program, nil, checker.CheckOptions{GoResolver: standardLibraryGoResolver(t)})
+			c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil, checker.CheckOptions{GoResolver: standardLibraryGoResolver(t)})
 			c.Check()
 			diagnostic := requireDiagnosticCode(t, c.Diagnostics(), tt.code)
 			if tt.legacyMessage != "" && diagnostic.Message != tt.legacyMessage {
@@ -1165,7 +1165,7 @@ func TestInvalidTestFunctionDiagnosticsUsePreciseSpans(t *testing.T) {
 			t.Fatalf("parse errors: %v", result.Errors)
 		}
 		function := result.Program.Statements[0].(*parse.FunctionDeclaration)
-		c := checker.New("main.ard", result.Program, nil)
+		c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 		c.Check()
 		diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeTestParametersNotAllowed)
 		if diagnostic.Primary.Span.Location != function.Parameters[0].GetLocation() || diagnostic.Primary.Message != "remove test function parameters" {
@@ -1179,7 +1179,7 @@ func TestInvalidTestFunctionDiagnosticsUsePreciseSpans(t *testing.T) {
 			t.Fatalf("parse errors: %v", result.Errors)
 		}
 		function := result.Program.Statements[0].(*parse.FunctionDeclaration)
-		c := checker.New("main.ard", result.Program, nil)
+		c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 		c.Check()
 		diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeInvalidTestReturnType)
 		if diagnostic.Primary.Span.Location != function.ReturnType.GetLocation() || diagnostic.Primary.Message != "test functions must return `Void!Str`" {
@@ -1193,7 +1193,7 @@ func TestInvalidTestFunctionDiagnosticsUsePreciseSpans(t *testing.T) {
 			t.Fatalf("parse errors: %v", result.Errors)
 		}
 		function := result.Program.Statements[0].(*parse.FunctionDeclaration)
-		c := checker.New("main.ard", result.Program, nil)
+		c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 		c.Check()
 		diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeInvalidTestReturnType)
 		if diagnostic.Primary.Span.Location != function.GetLocation() {
@@ -1210,7 +1210,7 @@ func TestNonCallableHasStructuredLabels(t *testing.T) {
 	declaration := result.Program.Statements[0].(*parse.VariableDeclaration)
 	call := result.Program.Statements[1]
 
-	c := checker.New("main.ard", result.Program, nil)
+	c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 	c.Check()
 	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeNotCallable)
 	if diagnostic.Primary.Span.Location != call.GetLocation() || diagnostic.Message != "Not a function: value" {
@@ -1229,7 +1229,7 @@ func TestMissingArgumentHasParameterProvenance(t *testing.T) {
 	function := result.Program.Statements[0].(*parse.FunctionDeclaration)
 	call := result.Program.Statements[1]
 
-	c := checker.New("main.ard", result.Program, nil)
+	c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 	c.Check()
 	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeMissingArgument)
 	if diagnostic.Primary.Span.Location != call.GetLocation() || diagnostic.Primary.Message != "this call is missing `b`" {
@@ -1244,7 +1244,7 @@ func TestNamedArgumentBindingDiagnosticsUseArgumentSpans(t *testing.T) {
 	t.Run("unknown", func(t *testing.T) {
 		result := parse.Parse([]byte("fn greet(name: Str) {}\ngreet(who: \"A\")\n"), "main.ard")
 		call := result.Program.Statements[1].(*parse.FunctionCall)
-		c := checker.New("main.ard", result.Program, nil)
+		c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 		c.Check()
 		diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeUnknownNamedArgument)
 		if diagnostic.Primary.Span.Location != call.Args[0].GetLocation() || diagnostic.Message != "unknown parameter name: who" {
@@ -1255,7 +1255,7 @@ func TestNamedArgumentBindingDiagnosticsUseArgumentSpans(t *testing.T) {
 	t.Run("duplicate", func(t *testing.T) {
 		result := parse.Parse([]byte("fn greet(name: Str) {}\ngreet(name: \"A\", name: \"B\")\n"), "main.ard")
 		call := result.Program.Statements[1].(*parse.FunctionCall)
-		c := checker.New("main.ard", result.Program, nil)
+		c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 		c.Check()
 		diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeDuplicateArgument)
 		if diagnostic.Primary.Span.Location != call.Args[1].GetLocation() || len(diagnostic.Secondary) != 1 || diagnostic.Secondary[0].Span.Location != call.Args[0].GetLocation() {
@@ -1267,7 +1267,7 @@ func TestNamedArgumentBindingDiagnosticsUseArgumentSpans(t *testing.T) {
 func TestIncorrectArgumentCountHasStructuredDiagnostic(t *testing.T) {
 	result := parse.Parse([]byte("fn ping() {}\nping(1)\n"), "main.ard")
 	call := result.Program.Statements[1]
-	c := checker.New("main.ard", result.Program, nil)
+	c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 	c.Check()
 	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeIncorrectArgumentCount)
 	if diagnostic.Primary.Span.Location != call.GetLocation() || diagnostic.Message != "Incorrect number of arguments: Expected 0, got 1" {
@@ -1278,7 +1278,7 @@ func TestIncorrectArgumentCountHasStructuredDiagnostic(t *testing.T) {
 func TestInvalidFunctionTypeArgumentsHasStructuredDiagnostic(t *testing.T) {
 	result := parse.Parse([]byte("fn ping() {}\nping<Int>()\n"), "main.ard")
 	call := result.Program.Statements[1]
-	c := checker.New("main.ard", result.Program, nil)
+	c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 	c.Check()
 	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeInvalidFunctionTypeArgs)
 	if diagnostic.Primary.Span.Location != call.GetLocation() || diagnostic.Message != "function ping does not take type arguments" {
@@ -1292,7 +1292,7 @@ func TestWrongFunctionTypeArgumentCountHasTruthfulLabel(t *testing.T) {
 	if len(result.Errors) > 0 {
 		t.Fatalf("parse errors: %v", result.Errors)
 	}
-	c := checker.New("main.ard", result.Program, nil)
+	c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 	c.Check()
 	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeInvalidFunctionTypeArgs)
 	if diagnostic.Message != "Expected 2 type arguments, got 1" || diagnostic.Primary.Message != "expected 2 type argument(s), but found 1" {
@@ -1303,7 +1303,7 @@ func TestWrongFunctionTypeArgumentCountHasTruthfulLabel(t *testing.T) {
 func TestGoNamedArgumentHasStructuredDiagnostic(t *testing.T) {
 	result := parse.Parse([]byte("use go:fmt\nfmt::Println(value: \"hello\")\n"), "main.ard")
 	call := result.Program.Statements[0].(*parse.StaticFunction)
-	c := checker.New("main.ard", result.Program, nil, checker.CheckOptions{GoResolver: standardLibraryGoResolver(t)})
+	c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil, checker.CheckOptions{GoResolver: standardLibraryGoResolver(t)})
 	c.Check()
 	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeNamedArgumentsUnsupported)
 	if diagnostic.Primary.Span.Location != call.Function.Args[0].GetLocation() || diagnostic.Message != "Go function calls do not support named arguments" {
@@ -1316,7 +1316,7 @@ func TestExplicitReferenceToLetStorageHasNoDiagnostic(t *testing.T) {
 	if len(result.Errors) > 0 {
 		t.Fatalf("parse errors: %v", result.Errors)
 	}
-	c := checker.New("main.ard", result.Program, nil)
+	c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 	c.Check()
 	if c.HasErrors() {
 		t.Fatalf("diagnostics = %#v, want addressable let storage to be borrowable", c.Diagnostics())
@@ -1331,7 +1331,7 @@ func TestImmutableReferenceSlotRebindingPointsToDeclaration(t *testing.T) {
 	}
 	declaration := result.Program.Statements[2].(*parse.VariableDeclaration)
 
-	c := checker.New("main.ard", result.Program, nil)
+	c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 	c.Check()
 	if len(c.Diagnostics()) != 1 {
 		t.Fatalf("diagnostics = %#v, want one immutable-slot error", c.Diagnostics())
@@ -1351,7 +1351,7 @@ func TestWholeReferentAssignmentPointsToReferenceDeclaration(t *testing.T) {
 	declaration := result.Program.Statements[1].(*parse.VariableDeclaration)
 	assignment := result.Program.Statements[2].(*parse.VariableAssignment)
 
-	c := checker.New("main.ard", result.Program, nil)
+	c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 	c.Check()
 	if len(c.Diagnostics()) != 1 {
 		t.Fatalf("diagnostics = %#v, want one whole-referent error", c.Diagnostics())
@@ -1371,7 +1371,7 @@ func TestImmutablePropertyAssignmentHasStructuredLabels(t *testing.T) {
 	declaration := result.Program.Statements[1].(*parse.VariableDeclaration)
 	assignment := result.Program.Statements[2].(*parse.VariableAssignment)
 
-	c := checker.New("main.ard", result.Program, nil)
+	c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 	c.Check()
 	// A field write through a non-writable place reports the interior
 	// mutation diagnostic with the same structured labels.
@@ -1391,7 +1391,7 @@ func TestOrdinaryMutableBindingReceiverRequiresReference(t *testing.T) {
 	}
 	declaration := result.Program.Statements[0].(*parse.VariableDeclaration)
 
-	c := checker.New("main.ard", result.Program, nil)
+	c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 	c.Check()
 	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeValueInteriorMutation)
 	if diagnostic.Title != "Mutating method requires a writable pointer" || diagnostic.Primary.Message != "`.push()` requires a `&mut` receiver" || strings.Contains(strings.ToLower(diagnostic.Text), "immutable") {
@@ -1408,7 +1408,7 @@ func TestReferenceDestinationRequiresActualReference(t *testing.T) {
 	if len(result.Errors) > 0 {
 		t.Fatalf("parse errors: %v", result.Errors)
 	}
-	c := checker.New("main.ard", result.Program, nil)
+	c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 	c.Check()
 	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeReferenceDestination)
 	if diagnostic.Title != "Pointer destination requires a pointer" || !strings.Contains(diagnostic.Text, "`&mut`") {
@@ -1422,7 +1422,7 @@ func TestReferenceParameterRequiresActualReference(t *testing.T) {
 	if len(result.Errors) > 0 {
 		t.Fatalf("parse errors: %v", result.Errors)
 	}
-	c := checker.New("main.ard", result.Program, nil)
+	c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 	c.Check()
 	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeReferenceDestination)
 	if diagnostic.Title != "Pointer parameter requires a pointer" || len(diagnostic.Secondary) != 1 {
@@ -1436,7 +1436,7 @@ func TestReferenceValueDestinationSuggestsPostfixDereference(t *testing.T) {
 	if len(result.Errors) > 0 {
 		t.Fatalf("parse errors: %v", result.Errors)
 	}
-	c := checker.New("main.ard", result.Program, nil)
+	c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 	c.Check()
 	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeReferenceValueMaterialization)
 	if diagnostic.Title != "Value destination requires dereference" || !strings.Contains(diagnostic.Text, "pointer.*") || !strings.Contains(diagnostic.Text, "shallow copy") {
@@ -1467,7 +1467,7 @@ func TestReferenceHintsRequireCompatibleReferentTypes(t *testing.T) {
 			if len(result.Errors) > 0 {
 				t.Fatalf("parse errors: %v", result.Errors)
 			}
-			c := checker.New("main.ard", result.Program, nil)
+			c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 			c.Check()
 			if len(c.Diagnostics()) == 0 {
 				t.Fatal("expected diagnostic")
@@ -1496,7 +1496,7 @@ func TestWholeReferentDiagnosticsCoverScalarStructAndFieldWrites(t *testing.T) {
 			if len(result.Errors) > 0 {
 				t.Fatalf("parse errors: %v", result.Errors)
 			}
-			c := checker.New("main.ard", result.Program, nil)
+			c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 			c.Check()
 			requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeWholeReferentAssignment)
 		})
@@ -1518,7 +1518,7 @@ func TestBorrowAndDerefFailuresUseDistinctDiagnostics(t *testing.T) {
 			if len(result.Errors) > 0 {
 				t.Fatalf("parse errors: %v", result.Errors)
 			}
-			c := checker.New("main.ard", result.Program, nil)
+			c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 			c.Check()
 			requireDiagnosticCode(t, c.Diagnostics(), test.code)
 		})
@@ -1531,7 +1531,7 @@ func TestGoConstantAssignmentHasStructuredDiagnostic(t *testing.T) {
 	if len(result.Errors) > 0 {
 		t.Fatalf("parse errors: %v", result.Errors)
 	}
-	c := checker.New("main.ard", result.Program, nil, checker.CheckOptions{GoResolver: standardLibraryGoResolver(t)})
+	c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil, checker.CheckOptions{GoResolver: standardLibraryGoResolver(t)})
 	c.Check()
 	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeGoConstantAssignment)
 	if diagnostic.Message != "Cannot assign to Go constant: time::Nanosecond" || diagnostic.Primary.Message != "Go constants are not assignable" || len(diagnostic.Secondary) != 0 {
@@ -1548,7 +1548,7 @@ func TestImmutableVariableAssignmentHasStructuredLabels(t *testing.T) {
 
 	declaration := result.Program.Statements[0].(*parse.VariableDeclaration).NameLocation
 	assignment := result.Program.Statements[1].(*parse.VariableAssignment).Target.GetLocation()
-	c := checker.New(filePath, result.Program, nil)
+	c := checker.New(filePath, checker.WrapStatementRuns(result.Program), nil)
 	c.Check()
 	if len(c.Diagnostics()) != 1 {
 		t.Fatalf("diagnostics = %#v, want one", c.Diagnostics())
@@ -1575,7 +1575,7 @@ func TestImmutableAssignmentUsesInnermostBindingProvenance(t *testing.T) {
 		t.Fatalf("parse errors: %v", result.Errors)
 	}
 
-	c := checker.New("main.ard", result.Program, nil)
+	c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 	c.Check()
 	if len(c.Diagnostics()) != 1 {
 		t.Fatalf("diagnostics = %#v, want one", c.Diagnostics())
@@ -1606,7 +1606,7 @@ fn forward(root: &mut $W) {
 	forward := result.Program.Statements[2].(*parse.FunctionDeclaration)
 	call := forward.Body[0].(*parse.FunctionCall)
 
-	c := checker.New("main.ard", result.Program, nil)
+	c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 	c.Check()
 	if len(c.Diagnostics()) != 1 {
 		t.Fatalf("diagnostics = %#v, want one", c.Diagnostics())
@@ -1633,7 +1633,7 @@ func TestReferenceArgumentMismatchPointsToParameter(t *testing.T) {
 	}
 	declaration := result.Program.Statements[0].(*parse.FunctionDeclaration)
 
-	c := checker.New("main.ard", result.Program, nil)
+	c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 	c.Check()
 	if len(c.Diagnostics()) != 1 {
 		t.Fatalf("diagnostics = %#v, want one reference-required error", c.Diagnostics())
@@ -1654,7 +1654,7 @@ func TestGenericArgumentMismatchRetainsParameterProvenance(t *testing.T) {
 	}
 	declaration := result.Program.Statements[0].(*parse.FunctionDeclaration)
 
-	c := checker.New("main.ard", result.Program, nil)
+	c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 	c.Check()
 	if len(c.Diagnostics()) != 1 {
 		t.Fatalf("diagnostics = %#v, want one", c.Diagnostics())
@@ -1673,7 +1673,7 @@ func TestGoFunctionArgumentOmitsSyntheticParameterLabel(t *testing.T) {
 	if len(result.Errors) > 0 {
 		t.Fatalf("parse errors: %v", result.Errors)
 	}
-	c := checker.New("main.ard", result.Program, nil, checker.CheckOptions{GoResolver: standardLibraryGoResolver(t)})
+	c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil, checker.CheckOptions{GoResolver: standardLibraryGoResolver(t)})
 	c.Check()
 	if len(c.Diagnostics()) != 1 {
 		t.Fatalf("diagnostics = %#v, want one", c.Diagnostics())
@@ -1715,7 +1715,7 @@ func TestImportedFunctionArgumentPointsToParameterModule(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c := checker.New(mainPath, mainResult.Program, resolver)
+	c := checker.New(mainPath, checker.WrapStatementRuns(mainResult.Program), resolver)
 	c.Check()
 	if len(c.Diagnostics()) != 1 {
 		t.Fatalf("diagnostics = %#v, want one", c.Diagnostics())
@@ -1740,7 +1740,7 @@ func TestIncorrectFunctionArgumentHasStructuredLabels(t *testing.T) {
 	declaration := result.Program.Statements[0].(*parse.FunctionDeclaration)
 	call := result.Program.Statements[1].(*parse.FunctionCall)
 
-	c := checker.New(filePath, result.Program, nil)
+	c := checker.New(filePath, checker.WrapStatementRuns(result.Program), nil)
 	c.Check()
 	if len(c.Diagnostics()) != 1 {
 		t.Fatalf("diagnostics = %#v, want one", c.Diagnostics())
@@ -1782,7 +1782,7 @@ func TestFunctionReturnMismatchHasStructuredLabels(t *testing.T) {
 	}
 	function := result.Program.Statements[0].(*parse.FunctionDeclaration)
 
-	c := checker.New("main.ard", result.Program, nil)
+	c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 	c.Check()
 	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeTypeMismatch)
 	if diagnostic.Primary.Span.Location != function.Body[0].GetLocation() || diagnostic.Primary.Message != "this expression has type `Bool`" {
@@ -1794,11 +1794,11 @@ func TestFunctionReturnMismatchHasStructuredLabels(t *testing.T) {
 }
 
 func TestIfBranchMismatchHasStructuredLabels(t *testing.T) {
-	result := parse.Parse([]byte("if true {\n  1\n} else {\n  \"no\"\n}\n"), "main.ard")
+	result := parse.Parse([]byte("fn pick() Int {\n  if true {\n    1\n  } else {\n    \"no\"\n  }\n}\n"), "main.ard")
 	if len(result.Errors) > 0 {
 		t.Fatalf("parse errors: %v", result.Errors)
 	}
-	chain := result.Program.Statements[0].(*parse.IfStatement)
+	chain := result.Program.Statements[0].(*parse.FunctionDeclaration).Body[0].(*parse.IfStatement)
 	elseBranch := chain.Else.(*parse.IfStatement)
 
 	c := checker.New("main.ard", result.Program, nil)
@@ -1846,7 +1846,7 @@ func TestValueIfWithoutElseHasStructuredDiagnostic(t *testing.T) {
 	function := result.Program.Statements[0].(*parse.FunctionDeclaration)
 	chain := function.Body[0].(*parse.IfStatement)
 
-	c := checker.New("main.ard", result.Program, nil)
+	c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 	c.Check()
 	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeNonExhaustiveValueIf)
 	if diagnostic.Message != "if used as a value must have an else branch" || diagnostic.Primary.Span.Location != chain.GetLocation() {
@@ -1883,7 +1883,7 @@ func TestInvalidMapKeyTypeHasStructuredDiagnostic(t *testing.T) {
 			if len(result.Errors) > 0 {
 				t.Fatalf("parse errors: %v", result.Errors)
 			}
-			c := checker.New("main.ard", result.Program, nil)
+			c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 			c.Check()
 			diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeInvalidMapKeyType)
 			if diagnostic.Primary.Span.Location != tt.span(result.Program) || diagnostic.Primary.Message != "`[Int]` cannot be used as a map key" {
@@ -1934,7 +1934,7 @@ func TestGenericTypeUsageHasStructuredDiagnostics(t *testing.T) {
 			if len(result.Errors) > 0 {
 				t.Fatalf("parse errors: %v", result.Errors)
 			}
-			c := checker.New("main.ard", result.Program, nil)
+			c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 			c.Check()
 			diagnostic := requireDiagnosticCode(t, c.Diagnostics(), tt.code)
 			if diagnostic.Message != tt.legacyMessage || diagnostic.Primary.Span.FilePath != "main.ard" || diagnostic.Primary.Message == "" {
@@ -1950,7 +1950,7 @@ func TestGenericInstantiationCycleDiagnostics(t *testing.T) {
 		if len(result.Errors) > 0 {
 			t.Fatalf("parse errors: %v", result.Errors)
 		}
-		c := checker.New("main.ard", result.Program, nil)
+		c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 		c.Check()
 		diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeGenericInstantiationCycle)
 		if diagnostic.Message != "Generic instantiation cycle grows type arguments: Chain.next" {
@@ -1963,7 +1963,7 @@ func TestGenericInstantiationCycleDiagnostics(t *testing.T) {
 		if len(result.Errors) > 0 {
 			t.Fatalf("parse errors: %v", result.Errors)
 		}
-		c := checker.New("main.ard", result.Program, nil)
+		c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 		c.Check()
 		count := 0
 		for _, diagnostic := range c.Diagnostics() {
@@ -1981,7 +1981,7 @@ func TestGenericInstantiationCycleDiagnostics(t *testing.T) {
 		if len(result.Errors) > 0 {
 			t.Fatalf("parse errors: %v", result.Errors)
 		}
-		c := checker.New("main.ard", result.Program, nil)
+		c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 		c.Check()
 		requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeGenericInstantiationCycle)
 	})
@@ -1994,7 +1994,7 @@ func TestGenericInstantiationCycleDiagnostics(t *testing.T) {
 		if len(result.Errors) > 0 {
 			t.Fatalf("parse errors: %v", result.Errors)
 		}
-		c := checker.New("main.ard", result.Program, nil)
+		c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 		c.Check()
 		if c.HasErrors() {
 			t.Fatalf("diagnostics = %v, want none", c.Diagnostics())
@@ -2008,7 +2008,7 @@ func TestGenericDeclarationRulesHaveStructuredDiagnostics(t *testing.T) {
 		if len(result.Errors) > 0 {
 			t.Fatalf("parse errors: %v", result.Errors)
 		}
-		c := checker.New("main.ard", result.Program, nil)
+		c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 		c.Check()
 		diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeRecursiveStructLayout)
 		if diagnostic.Message != "Recursive field Node.next has infinite size. "+"Put the recursive reference behind mut, list, map, nullable, trait, or function indirection." {
@@ -2022,7 +2022,7 @@ func TestGenericDeclarationRulesHaveStructuredDiagnostics(t *testing.T) {
 		if len(result.Errors) > 0 {
 			t.Fatalf("parse errors: %v", result.Errors)
 		}
-		c := checker.New("main.ard", result.Program, nil)
+		c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 		c.Check()
 		diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeMethodIntroducedGeneric)
 		if diagnostic.Primary.Message != "`$U` is not a generic parameter of the receiver type" {
@@ -2036,7 +2036,7 @@ func TestUnboundGenericTypeArgumentHasStructuredDiagnostic(t *testing.T) {
 	if len(result.Errors) > 0 {
 		t.Fatalf("parse errors: %v", result.Errors)
 	}
-	c := checker.New("main.ard", result.Program, nil)
+	c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 	c.Check()
 	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeUnboundGenericTypeArg)
 	if diagnostic.Message != "unbound generic type argument $U" || diagnostic.Primary.Message != "`$U` cannot be used as a type argument here" {
@@ -2049,7 +2049,7 @@ func TestStaticFunctionNotTopLevelHasStructuredDiagnostic(t *testing.T) {
 	if len(result.Errors) > 0 {
 		t.Fatalf("parse errors: %v", result.Errors)
 	}
-	c := checker.New("main.ard", result.Program, nil)
+	c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 	c.Check()
 	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeStaticFunctionNotTopLevel)
 	if diagnostic.Message != "static function Box::read must be a top-level declaration" || diagnostic.Primary.Message != "move this static function to the module level" {
@@ -2062,7 +2062,7 @@ func TestUnsupportedLocalGenericFunctionHasStructuredDiagnostic(t *testing.T) {
 	if len(result.Errors) > 0 {
 		t.Fatalf("parse errors: %v", result.Errors)
 	}
-	c := checker.New("main.ard", result.Program, nil)
+	c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 	c.Check()
 	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeUnsupportedLocalGeneric)
 	if diagnostic.Message != "generic local function identity is not supported" || diagnostic.Primary.Message != "local function signatures cannot contain generic parameters" {
@@ -2077,7 +2077,7 @@ func TestBuiltInTypeRedeclarationHasStructuredDiagnostic(t *testing.T) {
 	}
 	declaration := result.Program.Statements[0].(*parse.StructDefinition)
 
-	c := checker.New("main.ard", result.Program, nil)
+	c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 	c.Check()
 	if len(c.Diagnostics()) != 1 {
 		t.Fatalf("diagnostics = %#v, want one", c.Diagnostics())
@@ -2099,7 +2099,7 @@ func TestRecursiveTypeAliasHasStructuredCycleLabels(t *testing.T) {
 	first := result.Program.Statements[0].(*parse.TypeDeclaration)
 	second := result.Program.Statements[1].(*parse.TypeDeclaration)
 
-	c := checker.New("main.ard", result.Program, nil)
+	c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 	c.Check()
 	if len(c.Diagnostics()) != 1 {
 		t.Fatalf("diagnostics = %#v, want one", c.Diagnostics())
@@ -2122,7 +2122,7 @@ func TestRecursiveTypeAliasDirectCycleHasNoSecondaryLabel(t *testing.T) {
 		t.Fatalf("parse errors: %v", result.Errors)
 	}
 	declaration := result.Program.Statements[0].(*parse.TypeDeclaration)
-	c := checker.New("main.ard", result.Program, nil)
+	c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 	c.Check()
 	if len(c.Diagnostics()) != 1 || c.Diagnostics()[0].Code != checker.DiagnosticCodeRecursiveTypeAlias {
 		t.Fatalf("diagnostics = %#v", c.Diagnostics())
@@ -2139,7 +2139,7 @@ func TestNestedRecursiveTypeAliasesHaveCompleteCycleLabels(t *testing.T) {
 	}
 	first := result.Program.Statements[0].(*parse.TypeDeclaration)
 	second := result.Program.Statements[1].(*parse.TypeDeclaration)
-	c := checker.New("main.ard", result.Program, nil)
+	c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 	c.Check()
 	if len(c.Diagnostics()) != 1 || c.Diagnostics()[0].Code != checker.DiagnosticCodeRecursiveTypeAlias {
 		t.Fatalf("diagnostics = %#v", c.Diagnostics())
@@ -2158,7 +2158,7 @@ func TestNestedDirectRecursiveTypeAliasDoesNotPanic(t *testing.T) {
 	if len(result.Errors) > 0 {
 		t.Fatalf("parse errors: %v", result.Errors)
 	}
-	c := checker.New("main.ard", result.Program, nil)
+	c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 	c.Check()
 	if len(c.Diagnostics()) != 1 || c.Diagnostics()[0].Code != checker.DiagnosticCodeRecursiveTypeAlias {
 		t.Fatalf("diagnostics = %#v", c.Diagnostics())
@@ -2170,7 +2170,7 @@ func TestNonRecursiveTypeAliasChainIsAllowed(t *testing.T) {
 	if len(result.Errors) > 0 {
 		t.Fatalf("parse errors: %v", result.Errors)
 	}
-	c := checker.New("main.ard", result.Program, nil)
+	c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 	c.Check()
 	if len(c.Diagnostics()) != 0 {
 		t.Fatalf("diagnostics = %#v, want none", c.Diagnostics())
@@ -2185,7 +2185,7 @@ func TestRecursiveStructLayoutHasStructuredCycleLabels(t *testing.T) {
 	first := result.Program.Statements[0].(*parse.StructDefinition)
 	second := result.Program.Statements[1].(*parse.StructDefinition)
 
-	c := checker.New("main.ard", result.Program, nil)
+	c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 	c.Check()
 	if len(c.Diagnostics()) != 1 {
 		t.Fatalf("diagnostics = %#v, want one", c.Diagnostics())
@@ -2212,7 +2212,7 @@ func TestRecursiveStructLayoutExpandsGenericApplications(t *testing.T) {
 		if len(result.Errors) > 0 {
 			t.Fatalf("parse errors: %v", result.Errors)
 		}
-		c := checker.New("main.ard", result.Program, nil)
+		c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 		c.Check()
 		requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeRecursiveStructLayout)
 	}
@@ -2228,7 +2228,7 @@ func TestRecursiveStructLayoutAllowsIndirectRecursion(t *testing.T) {
 		if len(result.Errors) > 0 {
 			t.Fatalf("parse errors: %v", result.Errors)
 		}
-		c := checker.New("main.ard", result.Program, nil)
+		c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 		c.Check()
 		if len(c.Diagnostics()) != 0 {
 			t.Fatalf("diagnostics = %#v, want none", c.Diagnostics())
@@ -2243,7 +2243,7 @@ func TestRecursiveStructLayoutDistinguishesSiblingGenericApplications(t *testing
 		if len(result.Errors) > 0 {
 			t.Fatalf("parse errors: %v", result.Errors)
 		}
-		c := checker.New("main.ard", result.Program, nil)
+		c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 		c.Check()
 		requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeRecursiveStructLayout)
 	}
@@ -2259,7 +2259,7 @@ func TestStructMapKeysAreStructurallyComparable(t *testing.T) {
 		if len(result.Errors) > 0 {
 			t.Fatalf("parse errors: %v", result.Errors)
 		}
-		c := checker.New("main.ard", result.Program, nil)
+		c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 		c.Check()
 		requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeInvalidMapKeyType)
 		for _, diagnostic := range c.Diagnostics() {
@@ -2283,7 +2283,7 @@ func TestFailedGoImportHasStructuredDiagnostic(t *testing.T) {
 		t.Fatalf("parse errors: %v", result.Errors)
 	}
 
-	c := checker.New(filePath, result.Program, nil, checker.CheckOptions{GoResolver: failingGoResolver{}})
+	c := checker.New(filePath, checker.WrapStatementRuns(result.Program), nil, checker.CheckOptions{GoResolver: failingGoResolver{}})
 	c.Check()
 	if len(c.Diagnostics()) != 1 {
 		t.Fatalf("diagnostics = %#v, want one", c.Diagnostics())
@@ -2316,7 +2316,7 @@ func TestFailedArdImportHasStructuredDiagnostic(t *testing.T) {
 		t.Fatalf("parse errors: %v", result.Errors)
 	}
 
-	c := checker.New(filePath, result.Program, resolver, checker.CheckOptions{ModulePath: "app/main"})
+	c := checker.New(filePath, checker.WrapStatementRuns(result.Program), resolver, checker.CheckOptions{ModulePath: "app/main"})
 	c.Check()
 	if len(c.Diagnostics()) != 1 {
 		t.Fatalf("diagnostics = %#v, want one", c.Diagnostics())
@@ -2358,7 +2358,7 @@ func TestCircularImportHasStructuredDiagnostic(t *testing.T) {
 	aResult := parse.Parse([]byte("use app/b\n"), filepath.Join(root, "a.ard"))
 	bResult := parse.Parse([]byte("use app/a\n"), filepath.Join(root, "b.ard"))
 
-	c := checker.New(filePath, result.Program, resolver, checker.CheckOptions{ModulePath: "app/main"})
+	c := checker.New(filePath, checker.WrapStatementRuns(result.Program), resolver, checker.CheckOptions{ModulePath: "app/main"})
 	c.Check()
 	if len(c.Diagnostics()) != 1 {
 		t.Fatalf("diagnostics = %#v, want one", c.Diagnostics())
@@ -2400,7 +2400,7 @@ func TestModuleLoadFailureHasStructuredDiagnostic(t *testing.T) {
 		t.Fatalf("parse errors: %v", result.Errors)
 	}
 
-	c := checker.New(filePath, result.Program, resolver, checker.CheckOptions{ModulePath: "app/main"})
+	c := checker.New(filePath, checker.WrapStatementRuns(result.Program), resolver, checker.CheckOptions{ModulePath: "app/main"})
 	c.Check()
 	if len(c.Diagnostics()) != 1 {
 		t.Fatalf("diagnostics = %#v, want one", c.Diagnostics())
@@ -2443,7 +2443,7 @@ func TestImportFailuresLeaveResolverReadyForLaterChecks(t *testing.T) {
 		if len(result.Errors) > 0 {
 			t.Fatalf("parse errors: %v", result.Errors)
 		}
-		c := checker.New(filePath, result.Program, resolver, checker.CheckOptions{ModulePath: modulePath})
+		c := checker.New(filePath, checker.WrapStatementRuns(result.Program), resolver, checker.CheckOptions{ModulePath: modulePath})
 		c.Check()
 		return c.Diagnostics()
 	}
@@ -2466,7 +2466,7 @@ func TestDuplicateImportHasStructuredLabels(t *testing.T) {
 		t.Fatalf("parse errors: %v", result.Errors)
 	}
 
-	c := checker.New(filePath, result.Program, nil)
+	c := checker.New(filePath, checker.WrapStatementRuns(result.Program), nil)
 	c.Check()
 	if len(c.Diagnostics()) != 1 {
 		t.Fatalf("diagnostics = %#v, want one", c.Diagnostics())
@@ -2496,7 +2496,7 @@ func TestDuplicateStructFieldHasStructuredLabels(t *testing.T) {
 		t.Fatalf("parse errors: %v", result.Errors)
 	}
 
-	c := checker.New(filePath, result.Program, nil)
+	c := checker.New(filePath, checker.WrapStatementRuns(result.Program), nil)
 	c.Check()
 	if len(c.Diagnostics()) != 1 {
 		t.Fatalf("diagnostics = %#v, want one", c.Diagnostics())
@@ -2527,7 +2527,7 @@ func TestDuplicateTopLevelTypeDeclarationHasStructuredLabels(t *testing.T) {
 		t.Fatalf("parse errors: %v", result.Errors)
 	}
 
-	c := checker.New(filePath, result.Program, nil)
+	c := checker.New(filePath, checker.WrapStatementRuns(result.Program), nil)
 	c.Check()
 	if len(c.Diagnostics()) != 1 {
 		t.Fatalf("diagnostics = %#v, want one", c.Diagnostics())
@@ -2563,7 +2563,7 @@ func TestDuplicateTopLevelTypesPointBackToFirstDeclaration(t *testing.T) {
 	}
 	first := result.Program.Statements[0].(*parse.StructDefinition).Name.GetLocation()
 
-	c := checker.New("main.ard", result.Program, nil)
+	c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 	c.Check()
 	if len(c.Diagnostics()) != 2 {
 		t.Fatalf("diagnostics = %#v, want two", c.Diagnostics())
@@ -2590,7 +2590,7 @@ func TestAnnotatedBindingTypeMismatchHasStructuredLabels(t *testing.T) {
 		t.Fatalf("statement = %T, want *parse.VariableDeclaration", result.Program.Statements[0])
 	}
 
-	c := checker.New(filePath, result.Program, nil)
+	c := checker.New(filePath, checker.WrapStatementRuns(result.Program), nil)
 	c.Check()
 	if len(c.Diagnostics()) != 1 {
 		t.Fatalf("diagnostics = %#v, want one", c.Diagnostics())

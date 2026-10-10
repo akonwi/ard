@@ -226,6 +226,25 @@ func TestCLIFailureOutput(t *testing.T) {
 		}
 	})
 
+	// `main` is a program's only entry point (#533).
+	t.Run("run without main", func(t *testing.T) {
+		projectDir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"example\"\nard = \">= 0.27.0\"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		libPath := filepath.Join(projectDir, "lib.ard")
+		if err := os.WriteFile(libPath, []byte("fn helper() Int { 1 }\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		_, stderr, err := runCLIForTest(t, "run", libPath)
+		if err == nil {
+			t.Fatal("run succeeded; expected failure")
+		}
+		if !strings.Contains(stderr, "lib.ard has no `main` function") {
+			t.Fatalf("stderr missing missing-main error:\n%s", stderr)
+		}
+	})
+
 	t.Run("rendered parse diagnostic", func(t *testing.T) {
 		projectDir := t.TempDir()
 		if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"example\"\nard = \">= 0.27.0\"\n"), 0o644); err != nil {
@@ -870,6 +889,11 @@ func TestBuildRejectsInvalidMainEntrypointSignature(t *testing.T) {
 			  1
 			}`,
 			wantErr: "main entrypoint must return Void, got Int",
+		},
+		{
+			name:    "missing main",
+			source:  `fn helper() Int { 1 }`,
+			wantErr: "main.ard has no `main` function",
 		},
 	}
 

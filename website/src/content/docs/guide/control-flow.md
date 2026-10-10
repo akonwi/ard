@@ -330,7 +330,7 @@ for item in items {
 
 ## Deferred Cleanup
 
-Use `defer` to schedule cleanup work for the end of the current function, method, closure, or script. Deferred work runs in last-in-first-out order and still runs when `try` returns early.
+Use `defer` to schedule cleanup work for the end of the current function, method, or closure. Deferred work runs in last-in-first-out order and still runs when `try` returns early.
 
 ```ard
 fn read_file(path: Str) Str!Str {

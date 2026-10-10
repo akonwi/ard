@@ -90,7 +90,7 @@ writable.sort(fn(a, b) { a < b })`,
 		if len(result.Errors) > 0 {
 			t.Fatalf("parse errors: %v", result.Errors)
 		}
-		c := New("test.ard", result.Program, nil)
+		c := New("test.ard", WrapStatementRuns(result.Program), nil)
 		c.Check()
 		if !c.HasErrors() {
 			t.Fatalf("expected checker error for:\n%s", source)

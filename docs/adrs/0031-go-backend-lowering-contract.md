@@ -94,7 +94,7 @@ Two modules in different directories whose basenames sanitize to the same Go pac
 Ard has no concept of a "main module": any module may define an entry. By default the backend does not transpile an Ard module into `package main`. Instead:
 
 - Every Ard module — including one that defines an entry — lowers to an ordinary importable package under the normal rules. An Ard `fn main` is just a public function and lowers to an exported `Main` in its own package.
-- When the program has an entry root (AIR `Entry`) or a top-level-statement script root (AIR `Script`), the backend generates a separate, fully synthetic root `package main` whose only responsibility is to call the entry package's root:
+- When the program has an entry root (AIR `Entry`), the backend generates a separate, fully synthetic root `package main` whose only responsibility is to call the entry package's root:
 
 ```go
 package main
@@ -106,8 +106,7 @@ func main() {
 }
 ```
 
-- For a script root, the synthetic `main` calls the entry module's generated script root function instead.
-- A library project with no entry or script root emits no synthetic `main` package; it is just a set of importable packages.
+- A library project with no entry root emits no synthetic `main` package; it is just a set of importable packages. ADR 0075 removed script roots for top-level statements.
 
 This keeps `package main` decoupled from Ard source: entry selection is a property of lowering, not of any module's name.
 
@@ -287,7 +286,7 @@ Initialization order relies on Go's package-level variable initialization: decla
 
 A `mut` global receives no special treatment beyond being an unexported package variable; it is ordinary package state, as in Ard today. Assignments to a `mut` global from function bodies lower to ordinary Go package-variable assignments.
 
-In a script-root module, all module-level variable initializers — `let` and `mut` alike — run at package initialization time, before any top-level statements execute. Top-level statements observe fully initialized module variables and never interleave with their initializers.
+All module-level variable initializers — `let` and `mut` alike — run at package initialization time, before `main` runs. Modules contain no top-level executable statements (ADR 0075), so initializers never interleave with other module-level code.
 
 ### Functions and methods
 

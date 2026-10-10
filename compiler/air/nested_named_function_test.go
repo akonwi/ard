@@ -61,8 +61,7 @@ func TestValidateRejectsMalformedLocalFunctionBinding(t *testing.T) {
 				Result: &Expr{Kind: ExprConstInt, Type: 1, Payload: &TextExprPayload{Value: "1"}},
 			},
 		}},
-		Entry:  0,
-		Script: NoFunction,
+		Entry: 0,
 	}
 	if err := Validate(program); err == nil || !strings.Contains(err.Error(), "local function binding must be a closure-valued let") {
 		t.Fatalf("Validate error = %v, want malformed local function binding", err)

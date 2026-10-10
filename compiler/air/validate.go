@@ -189,9 +189,6 @@ func Validate(program *Program) error {
 	if program.Entry != NoFunction && !validFunctionID(program, program.Entry) {
 		return fmt.Errorf("invalid entry function id %d", program.Entry)
 	}
-	if program.Script != NoFunction && !validFunctionID(program, program.Script) {
-		return fmt.Errorf("invalid script function id %d", program.Script)
-	}
 	for _, test := range program.Tests {
 		if !validFunctionID(program, test.Function) {
 			return fmt.Errorf("test %s references invalid function %d", test.Name, test.Function)

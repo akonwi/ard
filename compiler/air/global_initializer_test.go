@@ -144,8 +144,7 @@ func TestValidateRejectsMalformedGlobalInitializerLocals(t *testing.T) {
 						Value:  test.value,
 					},
 				}},
-				Entry:  NoFunction,
-				Script: NoFunction,
+				Entry: NoFunction,
 			}
 			err := Validate(program)
 			if err == nil || !strings.Contains(err.Error(), test.wantErr) {

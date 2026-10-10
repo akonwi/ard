@@ -128,6 +128,7 @@ const (
 	DiagnosticCodeGoTypeInstantiationFailure    DiagnosticCode = "go_type_instantiation_failure"
 	DiagnosticCodeInvalidGoFunctionValue        DiagnosticCode = "invalid_go_function_value"
 	DiagnosticCodeInvalidDefer                  DiagnosticCode = "invalid_defer"
+	DiagnosticCodeTopLevelStatement             DiagnosticCode = "top_level_statement"
 	DiagnosticCodeInvalidBreak                  DiagnosticCode = "invalid_break"
 	DiagnosticCodeNonBooleanLoopCondition       DiagnosticCode = "non_boolean_loop_condition"
 	DiagnosticCodeInvalidForInitializer         DiagnosticCode = "invalid_for_initializer"
@@ -1745,6 +1746,20 @@ func (d invalidGoFunctionValueDiagnostic) build() Diagnostic {
 	}
 	diagnostic := newLabeledDiagnostic(Error, d.LegacyMessage, "Go function cannot be used as a value", d.Detail, DiagnosticLabel{Span: d.Span, Message: message})
 	diagnostic.Code = DiagnosticCodeInvalidGoFunctionValue
+	return diagnostic
+}
+
+type topLevelStatementDiagnostic struct {
+	Span SourceSpan
+}
+
+func (d topLevelStatementDiagnostic) build() Diagnostic {
+	diagnostic := newLabeledDiagnostic(Error,
+		"executable statements are not allowed at the top level of a module",
+		"Top-level statement",
+		"Only declarations may appear at the top level of a module: `let`, `mut`, functions, types, traits, and impls. Program code runs from `fn main()`.",
+		DiagnosticLabel{Span: d.Span, Message: "move this into `main` or another function"})
+	diagnostic.Code = DiagnosticCodeTopLevelStatement
 	return diagnostic
 }
 

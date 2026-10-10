@@ -46,7 +46,6 @@ type Program struct {
 	Tests         []Test
 	Functions     []Function
 	Entry         FunctionID
-	Script        FunctionID
 }
 
 type Module struct {
@@ -82,7 +81,6 @@ type Function struct {
 	Captures  []Capture
 	Body      Block
 	IsTest    bool
-	IsScript  bool
 	Private   bool
 
 	// TypeParams names the generic parameters for a generic function definition

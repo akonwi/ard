@@ -86,7 +86,7 @@ func main() {
 				reportCLIError(os.Stderr, err)
 				os.Exit(1)
 			}
-			if err := validateEntrypointSignature(profile, program); err != nil {
+			if err := validateEntrypoint(profile, inputPath, program); err != nil {
 				reportCLIError(os.Stderr, err)
 				os.Exit(1)
 			}
@@ -1711,7 +1711,7 @@ func buildGoBinaryWithOptions(inputPath string, outputPath string, buildOptions 
 	}); err != nil {
 		return "", err
 	}
-	if err := validateEntrypointSignature(profile, program); err != nil {
+	if err := validateEntrypoint(profile, inputPath, program); err != nil {
 		return "", err
 	}
 	if outputPath == "" {
@@ -1731,8 +1731,13 @@ func buildGoBinaryWithOptions(inputPath string, outputPath string, buildOptions 
 	return builtPath, nil
 }
 
-func validateEntrypointSignature(profile *pipelineProfile, program *air.Program) error {
+// validateEntrypoint requires the program run or built from inputPath to
+// define a valid `main`, its only entry point (#533).
+func validateEntrypoint(profile *pipelineProfile, inputPath string, program *air.Program) error {
 	return profile.Time("air.validate_entrypoint", func() error {
+		if program.Entry == air.NoFunction {
+			return fmt.Errorf("%s has no `main` function; define `fn main()` as the program's entry point", inputPath)
+		}
 		return air.ValidateEntrypointSignature(program)
 	})
 }

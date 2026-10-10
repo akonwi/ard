@@ -365,7 +365,7 @@ impl Named for Native {
 	if len(result.Errors) > 0 {
 		t.Fatalf("parse errors: %v", result.Errors)
 	}
-	checked := checker.New("test.ard", result.Program, nil, checker.CheckOptions{GoResolver: resolver})
+	checked := checker.New("test.ard", checker.WrapStatementRuns(result.Program), nil, checker.CheckOptions{GoResolver: resolver})
 	checked.Check()
 	for _, diagnostic := range checked.Diagnostics() {
 		if diagnostic.Code == checker.DiagnosticCodeGoConstraintViolation {
@@ -384,7 +384,7 @@ func assertGoReferenceCheckerResult(t *testing.T, source string, resolver *check
 	if strings.Contains(source, ".@") && !containsParsedDeref(reflect.ValueOf(result.Program)) {
 		t.Fatal("parser did not produce a dereference expression")
 	}
-	checked := checker.New("test.ard", result.Program, nil, checker.CheckOptions{GoResolver: resolver})
+	checked := checker.New("test.ard", checker.WrapStatementRuns(result.Program), nil, checker.CheckOptions{GoResolver: resolver})
 	checked.Check()
 	if wantError {
 		targetRow := lastSourceRow(source)

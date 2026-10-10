@@ -1406,7 +1406,7 @@ func rootFunction(program *air.Program) (air.FunctionID, error) {
 	if rootID, ok := findRootFunction(program); ok {
 		return rootID, nil
 	}
-	return air.NoFunction, fmt.Errorf("AIR program has no entry or script function")
+	return air.NoFunction, fmt.Errorf("AIR program has no entry function")
 }
 
 func findRootFunction(program *air.Program) (air.FunctionID, bool) {
@@ -1415,9 +1415,6 @@ func findRootFunction(program *air.Program) (air.FunctionID, bool) {
 	}
 	if program.Entry != air.NoFunction {
 		return program.Entry, true
-	}
-	if program.Script != air.NoFunction {
-		return program.Script, true
 	}
 	return air.NoFunction, false
 }

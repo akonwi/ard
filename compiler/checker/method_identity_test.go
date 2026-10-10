@@ -21,7 +21,7 @@ func TestStructMethodsAreStoredInProgramSideTable(t *testing.T) {
 	if len(result.Errors) > 0 {
 		t.Fatalf("parse error: %s", result.Errors[0].Message)
 	}
-	c := New("test.ard", result.Program, nil)
+	c := New("test.ard", WrapStatementRuns(result.Program), nil)
 	c.Check()
 	if c.HasErrors() {
 		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
@@ -66,7 +66,7 @@ func TestStructSideTableMethodUsesGenericBindingsFromNestedFields(t *testing.T) 
 	if len(result.Errors) > 0 {
 		t.Fatalf("parse error: %s", result.Errors[0].Message)
 	}
-	c := New("test.ard", result.Program, nil)
+	c := New("test.ard", WrapStatementRuns(result.Program), nil)
 	c.Check()
 	if c.HasErrors() {
 		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
@@ -113,7 +113,7 @@ func TestTransitiveGenericStructMethodUsesOwnerDefinition(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c := New(filepath.Join(tempDir, "main.ard"), result.Program, resolver)
+	c := New(filepath.Join(tempDir, "main.ard"), WrapStatementRuns(result.Program), resolver)
 	c.Check()
 	if !c.HasErrors() {
 		t.Fatal("checker succeeded; expected generic method argument error")
@@ -151,7 +151,7 @@ func TestExplicitTypeArgsCannotOverrideReceiverGenericMethod(t *testing.T) {
 	if len(result.Errors) > 0 {
 		t.Fatalf("parse error: %s", result.Errors[0].Message)
 	}
-	c := New("test.ard", result.Program, nil)
+	c := New("test.ard", WrapStatementRuns(result.Program), nil)
 	c.Check()
 	if !c.HasErrors() {
 		t.Fatal("checker succeeded; expected explicit receiver-generic method type arg error")
@@ -178,7 +178,7 @@ func TestMethodsCannotIntroduceGenericParams(t *testing.T) {
 	if len(result.Errors) > 0 {
 		t.Fatalf("parse error: %s", result.Errors[0].Message)
 	}
-	c := New("test.ard", result.Program, nil)
+	c := New("test.ard", WrapStatementRuns(result.Program), nil)
 	c.Check()
 	if !c.HasErrors() {
 		t.Fatal("checker succeeded; expected method generic parameter error")
@@ -195,7 +195,7 @@ func TestUnboundGenericExplicitCallTypeArgIsRejected(t *testing.T) {
 	if len(result.Errors) > 0 {
 		t.Fatalf("parse error: %s", result.Errors[0].Message)
 	}
-	c := New("test.ard", result.Program, nil)
+	c := New("test.ard", WrapStatementRuns(result.Program), nil)
 	c.Check()
 	if !c.HasErrors() {
 		t.Fatal("checker succeeded; expected unbound explicit type arg error")
@@ -218,7 +218,7 @@ func TestNestedFunctionCannotUseOuterGenericAsExplicitTypeArg(t *testing.T) {
 	if len(result.Errors) > 0 {
 		t.Fatalf("parse error: %s", result.Errors[0].Message)
 	}
-	c := New("test.ard", result.Program, nil)
+	c := New("test.ard", WrapStatementRuns(result.Program), nil)
 	c.Check()
 	if !c.HasErrors() {
 		t.Fatal("checker succeeded; expected outer generic type arg to be rejected in nested function")
@@ -241,7 +241,7 @@ func TestClosureCannotUseOuterGenericAsExplicitTypeArg(t *testing.T) {
 	if len(result.Errors) > 0 {
 		t.Fatalf("parse error: %s", result.Errors[0].Message)
 	}
-	c := New("test.ard", result.Program, nil)
+	c := New("test.ard", WrapStatementRuns(result.Program), nil)
 	c.Check()
 	if !c.HasErrors() {
 		t.Fatal("checker succeeded; expected outer generic type arg to be rejected in closure")
@@ -284,7 +284,7 @@ func TestGenericStructReceiverBindingInExplicitCallbackParameter(t *testing.T) {
 	if len(result.Errors) > 0 {
 		t.Fatalf("parse error: %s", result.Errors[0].Message)
 	}
-	c := New("test.ard", result.Program, nil)
+	c := New("test.ard", WrapStatementRuns(result.Program), nil)
 	c.Check()
 	if c.HasErrors() {
 		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
@@ -324,7 +324,7 @@ func TestGenericStructReceiverBindingInInferredCallbackParameter(t *testing.T) {
 	if len(result.Errors) > 0 {
 		t.Fatalf("parse error: %s", result.Errors[0].Message)
 	}
-	c := New("test.ard", result.Program, nil)
+	c := New("test.ard", WrapStatementRuns(result.Program), nil)
 	c.Check()
 	if c.HasErrors() {
 		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
@@ -364,7 +364,7 @@ func TestGenericStructReceiverBindingInCallbackParameterStillRejectsMismatch(t *
 	if len(result.Errors) > 0 {
 		t.Fatalf("parse error: %s", result.Errors[0].Message)
 	}
-	c := New("test.ard", result.Program, nil)
+	c := New("test.ard", WrapStatementRuns(result.Program), nil)
 	c.Check()
 	if !c.HasErrors() {
 		t.Fatal("checker succeeded; expected callback state type mismatch")
@@ -392,7 +392,7 @@ func TestExplicitGenericStructTypeArgumentsRemainDistinctWithoutGenericFields(t 
 	if len(result.Errors) > 0 {
 		t.Fatalf("parse error: %s", result.Errors[0].Message)
 	}
-	c := New("test.ard", result.Program, nil)
+	c := New("test.ard", WrapStatementRuns(result.Program), nil)
 	c.Check()
 	if !c.HasErrors() {
 		t.Fatal("checker succeeded; expected distinct explicit struct type arguments to mismatch")
@@ -442,7 +442,7 @@ func TestExplicitGenericStructCanUseTypeParamOnlyInMethods(t *testing.T) {
 	if len(result.Errors) > 0 {
 		t.Fatalf("parse error: %s", result.Errors[0].Message)
 	}
-	c := New("test.ard", result.Program, nil)
+	c := New("test.ard", WrapStatementRuns(result.Program), nil)
 	c.Check()
 	if c.HasErrors() {
 		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
