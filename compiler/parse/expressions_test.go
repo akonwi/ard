@@ -616,6 +616,52 @@ func TestParenthesizedExpressions(t *testing.T) {
 
 	runTests(t, tests)
 }
+
+// Modulo shares precedence and left associativity with `*` and `/`. (#530)
+func TestModuloPrecedence(t *testing.T) {
+	num := func(v string) *NumLiteral { return &NumLiteral{Value: v} }
+	bin := func(op Operator, l, r Expression) *BinaryExpression {
+		return &BinaryExpression{Operator: op, Left: l, Right: r}
+	}
+	program := func(s Statement) Program {
+		return Program{Imports: []Import{}, Statements: []Statement{s}}
+	}
+
+	tests := []test{
+		{
+			name:   "modulo binds tighter than trailing addition",
+			input:  `7 % 3 + 1`,
+			output: program(bin(Plus, bin(Modulo, num("7"), num("3")), num("1"))),
+		},
+		{
+			name:   "modulo binds tighter than trailing subtraction",
+			input:  `7 % 3 - 1`,
+			output: program(bin(Minus, bin(Modulo, num("7"), num("3")), num("1"))),
+		},
+		{
+			name:   "modulo binds tighter than leading addition",
+			input:  `1 + 7 % 3`,
+			output: program(bin(Plus, num("1"), bin(Modulo, num("7"), num("3")))),
+		},
+		{
+			name:   "modulo then multiply is left associative",
+			input:  `7 % 3 * 2`,
+			output: program(bin(Multiply, bin(Modulo, num("7"), num("3")), num("2"))),
+		},
+		{
+			name:   "multiply then modulo is left associative",
+			input:  `2 * 7 % 3`,
+			output: program(bin(Modulo, bin(Multiply, num("2"), num("7")), num("3"))),
+		},
+		{
+			name:   "chained modulo is left associative",
+			input:  `20 % 7 % 4`,
+			output: program(bin(Modulo, bin(Modulo, num("20"), num("7")), num("4"))),
+		},
+	}
+
+	runTests(t, tests)
+}
 func TestMemberAccess(t *testing.T) {
 	runTests(t, []test{
 		{
