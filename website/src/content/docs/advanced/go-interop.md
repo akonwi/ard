@@ -367,6 +367,19 @@ let error: Error = AppError{message: "request failed"}
 
 `Error::new("message")` creates a simple Go-compatible error. An explicit `impl Error` emits Go's `Error() string` method, so the Ard struct can be passed directly to Go APIs accepting `error`.
 
+A Go value whose method set implements `error` is an `Error` under Go's assignability rules. As at any Go interface destination, a `&T` or `&mut T` pointer contributes Go's pointer method set, so a pointer to `os::PathError`, whose `Error` method has a pointer receiver, is an `Error`, while a plain `os::PathError` value is not:
+
+```ard
+use go:io/fs
+use go:os
+
+fn missing(path: Str) Error {
+  &mut os::PathError{Op: "open", Path: path, Err: fs::ErrNotExist}
+}
+```
+
+The resulting `Error` is the original Go value, with its concrete type and pointer identity, so `errors.Is` and `errors.As` see through it.
+
 Conventional Go error returns preserve the original interface value: Go `error` becomes `Void!Error`, and `(T, error)` becomes `T!Error`. Error-returning Go callbacks use the corresponding `!Error` Ard function types. Ard functions returning `Void!Error` or `T!Error` use Go's idiomatic error return ABI and forward the underlying error value directly.
 
 This preservation keeps sentinel identity, concrete error types, and unwrap chains available to APIs such as Go's `errors.Is`:
