@@ -3521,6 +3521,16 @@ func (c *Checker) interfaceConversion(expected Type, actual Expression) (Express
 		return &InterfaceConversion{Value: actual, Destination: expected, Mode: mode}, true
 	}
 
+	// Builtin Error is Go's `error`. A Go value that implements it converts
+	// like any other Go interface destination: a foreign pointer is already a
+	// Go pointer and passes its identity directly (#513).
+	if trait, ok := expected.(*Trait); ok && IsBuiltinError(trait) {
+		if actualForeign, ok := actualBase.(*ForeignType); ok && (!reference || actualForeign.Pointer) && actualForeign.implementsGoError() {
+			return &InterfaceConversion{Value: actual, Destination: expected, Mode: InterfaceValue}, true
+		}
+		return nil, false
+	}
+
 	iface, ok := expected.(*ForeignType)
 	if !ok || !iface.Interface {
 		return nil, false

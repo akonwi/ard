@@ -151,7 +151,23 @@ func (f *ForeignType) equal(other Type) bool {
 	return true
 }
 
-func (f *ForeignType) hasTrait(trait *Trait) bool { return false }
+// hasTrait reports Ard trait conformance for a foreign type. Ard impls cannot
+// target foreign types, so only builtin Error applies: it is Go's predeclared
+// `error`, which Go values satisfy under Go's own rules (#513).
+func (f *ForeignType) hasTrait(trait *Trait) bool {
+	return IsBuiltinError(trait) && f.implementsGoError()
+}
+
+// goErrorType is Go's predeclared `error` interface, which builtin Error
+// represents.
+var goErrorType = types.Universe.Lookup("error").Type()
+
+// implementsGoError reports whether the Go value f represents is assignable to
+// Go's `error`. A pointer form's Go type is `*T`, so Go's pointer method set
+// applies, as it does when a `&T` or `&mut T` reaches any Go interface.
+func (f *ForeignType) implementsGoError() bool {
+	return f != nil && f.Target == "go" && f.GoType != nil && types.AssignableTo(f.GoType, goErrorType)
+}
 
 // EmptyInterface reports whether f is a Go interface type with an empty
 // method set (for example `type Event interface{}`). Any value is assignable
