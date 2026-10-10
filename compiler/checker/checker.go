@@ -6792,13 +6792,22 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 						// A mutable-reference lvalue (e.g. a `mut T` field read that
 						// deref's to its value type) auto-borrows back into `mut T` so a
 						// stored Go pointer handle can satisfy an interface/pointer field
-						// (ADR 0031).
-						if borrowed := c.checkExpr(property.Value); borrowed != nil {
+						// (ADR 0031). The retry is speculative: if it does not produce an
+						// accepted borrow, discard its diagnostics so failures already
+						// reported by the first attempt are not duplicated.
+						retryDiagCount := len(c.diagnostics)
+						retrySpansMark := c.spansMark()
+						borrowed := c.checkExpr(property.Value)
+						if borrowed != nil {
 							if refType := referenceArgType(borrowed); !validationEqualTypes(refType, borrowed.Type()) && c.areCompatible(fieldExpected, refType) {
 								c.diagnostics = c.diagnostics[:diagCount]
 								c.spansTruncate(spansMark)
 								val = borrowed
 							}
+						}
+						if val == nil {
+							c.diagnostics = c.diagnostics[:retryDiagCount]
+							c.spansTruncate(retrySpansMark)
 						}
 					}
 				}
@@ -8782,7 +8791,6 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 			Name: s.Name,
 			Span: c.sourceSpan(s.GetLocation()),
 		}.build())
-		c.halted = true
 		return nil
 	case *parse.FunctionValueCall:
 		{
