@@ -176,9 +176,11 @@ A `mut Slice<T>` reference projects to a compatible Go `[]T` parameter, with cap
 ## Numeric Conversions
 
 Numeric conversions are spelled as static functions on the **target** type, and
-the spelling depends on whether the conversion can lose information. Exactly
-one of the three compiles for any given pair, so a lossy conversion always
-announces itself:
+the spelling depends on whether the conversion can lose information. `from`
+compiles only for lossless pairs, so a conversion that can lose information
+always announces itself with `try` (checked) or `fit` (forced). Most lossy
+pairs accept either; integer → float conversions only accept `fit`, and
+conversions into `Rune` only accept `try`:
 
 | spelling | meaning | result |
 | --- | --- | --- |
