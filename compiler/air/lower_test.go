@@ -1679,6 +1679,69 @@ fn main() Str {
 		t.Fatalf("event_name result = %#v, want ExprLoadGlobal", featureFn.Body.Result)
 	}
 }
+
+// Module-level `mut` in an imported module is private module state, lowered
+// as a mutable global owned by that module like the root module's. (#517)
+func TestLowerImportedModuleFunctionCanAssignModuleLevelMut(t *testing.T) {
+	tempDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tempDir, "feature.ard"), []byte(`
+mut counter = 0
+
+fn bump() Int {
+  counter = counter + 1
+  counter
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(tempDir, "main.ard")
+	result := parse.Parse([]byte(`
+use app/feature
+
+fn main() Int {
+  feature::bump()
+}
+`), mainPath)
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse error: %s", result.Errors[0].Message)
+	}
+	resolver, err := checker.NewModuleResolver(tempDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := checker.New(mainPath, result.Program, resolver)
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
+	}
+
+	program, err := Lower(c.Module())
+	if err != nil {
+		t.Fatalf("lower error: %v", err)
+	}
+
+	if len(program.Globals) != 1 {
+		t.Fatalf("global count = %d, want 1", len(program.Globals))
+	}
+	global := program.Globals[0]
+	if global.Name != "counter" || !global.Mutable || !global.Private {
+		t.Fatalf("global = %#v, want mutable private counter", global)
+	}
+	if owner := program.Modules[global.Module].Path; owner != "app/feature" {
+		t.Fatalf("global owner = %q, want app/feature", owner)
+	}
+	bump := findFunction(t, program, "bump")
+	if len(bump.Body.Stmts) != 1 || bump.Body.Stmts[0].Kind != StmtAssignGlobal || bump.Body.Stmts[0].Global != global.ID {
+		t.Fatalf("bump stmts = %#v, want assignment to global %d", bump.Body.Stmts, global.ID)
+	}
+	if bump.Body.Result == nil || bump.Body.Result.Kind != ExprLoadGlobal {
+		t.Fatalf("bump result = %#v, want ExprLoadGlobal", bump.Body.Result)
+	}
+}
+
 func TestLowerContextualReturnOnlyGenericStaticCall(t *testing.T) {
 	program := lowerSource(t, `
 		struct Key<$T> {

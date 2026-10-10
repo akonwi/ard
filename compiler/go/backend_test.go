@@ -2769,6 +2769,68 @@ fn main() {
 		t.Fatalf("RunProgram error = %v", err)
 	}
 }
+
+// Module-level `mut` in an imported module is private module state shared
+// by every importer: functions can read it, assign it, and borrow it. (#517)
+func TestRunProgramSupportsImportedModuleLevelMut(t *testing.T) {
+	tempDir := t.TempDir()
+	files := map[string]string{
+		"ard.toml": "name = \"app\"\nard = \">= 0.1.0\"\n",
+		"lib.ard": `
+struct Box { number: Int }
+
+mut shared = Box{number: 7}
+mut calls = 0
+
+fn read() Int { shared.number }
+
+fn bump() Int {
+  calls = calls + 1
+  let box = &mut shared
+  box.number = box.number + 1
+  calls
+}
+`,
+		"helper.ard": `
+use app/lib
+
+fn bump_twice() {
+  lib::bump()
+  lib::bump()
+}
+`,
+		"main.ard": `
+use app/helper
+use app/lib
+
+fn main() {
+  if lib::read() != 7 { panic("initial read = {lib::read()}") }
+  helper::bump_twice()
+  let calls = lib::bump()
+  if calls != 3 { panic("calls = {calls}") }
+  if lib::read() != 10 { panic("read after bumps = {lib::read()}") }
+}
+`,
+	}
+	for name, contents := range files {
+		if err := os.WriteFile(filepath.Join(tempDir, name), []byte(contents), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mainPath := filepath.Join(tempDir, "main.ard")
+	loaded, err := frontend.LoadModule(mainPath)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower error: %v", err)
+	}
+	if err := RunProgram(program, []string{"ard", "run", mainPath}); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
+
 func TestRunProgramSupportsModuleGlobalInitializerCallingInstanceMethod(t *testing.T) {
 	program := lowerSource(t, `
 		struct Source {}
