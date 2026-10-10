@@ -472,6 +472,15 @@ Some programs need manual changes:
 
 - `&mut` of a `let` binding is rejected. For a local binding, the rewrite
   tool changes the binding to `mut`.
+- Borrowing a value parameter is rewritten by adding `mut name = name` at the
+  start of its function or closure body, then changing the borrow to
+  `&mut name`. This preserves the parameter slot across loops and rewrites
+  multiple borrows with one shadow. Captures of an outer parameter remain
+  manual because changing closure capture storage is not mechanical.
+- At a Go `[]T` or `map[K]V` parameter, an immutable legacy `mut value` is
+  rewritten to `value`: descriptor parameters accept ordinary values. A
+  writable operand stays `&mut value` to preserve the explicit mutation
+  intent. Go `*[]T` and `*map[K]V` parameters still require `&mut`.
 - Borrowing a module-level `let` has no direct replacement. ADR 0021 keeps
   module-level `mut` bindings out of scope for imported modules, so the binding
   cannot become a writable place. Store a pointer in the binding instead:
@@ -485,6 +494,8 @@ Some programs need manual changes:
 - `mut` applied to a trait-typed place, which captured the current interface
   value under ADR 0061, has no direct replacement. Store a `mut Trait` value
   instead.
+- Non-`mut` method receivers remain manual; they are not ordinary parameter
+  bindings that can be safely shadowed.
 
 Following ADR 0060, the migration spans two releases:
 
