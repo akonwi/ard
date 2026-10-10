@@ -178,6 +178,11 @@ type Diagnostic struct {
 	Primary   DiagnosticLabel
 	Secondary []DiagnosticLabel
 
+	// Dependency names the dependency package whose module produced this
+	// diagnostic. It is empty for the root project. Presentation layers use
+	// it to quiet warnings the user cannot fix locally.
+	Dependency string
+
 	fixes []TextEdit
 }
 

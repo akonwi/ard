@@ -293,3 +293,56 @@ func TestRenderFallsBackWhenSourceIsUnavailable(t *testing.T) {
 		t.Fatalf("output = %q, want %q", output.String(), want)
 	}
 }
+
+func TestRenderSummarizesDependencyWarnings(t *testing.T) {
+	at := func(file string) checker.DiagnosticLabel {
+		return checker.DiagnosticLabel{Span: checker.SourceSpan{FilePath: file, Location: parse.Location{Start: parse.Point{Row: 1, Col: 1}, End: parse.Point{Row: 1, Col: 1}}}}
+	}
+	diags := []checker.Diagnostic{
+		{Kind: checker.Warn, Title: "root warning", Primary: at("main.ard")},
+		{Kind: checker.Warn, Title: "dram warning one", Primary: at("dram.ard"), Dependency: "dram"},
+		{Kind: checker.Warn, Title: "sql warning", Primary: at("sql.ard"), Dependency: "sql"},
+		{Kind: checker.Error, Title: "sql error", Primary: at("sql.ard"), Dependency: "sql"},
+		{Kind: checker.Warn, Title: "dram warning two", Primary: at("dram.ard"), Dependency: "dram"},
+	}
+	provider := func(string) ([]byte, error) { return []byte("x\n"), nil }
+
+	var quiet bytes.Buffer
+	if err := diagnostics.RenderWithOptions(&quiet, diags, provider, diagnostics.RenderOptions{Color: diagnostics.ColorNever}); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"warning: root warning", "error: sql error", "warning: 3 warnings from dependencies not shown: dram (2), sql (1)\n"} {
+		if !strings.Contains(quiet.String(), want) {
+			t.Fatalf("output missing %q:\n%s", want, quiet.String())
+		}
+	}
+	for _, hidden := range []string{"dram warning", "sql warning"} {
+		if strings.Contains(quiet.String(), hidden) {
+			t.Fatalf("output should hide %q:\n%s", hidden, quiet.String())
+		}
+	}
+	if !strings.HasSuffix(quiet.String(), "dram (2), sql (1)\n") {
+		t.Fatalf("summary should be last:\n%s", quiet.String())
+	}
+
+	var single bytes.Buffer
+	if err := diagnostics.RenderWithOptions(&single, diags[1:2], provider, diagnostics.RenderOptions{Color: diagnostics.ColorNever}); err != nil {
+		t.Fatal(err)
+	}
+	if single.String() != "warning: 1 warning from dependencies not shown: dram (1)\n" {
+		t.Fatalf("single summary = %q", single.String())
+	}
+
+	var verbose bytes.Buffer
+	if err := diagnostics.RenderWithOptions(&verbose, diags, provider, diagnostics.RenderOptions{Color: diagnostics.ColorNever, ShowDependencyWarnings: true}); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"dram warning one", "dram warning two", "sql warning"} {
+		if !strings.Contains(verbose.String(), want) {
+			t.Fatalf("verbose output missing %q:\n%s", want, verbose.String())
+		}
+	}
+	if strings.Contains(verbose.String(), "not shown") {
+		t.Fatalf("verbose output should not summarize:\n%s", verbose.String())
+	}
+}

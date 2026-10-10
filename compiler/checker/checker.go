@@ -1337,8 +1337,12 @@ func (c *Checker) Check() {
 			if len(diagnostics) > 0 {
 				// Add all diagnostics from the imported module
 				hasErrors := false
+				dependency, isDependency := c.moduleResolver.DependencyPackageName(resolved.PackageID)
 				for _, diag := range diagnostics {
 					diag = reanchorCircularImportDiagnostic(diag, c.sourceSpan(imp.PathLocation))
+					if isDependency && diag.Dependency == "" {
+						diag.Dependency = dependency
+					}
 					c.diagnostics = append(c.diagnostics, diag)
 					hasErrors = hasErrors || diag.Kind == Error
 				}

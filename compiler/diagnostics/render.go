@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"unicode"
@@ -26,6 +27,10 @@ const (
 
 type RenderOptions struct {
 	Color ColorMode
+	// ShowDependencyWarnings renders warnings from dependency packages in
+	// full. By default they are replaced by one summary line, since the user
+	// cannot fix them until the dependency publishes a new version.
+	ShowDependencyWarnings bool
 }
 
 const (
@@ -75,7 +80,12 @@ func Render(w io.Writer, diagnostics []checker.Diagnostic, source SourceProvider
 
 func RenderWithOptions(w io.Writer, diagnostics []checker.Diagnostic, source SourceProvider, options RenderOptions) error {
 	color := colorEnabled(w, options.Color)
-	for i, diagnostic := range diagnostics {
+	shown := diagnostics
+	var hidden []checker.Diagnostic
+	if !options.ShowDependencyWarnings {
+		shown, hidden = splitDependencyWarnings(diagnostics)
+	}
+	for i, diagnostic := range shown {
 		if i > 0 {
 			if _, err := fmt.Fprintln(w); err != nil {
 				return err
@@ -85,7 +95,56 @@ func RenderWithOptions(w io.Writer, diagnostics []checker.Diagnostic, source Sou
 			return err
 		}
 	}
-	return nil
+	if len(hidden) == 0 {
+		return nil
+	}
+	if len(shown) > 0 {
+		if _, err := fmt.Fprintln(w); err != nil {
+			return err
+		}
+	}
+	style := diagnosticStyle(checker.Warn, color)
+	_, err := fmt.Fprintf(w, "%swarning: %s%s\n", style.header, dependencyWarningSummary(hidden), style.reset())
+	return err
+}
+
+func splitDependencyWarnings(diagnostics []checker.Diagnostic) (shown, hidden []checker.Diagnostic) {
+	for _, diagnostic := range diagnostics {
+		if diagnostic.Dependency != "" && diagnostic.Kind == checker.Warn {
+			hidden = append(hidden, diagnostic)
+		} else {
+			shown = append(shown, diagnostic)
+		}
+	}
+	return shown, hidden
+}
+
+// dependencyWarningSummary describes hidden dependency warnings, listing
+// packages from most to fewest warnings.
+func dependencyWarningSummary(hidden []checker.Diagnostic) string {
+	counts := map[string]int{}
+	var names []string
+	for _, diagnostic := range hidden {
+		if counts[diagnostic.Dependency] == 0 {
+			names = append(names, diagnostic.Dependency)
+		}
+		counts[diagnostic.Dependency]++
+	}
+	sort.SliceStable(names, func(i, j int) bool {
+		if counts[names[i]] != counts[names[j]] {
+			return counts[names[i]] > counts[names[j]]
+		}
+		return names[i] < names[j]
+	})
+	parts := make([]string, len(names))
+	for i, name := range names {
+		parts[i] = fmt.Sprintf("%s (%d)", name, counts[name])
+	}
+	noun := "warnings"
+	if len(hidden) == 1 {
+		noun = "warning"
+	}
+	return fmt.Sprintf("%d %s from dependencies not shown: %s", len(hidden), noun, strings.Join(parts, ", "))
 }
 
 // RenderRelative renders diagnostics with source paths rebased from sourceRoot

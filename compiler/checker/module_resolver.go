@@ -1774,6 +1774,22 @@ func (mr *ModuleResolver) canonicalModulePath(packageID string, packageName stri
 }
 
 // GetProjectInfo returns the current project information
+// DependencyPackageName reports the name of the dependency package with the
+// given ID. It returns false for the root project and unknown packages.
+func (mr *ModuleResolver) DependencyPackageName(packageID string) (string, bool) {
+	if mr == nil || mr.project == nil || packageID == "" || packageID == mr.project.RootPackageID {
+		return "", false
+	}
+	pkg, ok := mr.project.Packages[packageID]
+	if !ok {
+		return "", false
+	}
+	if pkg.Name == "" {
+		return packageID, true
+	}
+	return pkg.Name, true
+}
+
 func (mr *ModuleResolver) GetProjectInfo() *ProjectInfo {
 	return mr.project
 }
