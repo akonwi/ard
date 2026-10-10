@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted
+Accepted. Partially superseded by ADR 0074: critical errors no longer halt
+checking; already reported failures are represented with a checker error type.
 
 ## Context
 

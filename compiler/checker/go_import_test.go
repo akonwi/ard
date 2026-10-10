@@ -1156,7 +1156,6 @@ fn describe(value: Any) Str {
 }`,
 			diagnostics: []checker.Diagnostic{
 				{Kind: checker.Error, Message: "Match on a dynamic value requires a catch-all '_' case because the type set is open"},
-				{Kind: checker.Error, Message: "Type mismatch: Expected Str, got Void"},
 			},
 		},
 		{

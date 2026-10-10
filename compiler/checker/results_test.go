@@ -111,7 +111,6 @@ func TestResults(t *testing.T) {
 			}`,
 			diagnostics: []checker.Diagnostic{
 				{Kind: checker.Error, Message: `Type mismatch: Expected Str, got Bool`},
-				{Kind: checker.Error, Message: `Type mismatch: Expected Int!Str, got Void`},
 			},
 		},
 		{
@@ -450,7 +449,6 @@ func TestTry(t *testing.T) {
 				}`,
 			diagnostics: []checker.Diagnostic{
 				{Kind: checker.Error, Message: "Type mismatch: Expected Int, got Str"},
-				{Kind: checker.Error, Message: "Type mismatch: Expected Str, got Void"},
 			},
 		},
 		{
@@ -461,7 +459,6 @@ func TestTry(t *testing.T) {
 				}`,
 			diagnostics: []checker.Diagnostic{
 				{Kind: checker.Error, Message: "Undefined function: nonexistent_func"},
-				{Kind: checker.Error, Message: "Type mismatch: Expected Str, got Void"},
 			},
 		},
 		{

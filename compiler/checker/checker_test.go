@@ -77,6 +77,7 @@ var compareOptions = cmp.Options{
 	cmpopts.SortMaps(func(a, b string) bool { return a < b }),
 	cmpopts.IgnoreFields(checker.BoolMatch{}, "ResultType"),
 	cmpopts.IgnoreFields(checker.If{}, "ResultType"),
+	cmpopts.IgnoreFields(checker.Block{}, "failedFinal"),
 	cmpopts.IgnoreFields(checker.Parameter{}, "Loc", "declaredAt"),
 	// Legacy table tests assert the compatibility message. Each migrated
 	// diagnostic family must assert its structured fields in diagnostics_test.go.
@@ -2476,7 +2477,6 @@ func TestMatchArmScope(t *testing.T) {
 			}, "\n"),
 			diagnostics: []checker.Diagnostic{
 				{Kind: checker.Error, Message: "Undefined variable: y"},
-				{Kind: checker.Error, Message: "Type mismatch: Expected Int, got Void"},
 			},
 		},
 		{
@@ -2493,7 +2493,6 @@ func TestMatchArmScope(t *testing.T) {
 			}, "\n"),
 			diagnostics: []checker.Diagnostic{
 				{Kind: checker.Error, Message: "Undefined variable: value"},
-				{Kind: checker.Error, Message: "Type mismatch: Expected Int, got Void"},
 			},
 		},
 	})
