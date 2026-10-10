@@ -1462,11 +1462,22 @@ test fn uses_alpha() Void!Str {
 }
 `,
 		filepath.Join(app, "test", "b.ard"): `use ard/testing
+use app
 use beta
 use app/two
 
 test fn uses_beta() Void!Str {
-  testing::assert(beta::answer() == 2, "beta")
+  testing::assert(beta::answer() + app::helper() == 5, "beta")
+}
+`,
+		// The package's root module is both a test entry and imported as
+		// `use app`; its own tests must still run.
+		filepath.Join(app, "app.ard"): `use ard/testing
+
+fn helper() Int { 3 }
+
+test fn in_root() Void!Str {
+  testing::assert(helper() == 3, "root")
 }
 `,
 	}
@@ -1480,13 +1491,14 @@ test fn uses_beta() Void!Str {
 	}
 
 	var ok bool
+	var stdout string
 	stderr := captureStderr(t, func() {
-		captureStdout(t, func() {
+		stdout = captureStdout(t, func() {
 			ok = runTests(app, "", false)
 		})
 	})
-	if !ok {
-		t.Fatalf("expected tests to pass\n%s", stderr)
+	if !ok || !strings.Contains(stdout, "3 passed; 0 failed; 0 panicked") {
+		t.Fatalf("expected all tests to pass\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
 	}
 	if got := strings.Count(stderr, "from dependencies not shown"); got != 1 {
 		t.Fatalf("dependency summary lines = %d, want 1:\n%s", got, stderr)

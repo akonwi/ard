@@ -1454,15 +1454,15 @@ func loadGoTestModules(profile *pipelineProfile, inputPath string, files []strin
 		}
 		var collected []checker.Diagnostic
 		for _, path := range files {
-			c := checkGoTestModule(path, parsedFiles[path], resolver, projectInfo, goResolver)
-			collected = append(collected, c.Diagnostics()...)
-			if c.HasErrors() {
+			checked := checkGoTestModule(path, parsedFiles[path], resolver, projectInfo, goResolver)
+			collected = append(collected, checked.Diagnostics...)
+			if checked.HasErrors() {
 				if err := renderTestDiagnostics(collected, root); err != nil {
 					return err
 				}
 				return diagnostics.AlreadyReported(fmt.Errorf("type errors"))
 			}
-			module := c.Module()
+			module := checked.Module
 			loaded = append(loaded, loadedGoTestModule{
 				module: module,
 				tests:  collectTests(module, path, filter),
@@ -1475,7 +1475,10 @@ func loadGoTestModules(profile *pipelineProfile, inputPath string, files []strin
 	return loaded, projectInfo, nil
 }
 
-func checkGoTestModule(path string, program *parse.Program, resolver *checker.ModuleResolver, projectInfo *checker.ProjectInfo, goResolver checker.GoPackageResolver) *checker.Checker {
+// checkGoTestModule checks a test file as an entry module. Entries share the
+// resolver's import cache, so a project module that is both a test file and
+// another test file's import is checked, and its diagnostics reported, once.
+func checkGoTestModule(path string, program *parse.Program, resolver *checker.ModuleResolver, projectInfo *checker.ProjectInfo, goResolver checker.GoPackageResolver) checker.EntryResult {
 	modulePath := goTestModulePath(projectInfo, path)
 	filePath := path
 	if projectInfo != nil && projectInfo.RootPath != "" {
@@ -1487,67 +1490,23 @@ func checkGoTestModule(path string, program *parse.Program, resolver *checker.Mo
 		}
 	}
 	options := checker.CheckOptions{ModulePath: modulePath, GoResolver: goResolver}
-	c := checker.New(filePath, program, resolver, options)
-	c.Check()
-	return c
+	return checker.CheckEntry(path, filePath, program, resolver, options)
 }
 
 // renderTestDiagnostics renders the diagnostics collected across every test
-// file of a run. A project module can be checked both as a test entry and
-// again as another test file's import (entries are not in the module cache),
-// so identical diagnostics are reported once.
+// file of a run at once, so collapsed-warning summaries cover the whole run.
 func renderTestDiagnostics(collected []checker.Diagnostic, root string) error {
-	unique := dedupeDiagnostics(collected, root)
-	if len(unique) == 0 {
+	if len(collected) == 0 {
 		return nil
 	}
 	displayRoot, err := os.Getwd()
 	if err != nil {
 		displayRoot = root
 	}
-	if err := diagnostics.RenderRelative(os.Stderr, unique, root, displayRoot); err != nil {
+	if err := diagnostics.RenderRelative(os.Stderr, collected, root, displayRoot); err != nil {
 		return fmt.Errorf("render diagnostics: %w", err)
 	}
 	return nil
-}
-
-type diagnosticKey struct {
-	kind       checker.DiagnosticKind
-	code       checker.DiagnosticCode
-	title      string
-	message    string
-	file       string
-	location   parse.Location
-	dependency string
-}
-
-// dedupeDiagnostics drops repeated diagnostics, keeping first-seen order.
-// Entry modules report project-relative paths while imported modules report
-// absolute ones, so paths are resolved against root before comparing.
-func dedupeDiagnostics(collected []checker.Diagnostic, root string) []checker.Diagnostic {
-	seen := make(map[diagnosticKey]bool, len(collected))
-	unique := make([]checker.Diagnostic, 0, len(collected))
-	for _, diagnostic := range collected {
-		file := diagnostic.Primary.Span.FilePath
-		if file != "" && !filepath.IsAbs(file) {
-			file = filepath.Join(root, file)
-		}
-		key := diagnosticKey{
-			kind:       diagnostic.Kind,
-			code:       diagnostic.Code,
-			title:      diagnostic.Title,
-			message:    diagnostic.Message,
-			file:       filepath.Clean(file),
-			location:   diagnostic.Primary.Span.Location,
-			dependency: diagnostic.Dependency,
-		}
-		if seen[key] {
-			continue
-		}
-		seen[key] = true
-		unique = append(unique, diagnostic)
-	}
-	return unique
 }
 
 func goTestModulePath(projectInfo *checker.ProjectInfo, filePath string) string {
