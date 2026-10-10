@@ -804,7 +804,14 @@ func (p printer) renderType(declared parse.DeclaredType) string {
 	case *parse.GenericType:
 		return maybeNullable("$"+node.Name, node.IsNullable())
 	case *parse.MutableType:
-		name := "mut " + p.renderType(node.Inner)
+		prefix := "mut "
+		if node.Pointer {
+			prefix = "&mut "
+			if node.ReadOnly {
+				prefix = "&"
+			}
+		}
+		name := prefix + p.renderType(node.Inner)
 		if node.IsNullable() {
 			return "(" + name + ")?"
 		}
@@ -959,13 +966,13 @@ func (p printer) renderExpressionDoc(expression parse.Expression, parentPreceden
 	case parse.VoidLiteral:
 		return dText("()")
 	case *parse.MutRef:
-		return p.renderMutRefDoc(node.Operand, parentPrecedence)
+		return p.renderMutRefDoc(*node, parentPrecedence)
 	case parse.MutRef:
-		return p.renderMutRefDoc(node.Operand, parentPrecedence)
+		return p.renderMutRefDoc(node, parentPrecedence)
 	case *parse.Deref:
-		return p.renderDerefDoc(node.Operand, parentPrecedence)
+		return p.renderDerefDoc(*node, parentPrecedence)
 	case parse.Deref:
-		return p.renderDerefDoc(node.Operand, parentPrecedence)
+		return p.renderDerefDoc(node, parentPrecedence)
 	case *parse.UnaryExpression:
 		return dText(p.renderUnary(node, parentPrecedence))
 	case parse.UnaryExpression:
@@ -1406,8 +1413,7 @@ func (p printer) renderCallHeadDoc(head doc, headText string, typeArgs []parse.D
 		}
 		value := p.renderExpressionValueDoc(arg.Value, 0)
 		if arg.Spread {
-			switch arg.Value.(type) {
-			case *parse.MutRef, parse.MutRef:
+			if isMutRefExpression(arg.Value) {
 				value = dConcat(dText("("), value, dText(")"))
 			}
 			value = dConcat(value, dText("..."))
@@ -1646,24 +1652,37 @@ const (
 	precedenceCall
 )
 
-func (p printer) renderMutRefDoc(operand parse.Expression, parentPrecedence int) doc {
+func (p printer) renderMutRefDoc(node parse.MutRef, parentPrecedence int) doc {
+	operand := node.Operand
 	operandDoc := p.renderExpressionValueDoc(operand, precedenceUnary)
 	if requiresExplicitPostfixBaseParens(operand) {
 		operandDoc = dConcat(dText("("), operandDoc, dText(")"))
 	}
-	result := dConcat(dText("mut "), operandDoc)
+	operator := "mut "
+	if node.Ampersand {
+		operator = "&mut "
+		if node.ReadOnly {
+			operator = "&"
+		}
+	}
+	result := dConcat(dText(operator), operandDoc)
 	if precedenceUnary < parentPrecedence {
 		return dConcat(dText("("), result, dText(")"))
 	}
 	return result
 }
 
-func (p printer) renderDerefDoc(operand parse.Expression, parentPrecedence int) doc {
+func (p printer) renderDerefDoc(node parse.Deref, parentPrecedence int) doc {
+	operand := node.Operand
 	operandDoc := p.renderExpressionValueDoc(operand, precedenceCall)
 	if requiresExplicitPostfixBaseParens(operand) {
 		operandDoc = dConcat(dText("("), operandDoc, dText(")"))
 	}
-	result := dConcat(operandDoc, dText(".@"))
+	operator := ".@"
+	if node.Star {
+		operator = ".*"
+	}
+	result := dConcat(operandDoc, dText(operator))
 	if precedenceCall < parentPrecedence {
 		return dConcat(dText("("), result, dText(")"))
 	}
@@ -1836,10 +1855,16 @@ func (p printer) indent(level int) string {
 	return strings.Repeat(" ", level*indentWidth)
 }
 
+// isMutRefExpression reports whether expression is a legacy `mut <operand>`
+// reference expression. Its leading `mut` keyword would read as a binding
+// declaration at statement start, so it needs parentheses or inline placement
+// there. The ADR 0073 `&` spelling has no such ambiguity.
 func isMutRefExpression(expression parse.Expression) bool {
-	switch expression.(type) {
-	case *parse.MutRef, parse.MutRef:
-		return true
+	switch e := expression.(type) {
+	case *parse.MutRef:
+		return !e.Ampersand
+	case parse.MutRef:
+		return !e.Ampersand
 	default:
 		return false
 	}

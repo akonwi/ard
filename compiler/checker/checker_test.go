@@ -385,7 +385,7 @@ func TestVariables(t *testing.T) {
 				`}`,
 			}, "\n"),
 			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Cannot mutate 'cur.cursor': it is an ordinary value, not a reference"},
+				{Kind: checker.Error, Message: "Cannot write to 'cur.cursor': it is not a writable place"},
 			},
 		},
 		{
@@ -401,7 +401,7 @@ func TestVariables(t *testing.T) {
 				`}`,
 			}, "\n"),
 			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Cannot mutate 'cur.cursor': it is an ordinary value, not a reference"},
+				{Kind: checker.Error, Message: "Cannot write to 'cur.cursor': it is not a writable place"},
 			},
 		},
 		{
@@ -418,7 +418,7 @@ func TestVariables(t *testing.T) {
 				`}`,
 			}, "\n"),
 			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Cannot mutate 'it.v': it is an ordinary value, not a reference"},
+				{Kind: checker.Error, Message: "Cannot write to 'it.v': it is not a writable place"},
 			},
 		},
 		{
@@ -433,7 +433,7 @@ func TestVariables(t *testing.T) {
 				`}`,
 			}, "\n"),
 			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Cannot mutate 'it.v': it is an ordinary value, not a reference"},
+				{Kind: checker.Error, Message: "Cannot write to 'it.v': it is not a writable place"},
 			},
 		},
 		{
@@ -1860,7 +1860,7 @@ func TestLists(t *testing.T) {
 			  let list = [1,2,3]
 				list.push(4)`,
 			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Cannot call mutating method 'list.push': receiver is not a reference"},
+				{Kind: checker.Error, Message: "Cannot call mutating method 'list.push': receiver is not a writable pointer"},
 			},
 		},
 	})
@@ -2665,7 +2665,7 @@ func TestGenerics(t *testing.T) {
 						self.item = new
 					}
 				}
-				let int_box = mut Box{ item: 42 }
+				let int_box = &mut Box{ item: 42 }
 				let forty_four = int_box.item + 2
 
 				int_box.put(false) // not allowed
@@ -2707,7 +2707,7 @@ func TestGenerics(t *testing.T) {
 						self.second = new
 					}
 				}
-				let pair = mut Pair{ first: 42, second: "hello" }
+				let pair = &mut Pair{ first: 42, second: "hello" }
 				pair.swap_first(100)
 				pair.swap_second("world")
 				pair.swap_first("wrong") // type error

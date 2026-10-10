@@ -25,12 +25,12 @@ Invalid bounds return `none`. Empty ranges, including one at the end, return an 
 
 ## Shared storage
 
-A slice initially shares its selected element storage with its source. Mutating a visible element through a slice reference is observable through the source:
+A slice initially shares its selected element storage with its source. Mutating a visible element through a `&mut Slice<T>` pointer is observable through the source:
 
 ```ard
-let values = mut [10, 20, 30]
-let view = values.slice(start: 1).expect("valid bounds")
-let writable = mut view
+let values = &mut [10, 20, 30]
+mut view = values.slice(start: 1).expect("valid bounds")
+let writable = &mut view
 
 writable.set(0, 99)
 // values is [10, 99, 30]
@@ -64,14 +64,14 @@ Allocate an ordinary growable list and shallow-copy the visible elements. The ne
 
 ### `fn set(index: Int, value: T) Bool`
 
-Replace a visible element through a slice reference. Return `false` when `index` is out of bounds.
+Replace a visible element through a `&mut Slice<T>` pointer. Return `false` when `index` is out of bounds.
 
 ### `fn swap(l: Int, r: Int)`
 
-Swap two visible elements through a slice reference.
+Swap two visible elements through a `&mut Slice<T>` pointer.
 
 ## Go interop
 
-An explicit `mut Slice<T>` can be passed to a compatible Go `[]T` parameter. Go receives a normal slice descriptor whose capacity is restricted to its visible length. Go may mutate or retain the visible elements; this is an explicit FFI trust boundary.
+A `Slice<T>`, or a pointer to one, can be passed to a compatible Go `[]T` parameter. Go receives a normal slice descriptor whose capacity is restricted to its visible length. Go may mutate or retain the visible elements; this is an explicit FFI trust boundary.
 
-Go `*[]T` parameters do not accept `mut Slice<T>` because replacing the descriptor would violate the fixed-length contract.
+Go `*[]T` parameters do not accept a `&mut Slice<T>` because replacing the descriptor would violate the fixed-length contract.

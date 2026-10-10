@@ -69,6 +69,11 @@ const (
 	DiagnosticCodeInvalidDerefOperand           DiagnosticCode = "invalid_deref_operand"
 	DiagnosticCodeInvalidVariadicSpread         DiagnosticCode = "invalid_variadic_spread"
 	DiagnosticCodeNonAddressableBorrow          DiagnosticCode = "non_addressable_borrow"
+	DiagnosticCodePointerToTrait                DiagnosticCode = "pointer_to_trait"
+	DiagnosticCodePointerToPointer              DiagnosticCode = "pointer_to_pointer"
+	DiagnosticCodeNonWritableAddress            DiagnosticCode = "non_writable_address"
+	DiagnosticCodeReadOnlyPointerWrite          DiagnosticCode = "read_only_pointer_write"
+	DiagnosticCodeDeprecatedPointerSyntax       DiagnosticCode = "deprecated_pointer_syntax"
 	DiagnosticCodeValueInteriorMutation         DiagnosticCode = "value_interior_mutation"
 	DiagnosticCodeWholeReferentAssignment       DiagnosticCode = "whole_referent_assignment"
 	DiagnosticCodeReferenceDestination          DiagnosticCode = "reference_destination_requires_reference"
@@ -172,6 +177,13 @@ type Diagnostic struct {
 	Text      string
 	Primary   DiagnosticLabel
 	Secondary []DiagnosticLabel
+
+	// Dependency names the dependency package whose module produced this
+	// diagnostic. It is empty for the root project. Presentation layers use
+	// it to quiet warnings the user cannot fix locally.
+	Dependency string
+
+	fixes []TextEdit
 }
 
 func NewDiagnostic(kind DiagnosticKind, message string, filePath string, location parse.Location) Diagnostic {
@@ -494,10 +506,10 @@ type unsupportedMutableReferenceDiagnostic struct {
 func (d unsupportedMutableReferenceDiagnostic) build() Diagnostic {
 	return mutationDiagnostic(
 		DiagnosticCodeUnsupportedMutableReference,
-		fmt.Sprintf("Cannot take a mutable reference to %s", d.Type),
-		"Unsupported mutable reference",
+		fmt.Sprintf("Cannot take a pointer to %s", d.Type),
+		"Unsupported pointer",
 		"This foreign value has no supported pointer form.",
-		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("`%s` cannot be referenced mutably", d.Type)},
+		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("`%s` cannot be pointed to", d.Type)},
 		nil,
 		"",
 	)
@@ -513,8 +525,8 @@ func (d invalidDerefOperandDiagnostic) build() Diagnostic {
 		DiagnosticCodeInvalidDerefOperand,
 		fmt.Sprintf("Cannot dereference a value of type %s", formatTypeForDisplay(d.Type)),
 		"Invalid dereference operand",
-		"`.@` removes one reference layer, so its operand must be an actual reference value.",
-		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("`%s` is not a reference", formatTypeForDisplay(d.Type))},
+		"`.*` removes one pointer layer, so its operand must be a pointer.",
+		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("`%s` is not a pointer", formatTypeForDisplay(d.Type))},
 		nil,
 		"",
 	)
@@ -527,10 +539,86 @@ type nonAddressableBorrowDiagnostic struct {
 func (d nonAddressableBorrowDiagnostic) build() Diagnostic {
 	return mutationDiagnostic(
 		DiagnosticCodeNonAddressableBorrow,
-		"Cannot take a mutable reference to a non-addressable place",
-		"Cannot take a mutable reference",
+		"Cannot take a pointer to a non-addressable place",
+		"Cannot take a pointer",
 		"A selector on a temporary base has no stable storage to reference. Bind the base first.",
 		DiagnosticLabel{Span: d.Span, Message: "this place has no addressable storage"},
+		nil,
+		"",
+	)
+}
+
+// pointerToTraitDiagnostic reports pointer syntax applied to a trait type
+// (ADR 0073). Trait values are not spelled with pointer syntax; mutation
+// permission on a trait value is spelled `mut Trait`.
+type pointerToTraitDiagnostic struct {
+	Trait Type
+	Span  SourceSpan
+}
+
+func (d pointerToTraitDiagnostic) build() Diagnostic {
+	return mutationDiagnostic(
+		DiagnosticCodePointerToTrait,
+		fmt.Sprintf("Cannot take a pointer to trait %s", formatTypeForDisplay(d.Trait)),
+		"Pointer to a trait",
+		fmt.Sprintf("Trait values are not pointers. Use `mut %s` for a trait value that may call mutating methods, or point to the concrete type instead.", formatTypeForDisplay(d.Trait)),
+		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("`%s` is a trait", formatTypeForDisplay(d.Trait))},
+		nil,
+		"",
+	)
+}
+
+// pointerToPointerDiagnostic reports a pointer to a pointer (ADR 0073).
+type pointerToPointerDiagnostic struct {
+	Pointer Type
+	Span    SourceSpan
+}
+
+func (d pointerToPointerDiagnostic) build() Diagnostic {
+	return mutationDiagnostic(
+		DiagnosticCodePointerToPointer,
+		fmt.Sprintf("Cannot take a pointer to pointer %s", formatTypeForDisplay(d.Pointer)),
+		"Pointer to a pointer",
+		"Pointers to pointers are not supported. Copy a pointer by ordinary assignment.",
+		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("`%s` is already a pointer", formatTypeForDisplay(d.Pointer))},
+		nil,
+		"",
+	)
+}
+
+// nonWritableAddressDiagnostic reports `&mut` applied to a place that is not
+// writable (ADR 0073).
+type nonWritableAddressDiagnostic struct {
+	Span            SourceSpan
+	DeclarationSpan *SourceSpan
+}
+
+func (d nonWritableAddressDiagnostic) build() Diagnostic {
+	return mutationDiagnostic(
+		DiagnosticCodeNonWritableAddress,
+		"Cannot take a writable pointer to a place that is not writable",
+		"Cannot take a writable pointer",
+		"`&mut` requires a writable place: a `mut` binding, a field of a writable place, or a place reached through a `&mut` pointer. Use `&` for a read-only pointer.",
+		DiagnosticLabel{Span: d.Span, Message: "this place is not writable"},
+		d.DeclarationSpan,
+		"declared with `let`",
+	)
+}
+
+// readOnlyPointerWriteDiagnostic reports a write through a read-only `&T`
+// pointer (ADR 0073).
+type readOnlyPointerWriteDiagnostic struct {
+	Pointer Type
+	Span    SourceSpan
+}
+
+func (d readOnlyPointerWriteDiagnostic) build() Diagnostic {
+	return mutationDiagnostic(
+		DiagnosticCodeReadOnlyPointerWrite,
+		fmt.Sprintf("Cannot write through read-only pointer %s", formatTypeForDisplay(d.Pointer)),
+		"Write through a read-only pointer",
+		"A `&T` pointer forbids writes through itself. Use a `&mut T` pointer to write.",
+		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("`%s` is read-only", formatTypeForDisplay(d.Pointer))},
 		nil,
 		"",
 	)
@@ -545,12 +633,12 @@ type valueInteriorMutationDiagnostic struct {
 func (d valueInteriorMutationDiagnostic) build() Diagnostic {
 	return mutationDiagnostic(
 		DiagnosticCodeValueInteriorMutation,
-		fmt.Sprintf("Cannot mutate '%s': it is an ordinary value, not a reference", d.Place),
-		"Interior mutation requires a reference",
-		"Interior mutation flows through an actual `mut T` reference value. A writable binding slot only permits replacing the whole value.",
-		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("`%s` holds an ordinary value", d.Place)},
+		fmt.Sprintf("Cannot write to '%s': it is not a writable place", d.Place),
+		"Write requires a writable place",
+		"A field can be written through a `mut` binding or a `&mut` pointer.",
+		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("`%s` is not writable", d.Place)},
 		d.DeclarationSpan,
-		"declared as an ordinary value here",
+		"declared without `mut` here",
 	)
 }
 
@@ -563,12 +651,12 @@ type wholeReferentAssignmentDiagnostic struct {
 func (d wholeReferentAssignmentDiagnostic) build() Diagnostic {
 	return mutationDiagnostic(
 		DiagnosticCodeWholeReferentAssignment,
-		fmt.Sprintf("Cannot assign through reference '%s': whole-referent assignment is not supported", d.Place),
-		"Cannot assign through a reference",
-		"Ard does not replace a referent through a reference. Rebind the slot with another reference, or mutate the referent's interior.",
-		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("`%s` holds a reference", d.Place)},
+		fmt.Sprintf("Cannot assign a value to pointer '%s'", d.Place),
+		"Pointer slot requires a pointer",
+		fmt.Sprintf("`%s` holds a pointer. Assign another pointer, or replace the pointee with `%s.* = value`.", d.Place, d.Place),
+		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("`%s` holds a pointer", d.Place)},
 		d.DeclarationSpan,
-		"this reference-valued slot was declared here",
+		"this pointer slot was declared here",
 	)
 }
 
@@ -582,9 +670,9 @@ func (d referenceDestinationDiagnostic) build() Diagnostic {
 	return mutationDiagnostic(
 		DiagnosticCodeReferenceDestination,
 		fmt.Sprintf("Type mismatch: Expected %s, got %s", formatTypeForDisplay(d.Expected), formatTypeForDisplay(d.Actual)),
-		"Reference destination requires a reference",
-		"A `mut T` destination accepts only an actual reference value. Use an explicit `mut` expression to create one.",
-		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("expected `%s`, found ordinary `%s`", formatTypeForDisplay(d.Expected), formatTypeForDisplay(d.Actual))},
+		"Pointer destination requires a pointer",
+		"A pointer destination accepts only a pointer. Take one with `&` or `&mut`.",
+		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("expected `%s`, found `%s`", formatTypeForDisplay(d.Expected), formatTypeForDisplay(d.Actual))},
 		nil,
 		"",
 	)
@@ -601,8 +689,8 @@ func (d referenceValueMaterializationDiagnostic) build() Diagnostic {
 		DiagnosticCodeReferenceValueMaterialization,
 		fmt.Sprintf("Type mismatch: Expected %s, got %s", formatTypeForDisplay(d.Expected), formatTypeForDisplay(d.Actual)),
 		"Value destination requires dereference",
-		"References preserve identity in value flow. Use `reference.@` to make an explicit shallow value copy.",
-		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("`%s` is a reference; this destination expects `%s`", formatTypeForDisplay(d.Actual), formatTypeForDisplay(d.Expected))},
+		"Pointers preserve identity in value flow. Use `pointer.*` to make an explicit shallow copy.",
+		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("`%s` is a pointer; this destination expects `%s`", formatTypeForDisplay(d.Actual), formatTypeForDisplay(d.Expected))},
 		nil,
 		"",
 	)
@@ -696,29 +784,29 @@ type referenceReceiverDiagnostic struct {
 }
 
 func (d referenceReceiverDiagnostic) build() Diagnostic {
-	legacy := fmt.Sprintf("Cannot call mutating method '%s.%s': receiver is not a reference", d.Receiver, d.Method)
-	title := "Mutating method requires a reference"
-	primary := fmt.Sprintf("`.%s()` requires an actual reference receiver", d.Method)
+	legacy := fmt.Sprintf("Cannot call mutating method '%s.%s': receiver is not a writable pointer", d.Receiver, d.Method)
+	title := "Mutating method requires a writable pointer"
+	primary := fmt.Sprintf("`.%s()` requires a `&mut` receiver", d.Method)
 	if d.Kind == referenceMaybeReceiver {
-		legacy = fmt.Sprintf("Cannot call Maybe.%s: receiver is not a reference", d.Method)
-		primary = fmt.Sprintf("`Maybe.%s` requires an actual reference receiver", d.Method)
+		legacy = fmt.Sprintf("Cannot call Maybe.%s: receiver is not a writable pointer", d.Method)
+		primary = fmt.Sprintf("`Maybe.%s` requires a `&mut` receiver", d.Method)
 	} else if d.Kind == referencePointerMethodAccess {
-		legacy = fmt.Sprintf("Cannot access pointer receiver method %s.%s on an ordinary value", d.Receiver, d.Method)
-		title = "Pointer receiver method requires a reference"
-		primary = "this method value requires an actual reference receiver"
+		legacy = fmt.Sprintf("Cannot access pointer receiver method %s.%s on a value", d.Receiver, d.Method)
+		title = "Pointer receiver method requires a writable pointer"
+		primary = "this method value requires a `&mut` receiver"
 	} else if d.Kind == referencePointerMethodCall {
-		legacy = fmt.Sprintf("Cannot call pointer receiver method %s.%s on an ordinary value", d.Receiver, d.Method)
-		title = "Pointer receiver method requires a reference"
-		primary = "this method call requires an actual reference receiver"
+		legacy = fmt.Sprintf("Cannot call pointer receiver method %s.%s on a value", d.Receiver, d.Method)
+		title = "Pointer receiver method requires a writable pointer"
+		primary = "this method call requires a `&mut` receiver"
 	}
 	return mutationDiagnostic(
 		DiagnosticCodeValueInteriorMutation,
 		legacy,
 		title,
-		"A writable binding slot does not grant interior access. Create or pass an explicit `mut T` reference.",
+		"Mutating methods need a `&mut` receiver. Take one with `&mut`, or hold the value as a pointer.",
 		DiagnosticLabel{Span: d.Span, Message: primary},
 		d.DeclarationSpan,
-		"this binding stores an ordinary value",
+		"this binding stores a value",
 	)
 }
 
@@ -2067,9 +2155,9 @@ func (d incorrectArgumentTypeDiagnostic) build() Diagnostic {
 	code := DiagnosticCodeIncorrectArgumentType
 	if d.RequiresMutable {
 		code = DiagnosticCodeReferenceDestination
-		title = "Reference parameter requires a reference"
-		text = "A `mut T` parameter accepts only an actual reference value. Pass an existing reference or create one with `mut expression`."
-		primaryMessage = fmt.Sprintf("found ordinary `%s`; this parameter requires `%s`", formatTypeForDisplay(d.Actual), formatTypeForDisplay(d.Expected))
+		title = "Pointer parameter requires a pointer"
+		text = "A pointer parameter accepts only a pointer. Pass an existing pointer or take one with `&` or `&mut`."
+		primaryMessage = fmt.Sprintf("found `%s`; this parameter requires `%s`", formatTypeForDisplay(d.Actual), formatTypeForDisplay(d.Expected))
 	}
 
 	secondary := make([]DiagnosticLabel, 0, 1)

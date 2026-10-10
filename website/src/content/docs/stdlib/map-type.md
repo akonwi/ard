@@ -51,19 +51,19 @@ let names = scores.keys()
 
 ### `fn set(key: K, value: V)`
 
-Set `key` to `value` through a map reference.
+Set `key` to `value` through a `&mut [K: V]` pointer.
 
 ```ard
-let scores = mut ["Ada": 10]
+let scores = &mut ["Ada": 10]
 scores.set("Grace", 12)
 ```
 
 ### `fn delete(key: K)`
 
-Remove `key` through a map reference. Deleting an absent key is allowed.
+Remove `key` through a `&mut [K: V]` pointer. Deleting an absent key is allowed.
 
 ```ard
-let scores = mut ["Ada": 10]
+let scores = &mut ["Ada": 10]
 scores.delete("Ada")
 ```
 

@@ -1742,6 +1742,21 @@ func (p *parser) recoverFromBadType() {
 // they recurse through the reporting parseType and propagate nil upward
 // without adding further diagnostics.
 func (p *parser) tryParseType() DeclaredType {
+	if p.match(ampersand) {
+		ampersandToken := p.previous()
+		writable := p.match(mut)
+		inner := p.parseType()
+		if inner == nil {
+			return nil
+		}
+		return &MutableType{
+			Location: Location{Start: ampersandToken.getLocation().Start, End: inner.GetLocation().End},
+			Inner:    inner,
+			Pointer:  true,
+			ReadOnly: !writable,
+		}
+	}
+
 	if p.match(mut) {
 		mutToken := p.previous()
 		inner := p.parseType()
@@ -1853,12 +1868,17 @@ func (p *parser) tryParseType() DeclaredType {
 		// Parse parameter types
 		paramTypes := []DeclaredType{}
 		paramMutability := []bool{}
+		paramMutLocations := []Location{}
 		variadic := false
 		if hasLeftParen && !p.check(right_paren) {
 			for {
 				isVariadic := p.match(ellipsis)
 				// Skip 'mut' keyword if present (marks mutable parameters in type signatures)
 				isMutable := p.match(mut)
+				var mutLocation Location
+				if isMutable {
+					mutLocation = p.previous().getLocation()
+				}
 				paramType := p.parseType()
 				if paramType == nil {
 					p.recoverFromBadType()
@@ -1869,6 +1889,7 @@ func (p *parser) tryParseType() DeclaredType {
 				}
 				paramTypes = append(paramTypes, paramType)
 				paramMutability = append(paramMutability, isMutable)
+				paramMutLocations = append(paramMutLocations, mutLocation)
 				if isVariadic {
 					variadic = true
 				}
@@ -1890,6 +1911,7 @@ func (p *parser) tryParseType() DeclaredType {
 		}
 		if !hasMutableParam {
 			paramMutability = nil
+			paramMutLocations = nil
 		}
 
 		// Expect closing paren (only if we had opening paren)
@@ -1926,11 +1948,12 @@ func (p *parser) tryParseType() DeclaredType {
 		nullable := p.match(question_mark)
 
 		return &FunctionType{
-			Params:          paramTypes,
-			ParamMutability: paramMutability,
-			Variadic:        variadic,
-			Return:          returnType,
-			Nullable:        nullable,
+			Params:            paramTypes,
+			ParamMutability:   paramMutability,
+			ParamMutLocations: paramMutLocations,
+			Variadic:          variadic,
+			Return:            returnType,
+			Nullable:          nullable,
 			Location: Location{
 				Start: Point{Row: fnToken.line, Col: fnToken.column},
 				End:   Point{Row: p.previous().line, Col: p.previous().column},
@@ -2958,8 +2981,9 @@ func (p *parser) functionDef(asMethod bool, isTest bool) (Statement, error) {
 				continue
 			}
 
-			// `mut` may not prefix a parameter name. Parameter mutability
-			// belongs in the type (`name: mut T`), not before the name.
+			// `mut` may not prefix a parameter name. Parameters are
+			// immutable bindings (ADR 0073): caller-visible mutation uses a
+			// `&mut T` parameter, and local mutation shadows the parameter.
 			// Named functions already reject `mut name: T` via the
 			// missing-colon path, but `consumeVariableName` treats `mut`
 			// as an identifier, so anonymous functions would otherwise
@@ -2967,7 +2991,7 @@ func (p *parser) functionDef(asMethod bool, isTest bool) (Statement, error) {
 			// Reject it explicitly and recover by parsing the real
 			// parameter that follows. (#286)
 			if p.check(mut) {
-				p.addError(p.peek(), "parameter mutability belongs in the type ('name: mut T'), not before the name")
+				p.addError(p.peek(), "parameters are immutable; use a '&mut T' parameter type or shadow it with 'mut name = name'")
 				p.advance() // consume 'mut' and continue with the parameter name
 			}
 			nameToken := p.consumeVariableName("Expected parameter name")
@@ -3068,8 +3092,14 @@ func (p *parser) functionDef(asMethod bool, isTest bool) (Statement, error) {
 }
 
 func (p *parser) structInstance() (Expression, error) {
+	return p.structInstanceOr(p.iterRange)
+}
+
+// structInstanceOr parses a struct literal when one starts here, and
+// otherwise parses the expression with fallback.
+func (p *parser) structInstanceOr(fallback func() (Expression, error)) (Expression, error) {
 	if p.disallowStructInstance {
-		return p.iterRange()
+		return fallback()
 	}
 	// We are in a struct-allowing value position; let a nested `mut <operand>`
 	// pick up struct-literal operands in all forms. (#285)
@@ -3090,7 +3120,7 @@ func (p *parser) structInstance() (Expression, error) {
 	if p.check(identifier, left_brace) {
 		if p.peek().text == "unsafe" {
 			p.index = index
-			return p.iterRange()
+			return fallback()
 		}
 		if !p.check(identifier) {
 			p.addError(p.peek(), "Expected struct name")
@@ -3131,7 +3161,7 @@ func (p *parser) structInstance() (Expression, error) {
 		p.index = index
 	}
 
-	return p.iterRange()
+	return fallback()
 }
 
 // tryGenericStructInstance speculatively parses a struct instantiation with
@@ -3515,23 +3545,50 @@ func (p *parser) multiplication() (Expression, error) {
 	return left, nil
 }
 
+// addressOfOperand parses the operand of `&` or `&mut`. The operator binds
+// like other prefix unary operators: postfix operations belong to the
+// operand, while binary operators apply to the resulting pointer. In a value
+// position, a struct literal is parsed in every form (`&mut Name{}`,
+// `&mut pkg::Name{}`, generic literals); call()'s inline detection only sees
+// non-empty `Name{ field: ... }` on a bare identifier. In subject positions
+// (if/while/for/match) a following `{ ... }` is a block, not a struct. (#285)
+func (p *parser) addressOfOperand() (Expression, error) {
+	if p.structOperandAllowed {
+		return p.structInstanceOr(p.unary)
+	}
+	return p.unary()
+}
+
+// legacyMutRefOperand parses the operand of the legacy `mut <operand>`
+// reference expression, preserving its original broad precedence.
+func (p *parser) legacyMutRefOperand() (Expression, error) {
+	if p.structOperandAllowed {
+		return p.structInstance()
+	}
+	return p.unary()
+}
+
 func (p *parser) unary() (Expression, error) {
+	if p.match(ampersand) {
+		ampersandToken := p.previous()
+		writable := p.match(mut)
+		operand, err := p.addressOfOperand()
+		if err != nil {
+			return nil, err
+		}
+		return &MutRef{
+			Location: Location{
+				Start: ampersandToken.getLocation().Start,
+				End:   operand.GetLocation().End,
+			},
+			Operand:   operand,
+			Ampersand: true,
+			ReadOnly:  !writable,
+		}, nil
+	}
 	if p.match(mut) {
 		mutToken := p.previous()
-		// In a value position, parse the operand through structInstance() so a
-		// struct-literal operand is recognized in every form. call()'s inline
-		// detection only sees non-empty `Name{ field: ... }` on a bare
-		// identifier, so `mut Name{}`, `mut pkg::Name{}`, and generic struct
-		// literals would otherwise leave the braces dangling. In subject
-		// positions (if/while/for/match) a following `{ ... }` is a block, not
-		// a struct, so fall back to the plain unary operand there. (#285)
-		var operand Expression
-		var err error
-		if p.structOperandAllowed {
-			operand, err = p.structInstance()
-		} else {
-			operand, err = p.unary()
-		}
+		operand, err := p.legacyMutRefOperand()
 		if err != nil {
 			return nil, err
 		}
@@ -3607,11 +3664,11 @@ func (p *parser) memberAccess() (Expression, error) {
 
 		if p.previous().kind == dot {
 			dotToken := p.previous()
-			if p.check(at_sign) && adjacent(dotToken.getLocation(), p.peek()) {
-				atToken := p.advance()
+			if (p.check(at_sign) || p.check(star)) && adjacent(dotToken.getLocation(), p.peek()) {
+				operatorToken := p.advance()
 				operatorLocation := Location{
 					Start: Point{Row: dotToken.line, Col: dotToken.column},
-					End:   Point{Row: atToken.line, Col: atToken.column},
+					End:   Point{Row: operatorToken.line, Col: operatorToken.column},
 				}
 				expr = &Deref{
 					Location: Location{
@@ -3620,6 +3677,7 @@ func (p *parser) memberAccess() (Expression, error) {
 					},
 					Operand:          expr,
 					OperatorLocation: operatorLocation,
+					Star:             operatorToken.kind == star,
 				}
 				continue
 			}

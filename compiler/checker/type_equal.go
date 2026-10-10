@@ -202,7 +202,7 @@ func equalTypesSeen(left Type, right Type, context *typeEqualContext) bool {
 		return false
 	case *MutableRef:
 		if r, ok := right.(*MutableRef); ok {
-			return equalTypesSeen(l.of, r.of, context)
+			return l.readOnly == r.readOnly && equalTypesSeen(l.of, r.of, context)
 		}
 		if r, ok := right.(*TypeVar); ok {
 			return (r.actual == nil && context.allowUnboundWildcard) || equalTypesSeen(l, r.actual, context)
@@ -210,7 +210,7 @@ func equalTypesSeen(left Type, right Type, context *typeEqualContext) bool {
 		return false
 	case *ForeignType:
 		r, ok := right.(*ForeignType)
-		if !ok || l.Target != r.Target || l.Namespace != r.Namespace || l.Name != r.Name || l.Pointer != r.Pointer || len(l.TypeArgs) != len(r.TypeArgs) {
+		if !ok || l.Target != r.Target || l.Namespace != r.Namespace || l.Name != r.Name || l.Pointer != r.Pointer || l.ReadOnly != r.ReadOnly || len(l.TypeArgs) != len(r.TypeArgs) {
 			return false
 		}
 		for i := range l.TypeArgs {

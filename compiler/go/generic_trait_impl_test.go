@@ -96,8 +96,8 @@ func TestGenericTraitImplementationCanProjectMutatingSelf(t *testing.T) {
 		}
 
 		fn main() Bool {
-			let box = Box<Str>{marker: "box", number: 1}
-			let reference = mut box
+			mut box = Box<Str>{marker: "box", number: 1}
+			let reference = &mut box
 			let projected = reference.self_ref()
 			projected.set(7)
 			projected == reference and projected.value() == 7 and box.number == 7

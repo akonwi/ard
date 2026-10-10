@@ -123,6 +123,19 @@ func renderTypeAliasDecl(decl *parse.TypeDeclaration) string {
 	return "type " + decl.Name.Name + " = " + strings.Join(parts, " | ")
 }
 
+// mutableTypePrefix renders the pointer (`&`, `&mut `) or legacy reference
+// (`mut `) prefix of a MutableType annotation.
+func mutableTypePrefix(t parse.MutableType) string {
+	switch {
+	case !t.Pointer:
+		return "mut "
+	case t.ReadOnly:
+		return "&"
+	default:
+		return "&mut "
+	}
+}
+
 // typeDeclString renders a parse.DeclaredType as Ard surface syntax.
 func typeDeclString(t parse.DeclaredType) string {
 	if t == nil {
@@ -131,9 +144,9 @@ func typeDeclString(t parse.DeclaredType) string {
 	var s string
 	switch tt := t.(type) {
 	case *parse.MutableType:
-		s = "mut " + typeDeclString(tt.Inner)
+		s = mutableTypePrefix(*tt) + typeDeclString(tt.Inner)
 	case parse.MutableType:
-		s = "mut " + typeDeclString(tt.Inner)
+		s = mutableTypePrefix(tt) + typeDeclString(tt.Inner)
 	case *parse.List:
 		s = "[" + typeDeclString(tt.Element) + "]"
 	case *parse.Map:

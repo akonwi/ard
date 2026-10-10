@@ -3423,6 +3423,8 @@ func (fl *functionLowerer) lowerStmt(stmt checker.Statement) (*Stmt, error) {
 			return fl.lowerForeignFieldAssignment(target, s.Value)
 		case *checker.ForeignValue:
 			return fl.lowerForeignValueAssignment(target, s.Value)
+		case *checker.DerefExpr:
+			return fl.lowerPointeeAssignment(target, s.Value)
 		default:
 			return nil, fmt.Errorf("unsupported AIR assignment target %T", s.Target)
 		}
@@ -5570,10 +5572,11 @@ func (fl *functionLowerer) lowerInstanceProperty(typeID TypeID, prop *checker.In
 }
 
 func (fl *functionLowerer) lowerForeignFieldAssignment(prop *checker.ForeignFieldAccess, valueExpr checker.Expression) (*Stmt, error) {
-	target, err := fl.lowerExpr(prop.Subject)
+	target, err := fl.lowerExpr(fieldAssignmentSubject(prop.Subject))
 	if err != nil {
 		return nil, err
 	}
+	fl.markFieldWriteRootSlot(target)
 	fieldType, err := fl.internResolvedType(prop.Type())
 	if err != nil {
 		return nil, err
@@ -5600,11 +5603,56 @@ func (fl *functionLowerer) lowerForeignValueAssignment(prop *checker.ForeignValu
 	return &Stmt{Kind: StmtSetForeignValue, ForeignTarget: prop.Target, ForeignNamespace: prop.Namespace, ForeignQualifier: prop.Qualifier, ForeignSymbol: prop.Symbol, Type: valueType, Value: value}, nil
 }
 
-func (fl *functionLowerer) lowerFieldAssignment(prop *checker.InstanceProperty, valueExpr checker.Expression) (*Stmt, error) {
-	target, err := fl.lowerExpr(prop.Subject)
+// lowerPointeeAssignment lowers `pointer.* = value` (ADR 0073).
+func (fl *functionLowerer) lowerPointeeAssignment(target *checker.DerefExpr, valueExpr checker.Expression) (*Stmt, error) {
+	if !target.Place {
+		return nil, fmt.Errorf("assignment to non-place dereference %s", target)
+	}
+	pointer, err := fl.lowerExpr(target.Operand)
 	if err != nil {
 		return nil, err
 	}
+	pointeeType, err := fl.internType(target.Type())
+	if err != nil {
+		return nil, err
+	}
+	value, err := fl.lowerExprWithExpected(valueExpr, pointeeType)
+	if err != nil {
+		return nil, err
+	}
+	return &Stmt{Kind: StmtSetPointee, Target: pointer, Type: pointeeType, Value: value}, nil
+}
+
+// fieldAssignmentSubject returns the expression whose storage holds an
+// assigned field. A `pointer.*` place subject writes through the pointer
+// itself rather than through a dereferenced copy (ADR 0073).
+func fieldAssignmentSubject(subject checker.Expression) checker.Expression {
+	if deref, ok := subject.(*checker.DerefExpr); ok && deref.Place {
+		return deref.Operand
+	}
+	return subject
+}
+
+// markFieldWriteRootSlot marks the local whose inline storage a field write
+// modifies as a captured slot, so closures write the binding rather than a
+// copy of it (ADR 0073).
+func (fl *functionLowerer) markFieldWriteRootSlot(target *Expr) {
+	local, ok := referencePlaceRootLocal(target)
+	if !ok || int(local) < 0 || int(local) >= len(fl.fn.Locals) {
+		return
+	}
+	if info, ok := fl.l.typeInfo(fl.fn.Locals[local].Type); ok && (info.Kind == TypeReference || info.Kind == TypeForeignType && info.ForeignPointer) {
+		return
+	}
+	fl.markCaptureSlot(local)
+}
+
+func (fl *functionLowerer) lowerFieldAssignment(prop *checker.InstanceProperty, valueExpr checker.Expression) (*Stmt, error) {
+	target, err := fl.lowerExpr(fieldAssignmentSubject(prop.Subject))
+	if err != nil {
+		return nil, err
+	}
+	fl.markFieldWriteRootSlot(target)
 	targetInfo, ok := fl.l.referentTypeInfo(target.Type)
 	if !ok || targetInfo.Kind != TypeStruct {
 		return nil, fmt.Errorf("field assignment on non-struct AIR type %s", prop.Subject.Type().String())

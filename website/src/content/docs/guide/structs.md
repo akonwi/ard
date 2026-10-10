@@ -193,7 +193,7 @@ impl Person {
 }
 ```
 
-This signature lets the compiler require an actual `mut Person` reference receiver. A writable ordinary binding is not enough: `mut bob = Person{...}` permits replacing `bob`, but it still stores an ordinary value.
+A `fn mut` method needs a `&mut Person` receiver. Calling it does not take the receiver's address implicitly, so hold the value through a pointer, or take one with `&mut`:
 
 ```ard
 struct Person {
@@ -207,33 +207,35 @@ impl Person {
   }
 }
 
-let bob = Person{name: "Bob", age: 30}
-let bob_reference = mut bob
-bob_reference.grow_older() // OK
+let bob = &mut Person{name: "Bob", age: 30}
+bob.grow_older() // OK: bob is a &mut Person
 
 mut alice = Person{name: "Alice", age: 30}
-// alice.grow_older() // Error: alice stores an ordinary Person
-alice = Person{name: "Alice", age: 31} // OK: replaces alice's slot
+alice.age = 31             // OK: field write on a mut binding
+// alice.grow_older()      // Error: requires a &mut Person receiver
+(&mut alice).grow_older()  // OK
 ```
 
-## Reference-valued fields
+Non-mutating methods accept any receiver, including `&Person` and `&mut Person` pointers.
 
-A field typed as `mut T` stores a reference handle. Initialization and rebinding require actual references:
+## Pointer-valued fields
+
+A field typed as `&mut T` or `&T` stores a pointer:
 
 ```ard
 struct Session {
-  user: mut Person,
+  user: &mut Person,
 }
 
-let first = Person{name: "Ada", age: 30}
-let second = Person{name: "Grace", age: 35}
-let session = mut Session{user: mut first}
+mut first = Person{name: "Ada", age: 30}
+mut second = Person{name: "Grace", age: 35}
+mut session = Session{user: &mut first}
 
-session.user.grow_older()
-session.user = mut second
+session.user.grow_older()      // writes first through the pointer
+session.user = &mut second     // repoints the field; needs a writable session
 ```
 
-Copying `session.user` copies its current reference handle. Rebinding the field changes only that field slot; previously copied references keep their original pointee. Use `session.user.@` when an ordinary `Person` field or value is required.
+Writing through a pointer field targets the pointee, so it works even when the containing value is bound with `let`. Replacing the field itself writes the containing value's storage. Copying `session.user` copies the pointer. Use `session.user.*` when a `Person` value is required.
 
 ## Method Privacy
 

@@ -90,7 +90,7 @@ fn embedded_bytes() [Byte] { embed::bytes("asset.bin") }
 
 fn main() {
   if embed::text("page.txt") != "hello\n" { panic("bad embedded text") }
-  let first = mut embedded_bytes()
+  let first = &mut embedded_bytes()
   first.set(0, Byte::from(0))
   let second = embedded_bytes()
   if second.at(0).or(Byte::from(0)) != 104 { panic("embedded bytes shared mutable storage") }
@@ -183,7 +183,7 @@ fn main() {
   if text != "<h1>Hello</h1>\n" { panic("bad text") }
   let bytes = assets.read_file("public/index.html").expect("read bytes")
   if bytes.size() != 15 { panic("bad bytes") }
-  let changed = mut assets.read_file("public/index.html").expect("mutable bytes")
+  let changed = &mut assets.read_file("public/index.html").expect("mutable bytes")
   changed.set(0, Byte::from(0))
   if assets.read_file("public/index.html").expect("fresh bytes").at(0).or(Byte::from(0)) != 60 { panic("read bytes shared storage") }
   if gofs::ReadFile(assets, "public/index.html").expect("direct io/fs").size() != 15 { panic("bad io/fs bridge") }

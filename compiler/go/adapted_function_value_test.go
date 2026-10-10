@@ -215,8 +215,8 @@ fn main() {
 
   // Referenced lists spread without copying through direct, captured, rebound,
   // field, result-adapted, generic, named-function, and named-slice call paths.
-  let spread_values = ["b", "c"]
-  let spread_reference = mut spread_values
+  mut spread_values = ["b", "c"]
+  let spread_reference = &mut spread_values
   if not ffi::Join("a", spread_reference...) == "a:b:c" { panic("direct spread failed") }
   if not join("a", spread_reference...) == "a:b:c" { panic("captured spread failed") }
   if not rebound("a", spread_reference...) == "a:b:c" { panic("rebound spread failed") }
@@ -247,13 +247,13 @@ fn main() {
 
   // Fixed arguments and the spread operand retain source evaluation order.
   ffi::ResetSpreadOrder()
-  if not ffi::Join(ffi::MarkFixed("ordered"), (mut ffi::SpreadValues())...) == "ordered:spread" { panic("ordered direct spread failed") }
+  if not ffi::Join(ffi::MarkFixed("ordered"), (&mut ffi::SpreadValues())...) == "ordered:spread" { panic("ordered direct spread failed") }
   if not ffi::SpreadOrder() == "fs" { panic("fixed/spread evaluation order failed") }
   ffi::ResetSpreadOrder()
-  if not ffi::OrderedJoiner().Join((mut ffi::SpreadValues())...) == "ordered:spread" { panic("ordered receiver spread failed") }
+  if not ffi::OrderedJoiner().Join((&mut ffi::SpreadValues())...) == "ordered:spread" { panic("ordered receiver spread failed") }
   if not ffi::SpreadOrder() == "rs" { panic("receiver/spread evaluation order failed") }
   ffi::ResetSpreadOrder()
-  if not ffi::OrderedJoinFunc()("ordered", (mut ffi::SpreadValues())...) == "ordered:spread" { panic("ordered callee spread failed") }
+  if not ffi::OrderedJoinFunc()("ordered", (&mut ffi::SpreadValues())...) == "ordered:spread" { panic("ordered callee spread failed") }
   if not ffi::SpreadOrder() == "cs" { panic("callee/spread evaluation order failed") }
 
   // Variadic descriptor elements remain explicit references and are
@@ -261,34 +261,34 @@ fn main() {
   if not ffi::SlicesNil() { panic("direct variadic descriptor nil tail lost") }
   let slices_nil = ffi::SlicesNil
   if not slices_nil() { panic("captured variadic descriptor nil tail lost") }
-  let direct_first = ["a"]
-  let direct_second = ["b"]
-  if not ffi::JoinSlices(mut direct_first, mut direct_second) == "ab" { panic("direct variadic descriptor failed") }
+  mut direct_first = ["a"]
+  mut direct_second = ["b"]
+  if not ffi::JoinSlices(&mut direct_first, &mut direct_second) == "ab" { panic("direct variadic descriptor failed") }
   if not direct_first.at(0).or("") == "changed" { panic("direct variadic descriptor mutation lost") }
   let join_slices = ffi::JoinSlices
-  let captured_first = ["c"]
-  let captured_second = ["d"]
-  if not join_slices(mut captured_first, mut captured_second) == "cd" { panic("captured variadic descriptor failed") }
+  mut captured_first = ["c"]
+  mut captured_second = ["d"]
+  if not join_slices(&mut captured_first, &mut captured_second) == "cd" { panic("captured variadic descriptor failed") }
   if not captured_first.at(0).or("") == "changed" { panic("captured variadic descriptor mutation lost") }
 
   // A fixed descriptor parameter still gets its boundary projection while
   // the variadic tail remains repeated.
   let join_list = ffi::JoinList
-  let parts = ["a"]
-  if not join_list(mut parts) == "a" { panic("descriptor variadic zero case failed") }
-  if not join_list(mut parts, "b", "c") == "abc" { panic("descriptor variadic repeated case failed") }
+  mut parts = ["a"]
+  if not join_list(&mut parts) == "a" { panic("descriptor variadic zero case failed") }
+  if not join_list(&mut parts, "b", "c") == "abc" { panic("descriptor variadic repeated case failed") }
 
   // Bound variadic methods have the same call shape and evaluate the receiver once.
   let joiner = ffi::NewJoiner("m")
   let method = joiner.Join
   if not method() == "m" { panic("method variadic zero case failed") }
   if not method("n", "o") == "m:n:o" { panic("method variadic repeated case failed") }
-  let method_values = ["n", "o"]
-  if not method((mut method_values)...) == "m:n:o" { panic("bound method spread failed") }
-  if not joiner.Join((mut method_values)...) == "m:n:o" { panic("direct method spread failed") }
+  mut method_values = ["n", "o"]
+  if not method((&mut method_values)...) == "m:n:o" { panic("bound method spread failed") }
+  if not joiner.Join((&mut method_values)...) == "m:n:o" { panic("direct method spread failed") }
   let method_result = joiner.JoinResult
   if not method_result("p", "q").or("") == "m:p:q" { panic("method variadic result case failed") }
-  if not method_result((mut method_values)...).or("") == "m:n:o" { panic("method result spread failed") }
+  if not method_result((&mut method_values)...).or("") == "m:n:o" { panic("method result spread failed") }
   let empty_method_result = joiner.EmptyResult
   if empty_method_result("x").is_err() { panic("empty method result case failed") }
   let empty_method_maybe = joiner.EmptyMaybe

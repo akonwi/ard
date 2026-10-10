@@ -64,7 +64,7 @@ struct User {}
 
 fn consume(value: Any) {}
 
-fn pass_reference(value: mut $T) {
+fn pass_reference(value: &mut $T) {
   consume(value)
 }
 
@@ -73,8 +73,8 @@ fn pass_value(value: $T) {
 }
 
 fn main() {
-  let user = User{}
-  pass_reference(mut user)
+  mut user = User{}
+  pass_reference(&mut user)
   pass_value(user)
 }
 `)

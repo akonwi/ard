@@ -32,31 +32,47 @@ fn print_message(msg: Str) {
 }
 ```
 
-### Reference parameters
+### Pointer parameters
 
-A `mut T` parameter receives an actual mutable-reference value. Callers must pass an existing reference or create one explicitly with `mut expression`; declaring an ordinary binding with `mut` is not enough.
+Parameters are immutable bindings. A function that changes the caller's value takes a `&mut T` pointer, and the caller passes one explicitly with `&mut`:
 
 ```ard
 struct Person { name: Str, age: Int }
 
-fn grow_older(person: mut Person) {
+fn grow_older(person: &mut Person) {
   person.age =+ 1
 }
 
-let alice = Person{name: "Alice", age: 30}
-grow_older(mut alice)
+mut alice = Person{name: "Alice", age: 30}
+grow_older(&mut alice)
 
-let alice_reference = mut alice
-grow_older(alice_reference)
+let alice_pointer = &mut alice
+grow_older(alice_pointer)
 ```
 
-Reference parameters may mutate fields and call mutating methods, but Ard source does not support replacing a whole referent through the parameter. A function that needs an ordinary value must request `T`; callers with `mut T` use postfix `.@` explicitly.
+A `&T` parameter only reads through the pointer. Callers can pass `&value` or any `&mut T`:
 
 ```ard
-fn snapshot(person: mut Person) Person {
-  person.@
+fn describe(person: &Person) Str {
+  "{person.name} is {person.age}"
+}
+
+describe(&alice)
+```
+
+Postfix `.*` reads the value at a pointer. Through a `&mut T`, it can also replace the whole pointee:
+
+```ard
+fn snapshot(person: &Person) Person {
+  person.*
+}
+
+fn reset(person: &mut Person) {
+  person.* = Person{name: person.name, age: 0}
 }
 ```
+
+A function that only needs its own writable copy shadows the parameter: `mut person = person`.
 
 ## Return Values
 
@@ -208,7 +224,7 @@ let add_two = make_offsetter(2)
 let result = add_two(40) // 42
 ```
 
-Ordinary captured values and existing reference handles are snapshotted when the declaration executes. If the local function assigns to an enclosing mutable binding, it captures that binding's stable slot instead, so the update remains visible outside the function.
+Ordinary captured values, including pointers, are snapshotted when the declaration executes. If the local function assigns to an enclosing mutable binding, it captures that binding's stable slot instead, so the update remains visible outside the function.
 
 Local declarations are visible from their declaration through the remainder of the block. Their own name is available in their body, so direct recursion works, but calls before the declaration and mutual recursion through a later declaration are not supported. When a nested named declaration is the block's final expression, it evaluates to the bound closure just as writing its name after the declaration would.
 

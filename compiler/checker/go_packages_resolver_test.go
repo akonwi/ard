@@ -273,7 +273,7 @@ func TestDefaultGoResolverDoesNotReuseForeignModuleCache(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	serverSource := "use go:net/http\n\nfn handler() mut http::ServeMux { http::NewServeMux() }\n"
+	serverSource := "use go:net/http\n\nfn handler() &mut http::ServeMux { http::NewServeMux() }\n"
 	if err := os.WriteFile(filepath.Join(root, "server.ard"), []byte(serverSource), 0o644); err != nil {
 		t.Fatal(err)
 	}

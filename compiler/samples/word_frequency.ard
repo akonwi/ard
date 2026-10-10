@@ -9,17 +9,17 @@ struct WordCount {
 }
 
 fn count_words(words: [Str]) [WordCount] {
-  let counts = mut Map::new<Int>()
+  let counts = &mut Map::new<Int>()
 
   for word in words {
     counts.set(word, counts.get(word).or(0) + 1)
   }
 
-  let res = mut List::new<WordCount>()
+  let res = &mut List::new<WordCount>()
   for word, count in counts {
     res.push(WordCount{word, count})
   }
-  res.@
+  res.*
 }
 
 fn main() {
@@ -29,7 +29,7 @@ fn main() {
   if scanner.Scan() {
     let text = strings::TrimSpace(scanner.Text())
     let words = strings::Split(text, " ")
-    let word_counts = mut count_words(words)
+    let word_counts = &mut count_words(words)
 
     fmt::Println("\nWord Frequency Analysis:")
     fmt::Println("------------------------")

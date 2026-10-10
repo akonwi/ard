@@ -25,7 +25,7 @@ struct DemoState {
   ticks: Int,
 }
 
-fn read(c: mut ffi::StateCtx) Int {
+fn read(c: &mut ffi::StateCtx) Int {
   let state = ffi::StateValue<DemoState>(c)
   state.ticks
 }`,
@@ -38,7 +38,7 @@ struct DemoState {
   ticks: Int,
 }
 
-fn bump(c: mut ffi::StateCtx) {
+fn bump(c: &mut ffi::StateCtx) {
   let state = ffi::StateRef<DemoState>(c)
   state.ticks = state.ticks + 1
 }`,
@@ -70,7 +70,7 @@ fn forward(value: $W) {
 			name: "infer type arg from later argument",
 			input: `use go:example.com/app/ffi
 
-fn set(c: mut ffi::StateCtx) {
+fn set(c: &mut ffi::StateCtx) {
   ffi::StateSet(c, 42)
 }`,
 		},
@@ -122,8 +122,8 @@ fn empty() {
 			input: `use go:example.com/app/ffi
 
 fn mismatch() {
-  let values = [1, 2]
-  let value: Any = ffi::Or<Any>((mut values)...)
+  mut values = [1, 2]
+  let value: Any = ffi::Or<Any>((&mut values)...)
 }`,
 			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Variadic spread type mismatch: expected [Any], got [Int]"}},
 		},
@@ -141,8 +141,8 @@ fn join() Str {
 			input: `use go:example.com/app/ffi
 
 fn count() Int {
-  let values = ffi::Channels()
-  ffi::CountChannels((mut values)...)
+  mut values = ffi::Channels()
+  ffi::CountChannels((&mut values)...)
 }`,
 		},
 		{
@@ -150,8 +150,8 @@ fn count() Int {
 			input: `use go:example.com/app/ffi
 
 fn count() Int {
-  let values = ffi::CallbacksValue()
-  ffi::CountCallbacks((mut values)...)
+  mut values = ffi::CallbacksValue()
+  ffi::CountCallbacks((&mut values)...)
 }`,
 		},
 		{
@@ -159,8 +159,8 @@ fn count() Int {
 			input: `use go:example.com/app/ffi
 
 fn count() Int {
-  let values = ffi::ArraysValue()
-  ffi::CountArrays((mut values)...)
+  mut values = ffi::ArraysValue()
+  ffi::CountArrays((&mut values)...)
 }`,
 		},
 		{
@@ -168,23 +168,23 @@ fn count() Int {
 			input: `use go:example.com/app/ffi
 
 fn join() {
-  let first = ["a"]
-  let values = [mut first]
-  ffi::JoinSlices((mut values)...)
+  mut first = ["a"]
+  mut values = [&mut first]
+  ffi::JoinSlices((&mut values)...)
 }`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Variadic spread does not support descriptor-reference element type mut [Str]"}},
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Variadic spread does not support descriptor-reference element type &mut [Str]"}},
 		},
 		{
 			name: "descriptor-value element remains rejected after callable assignment",
 			input: `use go:example.com/app/ffi
 
 fn join() {
-  let first = ["a"]
-  let values = [mut first]
-  let join: fn(...mut [Str]) = ffi::JoinSlices
-  join((mut values)...)
+  mut first = ["a"]
+  mut values = [&mut first]
+  let join: fn(...&mut [Str]) = ffi::JoinSlices
+  join((&mut values)...)
 }`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Variadic spread does not support descriptor-reference element type mut [Str]"}},
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Variadic spread does not support descriptor-reference element type &mut [Str]"}},
 		},
 		{
 			name: "pointer-to-named-slice variadic element is conservatively rejected",
@@ -192,27 +192,27 @@ fn join() {
 
 fn join() {
   let first = ffi::StringsRef()
-  let values = [first]
-  ffi::NamedSlicePointers((mut values)...)
+  mut values = [first]
+  ffi::NamedSlicePointers((&mut values)...)
 }`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Variadic spread does not support descriptor-reference element type mut ffi::Strings"}},
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Variadic spread does not support descriptor-reference element type &mut ffi::Strings"}},
 		},
 		{
 			name: "exact pointer-to-descriptor variadic element spread is conservatively rejected",
 			input: `use go:example.com/app/ffi
 
 fn join() {
-  let first = ["a"]
-  let values = [mut first]
-  ffi::SlicePointers((mut values)...)
+  mut first = ["a"]
+  mut values = [&mut first]
+  ffi::SlicePointers((&mut values)...)
 }`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Variadic spread does not support descriptor-reference element type mut [Str]"}},
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Variadic spread does not support descriptor-reference element type &mut [Str]"}},
 		},
 		{
 			name: "reject uninferable call without type args",
 			input: `use go:example.com/app/ffi
 
-fn read(c: mut ffi::StateCtx) {
+fn read(c: &mut ffi::StateCtx) {
   let state = ffi::StateValue(c)
 }`,
 			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Could not infer type argument T for Go function ffi::StateValue"}},
@@ -221,7 +221,7 @@ fn read(c: mut ffi::StateCtx) {
 			name: "reject type args on non-generic Go function",
 			input: `use go:example.com/app/ffi
 
-fn touch(c: mut ffi::StateCtx) {
+fn touch(c: &mut ffi::StateCtx) {
   ffi::Touch<Int>(c)
 }`,
 			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Go function ffi::Touch is not generic"}},
@@ -230,7 +230,7 @@ fn touch(c: mut ffi::StateCtx) {
 			name: "reject wrong number of type args",
 			input: `use go:example.com/app/ffi
 
-fn read(c: mut ffi::StateCtx) {
+fn read(c: &mut ffi::StateCtx) {
   let state = ffi::StateValue<Str, Int>(c)
 }`,
 			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Go function ffi::StateValue expects 1 type argument(s), got 2"}},
@@ -243,10 +243,10 @@ struct DemoState {
   ticks: Int,
 }
 
-fn copy_state(c: mut ffi::StateCtx, c2: mut ffi::StateCtx) {
+fn copy_state(c: &mut ffi::StateCtx, c2: &mut ffi::StateCtx) {
   let state = ffi::StateRef<DemoState>(c)
-  let echoed: mut DemoState = ffi::Identity(state)
-  let snapshot: DemoState = ffi::Identity<DemoState>(state.@)
+  let echoed: &mut DemoState = ffi::Identity(state)
+  let snapshot: DemoState = ffi::Identity<DemoState>(state.*)
   ffi::StateSet(c2, snapshot)
   let ticks: Int = echoed.ticks
 }`,
@@ -259,7 +259,7 @@ struct DemoState {
   ticks: Int,
 }
 
-fn bump(c: mut ffi::StateCtx, other: mut ffi::StateCtx) {
+fn bump(c: &mut ffi::StateCtx, other: &mut ffi::StateCtx) {
   mut state = ffi::StateRef<DemoState>(c)
   state = ffi::StateRef<DemoState>(other)
 }`,

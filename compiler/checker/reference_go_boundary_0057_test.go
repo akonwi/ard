@@ -25,69 +25,69 @@ func TestADR0057GoReferenceBoundaryClassification(t *testing.T) {
 ffi::TakePtr(value)`, wantError: true},
 		{name: "pointer rejects ordinary mut value", source: `mut value = ffi::Item{N: 1}
 ffi::TakePtr(value)`, wantError: true},
-		{name: "pointer accepts explicit reference to let", source: `let value = ffi::Item{N: 1}
-ffi::TakePtr(mut value)`},
-		{name: "slice rejects ordinary mut binding", source: `mut values = [1, 2]
-ffi::TakeSlice(values)`, wantError: true},
-		{name: "slice accepts actual reference", source: `let values = [1, 2]
-ffi::TakeSlice(mut values)`},
-		{name: "fresh slice requires explicit reference", source: `ffi::TakeSlice(mut [1, 2])`},
-		{name: "bare fresh slice is rejected", source: `ffi::TakeSlice([1, 2])`, wantError: true},
-		{name: "map rejects ordinary mut binding", source: `mut values = ["a": 1]
-ffi::TakeMap(values)`, wantError: true},
-		{name: "map accepts actual reference", source: `let values = ["a": 1]
-ffi::TakeMap(mut values)`},
-		{name: "fresh map requires explicit reference", source: `ffi::TakeMap(mut ["a": 1])`},
-		{name: "bare fresh map is rejected", source: `ffi::TakeMap(["a": 1])`, wantError: true},
-		{name: "named slice rejects bare value", source: `let values = [1, 2]
-ffi::TakeNumbers(values)`, wantError: true},
-		{name: "named slice accepts actual reference", source: `let values = [1, 2]
-ffi::TakeNumbers(mut values)`},
-		{name: "named slice accepts fresh literal reference", source: `ffi::TakeNumbers(mut [1, 2])`},
-		{name: "named slice types fresh empty literal", source: `ffi::TakeNumbers(mut [])`},
-		{name: "named slice binding borrow keeps descriptor reference", source: `let values: ffi::Numbers = [1, 2]
-ffi::TakeNumbers(mut values)`},
-		{name: "named map rejects bare value", source: `let values = ["a": 1]
-ffi::TakeScores(values)`, wantError: true},
-		{name: "named map accepts actual reference", source: `let values = ["a": 1]
-ffi::TakeScores(mut values)`},
-		{name: "named map types fresh empty literal", source: `ffi::TakeScores(mut [:])`},
+		{name: "pointer accepts explicit reference to let", source: `mut value = ffi::Item{N: 1}
+ffi::TakePtr(&mut value)`},
+		{name: "slice accepts ordinary mut binding", source: `mut values = [1, 2]
+ffi::TakeSlice(values)`},
+		{name: "slice accepts actual reference", source: `mut values = [1, 2]
+ffi::TakeSlice(&mut values)`},
+		{name: "fresh slice requires explicit reference", source: `ffi::TakeSlice(&mut [1, 2])`},
+		{name: "bare fresh slice is accepted", source: `ffi::TakeSlice([1, 2])`},
+		{name: "map accepts ordinary mut binding", source: `mut values = ["a": 1]
+ffi::TakeMap(values)`},
+		{name: "map accepts actual reference", source: `mut values = ["a": 1]
+ffi::TakeMap(&mut values)`},
+		{name: "fresh map requires explicit reference", source: `ffi::TakeMap(&mut ["a": 1])`},
+		{name: "bare fresh map is accepted", source: `ffi::TakeMap(["a": 1])`},
+		{name: "named slice accepts bare value", source: `let values = [1, 2]
+ffi::TakeNumbers(values)`},
+		{name: "named slice accepts actual reference", source: `mut values = [1, 2]
+ffi::TakeNumbers(&mut values)`},
+		{name: "named slice accepts fresh literal reference", source: `ffi::TakeNumbers(&mut [1, 2])`},
+		{name: "named slice types fresh empty literal", source: `ffi::TakeNumbers(&mut [])`},
+		{name: "named slice binding borrow keeps descriptor reference", source: `mut values: ffi::Numbers = [1, 2]
+ffi::TakeNumbers(&mut values)`},
+		{name: "named map accepts bare value", source: `let values = ["a": 1]
+ffi::TakeScores(values)`},
+		{name: "named map accepts actual reference", source: `mut values = ["a": 1]
+ffi::TakeScores(&mut values)`},
+		{name: "named map types fresh empty literal", source: `ffi::TakeScores(&mut [:])`},
 		{name: "channel remains an ordinary handle", source: `let channel = Chan::new<Int>()
 ffi::TakeChan(channel)`},
-		{name: "pointer to descriptor accepts actual reference", source: `let values = [1, 2]
-ffi::TakeSlicePtr(mut values)`},
-		{name: "Go slice accepts Slice reference", source: `let view = [1, 2].slice().expect("bounds")
-ffi::TakeSlice(mut view)`},
-		{name: "Go slice function value accepts Slice reference", source: `let view = [1, 2].slice().expect("bounds")
+		{name: "pointer to descriptor accepts actual reference", source: `mut values = [1, 2]
+ffi::TakeSlicePtr(&mut values)`},
+		{name: "Go slice accepts Slice reference", source: `mut view = [1, 2].slice().expect("bounds")
+ffi::TakeSlice(&mut view)`},
+		{name: "Go slice function value accepts Slice reference", source: `mut view = [1, 2].slice().expect("bounds")
 let take = ffi::TakeSlice
-take(mut view)`},
-		{name: "Go slice method accepts Slice reference", source: `let view = [1, 2].slice().expect("bounds")
+take(&mut view)`},
+		{name: "Go slice method accepts Slice reference", source: `mut view = [1, 2].slice().expect("bounds")
 let sink = ffi::Sink{}
-sink.Take(mut view)`},
-		{name: "named Go slice accepts Slice reference", source: `let view = [1, 2].slice().expect("bounds")
-ffi::TakeNumbers(mut view)`},
-		{name: "Go pointer to slice rejects Slice reference", source: `let view = [1, 2].slice().expect("bounds")
-ffi::TakeSlicePtr(mut view)`, wantError: true},
-		{name: "bare generic preserves concrete reference", source: `let value = ffi::Item{N: 1}
-let reference = mut value
+sink.Take(&mut view)`},
+		{name: "named Go slice accepts Slice reference", source: `mut view = [1, 2].slice().expect("bounds")
+ffi::TakeNumbers(&mut view)`},
+		{name: "Go pointer to slice rejects Slice reference", source: `mut view = [1, 2].slice().expect("bounds")
+ffi::TakeSlicePtr(&mut view)`, wantError: true},
+		{name: "bare generic preserves concrete reference", source: `mut value = ffi::Item{N: 1}
+let reference = &mut value
 let echoed = ffi::Identity(reference)
 ffi::TakePtr(echoed)`},
-		{name: "bare generic preserves slice descriptor reference", source: `let values = [1, 2]
-let reference = mut values
+		{name: "bare generic preserves slice descriptor reference", source: `mut values = [1, 2]
+let reference = &mut values
 let echoed = ffi::Identity(reference)
 ffi::TakeSlicePtr(echoed)`},
-		{name: "bare generic preserves map descriptor reference", source: `let values = ["a": 1]
-let reference = mut values
+		{name: "bare generic preserves map descriptor reference", source: `mut values = ["a": 1]
+let reference = &mut values
 let echoed = ffi::Identity(reference)
 ffi::TakeMapPtr(echoed)`},
-		{name: "explicit value generic rejects bare reference", source: `let value = ffi::Item{N: 1}
-let reference = mut value
+		{name: "explicit value generic rejects bare reference", source: `mut value = ffi::Item{N: 1}
+let reference = &mut value
 let echoed: ffi::Item = ffi::Identity<ffi::Item>(reference)`, wantError: true},
-		{name: "explicit value generic accepts deref", source: `let value = ffi::Item{N: 1}
-let reference = mut value
-let echoed: ffi::Item = ffi::Identity<ffi::Item>(reference.@)`},
-		{name: "comparable generic accepts reference identity", source: `let value = ffi::Item{N: 1}
-let reference = mut value
+		{name: "explicit value generic accepts deref", source: `mut value = ffi::Item{N: 1}
+let reference = &mut value
+let echoed: ffi::Item = ffi::Identity<ffi::Item>(reference.*)`},
+		{name: "comparable generic accepts reference identity", source: `mut value = ffi::Item{N: 1}
+let reference = &mut value
 let ok = ffi::IsComparable(reference)`},
 		{name: "comparable generic accepts Ard struct reference", source: `struct Native { N: Int }
 let value = Native{N: 1}
@@ -100,53 +100,53 @@ ffi::Two<[Int], Native>(mut values, native)`, wantError: true},
 let b = a
 let same = a == b
 let different = a != b`},
-		{name: "foreign struct references compare by pointer identity", source: `let value = ffi::Item{N: 1}
-let left = mut value
-let right = mut value
+		{name: "foreign struct references compare by pointer identity", source: `mut value = ffi::Item{N: 1}
+let left = &mut value
+let right = &mut value
 let same = left == right`},
-		{name: "method constraint validates pointer representation", source: `let value = ffi::Item{N: 1}
-let reference = mut value
+		{name: "method constraint validates pointer representation", source: `mut value = ffi::Item{N: 1}
+let reference = &mut value
 ffi::UseBumper(reference)`},
-		{name: "slice shaped generic rejects bare value", source: `let values = [1, 2]
-let size = ffi::SliceSize(values)`, wantError: true},
-		{name: "slice shaped generic infers from referent", source: `let values = [1, 2]
-let reference = mut values
+		{name: "slice shaped generic accepts bare value", source: `let values = [1, 2]
+let size = ffi::SliceSize(values)`},
+		{name: "slice shaped generic infers from referent", source: `mut values = [1, 2]
+let reference = &mut values
 let size = ffi::SliceSize(reference)`},
 		{name: "slice shaped generic infers from Slice referent", source: `let view = [1, 2].slice().expect("bounds")
 let size = ffi::SliceSize(mut view)`},
 		{name: "generic Go callback Slice parameter is rejected", source: `let consume = ffi::SliceConsumer<Slice<Int>>()`, wantError: true},
-		{name: "map shaped generic rejects bare value", source: `let values = ["a": 1]
-let size = ffi::MapSize(values)`, wantError: true},
-		{name: "map shaped generic infers from referent", source: `let values = ["a": 1]
-let reference = mut values
+		{name: "map shaped generic accepts bare value", source: `let values = ["a": 1]
+let size = ffi::MapSize(values)`},
+		{name: "map shaped generic infers from referent", source: `mut values = ["a": 1]
+let reference = &mut values
 let size = ffi::MapSize(reference)`},
-		{name: "explicit descriptor generic rejects bare value", source: `let values = [1, 2]
-let size = ffi::MixedSize<[Int], Int>(values)`, wantError: true},
-		{name: "mixed generic uses explicit descriptor instantiation", source: `let values = [1, 2]
-let reference = mut values
+		{name: "explicit descriptor generic accepts bare value", source: `let values = [1, 2]
+let size = ffi::MixedSize<[Int], Int>(values)`},
+		{name: "mixed generic uses explicit descriptor instantiation", source: `mut values = [1, 2]
+let reference = &mut values
 let size = ffi::MixedSize<[Int], Int>(reference)`},
-		{name: "mixed generic does not implicitly project descriptor", source: `let values = [1, 2]
-let reference = mut values
+		{name: "mixed generic does not implicitly project descriptor", source: `mut values = [1, 2]
+let reference = &mut values
 let size = ffi::MixedSize(reference)`, wantError: true},
 		{name: "foreign pointer result flows as reference", source: `let pointer = ffi::ItemPtr()
 ffi::TakePtr(pointer)`},
-		{name: "foreign pointer satisfies Ard reference destination", source: `fn use_reference(value: mut ffi::Item) Int { value.N }
+		{name: "foreign pointer satisfies Ard reference destination", source: `fn use_reference(value: &mut ffi::Item) Int { value.N }
 let pointer = ffi::ItemPtr()
 let n = use_reference(pointer)`},
 
-		{name: "foreign pointer explicitly dereferences", source: `let copy: ffi::Item = ffi::ItemPtr().@`},
-		{name: "imported global is explicitly addressable", source: `let reference = mut ffi::Global
+		{name: "foreign pointer explicitly dereferences", source: `let copy: ffi::Item = ffi::ItemPtr().*`},
+		{name: "imported global is explicitly addressable", source: `let reference = &mut ffi::Global
 reference.N = 2`},
-		{name: "ordinary mut Go value rejects field mutation", source: `mut value = ffi::Item{N: 1}
-value.N = 2`, wantError: true},
+		{name: "ordinary mut Go value permits inline field mutation", source: `mut value = ffi::Item{N: 1}
+value.N = 2`},
 		{name: "ordinary mut Go value rejects pointer receiver", source: `mut value = ffi::Item{N: 1}
 value.Bump()`, wantError: true},
-		{name: "Go reference permits field and pointer receiver mutation", source: `let value = ffi::Item{N: 1}
-let reference = mut value
+		{name: "Go reference permits field and pointer receiver mutation", source: `mut value = ffi::Item{N: 1}
+let reference = &mut value
 reference.N = 2
 reference.Bump()`},
-		{name: "named Go interface accepts concrete reference", source: `let value = ffi::Item{N: 1}
-ffi::TakeBumper(mut value)`},
+		{name: "named Go interface accepts concrete reference", source: `mut value = ffi::Item{N: 1}
+ffi::TakeBumper(&mut value)`},
 		{name: "immediate Ard concrete to trait provenance satisfies named Go interface", source: `trait View {
   fn value() Int
 }
@@ -157,8 +157,8 @@ impl View for Native {
 impl ffi::Reader for Native {
   fn read() Int { self.N }
 }
-let value = Native{N: 1}
-ffi::TakeReader(mut value)`},
+mut value = Native{N: 1}
+ffi::TakeReader(&mut value)`},
 		{name: "flowed mutable trait is rejected at named Go interface", source: `trait View {
   fn value() Int
 }
@@ -169,8 +169,8 @@ impl View for Native {
 impl ffi::Reader for Native {
   fn read() Int { self.N }
 }
-let value = Native{N: 1}
-let view: mut View = mut value
+mut value = Native{N: 1}
+let view: mut View = &mut value
 ffi::TakeReader(view)`, wantError: true},
 		{name: "bare generic preserves native mutable trait interface", source: `trait View {
   fn value() Int
@@ -180,8 +180,8 @@ impl View for Native {
   fn value() Int { self.N }
 }
 fn take(value: mut View) {}
-let value = Native{N: 1}
-let view: mut View = mut value
+mut value = Native{N: 1}
+let view: mut View = &mut value
 let echoed = ffi::Identity(view)
 take(echoed)`},
 		{name: "mutable trait interface satisfies Go method constraint", source: `trait Bumpable {
@@ -191,8 +191,8 @@ struct Native { N: Int }
 impl Bumpable for Native {
   fn mut bump() { self.N = self.N + 1 }
 }
-let value = Native{N: 1}
-let reference: mut Bumpable = mut value
+mut value = Native{N: 1}
+let reference: mut Bumpable = &mut value
 ffi::UseBumper(reference)`},
 		{name: "mutable trait interface satisfies Result ABI method constraint", source: `trait Parser {
   fn parse() Int!Str
@@ -201,8 +201,8 @@ struct Native { N: Int }
 impl Parser for Native {
   fn parse() Int!Str { Result::ok(self.N) }
 }
-let value = Native{N: 1}
-let reference: mut Parser = mut value
+mut value = Native{N: 1}
+let reference: mut Parser = &mut value
 let result = ffi::UseParser(reference)`},
 		{name: "mutable trait interface satisfies Maybe ABI method constraint", source: `trait Finder {
   fn find() Int?
@@ -211,8 +211,8 @@ struct Native { N: Int }
 impl Finder for Native {
   fn find() Int? { Maybe::new(self.N) }
 }
-let value = Native{N: 1}
-let reference: mut Finder = mut value
+mut value = Native{N: 1}
+let reference: mut Finder = &mut value
 let result = ffi::UseFinder(reference)`},
 		{name: "recursive mutable trait interface satisfies Go method constraint", source: `trait Link {
   fn next(value: mut Link) mut Link
@@ -221,8 +221,8 @@ struct Node { N: Int }
 impl Link for Node {
   fn next(value: mut Link) mut Link { value }
 }
-let value = Node{N: 1}
-let reference: mut Link = mut value
+mut value = Node{N: 1}
+let reference: mut Link = &mut value
 let returned = ffi::UseLink(reference)`},
 		{name: "related recursive mutable trait interface Go struct arguments stay canonical", source: `trait Link {
   fn next(value: mut Link) mut Link
@@ -231,8 +231,8 @@ struct Node { N: Int }
 impl Link for Node {
   fn next(value: mut Link) mut Link { value }
 }
-let value = Node{N: 1}
-let reference: mut Link = mut value
+mut value = Node{N: 1}
+let reference: mut Link = &mut value
 let pair = ffi::LinkPair<mut Link, mut Link>{First: reference, Second: reference}`},
 		{name: "inferred related recursive mutable trait interface Go struct arguments stay canonical", source: `trait Link {
   fn next(value: mut Link) mut Link
@@ -241,8 +241,8 @@ struct Node { N: Int }
 impl Link for Node {
   fn next(value: mut Link) mut Link { value }
 }
-let value = Node{N: 1}
-let reference: mut Link = mut value
+mut value = Node{N: 1}
+let reference: mut Link = &mut value
 let pair = ffi::LinkPair{First: reference, Second: reference}`},
 		{name: "nested generic Go struct fields preserve mutable trait binding", source: `trait Link {
   fn next(value: mut Link) mut Link
@@ -251,8 +251,8 @@ struct Node { N: Int }
 impl Link for Node {
   fn next(value: mut Link) mut Link { value }
 }
-let value = Node{N: 1}
-let reference: mut Link = mut value
+mut value = Node{N: 1}
+let reference: mut Link = &mut value
 let inner = ffi::GenericBox<mut Link>{Value: reference}
 let outer = ffi::GenericOuter<mut Link>{Box: inner}`},
 		{name: "pointer nested generic Go struct fields preserve mutable trait binding", source: `trait Link {
@@ -262,10 +262,10 @@ struct Node { N: Int }
 impl Link for Node {
   fn next(value: mut Link) mut Link { value }
 }
-let value = Node{N: 1}
-let reference: mut Link = mut value
-let inner = ffi::GenericBox<mut Link>{Value: reference}
-let outer = ffi::GenericPointerOuter<mut Link>{Box: mut inner}
+mut value = Node{N: 1}
+let reference: mut Link = &mut value
+mut inner = ffi::GenericBox<mut Link>{Value: reference}
+let outer = ffi::GenericPointerOuter<mut Link>{Box: &mut inner}
 let rebound: mut Link = outer.Box.Value
 let linked = rebound.next(reference)`},
 		{name: "representable wrapper method satisfies constraint beside Ard-only method", source: `struct Payload { N: Int }
@@ -278,8 +278,8 @@ impl View for Native {
   fn read() Int { self.N }
   fn payload() Payload { Payload{N: self.N} }
 }
-let value = Native{N: 1}
-let reference: mut View = mut value
+mut value = Native{N: 1}
+let reference: mut View = &mut value
 let result = ffi::UseReader(reference)`},
 		{name: "fallback trait rejects incompatible natural Go method constraint", source: `trait Named {
   fn name() Str
@@ -288,8 +288,8 @@ struct Native { name: Str }
 impl Named for Native {
   fn name() Str { self.name }
 }
-let value = Native{name: "ard"}
-let reference: mut Named = mut value
+mut value = Native{name: "ard"}
+let reference: mut Named = &mut value
 let result = ffi::UseNamed(reference)`, wantError: true},
 		{name: "receiver method collision across traits rejects natural Go constraint", source: `trait FirstName {
   fn name() Str
@@ -320,21 +320,21 @@ impl SecondName for Alias {
   fn name() Str { self.value }
 }
 fn pass(value: mut FirstName) Str { ffi::UseNamed(value) }`, wantError: true},
-		{name: "foreign interface storage rejects bare reference at value destination", source: `let value = ffi::BumperValue()
-let reference = mut value
+		{name: "foreign interface storage rejects bare reference at value destination", source: `mut value = ffi::BumperValue()
+let reference = &mut value
 ffi::TakeBumper(reference)`, wantError: true},
-		{name: "foreign interface storage requires deref at value destination", source: `let value = ffi::BumperValue()
-let reference = mut value
+		{name: "foreign interface storage requires deref at value destination", source: `mut value = ffi::BumperValue()
+let reference = &mut value
 let boxed: Any = reference
-ffi::TakeBumper(reference.@)`},
-		{name: "pure Ard cannot construct double pointer", source: `let value = ffi::Item{N: 1}
-let reference = mut value
-ffi::TakeDoublePtr(mut reference)`, wantError: true},
+ffi::TakeBumper(reference.*)`},
+		{name: "pure Ard cannot construct double pointer", source: `mut value = ffi::Item{N: 1}
+let reference = &mut value
+ffi::TakeDoublePtr(reference)`, wantError: true},
 		{name: "compatible foreign double pointer flows", source: `let pointer = ffi::DoublePtr()
 ffi::TakeDoublePtr(pointer)
 let value = ffi::ReadDoublePtr(pointer)`},
 		{name: "deref removes one foreign pointer layer", source: `let pointer = ffi::DoublePtr()
-let single: mut ffi::Item = pointer.@
+let single: &mut ffi::Item = pointer.*
 ffi::TakePtr(single)`},
 		{name: "exact pointer to interface remains unsupported", source: `fn pass(value: ffi::Bumper) { ffi::TakeInterfacePtr(mut value) }`, wantError: true},
 	}

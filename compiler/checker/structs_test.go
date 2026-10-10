@@ -49,7 +49,7 @@ func TestRecursiveImplicitGenericStructLiteralDoesNotOverflow(t *testing.T) {
 	const helperEnv = "ARD_TEST_CHECKER_RECURSIVE_GENERIC_EXTRACTION"
 	const input = `
 struct Ref {
-  current: (mut Item)?,
+  current: (&mut Item)?,
 }
 
 struct Generic {
@@ -57,12 +57,12 @@ struct Generic {
 }
 
 struct Item {
-  ref: (mut Ref)?,
+  ref: (&mut Ref)?,
   generic: Generic,
 }
 
 fn main() {
-  let value = mut Ref{current: Maybe::new<mut Item>()}
+  let value = &mut Ref{current: Maybe::new<&mut Item>()}
 }
 `
 
@@ -102,10 +102,10 @@ func TestRecursiveGenericStructThroughFunctionField(t *testing.T) {
 		input: `
 struct Context<$T> {
   state: $T,
-  handlers: [fn(mut Context<$T>)],
+  handlers: [fn(&mut Context<$T>)],
 }
 
-fn use_context(context: mut Context<Int>) {
+fn use_context(context: &mut Context<Int>) {
   let handler = context.handlers.at(0).expect("handler")
   handler(context)
 }
@@ -234,13 +234,11 @@ func TestStructs(t *testing.T) {
 			diagnostics: []checker.Diagnostic{},
 		},
 		{
-			name: "Can't reassign to properties of ordinary struct values",
+			name: "Can reassign properties of mutable struct bindings",
 			input: fmt.Sprintf(`%s
 						mut p = Person{name: "Alice", age: 30, employed: true}
 						p.age = 31`, personStructInput),
-			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Cannot mutate 'p.age': it is an ordinary value, not a reference"},
-			},
+			diagnostics: []checker.Diagnostic{},
 		},
 		{
 			name: "Can't reassign to properties of immutable structs",
@@ -248,7 +246,7 @@ func TestStructs(t *testing.T) {
 						let p = Person{name: "Alice", age: 30, employed: true}
 						p.age = 31`, personStructInput),
 			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Cannot mutate 'p.age': it is an ordinary value, not a reference"},
+				{Kind: checker.Error, Message: "Cannot write to 'p.age': it is not a writable place"},
 			},
 		},
 		{
@@ -259,7 +257,7 @@ func TestStructs(t *testing.T) {
 			diagnostics: []checker.Diagnostic{
 				{Kind: checker.Error, Message: "Undefined variable: is_employed"},
 				// Checking continues after an undefined variable (#523).
-				{Kind: checker.Error, Message: "Cannot mutate 'p.age': it is an ordinary value, not a reference"},
+				{Kind: checker.Error, Message: "Cannot write to 'p.age': it is not a writable place"},
 			},
 		},
 	})
@@ -442,8 +440,8 @@ func TestMethods(t *testing.T) {
 					}
 				}`, shapeCode),
 			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Cannot mutate 'self.width': it is an ordinary value, not a reference"},
-				{Kind: checker.Error, Message: "Cannot mutate 'self.height': it is an ordinary value, not a reference"},
+				{Kind: checker.Error, Message: "Cannot write to 'self.width': it is not a writable place"},
+				{Kind: checker.Error, Message: "Cannot write to 'self.height': it is not a writable place"},
 			},
 		},
 		{
@@ -460,7 +458,7 @@ func TestMethods(t *testing.T) {
 				let square = Shape{width: 5, height: 5}
 				square.resize(8,8)`, shapeCode),
 			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Cannot call mutating method 'square.resize': receiver is not a reference"},
+				{Kind: checker.Error, Message: "Cannot call mutating method 'square.resize': receiver is not a writable pointer"},
 			},
 		},
 	})

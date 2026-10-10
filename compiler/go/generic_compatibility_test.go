@@ -30,7 +30,7 @@ func TestGenericCompatibilityPreservesGoRepresentations(t *testing.T) {
 		}
 
 		struct WidgetListRef<$T> {
-			values: mut [$T],
+			values: &mut [$T],
 		}
 
 		fn marker(seed: $T) Marker<$T> {
@@ -40,10 +40,10 @@ func TestGenericCompatibilityPreservesGoRepresentations(t *testing.T) {
 		fn main() Int {
 			let holder = Holder<Widget>{value: Root{}}
 			let optional = OptionalHolder<Widget>{value: Root{}}
-			let root = mut Root{}
+			let root = &mut Root{}
 			let optional_ref = OptionalWidgetRef{value: root}
-			let widget_values: [Widget] = [Root{}]
-			let widget_list_ref = WidgetListRef<Widget>{values: mut widget_values}
+			mut widget_values: [Widget] = [Root{}]
+			let widget_list_ref = WidgetListRef<Widget>{values: &mut widget_values}
 			let marked = marker("context")
 			let direct_value = holder.value.render()
 			let optional_value = optional.value.expect("widget").render()

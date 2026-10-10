@@ -260,13 +260,16 @@ const (
 	StructSubject SubjectKind = iota
 )
 
-// MutableRefExpr is the explicit `mut <operand>` expression. It evaluates to
-// a mutable reference and preserves whether lowering copies an existing
-// handle, borrows addressable storage, or materializes fresh storage (ADR 0057).
+// MutableRefExpr is an address-of expression: `&operand` or `&mut operand`
+// (ADR 0073), or the legacy `mut operand`. It evaluates to a pointer and
+// preserves whether lowering copies an existing handle, borrows addressable
+// storage, or materializes fresh storage (ADR 0057). ReadOnly marks `&operand`,
+// whose `&T` result forbids writes through itself; it has no runtime effect.
 type MutableRefExpr struct {
-	Operand Expression
-	Mode    ReferenceMode
-	_type   Type
+	Operand  Expression
+	Mode     ReferenceMode
+	ReadOnly bool
+	_type    Type
 }
 
 func (m *MutableRefExpr) Type() Type {
@@ -274,17 +277,24 @@ func (m *MutableRefExpr) Type() Type {
 }
 
 func (m *MutableRefExpr) String() string {
-	return fmt.Sprintf("mut %s", m.Operand)
+	if m.ReadOnly {
+		return fmt.Sprintf("&%s", m.Operand)
+	}
+	return fmt.Sprintf("&mut %s", m.Operand)
 }
 
-// DerefExpr is the explicit one-layer dereference `<operand>.@` (ADRs 0057
-// and 0060). The operand must be an actual reference value; the result is a
-// shallow, non-addressable copy of the current referent. Observational is set
-// for compiler-inserted referent reads (arithmetic, interpolation, matching),
-// which share the same shallow-load semantics.
+// DerefExpr is the explicit one-layer dereference `<operand>.*` (ADR 0073)
+// or legacy `<operand>.@` (ADRs 0057 and 0060). The operand must be an actual
+// pointer value; reading it produces a shallow copy of the current pointee.
+// Place is set for the ADR 0073 `.*` spelling, which also names the pointee
+// as an assignment place; the legacy `.@` result is a non-addressable
+// temporary. Observational is set for compiler-inserted pointee reads
+// (arithmetic, interpolation, matching), which share the same shallow-load
+// semantics.
 type DerefExpr struct {
 	Operand       Expression
 	Observational bool
+	Place         bool
 	_type         Type
 }
 
@@ -293,6 +303,9 @@ func (d *DerefExpr) Type() Type {
 }
 
 func (d *DerefExpr) String() string {
+	if d.Place {
+		return fmt.Sprintf("%s.*", d.Operand)
+	}
 	return fmt.Sprintf("%s.@", d.Operand)
 }
 

@@ -293,3 +293,135 @@ func TestRenderFallsBackWhenSourceIsUnavailable(t *testing.T) {
 		t.Fatalf("output = %q, want %q", output.String(), want)
 	}
 }
+
+func TestRenderSummarizesDependencyWarnings(t *testing.T) {
+	at := func(file string) checker.DiagnosticLabel {
+		return checker.DiagnosticLabel{Span: checker.SourceSpan{FilePath: file, Location: parse.Location{Start: parse.Point{Row: 1, Col: 1}, End: parse.Point{Row: 1, Col: 1}}}}
+	}
+	diags := []checker.Diagnostic{
+		{Kind: checker.Warn, Title: "root warning", Primary: at("main.ard")},
+		{Kind: checker.Warn, Title: "dram warning one", Primary: at("dram.ard"), Dependency: "dram"},
+		{Kind: checker.Warn, Title: "sql warning", Primary: at("sql.ard"), Dependency: "sql"},
+		{Kind: checker.Error, Title: "sql error", Primary: at("sql.ard"), Dependency: "sql"},
+		{Kind: checker.Warn, Title: "dram warning two", Primary: at("dram.ard"), Dependency: "dram"},
+	}
+	provider := func(string) ([]byte, error) { return []byte("x\n"), nil }
+
+	var quiet bytes.Buffer
+	if err := diagnostics.RenderWithOptions(&quiet, diags, provider, diagnostics.RenderOptions{Color: diagnostics.ColorNever}); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"warning: root warning", "error: sql error", "warning: 3 warnings from dependencies not shown: dram (2), sql (1)\n"} {
+		if !strings.Contains(quiet.String(), want) {
+			t.Fatalf("output missing %q:\n%s", want, quiet.String())
+		}
+	}
+	for _, hidden := range []string{"dram warning", "sql warning"} {
+		if strings.Contains(quiet.String(), hidden) {
+			t.Fatalf("output should hide %q:\n%s", hidden, quiet.String())
+		}
+	}
+	if !strings.HasSuffix(quiet.String(), "dram (2), sql (1)\n") {
+		t.Fatalf("summary should be last:\n%s", quiet.String())
+	}
+
+	var single bytes.Buffer
+	if err := diagnostics.RenderWithOptions(&single, diags[1:2], provider, diagnostics.RenderOptions{Color: diagnostics.ColorNever}); err != nil {
+		t.Fatal(err)
+	}
+	if single.String() != "warning: 1 warning from dependencies not shown: dram (1)\n" {
+		t.Fatalf("single summary = %q", single.String())
+	}
+
+	var verbose bytes.Buffer
+	if err := diagnostics.RenderWithOptions(&verbose, diags, provider, diagnostics.RenderOptions{Color: diagnostics.ColorNever, ShowDependencyWarnings: true}); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"dram warning one", "dram warning two", "sql warning"} {
+		if !strings.Contains(verbose.String(), want) {
+			t.Fatalf("verbose output missing %q:\n%s", want, verbose.String())
+		}
+	}
+	if strings.Contains(verbose.String(), "not shown") {
+		t.Fatalf("verbose output should not summarize:\n%s", verbose.String())
+	}
+}
+
+func TestRenderSummarizesDeprecatedPointerSyntax(t *testing.T) {
+	at := func(file string) checker.DiagnosticLabel {
+		return checker.DiagnosticLabel{Span: checker.SourceSpan{FilePath: file, Location: parse.Location{Start: parse.Point{Row: 1, Col: 1}, End: parse.Point{Row: 1, Col: 1}}}}
+	}
+	deprecated := func(file string) checker.Diagnostic {
+		return checker.Diagnostic{Kind: checker.Warn, Code: checker.DiagnosticCodeDeprecatedPointerSyntax, Title: "deprecated in " + file, Primary: at(file)}
+	}
+	diags := []checker.Diagnostic{
+		deprecated("a.ard"),
+		{Kind: checker.Error, Title: "real error", Primary: at("a.ard")},
+		deprecated("a.ard"),
+		deprecated("b.ard"),
+		{Kind: checker.Warn, Code: checker.DiagnosticCodeDeprecatedPointerSyntax, Title: "dependency deprecated", Primary: at("dep.ard"), Dependency: "dram"},
+	}
+	provider := func(string) ([]byte, error) { return []byte("x\n"), nil }
+
+	var quiet bytes.Buffer
+	if err := diagnostics.RenderWithOptions(&quiet, diags, provider, diagnostics.RenderOptions{Color: diagnostics.ColorNever}); err != nil {
+		t.Fatal(err)
+	}
+	want := "warning: 3 deprecated pointer uses in 2 files not shown; run `ard migrate .` to update them\n\n" +
+		"warning: 1 warning from dependencies not shown: dram (1)\n"
+	if !strings.Contains(quiet.String(), "error: real error") || !strings.HasSuffix(quiet.String(), want) {
+		t.Fatalf("output should keep errors and end with summaries %q:\n%s", want, quiet.String())
+	}
+	if strings.Contains(quiet.String(), "deprecated in") {
+		t.Fatalf("deprecated uses should be collapsed:\n%s", quiet.String())
+	}
+
+	var single bytes.Buffer
+	if err := diagnostics.RenderWithOptions(&single, diags[3:4], provider, diagnostics.RenderOptions{Color: diagnostics.ColorNever, MigratePath: "app"}); err != nil {
+		t.Fatal(err)
+	}
+	if single.String() != "warning: 1 deprecated pointer use in 1 file not shown; run `ard migrate app` to update it\n" {
+		t.Fatalf("single summary = %q", single.String())
+	}
+
+	var verbose bytes.Buffer
+	if err := diagnostics.RenderWithOptions(&verbose, diags, provider, diagnostics.RenderOptions{Color: diagnostics.ColorNever, ShowDeprecationWarnings: true}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(verbose.String(), "warning: deprecated in") != 3 || strings.Contains(verbose.String(), "deprecated pointer use") {
+		t.Fatalf("verbose output should show each deprecated use:\n%s", verbose.String())
+	}
+}
+
+func TestRenderRelativeMigrateHintPointsAtProjectRoot(t *testing.T) {
+	root := t.TempDir()
+	cwd := filepath.Dir(root)
+	diag := checker.Diagnostic{Kind: checker.Warn, Code: checker.DiagnosticCodeDeprecatedPointerSyntax, Title: "deprecated", Primary: checker.DiagnosticLabel{Span: checker.SourceSpan{FilePath: "main.ard"}}}
+	var output bytes.Buffer
+	if err := diagnostics.RenderRelativeWithOptions(&output, []checker.Diagnostic{diag}, root, cwd, diagnostics.RenderOptions{Color: diagnostics.ColorNever}); err != nil {
+		t.Fatal(err)
+	}
+	if want := "run `ard migrate " + filepath.Base(root) + "`"; !strings.Contains(output.String(), want) {
+		t.Fatalf("output missing %q:\n%s", want, output.String())
+	}
+}
+
+func TestRenderRelativeMigrateHintPrefersShorterPath(t *testing.T) {
+	root := t.TempDir()
+	diag := checker.Diagnostic{Kind: checker.Warn, Code: checker.DiagnosticCodeDeprecatedPointerSyntax, Title: "deprecated", Primary: checker.DiagnosticLabel{Span: checker.SourceSpan{FilePath: "main.ard"}}}
+	for _, tt := range []struct{ name, cwd, want string }{
+		{"inside project", root, "run `ard migrate .`"},
+		{"nearby directory", filepath.Join(root, "src", "lib"), "run `ard migrate ../..`"},
+		{"distant directory", filepath.Join(append([]string{root}, strings.Split(strings.Repeat("deep/", 60), "/")...)...), "run `ard migrate " + root + "`"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var output bytes.Buffer
+			if err := diagnostics.RenderRelativeWithOptions(&output, []checker.Diagnostic{diag}, root, tt.cwd, diagnostics.RenderOptions{Color: diagnostics.ColorNever}); err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(output.String(), tt.want) {
+				t.Fatalf("output missing %q:\n%s", tt.want, output.String())
+			}
+		})
+	}
+}

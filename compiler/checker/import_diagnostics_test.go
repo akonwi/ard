@@ -111,3 +111,51 @@ func TestPathDependencyBodyDiagnosticsSurfaceAtImport(t *testing.T) {
 	diagnostics := checkImporter(t, app, "use dep\n\nfn main() {\n  let out = dep::broken([1])\n}\n")
 	requireModuleBodyDiagnostic(t, diagnostics, "dep.ard")
 }
+
+// Diagnostics from dependency packages record the owning package so
+// presentation layers can quiet warnings the user cannot fix locally.
+// Root-project modules stay untagged; transitive dependencies keep the
+// innermost owning package.
+func TestImportedDiagnosticsRecordOwningDependency(t *testing.T) {
+	const warningModule = "let signal: Void? = Maybe::new()\n\nfn answer() Int { 42 }\n"
+	workspace := t.TempDir()
+	app := filepath.Join(workspace, "app")
+	dep := filepath.Join(workspace, "dep-src")
+	sub := filepath.Join(workspace, "sub-src")
+	for _, dir := range []string{app, dep, sub} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	files := map[string]string{
+		filepath.Join(sub, "ard.toml"): "name = \"sub\"\nard = \">= 0.1.0\"\n",
+		filepath.Join(sub, "sub.ard"):  warningModule,
+		filepath.Join(dep, "ard.toml"): "name = \"dep\"\nard = \">= 0.1.0\"\n\n[dependencies]\nsub = { path = \"../sub-src\" }\n",
+		filepath.Join(dep, "dep.ard"):  "use sub\n\n" + warningModule + "\nfn nested() Int { sub::answer() }\n",
+		filepath.Join(app, "ard.toml"): "name = \"app\"\nard = \">= 0.1.0\"\n\n[dependencies]\ndep = { path = \"../dep-src\" }\n",
+		filepath.Join(app, "util.ard"): warningModule,
+	}
+	for path, contents := range files {
+		if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	diagnostics := checkImporter(t, app, "use app/util\nuse dep\n\nfn main() Int { util::answer() + dep::nested() }\n")
+	owners := map[string]string{}
+	for _, diagnostic := range diagnostics {
+		if diagnostic.Kind != checker.Warn {
+			t.Fatalf("unexpected diagnostic: %#v", diagnostic)
+		}
+		owners[filepath.Base(diagnostic.Primary.Span.FilePath)] = diagnostic.Dependency
+	}
+	want := map[string]string{"util.ard": "", "dep.ard": "dep", "sub.ard": "sub"}
+	if len(owners) != len(want) {
+		t.Fatalf("diagnostic owners = %#v, want %#v", owners, want)
+	}
+	for file, owner := range want {
+		if got, ok := owners[file]; !ok || got != owner {
+			t.Fatalf("diagnostic owners = %#v, want %#v", owners, want)
+		}
+	}
+}
