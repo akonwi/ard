@@ -137,7 +137,6 @@ fn wrong() IntOnly {
 }`,
 			diagnostics: []checker.Diagnostic{
 				{Kind: checker.Error, Message: "Type mismatch: Expected implementation of IntOnly, got Box<Str>"},
-				{Kind: checker.Error, Message: "Type mismatch: Expected implementation of IntOnly, got Void"},
 			},
 		},
 		{
@@ -155,7 +154,6 @@ impl Error for Failure {
 }`,
 			diagnostics: []checker.Diagnostic{
 				{Kind: checker.Error, Message: "Type mismatch: Expected implementation of Error, got Failure"},
-				{Kind: checker.Error, Message: "Type mismatch: Expected implementation of Error, got Void"},
 				{Kind: checker.Error, Message: "Failure cannot implement Error"},
 			},
 		},
@@ -298,7 +296,6 @@ fn choose(condition: Bool, left: (mut Widget)?, right: (mut $W)?) (mut Widget)? 
 }`,
 			diagnostics: []checker.Diagnostic{
 				{Kind: checker.Error, Message: "All branches must have the same result type"},
-				{Kind: checker.Error, Message: "Type mismatch: Expected (mut Widget)?, got Void"},
 			},
 		},
 		{

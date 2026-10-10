@@ -7,7 +7,7 @@ import (
 
 // todo: this can return an error with more detailed messaging for the scenario
 func areCompatible(expected Type, actual Type) bool {
-	if IsNever(actual) {
+	if IsNever(actual) || IsInvalid(expected) || IsInvalid(actual) {
 		return true
 	}
 	if union, ok := expected.(*Union); ok {
@@ -35,6 +35,14 @@ func commonResultType(a Type, b Type) (Type, bool) {
 		return b, true
 	}
 	if IsNever(b) {
+		return a, true
+	}
+	// Like Never, an already reported failure provides no evidence for the
+	// result type; the remaining branches decide it (ADR 0074).
+	if IsInvalid(a) {
+		return b, true
+	}
+	if IsInvalid(b) {
 		return a, true
 	}
 	if validationEqualTypes(a, b) {
@@ -534,6 +542,91 @@ func (n *never) hasTrait(trait *Trait) bool { return false }
 var neverType = &never{}
 
 func IsNever(t Type) bool { return t == neverType }
+
+// invalid is the checker-only type of a construct whose check already failed
+// and reported a diagnostic (ADR 0074). It is compatible with every type in
+// both directions so dependent checks stay silent instead of cascading. It is
+// only produced alongside an error diagnostic, so it never reaches AIR.
+type invalid struct{}
+
+func (i invalid) String() string       { return "<unknown>" }
+func (i invalid) get(name string) Type { return nil }
+func (i *invalid) equal(other Type) bool {
+	return true
+}
+func (i *invalid) hasTrait(trait *Trait) bool { return true }
+
+var invalidType = &invalid{}
+
+// IsInvalid reports whether t is the checker's error type for an already
+// reported failure.
+func IsInvalid(t Type) bool { return t == invalidType }
+
+// containsInvalidType reports whether the error type appears anywhere in t,
+// for example as the inferred return type of a closure whose body failed.
+func containsInvalidType(t Type) bool {
+	var visit func(Type, map[Type]bool) bool
+	visit = func(current Type, seen map[Type]bool) bool {
+		if current == nil || seen[current] {
+			return false
+		}
+		if IsInvalid(current) {
+			return true
+		}
+		seen[current] = true
+		switch current := current.(type) {
+		case *TypeVar:
+			return current.bound && visit(current.actual, seen)
+		case *List:
+			return visit(current.of, seen)
+		case *Slice:
+			return visit(current.of, seen)
+		case *FixedArray:
+			return visit(current.of, seen)
+		case *Map:
+			return visit(current.key, seen) || visit(current.value, seen)
+		case *Maybe:
+			return visit(current.of, seen)
+		case *Result:
+			return visit(current.val, seen) || visit(current.err, seen)
+		case *MutableRef:
+			return visit(current.of, seen)
+		case *Chan:
+			return visit(current.of, seen)
+		case *Receiver:
+			return visit(current.of, seen)
+		case *Sender:
+			return visit(current.of, seen)
+		case *Union:
+			for _, member := range current.Types {
+				if visit(member, seen) {
+					return true
+				}
+			}
+		case *ForeignType:
+			for _, typeArg := range current.TypeArgs {
+				if visit(typeArg, seen) {
+					return true
+				}
+			}
+		case *StructDef:
+			for _, typeArg := range current.TypeArgs {
+				if visit(typeArg, seen) {
+					return true
+				}
+			}
+		case *FunctionDef:
+			for _, param := range current.Parameters {
+				if visit(param.Type, seen) {
+					return true
+				}
+			}
+			return visit(current.ReturnType, seen)
+		}
+		return false
+	}
+	return visit(t, map[Type]bool{})
+}
 
 type void struct{}
 

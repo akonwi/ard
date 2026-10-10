@@ -19,7 +19,6 @@ func TestScalarFrom(t *testing.T) {
 }`,
 			diagnostics: []checker.Diagnostic{
 				{Kind: checker.Error, Message: "Uint32 cannot hold every Int value"},
-				{Kind: checker.Error, Message: "Type mismatch: Expected Uint32, got Void"},
 			},
 		},
 		{

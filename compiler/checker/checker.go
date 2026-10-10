@@ -637,7 +637,6 @@ type Checker struct {
 	filePath                          string
 	modulePath                        string
 	program                           *Program
-	halted                            bool
 	moduleResolver                    *ModuleResolver
 	options                           CheckOptions
 	expectedExpr                      Type
@@ -673,6 +672,9 @@ type Checker struct {
 	constraintFunctionStack           []*FunctionDef
 	comparableConstraintCalls         []comparableConstraintCall
 	genericTraitConstraintChecks      []genericTraitConstraintCheck
+	// silentFailures counts failures that propagate an already reported error
+	// without a new diagnostic (ADR 0074).
+	silentFailures int
 }
 
 func New(filePath string, input *parse.Program, moduleResolver *ModuleResolver, options ...CheckOptions) *Checker {
@@ -734,7 +736,13 @@ func (c *Checker) typeOwnerPath() string {
 }
 
 func (c *Checker) HasErrors() bool {
-	for _, diagnostic := range c.diagnostics {
+	return c.hasErrorsSince(0)
+}
+
+// hasErrorsSince reports whether an error diagnostic was added at or after the
+// given diagnostics index.
+func (c *Checker) hasErrorsSince(start int) bool {
+	for _, diagnostic := range c.diagnostics[start:] {
 		if diagnostic.Kind == Error {
 			return true
 		}
@@ -1100,9 +1108,6 @@ func (c *Checker) Check() {
 			}
 		} else if stmt := c.checkStmt(&c.input.Statements[i]); stmt != nil {
 			c.program.Statements = append(c.program.Statements, *stmt)
-		}
-		if c.halted {
-			break
 		}
 	}
 
@@ -2568,7 +2573,7 @@ func mergeMatchResultType(c *Checker, current Type, next Type, loc parse.Locatio
 }
 
 func mixedVoidMatchTypes(left Type, right Type) (Type, Type, bool) {
-	if left == nil || right == nil || left == right {
+	if left == nil || right == nil || left == right || IsInvalid(left) || IsInvalid(right) {
 		return nil, nil, false
 	}
 	if left == Void {
@@ -2594,6 +2599,11 @@ func typeMismatch(expected, got Type) string {
 
 func (c *Checker) areCompatible(expected Type, actual Type) bool {
 	if IsNever(actual) {
+		return true
+	}
+	// An already reported failure is compatible with everything so it does
+	// not produce follow-on mismatches (ADR 0074).
+	if IsInvalid(expected) || IsInvalid(actual) {
 		return true
 	}
 	if _, ok := expected.(*anyType); ok {
@@ -3357,10 +3367,15 @@ func typeErasesInference(t Type) bool {
 	return false
 }
 
+// bindFailedVariable introduces a declaration's name after its initializer
+// failed, so later uses resolve instead of reporting it as undefined. With the
+// error type, references to it are themselves silent failures (ADR 0074).
+func (c *Checker) bindFailedVariable(decl *parse.VariableDeclaration, bindingType Type) {
+	bound := c.scope.add(decl.Name, bindingType, decl.Mutable)
+	c.recordBindingWithSpan(decl.NameLocation, decl.GetLocation(), bound)
+}
+
 func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
-	if c.halted {
-		return nil
-	}
 	if c.isDuplicateTopLevelTypeDeclaration(*stmt) {
 		return nil
 	}
@@ -3864,6 +3879,9 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 	case *parse.VariableDeclaration:
 		{
 			var val Expression
+			// declared is the resolved annotation, kept so a failed initializer
+			// can still bind the name with a trustworthy type (ADR 0074).
+			var declared Type
 			c.withValueExprContext(func() {
 				if s.Type == nil {
 					switch literal := s.Value.(type) {
@@ -3898,6 +3916,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 						c.addError("Cannot assign a void value", s.Value.GetLocation())
 						return
 					}
+					declared = expected
 
 					switch literal := s.Value.(type) {
 					case *parse.ListLiteral:
@@ -3922,6 +3941,10 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 			})
 
 			if val == nil {
+				if declared == nil {
+					declared = invalidType
+				}
+				c.bindFailedVariable(s, declared)
 				return nil
 			}
 
@@ -3946,6 +3969,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 							ActualSpan:  c.sourceSpan(s.Value.GetLocation()),
 							Expectation: &typeExpectation{Span: expectedSpan, Kind: expectationAnnotation},
 						}))
+						c.bindFailedVariable(s, expected)
 						return nil
 					}
 					__type = expected
@@ -3954,6 +3978,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 
 			c.markFunctionComparableRequirements(c.currentConstraintFunction(), __type, false, c.sourceSpan(s.GetLocation()))
 			if c.rejectUnresolvedCallType(__type, s.Value.GetLocation()) {
+				c.bindFailedVariable(s, invalidType)
 				return nil
 			}
 
@@ -4006,6 +4031,16 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 						AssignmentSpan:  c.sourceSpan(s.Target.GetLocation()),
 						DeclarationSpan: target.declaredAt,
 					}.build())
+					return nil
+				}
+
+				if IsInvalid(target.Type) {
+					// The binding's initializer already failed; still check the
+					// assigned value for its own errors (ADR 0074).
+					c.withValueExprContext(func() {
+						c.checkExpr(s.Value)
+					})
+					c.failSilently()
 					return nil
 				}
 
@@ -4739,9 +4774,7 @@ func (c *Checker) checkList(declaredType Type, expr *parse.ListLiteral) *ListLit
 		c.addDiagnostic(emptyCollectionNeedsTypeDiagnostic{
 			Kind: emptyListCollection, LiteralSpan: c.sourceSpan(expr.GetLocation()), BindingName: bindingName, BindingSpan: bindingSpan,
 		}.build())
-		c.halted = true
-		listType := MakeList(Void)
-		return &ListLiteral{_type: listType, ListType: listType, Elements: []Expression{}}
+		return nil
 	}
 
 	hasError := false
@@ -4839,7 +4872,9 @@ func (c *Checker) checkBlockWithExpected(stmts []parse.Statement, setup func(), 
 	}
 
 	block := &Block{Stmts: make([]Statement, len(stmts)), DiscardFinalValue: expectedFinal == Void}
+	finalIndex := finalValueStatementIndex(stmts)
 	for i := range stmts {
+		before := c.markFailures()
 		if i == lastExprIndex {
 			expr := c.checkExprAs(stmts[i].(parse.Expression), expectedFinal)
 			if expr != nil {
@@ -4852,14 +4887,12 @@ func (c *Checker) checkBlockWithExpected(stmts []parse.Statement, setup func(), 
 		} else if stmt := c.checkStmt(&stmts[i]); stmt != nil {
 			block.Stmts[i] = *stmt
 		}
-		if c.halted {
-			break
-		}
+		c.markFailedFinal(block, i, finalIndex, before)
 	}
 	// Some final expressions are naturally checked before destination
 	// conversion to preserve generic inference behavior. Once checked, still
 	// materialize a representation-bearing runtime interface conversion.
-	if expectedFinal != nil && expectedFinal != Void {
+	if expectedFinal != nil && expectedFinal != Void && !block.failedFinal {
 		for i := len(block.Stmts) - 1; i >= 0; i-- {
 			if block.Stmts[i].Expr == nil {
 				continue
@@ -5767,7 +5800,9 @@ func (c *Checker) checkBlockWithInferredFinalValue(stmts []parse.Statement, setu
 	}
 
 	block := &Block{Stmts: make([]Statement, len(stmts))}
+	finalIndex := finalValueStatementIndex(stmts)
 	for i := range stmts {
+		before := c.markFailures()
 		if i == lastExprIndex {
 			var expr Expression
 			if finalDiscardContext {
@@ -5783,11 +5818,70 @@ func (c *Checker) checkBlockWithInferredFinalValue(stmts []parse.Statement, setu
 		} else if stmt := c.checkStmt(&stmts[i]); stmt != nil {
 			block.Stmts[i] = *stmt
 		}
-		if c.halted {
-			break
-		}
+		c.markFailedFinal(block, i, finalIndex, before)
 	}
 	return block
+}
+
+// finalValueStatementIndex returns the index of the statement that provides a
+// block's value, or -1 when the block ends in a statement that never produces
+// one (a declaration, assignment, or loop).
+func finalValueStatementIndex(stmts []parse.Statement) int {
+	for i := len(stmts) - 1; i >= 0; i-- {
+		switch stmts[i].(type) {
+		case nil, *parse.Comment:
+			continue
+		case *parse.VariableDeclaration, *parse.VariableAssignment, *parse.Break, *parse.Defer,
+			*parse.WhileLoop, *parse.ForLoop, *parse.RangeLoop, *parse.ForInLoop,
+			*parse.TraitDefinition, *parse.TraitImplementation, *parse.TypeDeclaration,
+			*parse.EnumDefinition, *parse.StructDefinition, *parse.ImplBlock:
+			return -1
+		}
+		return i
+	}
+	return -1
+}
+
+// markFailedFinal records that the block's final value statement failed: it
+// produced no checked result and reported an error. The block then has the
+// error type, so its consumers do not report a follow-on mismatch (ADR 0074).
+func (c *Checker) markFailedFinal(block *Block, index int, finalIndex int, before failureMark) {
+	if index != finalIndex {
+		return
+	}
+	stmt := block.Stmts[index]
+	if stmt.Expr == nil && stmt.Stmt == nil && c.failedSince(before) {
+		block.failedFinal = true
+	}
+}
+
+// failureMark snapshots the checker's failure state so a caller can tell
+// whether checking a construct failed, either by reporting an error or by
+// silently propagating an already reported one (ADR 0074).
+type failureMark struct {
+	diagnostics    int
+	silentFailures int
+}
+
+func (c *Checker) markFailures() failureMark {
+	return failureMark{diagnostics: len(c.diagnostics), silentFailures: c.silentFailures}
+}
+
+func (c *Checker) failedSince(mark failureMark) bool {
+	return c.silentFailures > mark.silentFailures || c.hasErrorsSince(mark.diagnostics)
+}
+
+// failSilently records a failure caused by an already reported error, such as
+// a reference to a binding whose initializer failed (ADR 0074).
+func (c *Checker) failSilently() {
+	c.silentFailures++
+}
+
+// mayContainInvalidType reports whether the error type can exist yet. It is
+// only produced alongside a diagnostic, so error-free checking skips the
+// containment walk.
+func (c *Checker) mayContainInvalidType() bool {
+	return len(c.diagnostics) > 0 || c.silentFailures > 0
 }
 
 func (c *Checker) withExpectedExpr(expected Type, check func() Expression) Expression {
@@ -5863,15 +5957,7 @@ func (c *Checker) checkMap(declaredType Type, expr *parse.MapLiteral) *MapLitera
 			c.addDiagnostic(emptyCollectionNeedsTypeDiagnostic{
 				Kind: emptyMapCollection, LiteralSpan: c.sourceSpan(expr.GetLocation()), BindingName: bindingName, BindingSpan: bindingSpan,
 			}.build())
-			c.halted = true
-			mapType := MakeMap(Void, Void)
-			return &MapLiteral{
-				_type:     mapType,
-				Keys:      []Expression{},
-				Values:    []Expression{},
-				KeyType:   Void,
-				ValueType: Void,
-			}
+			return nil
 		}
 	}
 
@@ -6170,11 +6256,9 @@ func (c *Checker) instantiateForeignStructForLiteral(foreign *ForeignType, typeA
 func (c *Checker) checkExprForInference(expr parse.Expression) Expression {
 	diagnosticsLen := len(c.diagnostics)
 	spansMark := c.spansMark()
-	halted := c.halted
 	checked := c.checkExpr(expr)
 	c.diagnostics = c.diagnostics[:diagnosticsLen]
 	c.spansTruncate(spansMark)
-	c.halted = halted
 	return checked
 }
 
@@ -6884,6 +6968,17 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 		instance._type = definition
 	}
 	instance.StructType = instance._type
+	if firstUnresolvedCallTypeVar(instance._type) != nil {
+		// A provided field whose value failed to check gave no evidence for
+		// its generics. The literal's type is then unknowable, which is a
+		// consequence of the reported failure rather than a new error
+		// (ADR 0074).
+		for name := range providedFields {
+			if _, checked := fields[name]; !checked {
+				return nil
+			}
+		}
+	}
 	return instance
 }
 
@@ -8610,6 +8705,15 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 
 func (c *Checker) checkExprWithExpectedCall(expr parse.Expression, expectedReturn Type) Expression {
 	result := c.checkExprInner(expr, expectedReturn)
+	if result != nil && c.mayContainInvalidType() && containsInvalidType(result.Type()) {
+		// A construct built from an already reported failure (for example a
+		// match whose arm failed, or a closure whose return type was inferred
+		// from a failed body) is itself a failure. Expressions never carry the
+		// error type, even nested; nil is the checker's failed-expression
+		// result (ADR 0074).
+		c.failSilently()
+		return nil
+	}
 	if result != nil {
 		c.recordExprSpan(expr, result)
 		c.markFunctionComparableRequirements(c.currentConstraintFunction(), result.Type(), false, c.sourceSpan(expr.GetLocation()))
@@ -8618,9 +8722,6 @@ func (c *Checker) checkExprWithExpectedCall(expr parse.Expression, expectedRetur
 }
 
 func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Expression {
-	if c.halted {
-		return nil
-	}
 	discardThisExpr := c.discardExprContext
 	previousDiscard := c.discardExprContext
 	c.discardExprContext = false
@@ -8780,6 +8881,13 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 		}
 	case *parse.Identifier:
 		if sym, ok := c.scope.get(s.Name); ok {
+			if IsInvalid(sym.Type) {
+				// The binding's initializer already failed and was reported;
+				// uses of it fail silently (ADR 0074).
+				c.recordSymbolUse(s, sym, nil)
+				c.failSilently()
+				return nil
+			}
 			if c.rejectUnspecializedGenericFunctionValue(sym.Type, s.GetLocation()) {
 				return nil
 			}
@@ -8837,6 +8945,15 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 			}
 			if fnSym.typeDeclaration {
 				c.addNonCallable(s.Name, s.GetLocation(), sourceSpanIfPresent(fnSym.declaredAt), nonCallablePrefix)
+				return nil
+			}
+			if IsInvalid(fnSym.Type) {
+				// Calling a binding whose initializer already failed: check the
+				// arguments for their own errors, then fail silently (ADR 0074).
+				for _, arg := range s.Args {
+					c.checkExpr(arg.Value)
+				}
+				c.failSilently()
 				return nil
 			}
 
@@ -11578,7 +11695,9 @@ func bindInferredTypeVars(expected Type, actual Type) {
 }
 
 func bindInferredTypeVarsSeen(expected Type, actual Type, seen map[inferredTypeBindingVisit]struct{}) {
-	if expected == nil || actual == nil {
+	// An already reported failure provides no evidence for inference
+	// (ADR 0074).
+	if expected == nil || actual == nil || IsInvalid(expected) || IsInvalid(actual) {
 		return
 	}
 
@@ -12311,6 +12430,14 @@ func (c *Checker) checkExprAsInner(expr parse.Expression, expectedType Type, exp
 			// This is a shared anonymous-function inference path, so changes here affect closure typing
 			// beyond Result/Maybe combinators.
 			bindInferredTypeVars(returnType, body.Type())
+
+			// A callback whose return type had to be inferred from a body that
+			// failed has no knowable type, so the closure itself is a failed
+			// expression rather than evidence for the enclosing call (ADR 0074).
+			if IsInvalid(body.Type()) && firstUnresolvedCallTypeVar(returnType) != nil {
+				c.failSilently()
+				return nil
+			}
 
 			// Validate return type
 			if returnType != Void && !c.areCompatible(returnType, body.Type()) {
@@ -14106,8 +14233,9 @@ func (c *Checker) unifyTypes(expected Type, actual Type, genericScope *SymbolTab
 	actual = deref(actual)
 	// A non-returning expression never produces a value and therefore provides
 	// no evidence for generic inference. Other arguments or return context may
-	// still bind the expected generic.
-	if IsNever(actual) {
+	// still bind the expected generic. An already reported failure provides no
+	// evidence either (ADR 0074).
+	if IsNever(actual) || IsInvalid(actual) || IsInvalid(expected) {
 		return nil
 	}
 

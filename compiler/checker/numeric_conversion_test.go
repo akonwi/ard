@@ -29,7 +29,6 @@ func TestConversionTierSelection(t *testing.T) {
 }`,
 			diagnostics: []checker.Diagnostic{
 				{Kind: checker.Error, Message: "every Float32 value is exactly representable as Float64"},
-				{Kind: checker.Error, Message: "Type mismatch: Expected Float64?, got Void"},
 			},
 		},
 		{
@@ -39,7 +38,6 @@ func TestConversionTierSelection(t *testing.T) {
 }`,
 			diagnostics: []checker.Diagnostic{
 				{Kind: checker.Error, Message: "every Float32 value is exactly representable as Float64"},
-				{Kind: checker.Error, Message: "Type mismatch: Expected Float64, got Void"},
 			},
 		},
 		{
@@ -49,7 +47,6 @@ func TestConversionTierSelection(t *testing.T) {
 }`,
 			diagnostics: []checker.Diagnostic{
 				{Kind: checker.Error, Message: "Int cannot hold every Int64 value"},
-				{Kind: checker.Error, Message: "Type mismatch: Expected Int, got Void"},
 			},
 		},
 		{
@@ -67,7 +64,6 @@ func TestConversionTierSelection(t *testing.T) {
 }`,
 			diagnostics: []checker.Diagnostic{
 				{Kind: checker.Error, Message: "converting Int to Float64 cannot fail"},
-				{Kind: checker.Error, Message: "Type mismatch: Expected Float64?, got Void"},
 			},
 		},
 		{
@@ -113,7 +109,6 @@ func TestRuneConversionInvariant(t *testing.T) {
 }`,
 			diagnostics: []checker.Diagnostic{
 				{Kind: checker.Error, Message: "Rune cannot hold every Int value"},
-				{Kind: checker.Error, Message: "Type mismatch: Expected Rune, got Void"},
 			},
 		},
 		{
@@ -129,7 +124,6 @@ func TestRuneConversionInvariant(t *testing.T) {
 }`,
 			diagnostics: []checker.Diagnostic{
 				{Kind: checker.Error, Message: "Rune cannot hold every Int32 value"},
-				{Kind: checker.Error, Message: "Type mismatch: Expected Rune, got Void"},
 			},
 		},
 	})
@@ -156,7 +150,6 @@ func TestIdentityConversion(t *testing.T) {
 }`,
 			diagnostics: []checker.Diagnostic{
 				{Kind: checker.Error, Message: "every Int value is exactly representable as Int"},
-				{Kind: checker.Error, Message: "Type mismatch: Expected Int?, got Void"},
 			},
 		},
 		{
@@ -221,7 +214,6 @@ func TestRemovedConversionMethods(t *testing.T) {
 }`,
 			diagnostics: []checker.Diagnostic{
 				{Kind: checker.Error, Message: "Undefined: b.to_int"},
-				{Kind: checker.Error, Message: "Type mismatch: Expected Int, got Void"},
 			},
 		},
 		{
@@ -231,7 +223,6 @@ func TestRemovedConversionMethods(t *testing.T) {
 }`,
 			diagnostics: []checker.Diagnostic{
 				{Kind: checker.Error, Message: "Undefined: r.to_int"},
-				{Kind: checker.Error, Message: "Type mismatch: Expected Int, got Void"},
 			},
 		},
 		{
@@ -241,7 +232,6 @@ func TestRemovedConversionMethods(t *testing.T) {
 }`,
 			diagnostics: []checker.Diagnostic{
 				{Kind: checker.Error, Message: "Undefined: n.to_f64"},
-				{Kind: checker.Error, Message: "Type mismatch: Expected Float64, got Void"},
 			},
 		},
 		{
@@ -251,7 +241,6 @@ func TestRemovedConversionMethods(t *testing.T) {
 }`,
 			diagnostics: []checker.Diagnostic{
 				{Kind: checker.Error, Message: "Undefined: value.to_int"},
-				{Kind: checker.Error, Message: "Type mismatch: Expected Int, got Void"},
 			},
 		},
 		{

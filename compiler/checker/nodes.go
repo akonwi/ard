@@ -1140,11 +1140,17 @@ func (o *Or) Type() Type {
 type Block struct {
 	Stmts             []Statement
 	DiscardFinalValue bool
+	// failedFinal records that the block's final value expression failed to
+	// check and already reported a diagnostic (ADR 0074).
+	failedFinal bool
 }
 
 func (b *Block) Type() Type {
 	if b.DiscardFinalValue {
 		return Void
+	}
+	if b.failedFinal {
+		return invalidType
 	}
 	if len(b.Stmts) == 0 {
 		return Void

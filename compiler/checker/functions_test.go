@@ -1541,7 +1541,6 @@ func TestForwardFunctionReferences(t *testing.T) {
 			}, "\n"),
 			diagnostics: []checker.Diagnostic{
 				{Kind: checker.Error, Message: "Type mismatch: Expected Str, got Int"},
-				{Kind: checker.Error, Message: "Type mismatch: Expected Str, got Void"},
 			},
 		},
 	})
