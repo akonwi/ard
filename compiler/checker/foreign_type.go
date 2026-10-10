@@ -241,7 +241,7 @@ func (f *ForeignType) ValueForm() *ForeignType {
 	if !ok {
 		return nil
 	}
-	named, ok := pointer.Elem().(*types.Named)
+	named, ok := types.Unalias(pointer.Elem()).(*types.Named)
 	if !ok {
 		return nil
 	}
