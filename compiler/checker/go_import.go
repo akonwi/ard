@@ -372,7 +372,9 @@ func typeFromGoWithMethods(t types.Type, includeMethods bool) (Type, string) {
 		return fn, ""
 	}
 	if ptr, ok := t.(*types.Pointer); ok {
-		if named, ok := ptr.Elem().(*types.Named); ok && !isGoError(named) {
+		// Unalias the pointee so `*Alias` imports as the same foreign pointer
+		// as `*Target`; an alias is the same type as its target (#512).
+		if named, ok := types.Unalias(ptr.Elem()).(*types.Named); ok && !isGoError(named) {
 			if reason := unsupportedGoNamedTypeArgs(named); reason != "" {
 				return nil, reason
 			}
