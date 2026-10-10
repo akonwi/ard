@@ -1446,24 +1446,39 @@ func loadGoTestModules(profile *pipelineProfile, inputPath string, files []strin
 	}
 	loaded := make([]loadedGoTestModule, 0, len(files))
 	if err := profile.Time("frontend.check_discovered_modules", func() error {
+		// Diagnostics are rendered once for the whole run so collapsed-warning
+		// summaries cover every test file in a single line each (#529).
+		root := startDir
+		if projectInfo != nil && projectInfo.RootPath != "" {
+			root = projectInfo.RootPath
+		}
+		var collected []checker.Diagnostic
 		for _, path := range files {
-			module, err := loadGoTestModule(path, parsedFiles[path], resolver, projectInfo, goResolver)
-			if err != nil {
-				return err
+			checked := checkGoTestModule(path, parsedFiles[path], resolver, projectInfo, goResolver)
+			collected = append(collected, checked.Diagnostics...)
+			if checked.HasErrors() {
+				if err := renderTestDiagnostics(collected, root); err != nil {
+					return err
+				}
+				return diagnostics.AlreadyReported(fmt.Errorf("type errors"))
 			}
+			module := checked.Module
 			loaded = append(loaded, loadedGoTestModule{
 				module: module,
 				tests:  collectTests(module, path, filter),
 			})
 		}
-		return nil
+		return renderTestDiagnostics(collected, root)
 	}); err != nil {
 		return nil, projectInfo, err
 	}
 	return loaded, projectInfo, nil
 }
 
-func loadGoTestModule(path string, program *parse.Program, resolver *checker.ModuleResolver, projectInfo *checker.ProjectInfo, goResolver checker.GoPackageResolver) (checker.Module, error) {
+// checkGoTestModule checks a test file as an entry module. Entries share the
+// resolver's import cache, so a project module that is both a test file and
+// another test file's import is checked, and its diagnostics reported, once.
+func checkGoTestModule(path string, program *parse.Program, resolver *checker.ModuleResolver, projectInfo *checker.ProjectInfo, goResolver checker.GoPackageResolver) checker.EntryResult {
 	modulePath := goTestModulePath(projectInfo, path)
 	filePath := path
 	if projectInfo != nil && projectInfo.RootPath != "" {
@@ -1475,25 +1490,23 @@ func loadGoTestModule(path string, program *parse.Program, resolver *checker.Mod
 		}
 	}
 	options := checker.CheckOptions{ModulePath: modulePath, GoResolver: goResolver}
-	c := checker.New(filePath, program, resolver, options)
-	c.Check()
-	if len(c.Diagnostics()) > 0 {
-		root := filepath.Dir(path)
-		if projectInfo != nil && projectInfo.RootPath != "" {
-			root = projectInfo.RootPath
-		}
-		displayRoot, err := os.Getwd()
-		if err != nil {
-			displayRoot = root
-		}
-		if err := diagnostics.RenderRelative(os.Stderr, c.Diagnostics(), root, displayRoot); err != nil {
-			return nil, fmt.Errorf("render diagnostics: %w", err)
-		}
+	return checker.CheckEntry(path, filePath, program, resolver, options)
+}
+
+// renderTestDiagnostics renders the diagnostics collected across every test
+// file of a run at once, so collapsed-warning summaries cover the whole run.
+func renderTestDiagnostics(collected []checker.Diagnostic, root string) error {
+	if len(collected) == 0 {
+		return nil
 	}
-	if c.HasErrors() {
-		return nil, diagnostics.AlreadyReported(fmt.Errorf("type errors"))
+	displayRoot, err := os.Getwd()
+	if err != nil {
+		displayRoot = root
 	}
-	return c.Module(), nil
+	if err := diagnostics.RenderRelative(os.Stderr, collected, root, displayRoot); err != nil {
+		return fmt.Errorf("render diagnostics: %w", err)
+	}
+	return nil
 }
 
 func goTestModulePath(projectInfo *checker.ProjectInfo, filePath string) string {
