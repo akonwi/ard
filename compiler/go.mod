@@ -2,10 +2,9 @@ module github.com/akonwi/ard
 
 go 1.27.0
 
-require github.com/google/go-cmp v0.6.0
-
 require (
 	github.com/go-sql-driver/mysql v1.9.3
+	github.com/google/go-cmp v0.6.0
 	github.com/jackc/pgx/v5 v5.8.0
 	github.com/mattn/go-sqlite3 v1.14.28
 	github.com/pelletier/go-toml/v2 v2.2.4
@@ -14,7 +13,7 @@ require (
 	go.lsp.dev/uri v0.3.0
 	golang.org/x/crypto v0.47.0
 	golang.org/x/text v0.33.0
-	golang.org/x/tools v0.46.0
+	golang.org/x/tools v0.51.0
 )
 
 require (
@@ -28,7 +27,7 @@ require (
 	go.uber.org/atomic v1.9.0 // indirect
 	go.uber.org/multierr v1.8.0 // indirect
 	go.uber.org/zap v1.21.0 // indirect
-	golang.org/x/mod v0.37.0 // indirect
-	golang.org/x/sync v0.21.0 // indirect
-	golang.org/x/sys v0.46.0 // indirect
+	golang.org/x/mod v0.41.0 // indirect
+	golang.org/x/sync v0.23.0 // indirect
+	golang.org/x/sys v0.48.0 // indirect
 )
