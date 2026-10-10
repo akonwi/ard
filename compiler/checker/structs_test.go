@@ -258,6 +258,8 @@ func TestStructs(t *testing.T) {
 						p.age = 31`, personStructInput),
 			diagnostics: []checker.Diagnostic{
 				{Kind: checker.Error, Message: "Undefined variable: is_employed"},
+				// Checking continues after an undefined variable (#523).
+				{Kind: checker.Error, Message: "Cannot mutate 'p.age': it is an ordinary value, not a reference"},
 			},
 		},
 	})
