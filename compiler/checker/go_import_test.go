@@ -1184,6 +1184,45 @@ fn describe(value: Any) Str {
 			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Foreign type pattern must name a concrete foreign type, got io::Writer"}},
 		},
 		{
+			name: "patterns that implement a Go interface subject are accepted",
+			input: `use go:fmt
+use go:time
+
+fn describe(value: fmt::Stringer) Str {
+  match value {
+    time::Duration(d) => d.String(),
+    time::Month(_) => "month",
+    _ => "other",
+  }
+}`,
+		},
+		{
+			name: "patterns that cannot implement a Go interface subject are rejected",
+			input: `use go:io
+use go:time
+
+fn describe(reader: io::Reader) Str {
+  match reader {
+    time::Duration(_) => "duration",
+    _ => "other",
+  }
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Foreign type pattern time::Duration cannot be the dynamic type of io::Reader (missing method Read)"}},
+		},
+		{
+			name: "value patterns whose method has a pointer receiver are rejected",
+			input: `use go:bytes
+use go:io
+
+fn describe(reader: io::Reader) Str {
+  match reader {
+    bytes::Buffer(_) => "buffer",
+    _ => "other",
+  }
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Foreign type pattern bytes::Buffer cannot be the dynamic type of io::Reader (method Read has a pointer receiver)"}},
+		},
+		{
 			name: "non-dynamic subjects keep existing match semantics",
 			input: `fn describe(value: Int) Str {
   match value {

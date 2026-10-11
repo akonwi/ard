@@ -87,6 +87,7 @@ Rules:
 - A pattern names a concrete foreign Go type and binds the narrowed value: `term::EventNotify(e)` binds `e` with type `term::EventNotify`. A `_` binding matches the type without binding. Pointer (`mut`) patterns are deferred; use `unsafe::cast<mut T>` when a pointer form must be recovered.
 - The dynamic type set is open, so a catch-all `_` arm is required, mirroring the existing rule for imported Go enum-like constants.
 - Exhaustiveness is not checked beyond the catch-all requirement. Duplicate type patterns are diagnosed as unreachable.
+- When the subject is a method-bearing Go interface, each pattern type must be a possible dynamic type of it, following Go's rule for type-switch cases. A pattern whose value form lacks a method of the interface (including a method only its pointer form has) is rejected, so the generated type switch never contains an impossible case.
 - The whole match lowers to a single Go type switch, with each arm becoming a `case pkg.T:` clause.
 
 Match type patterns do not require an `unsafe` marker. The distinction is deliberate: `unsafe::cast` is a partial operation whose result can be forced, while a catch-all-required match is total — a failed test falls through to another arm, with no panic and no misrepresented type. The `match` form is dynamic but not unsafe.

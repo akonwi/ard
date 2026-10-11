@@ -180,6 +180,38 @@ func (f *ForeignType) EmptyInterface() bool {
 	return ok && iface.Empty()
 }
 
+// impossibleDynamicType explains why a value of the concrete pattern type can
+// never be the dynamic type of the Go interface subject, mirroring Go's
+// "impossible type switch case" rule (#510). It returns "" when the pattern
+// is a possible dynamic type, when the subject has no method set to satisfy,
+// or when Go metadata is not precise enough to decide (synthetic types and
+// generic instantiations), leaving those cases to the Go compiler.
+func impossibleDynamicType(subject *ForeignType, pattern *ForeignType) string {
+	if subject == nil || pattern == nil || !subject.Interface || subject.GoType == nil || pattern.GoType == nil {
+		return ""
+	}
+	if len(subject.TypeArgs) > 0 || len(pattern.TypeArgs) > 0 {
+		return ""
+	}
+	iface, ok := subject.GoType.Underlying().(*types.Interface)
+	if !ok || iface.Empty() || types.AssertableTo(iface, pattern.GoType) {
+		return ""
+	}
+	method, wrongType := types.MissingMethod(pattern.GoType, iface, true)
+	if method == nil {
+		return ""
+	}
+	if _, isPointer := pattern.GoType.(*types.Pointer); !isPointer {
+		if missing, _ := types.MissingMethod(types.NewPointer(pattern.GoType), iface, true); missing == nil {
+			return fmt.Sprintf("method %s has a pointer receiver", method.Name())
+		}
+	}
+	if wrongType {
+		return fmt.Sprintf("wrong type for method %s", method.Name())
+	}
+	return fmt.Sprintf("missing method %s", method.Name())
+}
+
 // readOnlyPointerForm returns the read-only form of a pointer-shaped foreign
 // type (ADR 0073).
 func (f *ForeignType) readOnlyPointerForm() *ForeignType {
