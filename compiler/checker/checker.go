@@ -3081,6 +3081,18 @@ func (c *Checker) areCompatible(expected Type, actual Type) bool {
 			return validationEqualTypes(foreign.Elem, actualList.of)
 		}
 	}
+	// The reverse also mirrors Go: named Go slice and map values flow where an
+	// Ard list or map with the same shape is expected (#511).
+	if expectedList, ok := expected.(*List); ok {
+		if elem, ok := namedGoSliceElem(actual); ok {
+			return validationEqualTypes(expectedList.of, elem)
+		}
+	}
+	if expectedMap, ok := expected.(*Map); ok {
+		if key, value, ok := namedGoMapEntry(actual); ok {
+			return validationEqualTypes(expectedMap.Key(), key) && validationEqualTypes(expectedMap.Value(), value)
+		}
+	}
 	// A named Go array type accepts an Ard fixed array with the same element
 	// type and length, mirroring Go's unnamed-to-named assignability.
 	if foreign, ok := expected.(*ForeignType); ok && !foreign.Pointer {
@@ -4861,6 +4873,24 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				return &Statement{Stmt: loop}
 			}
 
+			// A named Go slice iterates like an Ard list of its element type,
+			// as Go's `range` does (#511).
+			if elem, ok := namedGoSliceElem(iterValue.Type()); ok {
+				loop := &ForInList{
+					Cursor: s.Cursor.Name,
+					Index:  s.Cursor2.Name,
+					List:   iterValue,
+				}
+				body := c.checkLoopBody(s.GetLocation(), s.Body, func() {
+					c.recordBinding(s.Cursor.GetLocation(), c.legacyBorrowBinding(c.scope.add(s.Cursor.Name, elem, false)))
+					if loop.Index != "" {
+						c.recordBinding(s.Cursor2.GetLocation(), c.legacyBorrowBinding(c.scope.add(loop.Index, Int, false)))
+					}
+				})
+				loop.Body = body
+				return &Statement{Stmt: loop}
+			}
+
 			if arrayType, ok := iterValue.Type().(*FixedArray); ok {
 				loop := &ForInList{
 					Cursor: s.Cursor.Name,
@@ -4897,6 +4927,22 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					c.recordBinding(s.Cursor2.GetLocation(), c.legacyBorrowBinding(c.scope.add(loop.Val, mapType.Value(), valueMutable)))
 				})
 
+				loop.Body = body
+				return &Statement{Stmt: loop}
+			}
+
+			// A named Go map iterates like an Ard map of its key and value
+			// types, as Go's `range` does (#511).
+			if key, value, ok := namedGoMapEntry(iterValue.Type()); ok {
+				loop := &ForInMap{
+					Key: s.Cursor.Name,
+					Val: s.Cursor2.Name,
+					Map: iterValue,
+				}
+				body := c.checkLoopBody(s.GetLocation(), s.Body, func() {
+					c.recordBinding(s.Cursor.GetLocation(), c.legacyBorrowBinding(c.scope.add(loop.Key, key, false)))
+					c.recordBinding(s.Cursor2.GetLocation(), c.legacyBorrowBinding(c.scope.add(loop.Val, value, false)))
+				})
 				loop.Body = body
 				return &Statement{Stmt: loop}
 			}

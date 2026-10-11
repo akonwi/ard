@@ -1687,6 +1687,80 @@ fn bad() {
 	})
 }
 
+// Go assignability between a named slice or map type and its unnamed
+// underlying type is symmetric, and both iterate with `range`, so named Go
+// collections flow into Ard lists and maps and work with `for ... in` (#511).
+func TestNamedGoCollectionsBehaveLikeArdCollections(t *testing.T) {
+	run(t, []test{
+		{
+			name: "named Go slice satisfies an Ard list parameter",
+			input: `use go:sort
+fn total(values: [Int]) Int { values.size() }
+fn count(nums: sort::IntSlice) Int {
+  total(nums)
+}`,
+		},
+		{
+			name: "named Go slice satisfies an Ard list annotation",
+			input: `use go:sort
+fn plain(nums: sort::IntSlice) [Int] {
+  let values: [Int] = nums
+  values
+}`,
+		},
+		{
+			name: "named Go slices iterate like lists",
+			input: `use go:sort
+fn sum(nums: sort::IntSlice) Int {
+  mut total = 0
+  for n, i in nums {
+    total = total + n + i
+  }
+  total
+}`,
+		},
+		{
+			name: "named Go slice references iterate their referent",
+			input: `use go:sort
+fn sum(nums: &mut sort::IntSlice) Int {
+  mut total = 0
+  for n in nums {
+    total = total + n
+  }
+  total
+}`,
+		},
+		{
+			name: "named Go slice element type must match the list",
+			input: `use go:sort
+fn total(values: [Int]) Int { values.size() }
+fn count(names: sort::StringSlice) Int {
+  total(names)
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected [Int], got sort::StringSlice"}},
+		},
+		{
+			name: "named Go map satisfies an Ard map parameter",
+			input: `use go:net/http
+fn count(values: [Str: [Str]]) Int { values.size() }
+fn headers(header: http::Header) Int {
+  count(header)
+}`,
+		},
+		{
+			name: "named Go maps iterate like maps",
+			input: `use go:net/http
+fn names(header: http::Header) Int {
+  mut total = 0
+  for key, values in header {
+    total = total + key.size() + values.size()
+  }
+  total
+}`,
+		},
+	})
+}
+
 // Fresh containers still need explicit reference-producing syntax at a
 // reference destination. `mut <literal>` owns the fresh stable storage.
 func TestFreshContainerLiteralsRequireExplicitReferences(t *testing.T) {

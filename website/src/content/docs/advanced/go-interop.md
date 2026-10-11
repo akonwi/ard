@@ -146,6 +146,28 @@ let zero: Byte = 0
 let first = digest.at(0).or(zero)
 ```
 
+Named Go slice and map types, such as `sort::IntSlice` or `http::Header`, keep their Go name but behave like the list or map they are defined as, following Go's assignability rules. An Ard list or map with the same shape is accepted where the named type is expected, and a named value is accepted where the Ard list or map is expected. Named values also support the ordinary list and map methods and `for ... in`:
+
+```ard
+use go:sort
+
+fn total(values: [Int]) Int {
+  mut sum = 0
+  for value in values {
+    sum = sum + value
+  }
+  sum
+}
+
+fn main() {
+  let nums: sort::IntSlice = [3, 1, 2]
+  let sum = total(nums)
+  for n, i in nums {
+    // ...
+  }
+}
+```
+
 Ard does not implicitly convert through containers. If a Go API needs `[Byte]` and you have `[Int]`, write the transformation explicitly with `Byte::fit(...)` so allocation and truncation are visible in source.
 
 ## Pointer arguments and exact Go ABI
