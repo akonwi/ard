@@ -1990,6 +1990,45 @@ fn main() {
 	}
 }
 
+// Generic calls whose signatures reach a recursive struct specialize and run
+// (#509).
+func TestRunProgramGenericCallsReachingRecursiveStruct(t *testing.T) {
+	program := lowerSource(t, `struct Node {
+  next: (&mut Node)?,
+  kids: [Node],
+}
+
+struct Box {
+  value: $T,
+}
+
+impl Box {
+  fn node() Node {
+    Node{next: Maybe::new(), kids: [Node{next: Maybe::new(), kids: []}]}
+  }
+}
+
+fn make(x: $T) Node {
+  Node{next: Maybe::new(), kids: []}
+}
+
+fn count(x: $T, node: Node) Int {
+  node.kids.size()
+}
+
+fn main() {
+  let made = make(1)
+  let box = Box<Int>{value: 1}
+  let built = box.node()
+  if not count("x", built) == 1 { panic("method result lost its children") }
+  if not count(true, made) == 0 { panic("free function result has children") }
+}`)
+
+	if err := RunProgram(program, []string{"ard", "run", "sample.ard"}); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
+
 func TestRunProgramNarrowsForeignScalarsToPrimitives(t *testing.T) {
 	program := lowerSource(t, `use go:time
 

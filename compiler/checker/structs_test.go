@@ -96,6 +96,129 @@ fn main() {
 	}
 }
 
+// Specializing a generic call whose signature reaches a recursive
+// non-generic struct must terminate (#509).
+func TestGenericCallReachingRecursiveStructDoesNotOverflow(t *testing.T) {
+	const helperEnv = "ARD_TEST_CHECKER_GENERIC_CALL_RECURSIVE_STRUCT"
+	cases := []test{
+		{
+			name: "free generic function returning a recursive struct",
+			input: `
+struct Node {
+  next: (&mut Node)?,
+}
+
+fn make(x: $T) Node {
+  Node{next: Maybe::new()}
+}
+
+fn main() {
+  let n = make(1)
+}`,
+		},
+		{
+			name: "recursion through a list",
+			input: `
+struct Node {
+  kids: [Node],
+}
+
+fn make(x: $T) Node {
+  Node{kids: []}
+}
+
+fn main() {
+  let n = make(1)
+}`,
+		},
+		{
+			name: "recursive struct as a parameter",
+			input: `
+struct Node {
+  next: (&mut Node)?,
+}
+
+fn take(x: $T, n: Node) {}
+
+fn main() {
+  take(1, Node{next: Maybe::new()})
+}`,
+		},
+		{
+			name: "method on a generic receiver",
+			input: `
+struct Node {
+  next: (&mut Node)?,
+}
+
+struct Box {
+  value: $T,
+}
+
+impl Box {
+  fn node() Node {
+    Node{next: Maybe::new()}
+  }
+}
+
+fn main() {
+  let box = Box<Int>{value: 1}
+  let n = box.node()
+}`,
+		},
+		{
+			name: "receiver made generic by an unresolved field type",
+			input: `
+struct Node {
+  next: (&mut Node)?,
+}
+
+struct Owner {
+  missing: DoesNotExist,
+}
+
+impl Owner {
+  fn node() Node {
+    Node{next: Maybe::new()}
+  }
+}
+
+fn main() {
+  let owner = Owner{missing: 1}
+  let n = owner.node()
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Unrecognized type: DoesNotExist"}},
+		},
+	}
+
+	if os.Getenv(helperEnv) == "1" {
+		debug.SetMaxStack(1 << 20)
+		run(t, cases)
+		return
+	}
+
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(executable, "-test.run=^TestGenericCallReachingRecursiveStructDoesNotOverflow$", "-test.v")
+	cmd.Env = append(os.Environ(), helperEnv+"=1")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("checking generic calls that reach a recursive struct failed: %v\n%s", err, firstLines(string(output), 40))
+	}
+}
+
+// firstLines returns the first n lines of s, keeping the overflowing frames of
+// a stack trace and dropping the idle goroutines after them.
+func firstLines(s string, n int) string {
+	lines := strings.Split(s, "\n")
+	if len(lines) <= n {
+		return s
+	}
+	return strings.Join(lines[:n], "\n")
+}
+
 func TestRecursiveGenericStructThroughFunctionField(t *testing.T) {
 	run(t, []test{{
 		name: "recursive generic callback field",
