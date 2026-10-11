@@ -893,6 +893,14 @@ func firstUnresolvedCallTypeVar(t Type) *TypeVar {
 
 // Type replacement functions
 func replaceGeneric(t Type, genericName string, concreteType Type) Type {
+	return replaceGenericSeen(t, genericName, concreteType, map[*StructDef]*StructDef{})
+}
+
+// replaceGenericSeen substitutes concreteType for genericName. Canonical
+// struct declarations can be recursive (`struct Node { next: (mut Node)? }`),
+// so their copies are memoized in seen: a cycle resolves to the copy under
+// construction instead of recursing forever (#509).
+func replaceGenericSeen(t Type, genericName string, concreteType Type, seen map[*StructDef]*StructDef) Type {
 	switch t := t.(type) {
 	case *TypeVar:
 		if t.name == genericName {
@@ -900,38 +908,38 @@ func replaceGeneric(t Type, genericName string, concreteType Type) Type {
 		}
 		return t
 	case *List:
-		newOf := replaceGeneric(t.of, genericName, concreteType)
+		newOf := replaceGenericSeen(t.of, genericName, concreteType, seen)
 		if newOf == t.of {
 			return t
 		}
 		return &List{of: newOf}
 	case *Slice:
-		newOf := replaceGeneric(t.of, genericName, concreteType)
+		newOf := replaceGenericSeen(t.of, genericName, concreteType, seen)
 		if newOf == t.of {
 			return t
 		}
 		return &Slice{of: newOf}
 	case *Chan:
-		newOf := replaceGeneric(t.of, genericName, concreteType)
+		newOf := replaceGenericSeen(t.of, genericName, concreteType, seen)
 		if newOf == t.of {
 			return t
 		}
 		return &Chan{of: newOf}
 	case *Receiver:
-		newOf := replaceGeneric(t.of, genericName, concreteType)
+		newOf := replaceGenericSeen(t.of, genericName, concreteType, seen)
 		if newOf == t.of {
 			return t
 		}
 		return &Receiver{of: newOf}
 	case *Sender:
-		newOf := replaceGeneric(t.of, genericName, concreteType)
+		newOf := replaceGenericSeen(t.of, genericName, concreteType, seen)
 		if newOf == t.of {
 			return t
 		}
 		return &Sender{of: newOf}
 	case *Map:
-		newKey := replaceGeneric(t.key, genericName, concreteType)
-		newValue := replaceGeneric(t.value, genericName, concreteType)
+		newKey := replaceGenericSeen(t.key, genericName, concreteType, seen)
+		newValue := replaceGenericSeen(t.value, genericName, concreteType, seen)
 		if newKey == t.key && newValue == t.value {
 			return t
 		}
@@ -940,14 +948,14 @@ func replaceGeneric(t Type, genericName string, concreteType Type) Type {
 			value: newValue,
 		}
 	case *Maybe:
-		newOf := replaceGeneric(t.of, genericName, concreteType)
+		newOf := replaceGenericSeen(t.of, genericName, concreteType, seen)
 		if newOf == t.of {
 			return t
 		}
 		return &Maybe{of: newOf}
 	case *Result:
-		newVal := replaceGeneric(t.val, genericName, concreteType)
-		newErr := replaceGeneric(t.err, genericName, concreteType)
+		newVal := replaceGenericSeen(t.val, genericName, concreteType, seen)
+		newErr := replaceGenericSeen(t.err, genericName, concreteType, seen)
 		// Only create a new Result if something actually changed
 		if newVal == t.val && newErr == t.err {
 			return t
@@ -957,7 +965,7 @@ func replaceGeneric(t Type, genericName string, concreteType Type) Type {
 			err: newErr,
 		}
 	case *MutableRef:
-		newOf := replaceGeneric(t.of, genericName, concreteType)
+		newOf := replaceGenericSeen(t.of, genericName, concreteType, seen)
 		if newOf == t.of {
 			return t
 		}
@@ -966,9 +974,9 @@ func replaceGeneric(t Type, genericName string, concreteType Type) Type {
 		newParams := make([]Parameter, len(t.Parameters))
 		for i, p := range t.Parameters {
 			newParams[i] = p
-			newParams[i].Type = replaceGeneric(p.Type, genericName, concreteType)
+			newParams[i].Type = replaceGenericSeen(p.Type, genericName, concreteType, seen)
 		}
-		newReturnType := replaceGeneric(t.ReturnType, genericName, concreteType)
+		newReturnType := replaceGenericSeen(t.ReturnType, genericName, concreteType, seen)
 		// Create a new FunctionDef, don't modify the original
 		return &FunctionDef{
 			Name:                    t.Name,
@@ -988,37 +996,29 @@ func replaceGeneric(t Type, genericName string, concreteType Type) Type {
 	case *ForeignType:
 		args := make([]Type, len(t.TypeArgs))
 		for i, arg := range t.TypeArgs {
-			args[i] = replaceGeneric(arg, genericName, concreteType)
+			args[i] = replaceGenericSeen(arg, genericName, concreteType, seen)
 		}
 		return foreignTypeWithArgs(t, args)
 	case *StructDef:
 		if t.Definition != nil {
 			newTypeArgs := make([]Type, len(t.TypeArgs))
 			for i, typeArg := range t.TypeArgs {
-				newTypeArgs[i] = replaceGeneric(typeArg, genericName, concreteType)
+				newTypeArgs[i] = replaceGenericSeen(typeArg, genericName, concreteType, seen)
 			}
 			return newStructApplication(t, newTypeArgs)
 		}
 		// Canonical declarations are still copied for inference scratch values;
 		// ordinary named specialization uses nominal applications above.
-		anyChanged := false
-		newFields := make(map[string]Type)
-		for fieldName, fieldType := range t.Fields {
-			newFieldType := replaceGeneric(fieldType, genericName, concreteType)
-			newFields[fieldName] = newFieldType
-			if newFieldType != fieldType {
-				anyChanged = true
-			}
+		if existing, ok := seen[t]; ok {
+			return existing
 		}
-		// If nothing changed, return the original struct
-		if !anyChanged {
+		// A declaration that never mentions the generic is returned as is,
+		// which also keeps non-generic recursive structs nominal.
+		if !hasGeneric(t, genericName) {
 			return t
 		}
-		newTypeArgs := make([]Type, len(t.TypeArgs))
-		for i, typeArg := range t.TypeArgs {
-			newTypeArgs[i] = replaceGeneric(typeArg, genericName, concreteType)
-		}
-		return &StructDef{
+		newFields := make(map[string]Type, len(t.Fields))
+		structCopy := &StructDef{
 			Name:             t.Name,
 			ModulePath:       t.ModulePath,
 			Fields:           newFields,
@@ -1028,46 +1028,79 @@ func replaceGeneric(t Type, genericName string, concreteType Type) Type {
 			Traits:           t.Traits,
 			GenericParams:    append([]string(nil), t.GenericParams...),
 			DeclaredGenerics: t.DeclaredGenerics,
-			TypeArgs:         newTypeArgs,
 			Definition:       t.Definition,
 			Private:          t.Private,
 		}
+		seen[t] = structCopy
+		for fieldName, fieldType := range t.Fields {
+			newFields[fieldName] = replaceGenericSeen(fieldType, genericName, concreteType, seen)
+		}
+		newTypeArgs := make([]Type, len(t.TypeArgs))
+		for i, typeArg := range t.TypeArgs {
+			newTypeArgs[i] = replaceGenericSeen(typeArg, genericName, concreteType, seen)
+		}
+		structCopy.TypeArgs = newTypeArgs
+		return structCopy
 	default:
 		return t
 	}
 }
 
 func hasGeneric(t Type, genericName string) bool {
+	return hasGenericSeen(t, genericName, map[*StructDef]bool{})
+}
+
+// hasGenericSeen reports whether t mentions genericName anywhere
+// replaceGeneric would substitute it. A struct already on the walk contributes
+// nothing new, so recursive declarations terminate (#509).
+func hasGenericSeen(t Type, genericName string, seen map[*StructDef]bool) bool {
 	switch t := t.(type) {
 	case *TypeVar:
 		return t.name == genericName
 	case *List:
-		return hasGeneric(t.of, genericName)
+		return hasGenericSeen(t.of, genericName, seen)
 	case *Slice:
-		return hasGeneric(t.of, genericName)
+		return hasGenericSeen(t.of, genericName, seen)
 	case *Map:
-		return hasGeneric(t.key, genericName) || hasGeneric(t.value, genericName)
+		return hasGenericSeen(t.key, genericName, seen) || hasGenericSeen(t.value, genericName, seen)
 	case *Maybe:
-		return hasGeneric(t.of, genericName)
+		return hasGenericSeen(t.of, genericName, seen)
 	case *Result:
-		return hasGeneric(t.val, genericName) || hasGeneric(t.err, genericName)
+		return hasGenericSeen(t.val, genericName, seen) || hasGenericSeen(t.err, genericName, seen)
 	case *MutableRef:
-		return hasGeneric(t.of, genericName)
+		return hasGenericSeen(t.of, genericName, seen)
+	case *Chan:
+		return hasGenericSeen(t.of, genericName, seen)
+	case *Receiver:
+		return hasGenericSeen(t.of, genericName, seen)
+	case *Sender:
+		return hasGenericSeen(t.of, genericName, seen)
+	case *FunctionDef:
+		for _, param := range t.Parameters {
+			if hasGenericSeen(param.Type, genericName, seen) {
+				return true
+			}
+		}
+		return hasGenericSeen(t.ReturnType, genericName, seen)
 	case *ForeignType:
 		for _, typeArg := range t.TypeArgs {
-			if hasGeneric(typeArg, genericName) {
+			if hasGenericSeen(typeArg, genericName, seen) {
 				return true
 			}
 		}
 		return false
 	case *StructDef:
+		if seen[t] {
+			return false
+		}
+		seen[t] = true
 		for _, typeArg := range t.TypeArgs {
-			if hasGeneric(typeArg, genericName) {
+			if hasGenericSeen(typeArg, genericName, seen) {
 				return true
 			}
 		}
 		for _, fieldType := range t.Fields {
-			if hasGeneric(fieldType, genericName) {
+			if hasGenericSeen(fieldType, genericName, seen) {
 				return true
 			}
 		}
