@@ -2629,6 +2629,13 @@ func (c *Checker) checkForeignTypeMatch(s *parse.MatchExpression, subject Expres
 				c.addInvalidForeignTypePattern(legacy, matchCase.Pattern.GetLocation(), "this pattern does not name a concrete foreign type")
 				continue
 			}
+			if subjectForeign, ok := subject.Type().(*ForeignType); ok {
+				if reason := impossibleDynamicType(subjectForeign, foreign); reason != "" {
+					legacy := fmt.Sprintf("Foreign type pattern %s cannot be the dynamic type of %s (%s)", foreign, subjectForeign, reason)
+					c.addInvalidForeignTypePattern(legacy, matchCase.Pattern.GetLocation(), fmt.Sprintf("`%s` can never hold a `%s` (%s)", subjectForeign, foreign, reason))
+					continue
+				}
+			}
 			if len(p.Function.Args) != 1 {
 				c.addInvalidForeignTypePattern("Foreign type pattern requires exactly one binding, like pkg::Type(binding)", matchCase.Pattern.GetLocation(), "provide exactly one binding")
 				continue

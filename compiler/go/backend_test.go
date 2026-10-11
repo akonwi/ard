@@ -1965,6 +1965,31 @@ fn main() {
 	}
 }
 
+// A match over a method-bearing Go interface lowers to a type switch whose
+// cases must all be possible dynamic types; the checker rejects the rest (#510).
+func TestRunProgramExecutesForeignTypeMatchOverGoInterface(t *testing.T) {
+	program := lowerSource(t, `use go:fmt
+use go:time
+
+fn describe(value: fmt::Stringer) Str {
+  match value {
+    time::Duration(d) => "duration:{d.String()}",
+    time::Month(_) => "month",
+    _ => "other",
+  }
+}
+
+fn main() {
+  if not describe(time::Second) == "duration:1s" { panic("duration arm failed") }
+  if not describe(time::January) == "month" { panic("month arm failed") }
+  if not describe(time::Monday) == "other" { panic("catch-all failed") }
+}`)
+
+	if err := RunProgram(program, []string{"ard", "run", "sample.ard"}); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
+
 func TestRunProgramNarrowsForeignScalarsToPrimitives(t *testing.T) {
 	program := lowerSource(t, `use go:time
 
