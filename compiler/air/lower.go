@@ -3608,7 +3608,10 @@ func (fl *functionLowerer) lowerForInList(loop *checker.ForInList) ([]Stmt, erro
 		return nil, err
 	}
 	listType, ok := fl.l.typeInfo(list.Type)
-	if !ok || (listType.Kind != TypeList && listType.Kind != TypeSlice && listType.Kind != TypeFixedArray) {
+	// A named Go slice (a non-pointer foreign type with an element) iterates
+	// like a list (#511).
+	namedSlice := listType.Kind == TypeForeignType && !listType.ForeignPointer && listType.Elem != NoType
+	if !ok || (listType.Kind != TypeList && listType.Kind != TypeSlice && listType.Kind != TypeFixedArray && !namedSlice) {
 		return nil, fmt.Errorf("for-in list lowered with non-list subject %s", loop.List.Type().String())
 	}
 
@@ -3670,7 +3673,10 @@ func (fl *functionLowerer) lowerForInMap(loop *checker.ForInMap) ([]Stmt, error)
 		return nil, err
 	}
 	mapType, ok := fl.l.typeInfo(m.Type)
-	if !ok || mapType.Kind != TypeMap {
+	// A named Go map (a non-pointer foreign type with a key) iterates like a
+	// map (#511).
+	namedMap := mapType.Kind == TypeForeignType && !mapType.ForeignPointer && mapType.Key != NoType
+	if !ok || (mapType.Kind != TypeMap && !namedMap) {
 		return nil, fmt.Errorf("for-in map lowered with non-map subject %s", loop.Map.Type().String())
 	}
 

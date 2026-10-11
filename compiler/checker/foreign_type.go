@@ -191,6 +191,26 @@ func (f *ForeignType) readOnlyPointerForm() *ForeignType {
 	return &readOnly
 }
 
+// namedGoSliceElem returns the element type of a named Go slice value
+// (`type Nums []int`), which behaves like an Ard list of that element.
+func namedGoSliceElem(t Type) (Type, bool) {
+	foreign, ok := t.(*ForeignType)
+	if !ok || foreign.Pointer || foreign.Elem == nil {
+		return nil, false
+	}
+	return foreign.Elem, true
+}
+
+// namedGoMapEntry returns the key and value types of a named Go map value
+// (`type Header map[string][]string`), which behaves like an Ard map.
+func namedGoMapEntry(t Type) (Type, Type, bool) {
+	foreign, ok := t.(*ForeignType)
+	if !ok || foreign.Pointer || foreign.MapKey == nil || foreign.MapValue == nil {
+		return nil, nil, false
+	}
+	return foreign.MapKey, foreign.MapValue, true
+}
+
 func isPointerForeign(t Type) bool {
 	foreign, ok := t.(*ForeignType)
 	return ok && foreign.Pointer
