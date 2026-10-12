@@ -451,10 +451,18 @@ func runUpdateCommand(args []string) error {
 		return err
 	}
 
+	// A path dependency whose lock entry still pins another source (for
+	// example after switching from Git to a local checkout) is re-locked to
+	// its path; there is nothing else to update for paths (#542).
+	pathDrifted := func(alias string) bool {
+		dep, ok := project.Dependencies[alias]
+		return ok && dep.SourcePath != "" && dep.LockDrift != ""
+	}
+
 	targets := append([]string{}, args...)
 	if len(targets) == 0 {
 		for alias, dep := range declared {
-			if dep.Git != "" {
+			if dep.Git != "" || pathDrifted(alias) {
 				targets = append(targets, alias)
 			}
 		}
@@ -467,12 +475,17 @@ func runUpdateCommand(args []string) error {
 
 	// updates maps a canonical git source to the newly resolved commit.
 	updates := map[string]string{}
+	relockedPaths := []string{}
 	for _, alias := range targets {
 		dep, ok := declared[alias]
 		if !ok {
 			return fmt.Errorf("dependency %q is not declared in ard.toml", alias)
 		}
 		if dep.Git == "" {
+			if pathDrifted(alias) {
+				relockedPaths = append(relockedPaths, alias)
+				continue
+			}
 			fmt.Printf("Skipping %s (path dependency)\n", alias)
 			continue
 		}
@@ -482,22 +495,47 @@ func runUpdateCommand(args []string) error {
 		}
 		locked := ""
 		lockedGit := ""
+		// A dependency missing from ard.lock, or whose lock entry no longer
+		// matches ard.toml, carries its manifest values here; it still needs
+		// locking even when the manifest already names the latest commit.
+		lockCurrent := false
 		if info, ok := project.Dependencies[alias]; ok {
 			locked = info.Commit
 			lockedGit = info.Git
+			lockCurrent = info.PackageID != "" && info.LockDrift == ""
 		}
 		sameSource := checker.CanonicalGitSource(dep.Git) == checker.CanonicalGitSource(lockedGit)
-		if latest == locked && sameSource {
+		if latest == locked && sameSource && lockCurrent {
 			fmt.Printf("%s is already up to date (%s)\n", alias, shortCommit(latest))
 			continue
 		}
 		updates[checker.CanonicalGitSource(dep.Git)] = latest
 	}
-	if len(updates) == 0 {
+	if len(updates) == 0 && len(relockedPaths) == 0 {
 		fmt.Println("All dependencies are up to date")
 		return nil
 	}
 
+	if len(updates) == 0 {
+		// Only path dependencies need re-locking. Lock each one's subtree on
+		// its own: the other Git dependencies keep their pins and are not
+		// re-resolved. Git dependencies inside the subtree are still resolved
+		// from their sources.
+		for _, alias := range relockedPaths {
+			lock, err := checker.LockDependencyGraphReplacingAliases(project.RootPath, project.ProjectName, alias, nil, declared[alias], "", "")
+			if err != nil {
+				return err
+			}
+			if err := checker.WriteDependencyLock(project.RootPath, lock); err != nil {
+				return err
+			}
+		}
+		printRelockedPaths(project.RootPath, declared, relockedPaths)
+		return nil
+	}
+
+	// Rebuilding the graph for Git updates also re-locks every path
+	// dependency from ard.toml.
 	lock, err := checker.UpdateDependencyGraph(project.RootPath, project.ProjectName, updates)
 	if err != nil {
 		return err
@@ -531,7 +569,18 @@ func runUpdateCommand(args []string) error {
 		}
 		fmt.Printf("Updated %s -> %s\n", alias, shortCommit(updates[checker.CanonicalGitSource(declared[alias].Git)]))
 	}
+	printRelockedPaths(project.RootPath, declared, relockedPaths)
 	return nil
+}
+
+func printRelockedPaths(projectRoot string, declared map[string]checker.DependencyInfo, aliases []string) {
+	for _, alias := range aliases {
+		path := declared[alias].SourcePath
+		if rel, err := filepath.Rel(projectRoot, path); err == nil {
+			path = filepath.ToSlash(rel)
+		}
+		fmt.Printf("Locked %s -> path %s\n", alias, path)
+	}
 }
 
 func shortCommit(commit string) string {
@@ -558,6 +607,9 @@ func runDepsCommand(args []string) error {
 		}
 		return nil
 	case "verify":
+		if err := checker.VerifyLockMatchesManifest("."); err != nil {
+			return err
+		}
 		if err := checker.VerifyDependencies("."); err != nil {
 			return err
 		}
