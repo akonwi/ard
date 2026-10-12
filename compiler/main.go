@@ -495,12 +495,17 @@ func runUpdateCommand(args []string) error {
 		}
 		locked := ""
 		lockedGit := ""
+		// A dependency missing from ard.lock, or whose lock entry no longer
+		// matches ard.toml, carries its manifest values here; it still needs
+		// locking even when the manifest already names the latest commit.
+		lockCurrent := false
 		if info, ok := project.Dependencies[alias]; ok {
 			locked = info.Commit
 			lockedGit = info.Git
+			lockCurrent = info.PackageID != "" && info.LockDrift == ""
 		}
 		sameSource := checker.CanonicalGitSource(dep.Git) == checker.CanonicalGitSource(lockedGit)
-		if latest == locked && sameSource {
+		if latest == locked && sameSource && lockCurrent {
 			fmt.Printf("%s is already up to date (%s)\n", alias, shortCommit(latest))
 			continue
 		}
@@ -511,6 +516,25 @@ func runUpdateCommand(args []string) error {
 		return nil
 	}
 
+	if len(updates) == 0 {
+		// Only path dependencies need re-locking. Lock each one's subtree
+		// without re-resolving the other Git dependencies, which would need
+		// the network and could move their pins.
+		for _, alias := range relockedPaths {
+			lock, err := checker.LockDependencyGraphReplacingAliases(project.RootPath, project.ProjectName, alias, nil, declared[alias], "", "")
+			if err != nil {
+				return err
+			}
+			if err := checker.WriteDependencyLock(project.RootPath, lock); err != nil {
+				return err
+			}
+		}
+		printRelockedPaths(project.RootPath, declared, relockedPaths)
+		return nil
+	}
+
+	// Rebuilding the graph for Git updates also re-locks every path
+	// dependency from ard.toml.
 	lock, err := checker.UpdateDependencyGraph(project.RootPath, project.ProjectName, updates)
 	if err != nil {
 		return err
@@ -544,14 +568,18 @@ func runUpdateCommand(args []string) error {
 		}
 		fmt.Printf("Updated %s -> %s\n", alias, shortCommit(updates[checker.CanonicalGitSource(declared[alias].Git)]))
 	}
-	for _, alias := range relockedPaths {
+	printRelockedPaths(project.RootPath, declared, relockedPaths)
+	return nil
+}
+
+func printRelockedPaths(projectRoot string, declared map[string]checker.DependencyInfo, aliases []string) {
+	for _, alias := range aliases {
 		path := declared[alias].SourcePath
-		if rel, err := filepath.Rel(project.RootPath, path); err == nil {
+		if rel, err := filepath.Rel(projectRoot, path); err == nil {
 			path = filepath.ToSlash(rel)
 		}
 		fmt.Printf("Locked %s -> path %s\n", alias, path)
 	}
-	return nil
 }
 
 func shortCommit(commit string) string {

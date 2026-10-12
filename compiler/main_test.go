@@ -1765,8 +1765,8 @@ func TestRunUpdateCommandRelocksPathDependencyReplacingGitLock(t *testing.T) {
 	if err := os.MkdirAll(repo, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	os.WriteFile(filepath.Join(repo, "ard.toml"), []byte("name = \"helper\"\nard = \">= 0.1.0\"\n"), 0o644)
-	os.WriteFile(filepath.Join(repo, "helper.ard"), []byte("fn value() Int { 1 }\n"), 0o644)
+	writeTestFile(t, filepath.Join(repo, "ard.toml"), []byte("name = \"helper\"\nard = \">= 0.1.0\"\n"))
+	writeTestFile(t, filepath.Join(repo, "helper.ard"), []byte("fn value() Int { 1 }\n"))
 	gitRun(t, repo, "init")
 	gitRun(t, repo, "add", ".")
 	gitRun(t, repo, "-c", "user.email=t@e.com", "-c", "user.name=T", "commit", "-m", "one")
@@ -1776,7 +1776,7 @@ func TestRunUpdateCommandRelocksPathDependencyReplacingGitLock(t *testing.T) {
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n\n[dependencies]\nhelper = { git = \""+repo+"\", commit = \""+commit+"\" }\n"), 0o644)
+	writeTestFile(t, filepath.Join(root, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n\n[dependencies]\nhelper = { git = \""+repo+"\", commit = \""+commit+"\" }\n"))
 	lock, err := checker.LockDependencyGraph(root, "app", "helper", checker.DependencyInfo{Alias: "helper", Name: "helper", Git: repo, Commit: commit}, "helper", commit)
 	if err != nil {
 		t.Fatalf("initial lock: %v", err)
@@ -1789,9 +1789,9 @@ func TestRunUpdateCommandRelocksPathDependencyReplacingGitLock(t *testing.T) {
 	if err := os.MkdirAll(local, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	os.WriteFile(filepath.Join(local, "ard.toml"), []byte("name = \"helper\"\nard = \">= 0.1.0\"\n"), 0o644)
-	os.WriteFile(filepath.Join(local, "helper.ard"), []byte("fn value() Int { 2 }\n"), 0o644)
-	os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n\n[dependencies]\nhelper = { path = \"../helper-local\" }\n"), 0o644)
+	writeTestFile(t, filepath.Join(local, "ard.toml"), []byte("name = \"helper\"\nard = \">= 0.1.0\"\n"))
+	writeTestFile(t, filepath.Join(local, "helper.ard"), []byte("fn value() Int { 2 }\n"))
+	writeTestFile(t, filepath.Join(root, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n\n[dependencies]\nhelper = { path = \"../helper-local\" }\n"))
 
 	if err := checker.VerifyLockMatchesManifest(root); err == nil {
 		t.Fatal("lock verification passed before the path was locked")
@@ -1822,6 +1822,128 @@ func TestRunUpdateCommandRelocksPathDependencyReplacingGitLock(t *testing.T) {
 	// With nothing left to re-lock, a second update reports no work.
 	if err := runUpdateCommand(nil); err != nil {
 		t.Fatalf("runUpdateCommand (second): %v", err)
+	}
+}
+
+// lockedHelperProject locks a Git `helper` dependency at its first commit and
+// returns the workspace, project root, helper repo, and locked commit.
+func lockedHelperProject(t *testing.T) (string, string, string, string) {
+	t.Helper()
+	t.Setenv("ARD_CACHE_DIR", t.TempDir())
+	workspace := t.TempDir()
+	repo := filepath.Join(workspace, "helper")
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, filepath.Join(repo, "ard.toml"), []byte("name = \"helper\"\nard = \">= 0.1.0\"\n"))
+	writeTestFile(t, filepath.Join(repo, "helper.ard"), []byte("fn value() Int { 1 }\n"))
+	gitRun(t, repo, "init")
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "-c", "user.email=t@e.com", "-c", "user.name=T", "commit", "-m", "one")
+	commit := gitRun(t, repo, "rev-parse", "HEAD")
+
+	root := filepath.Join(workspace, "app")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, filepath.Join(root, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n\n[dependencies]\nhelper = { git = \""+repo+"\", commit = \""+commit+"\" }\n"))
+	lock, err := checker.LockDependencyGraph(root, "app", "helper", checker.DependencyInfo{Alias: "helper", Name: "helper", Git: repo, Commit: commit}, "helper", commit)
+	if err != nil {
+		t.Fatalf("initial lock: %v", err)
+	}
+	if err := checker.WriteDependencyLock(root, lock); err != nil {
+		t.Fatal(err)
+	}
+	return workspace, root, repo, commit
+}
+
+// A hand-edited Git commit that is already the latest commit still needs
+// locking; `ard update` must not report it as up to date (#542).
+func TestRunUpdateCommandRelocksHandEditedGitCommit(t *testing.T) {
+	_, root, repo, c1 := lockedHelperProject(t)
+	writeTestFile(t, filepath.Join(repo, "helper.ard"), []byte("fn value() Int { 2 }\n"))
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "-c", "user.email=t@e.com", "-c", "user.name=T", "commit", "-m", "two")
+	c2 := gitRun(t, repo, "rev-parse", "HEAD")
+	writeTestFile(t, filepath.Join(root, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n\n[dependencies]\nhelper = { git = \""+repo+"\", commit = \""+c2+"\" }\n"))
+	if err := checker.VerifyDependencies(root); err == nil {
+		t.Fatal("verify passed although ard.lock still pins the old commit")
+	}
+
+	t.Chdir(root)
+	if err := runUpdateCommand([]string{"helper"}); err != nil {
+		t.Fatalf("runUpdateCommand: %v", err)
+	}
+	lockData, _ := os.ReadFile(filepath.Join(root, "ard.lock"))
+	if !strings.Contains(string(lockData), c2) || strings.Contains(string(lockData), c1) {
+		t.Fatalf("lock not moved to the edited commit:\n%s", lockData)
+	}
+	if err := checker.VerifyDependencies(root); err != nil {
+		t.Fatalf("verify after update: %v", err)
+	}
+}
+
+// Re-locking a path dependency leaves other Git pins alone and does not need
+// to reach their sources (#542).
+func TestRunUpdateCommandRelocksOnlyThePathDependency(t *testing.T) {
+	workspace, root, repo, commit := lockedHelperProject(t)
+	if _, err := checker.FetchDependency(root, "helper"); err != nil {
+		t.Fatalf("fetch helper: %v", err)
+	}
+	sharedRepo := filepath.Join(workspace, "shared-repo")
+	if err := os.MkdirAll(sharedRepo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, filepath.Join(sharedRepo, "ard.toml"), []byte("name = \"shared\"\nard = \">= 0.1.0\"\n"))
+	writeTestFile(t, filepath.Join(sharedRepo, "shared.ard"), []byte("fn value() Int { 0 }\n"))
+	gitRun(t, sharedRepo, "init")
+	gitRun(t, sharedRepo, "add", ".")
+	gitRun(t, sharedRepo, "-c", "user.email=t@e.com", "-c", "user.name=T", "commit", "-m", "one")
+	sharedCommit := gitRun(t, sharedRepo, "rev-parse", "HEAD")
+	writeTestFile(t, filepath.Join(root, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n\n[dependencies]\nhelper = { git = \""+repo+"\", commit = \""+commit+"\" }\nshared = { git = \""+sharedRepo+"\", commit = \""+sharedCommit+"\" }\n"))
+	lock, err := checker.LockDependencyGraph(root, "app", "shared", checker.DependencyInfo{Alias: "shared", Name: "shared", Git: sharedRepo, Commit: sharedCommit}, "shared", sharedCommit)
+	if err != nil {
+		t.Fatalf("lock shared: %v", err)
+	}
+	if err := checker.WriteDependencyLock(root, lock); err != nil {
+		t.Fatal(err)
+	}
+
+	shared := filepath.Join(workspace, "shared")
+	if err := os.MkdirAll(shared, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, filepath.Join(shared, "ard.toml"), []byte("name = \"shared\"\nard = \">= 0.1.0\"\n"))
+	writeTestFile(t, filepath.Join(shared, "shared.ard"), []byte("fn value() Int { 1 }\n"))
+	writeTestFile(t, filepath.Join(root, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n\n[dependencies]\nhelper = { git = \""+repo+"\", commit = \""+commit+"\" }\nshared = { path = \"../shared\" }\n"))
+	// The helper source becomes unreachable: re-resolving it would fail.
+	if err := os.RemoveAll(repo); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Chdir(root)
+	if err := runUpdateCommand([]string{"shared"}); err != nil {
+		t.Fatalf("runUpdateCommand: %v", err)
+	}
+	lockData, _ := os.ReadFile(filepath.Join(root, "ard.lock"))
+	if !strings.Contains(string(lockData), commit) {
+		t.Fatalf("helper pin was dropped:\n%s", lockData)
+	}
+	if strings.Contains(string(lockData), sharedCommit) {
+		t.Fatalf("shared still pinned to its Git commit:\n%s", lockData)
+	}
+	if err := checker.VerifyLockMatchesManifest(root); err != nil {
+		t.Fatalf("verify lock after update: %v", err)
+	}
+	if err := checker.VerifyDependencies(root); err != nil {
+		t.Fatalf("verify after update: %v", err)
+	}
+}
+
+func writeTestFile(t *testing.T, path string, data []byte) {
+	t.Helper()
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
 

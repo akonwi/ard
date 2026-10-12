@@ -124,7 +124,7 @@ To verify that `ard.lock` matches `ard.toml` and that cached dependencies match 
 ard deps verify
 ```
 
-`ard.toml` decides what each dependency is, and `ard.lock` only pins it. If you edit a Git dependency's `commit`, `tag`, or `git` source by hand, commands fail with an "`ard.lock` is out of date" error until you re-lock it with `ard add <source>@<ref>`, instead of building the previously locked commit.
+`ard.toml` decides what each dependency is, and `ard.lock` only pins it. If you edit a Git dependency's `commit`, `tag`, or `git` source by hand, commands fail with an "`ard.lock` is out of date" error, instead of building the previously locked commit. The error names the `ard add` command that locks the requested ref.
 
 ## Removing a dependency
 
@@ -154,7 +154,7 @@ To develop against an unpushed change to a Git dependency, point it at a local c
 cooper = { path = "../cooper" }
 ```
 
-Commands build the checkout right away, even though `ard.lock` still pins the Git commit. `ard deps verify` reports the mismatch, so a stale lock is not committed by accident. Either restore the Git entry when you're done, or run `ard update cooper` to lock the path.
+Commands build the checkout right away, even though `ard.lock` still pins the Git commit. The checkout's own Git dependencies reuse the commits `ard.lock` already pins for them. If the checkout adds or changes one, run `ard update cooper` to lock it. `ard deps verify` reports the mismatch, so a stale lock is not committed by accident. Either restore the Git entry when you're done, or run `ard update cooper` to lock the path; this re-locks only that dependency.
 
 ## FFI companions
 
