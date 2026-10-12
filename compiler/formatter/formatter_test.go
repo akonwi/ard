@@ -511,3 +511,133 @@ func TestFormatBlankLinesHaveNoTrailingWhitespace(t *testing.T) {
 		}
 	}
 }
+
+// A comment on its own line before a match, conditional match, or select arm
+// stays attached to that arm instead of moving above the first arm (#543).
+func TestFormatKeepsCommentsWithTheirArms(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name: "match arms keep their leading comments",
+			input: `fn describe(count: Int) Str {
+  match count {
+    // Nothing yet.
+    0 => "none",
+    1 => "one",
+    // Two is a pair.
+    2 => "pair",
+    // Everything else.
+    _ => "many",
+  }
+}
+`,
+		},
+		{
+			name: "bool match keeps the comment on the second arm",
+			input: `fn describe(flag: Bool) Str {
+  match flag {
+    true => "yes",
+    // Otherwise no.
+    false => "no",
+  }
+}
+`,
+		},
+		{
+			name: "comments after the last arm stay at the end",
+			input: `fn describe(count: Int) Str {
+  match count {
+    0 => "none",
+    _ => "many",
+    // More cases later.
+  }
+}
+`,
+		},
+		{
+			name: "block arm comments stay between arms",
+			input: `fn describe(count: Int) Str {
+  match count {
+    0 => {
+      let label = "none"
+      label
+    },
+    // Many has a block too.
+    _ => {
+      let label = "many"
+      label
+    },
+  }
+}
+`,
+		},
+		{
+			name: "trailing same-line comments move below their arm",
+			input: `fn describe(count: Int) Str {
+  match count {
+    0 => "none", // zero
+    _ => "many",
+  }
+}
+`,
+			want: `fn describe(count: Int) Str {
+  match count {
+    0 => "none",
+    // zero
+    _ => "many",
+  }
+}
+`,
+		},
+		{
+			name: "conditional match arms keep their leading comments",
+			input: `fn describe(count: Int) Str {
+  match {
+    count == 0 => "none",
+    // Small counts.
+    count < 3 => "few",
+    // Everything else.
+    _ => "many",
+  }
+}
+`,
+		},
+		{
+			name: "select arms keep their leading comments",
+			input: `fn wait(first: Chan<Int>, second: Chan<Int>) Int? {
+  select {
+    let value = first.recv() => value,
+    // The second channel wins ties.
+    let value = second.recv() => value,
+  }
+}
+`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			want := tt.want
+			if want == "" {
+				want = tt.input
+			}
+			formatted, err := Format([]byte(tt.input), "test.ard")
+			if err != nil {
+				t.Fatalf("format: %v", err)
+			}
+			if string(formatted) != want {
+				t.Fatalf("formatted =\n%s\nwant\n%s", formatted, want)
+			}
+			again, err := Format(formatted, "test.ard")
+			if err != nil {
+				t.Fatalf("reformat: %v", err)
+			}
+			if string(again) != string(formatted) {
+				t.Fatalf("formatting is not idempotent:\n%s", again)
+			}
+		})
+	}
+}

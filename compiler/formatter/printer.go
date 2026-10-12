@@ -1479,19 +1479,43 @@ func (p printer) renderCallHeadDoc(head doc, headText string, typeArgs []parse.D
 	return fallback
 }
 
-func (p printer) renderMatchExpressionDoc(node *parse.MatchExpression) doc {
-	caseDocs := make([]doc, 0, len(node.Cases)+len(node.Comments))
-	for _, comment := range node.Comments {
-		caseDocs = append(caseDocs, dText(p.renderComment(comment.Value)))
-	}
-	for _, matchCase := range node.Cases {
-		caseDocs = append(caseDocs, dConcat(p.renderMatchCaseDoc(matchCase), dText(",")))
-	}
+// armDoc is a rendered match or select arm with the source row it starts on,
+// used to keep comments next to the arm they precede.
+type armDoc struct {
+	doc      doc
+	startRow int
+}
 
-	body := dText("")
-	if len(caseDocs) > 0 {
-		body = dJoin(dHardLine(), caseDocs)
+// renderArmsWithComments joins arms one per line, placing each comment before
+// the first arm that starts after it, so a comment stays attached to the arm
+// it describes (#543). A comment that shares a row with an arm, or follows
+// the last arm, comes after that arm. An arm without a recorded position
+// keeps every pending comment above it.
+func (p printer) renderArmsWithComments(arms []armDoc, comments []parse.Comment) doc {
+	docs := make([]doc, 0, len(arms)+len(comments))
+	commentIndex := 0
+	for _, arm := range arms {
+		for commentIndex < len(comments) && (arm.startRow <= 0 || comments[commentIndex].Location.Start.Row < arm.startRow) {
+			docs = append(docs, dText(p.renderComment(comments[commentIndex].Value)))
+			commentIndex++
+		}
+		docs = append(docs, arm.doc)
 	}
+	for ; commentIndex < len(comments); commentIndex++ {
+		docs = append(docs, dText(p.renderComment(comments[commentIndex].Value)))
+	}
+	if len(docs) == 0 {
+		return dText("")
+	}
+	return dJoin(dHardLine(), docs)
+}
+
+func (p printer) renderMatchExpressionDoc(node *parse.MatchExpression) doc {
+	arms := make([]armDoc, 0, len(node.Cases))
+	for _, matchCase := range node.Cases {
+		arms = append(arms, armDoc{doc: dConcat(p.renderMatchCaseDoc(matchCase), dText(",")), startRow: matchCase.Location.Start.Row})
+	}
+	body := p.renderArmsWithComments(arms, node.Comments)
 
 	return dGroup(dConcat(
 		dText("match "+p.renderExpression(node.Subject, 0)+" {"),
@@ -1502,18 +1526,11 @@ func (p printer) renderMatchExpressionDoc(node *parse.MatchExpression) doc {
 }
 
 func (p printer) renderConditionalMatchExpressionDoc(node *parse.ConditionalMatchExpression) doc {
-	caseDocs := make([]doc, 0, len(node.Cases)+len(node.Comments))
-	for _, comment := range node.Comments {
-		caseDocs = append(caseDocs, dText(p.renderComment(comment.Value)))
-	}
+	arms := make([]armDoc, 0, len(node.Cases))
 	for _, matchCase := range node.Cases {
-		caseDocs = append(caseDocs, dConcat(p.renderConditionalMatchCaseDoc(matchCase), dText(",")))
+		arms = append(arms, armDoc{doc: dConcat(p.renderConditionalMatchCaseDoc(matchCase), dText(",")), startRow: matchCase.Location.Start.Row})
 	}
-
-	body := dText("")
-	if len(caseDocs) > 0 {
-		body = dJoin(dHardLine(), caseDocs)
-	}
+	body := p.renderArmsWithComments(arms, node.Comments)
 
 	return dGroup(dConcat(
 		dText("match {"),
@@ -1612,18 +1629,11 @@ func (p printer) renderArmWithPattern(pattern string, body []parse.Statement) do
 }
 
 func (p printer) renderSelectExpressionDoc(node *parse.SelectExpression) doc {
-	caseDocs := make([]doc, 0, len(node.Cases)+len(node.Comments))
-	for _, comment := range node.Comments {
-		caseDocs = append(caseDocs, dText(p.renderComment(comment.Value)))
-	}
+	arms := make([]armDoc, 0, len(node.Cases))
 	for _, arm := range node.Cases {
-		caseDocs = append(caseDocs, dConcat(p.renderSelectCaseDoc(arm), dText(",")))
+		arms = append(arms, armDoc{doc: dConcat(p.renderSelectCaseDoc(arm), dText(",")), startRow: arm.Location.Start.Row})
 	}
-
-	body := dText("")
-	if len(caseDocs) > 0 {
-		body = dJoin(dHardLine(), caseDocs)
-	}
+	body := p.renderArmsWithComments(arms, node.Comments)
 
 	return dGroup(dConcat(
 		dText("select {"),

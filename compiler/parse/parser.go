@@ -2526,6 +2526,7 @@ func (p *parser) matchExpr() (Expression, error) {
 			if p.match(new_line) {
 				continue
 			}
+			caseStart := Point{Row: p.peek().line, Col: p.peek().column}
 			pattern, err := p.iterRange()
 			if err != nil {
 				return nil, err
@@ -2560,8 +2561,9 @@ func (p *parser) matchExpr() (Expression, error) {
 			}
 
 			matchExpr.Cases = append(matchExpr.Cases, MatchCase{
-				Pattern: pattern,
-				Body:    body,
+				Location: Location{Start: caseStart, End: Point{Row: p.previous().line, Col: p.previous().column}},
+				Pattern:  pattern,
+				Body:     body,
 			})
 			p.match(comma)
 		}
@@ -2607,6 +2609,7 @@ func (p *parser) parseConditionalMatch(keyword token) (Expression, error) {
 			continue
 		}
 
+		caseStart := Point{Row: p.peek().line, Col: p.peek().column}
 		var condition Expression
 		var err error
 
@@ -2653,6 +2656,7 @@ func (p *parser) parseConditionalMatch(keyword token) (Expression, error) {
 		}
 
 		conditionalMatch.Cases = append(conditionalMatch.Cases, ConditionalMatchCase{
+			Location:  Location{Start: caseStart, End: Point{Row: p.previous().line, Col: p.previous().column}},
 			Condition: condition,
 			Body:      body,
 		})
