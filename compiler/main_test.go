@@ -1755,6 +1755,76 @@ func TestRunUpdateCommandUpdatesGitDependency(t *testing.T) {
 	}
 }
 
+// Switching a locked Git dependency to a path is re-locked by `ard update`,
+// after which `ard deps verify` passes and builds use the path (#542).
+func TestRunUpdateCommandRelocksPathDependencyReplacingGitLock(t *testing.T) {
+	t.Setenv("ARD_CACHE_DIR", t.TempDir())
+	workspace := t.TempDir()
+
+	repo := filepath.Join(workspace, "helper")
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(repo, "ard.toml"), []byte("name = \"helper\"\nard = \">= 0.1.0\"\n"), 0o644)
+	os.WriteFile(filepath.Join(repo, "helper.ard"), []byte("fn value() Int { 1 }\n"), 0o644)
+	gitRun(t, repo, "init")
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "-c", "user.email=t@e.com", "-c", "user.name=T", "commit", "-m", "one")
+	commit := gitRun(t, repo, "rev-parse", "HEAD")
+
+	root := filepath.Join(workspace, "app")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n\n[dependencies]\nhelper = { git = \""+repo+"\", commit = \""+commit+"\" }\n"), 0o644)
+	lock, err := checker.LockDependencyGraph(root, "app", "helper", checker.DependencyInfo{Alias: "helper", Name: "helper", Git: repo, Commit: commit}, "helper", commit)
+	if err != nil {
+		t.Fatalf("initial lock: %v", err)
+	}
+	if err := checker.WriteDependencyLock(root, lock); err != nil {
+		t.Fatal(err)
+	}
+
+	local := filepath.Join(workspace, "helper-local")
+	if err := os.MkdirAll(local, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(local, "ard.toml"), []byte("name = \"helper\"\nard = \">= 0.1.0\"\n"), 0o644)
+	os.WriteFile(filepath.Join(local, "helper.ard"), []byte("fn value() Int { 2 }\n"), 0o644)
+	os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n\n[dependencies]\nhelper = { path = \"../helper-local\" }\n"), 0o644)
+
+	if err := checker.VerifyLockMatchesManifest(root); err == nil {
+		t.Fatal("lock verification passed before the path was locked")
+	}
+
+	t.Chdir(root)
+	if err := runUpdateCommand([]string{"helper"}); err != nil {
+		t.Fatalf("runUpdateCommand: %v", err)
+	}
+	lockData, _ := os.ReadFile(filepath.Join(root, "ard.lock"))
+	if strings.Contains(string(lockData), commit) || !strings.Contains(string(lockData), "helper-local") {
+		t.Fatalf("lock still pins the Git commit instead of the path:\n%s", lockData)
+	}
+	if err := checker.VerifyLockMatchesManifest(root); err != nil {
+		t.Fatalf("verify lock after re-locking: %v", err)
+	}
+	if err := checker.VerifyDependencies(root); err != nil {
+		t.Fatalf("verify after re-locking: %v", err)
+	}
+	project, err := checker.FindProjectRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dep := project.Dependencies["helper"]; dep.RootPath != local || dep.LockDrift != "" {
+		t.Fatalf("helper root = %q (drift %q), want the locked path %q", dep.RootPath, dep.LockDrift, local)
+	}
+
+	// With nothing left to re-lock, a second update reports no work.
+	if err := runUpdateCommand(nil); err != nil {
+		t.Fatalf("runUpdateCommand (second): %v", err)
+	}
+}
+
 func TestAddDependencyToManifest(t *testing.T) {
 	dir := t.TempDir()
 	manifest := filepath.Join(dir, "ard.toml")

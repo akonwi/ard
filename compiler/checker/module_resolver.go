@@ -51,6 +51,10 @@ type DependencyInfo struct {
 	RootPath   string // source root used by resolver: path dependency or locked cache checkout
 	PackageID  string
 	Name       string
+	// LockDrift describes how ard.lock disagrees with this dependency's
+	// ard.toml entry, or is empty when they match (#542). A path dependency
+	// still resolves from its path; a drifted Git dependency fails to resolve.
+	LockDrift string
 }
 
 type PackageInfo struct {
@@ -437,10 +441,14 @@ func applyDependencyLock(projectRoot string, projectName string, deps map[string
 	}
 	for alias, dep := range deps {
 		dep.Name = alias
-		packageID := rootPkg.Dependencies[alias]
-		if packageID != "" {
-			if pkg, ok := packages[packageID]; ok {
-				dep.PackageID = packageID
+		if pkg, ok := packages[rootPkg.Dependencies[alias]]; ok {
+			// ard.toml is the source of truth for what a direct dependency is;
+			// the lock only pins it. A stale entry must not silently replace
+			// the declared source (#542).
+			dep.LockDrift = dependencyLockDrift(projectRoot, dep, pkg)
+			switch {
+			case dep.LockDrift == "":
+				dep.PackageID = pkg.ID
 				dep.Name = pkg.Name
 				dep.RootPath = pkg.RootPath
 				if pkg.Git != "" {
@@ -457,6 +465,15 @@ func applyDependencyLock(projectRoot string, projectName string, deps map[string
 				}
 				deps[alias] = dep
 				continue
+			case dep.SourcePath == "":
+				// The locked commit is not what ard.toml asks for, and the
+				// requested one has not been resolved yet.
+				delete(rootPkg.Dependencies, alias)
+				deps[alias] = dep
+				continue
+			default:
+				// A path has nothing to pin: build the declared checkout.
+				delete(rootPkg.Dependencies, alias)
 			}
 		}
 		if dep.SourcePath != "" {
@@ -464,10 +481,127 @@ func applyDependencyLock(projectRoot string, projectName string, deps map[string
 			if dep.PackageID == "" {
 				dep.PackageID = "path:" + dep.SourcePath
 			}
+			rootPkg.Dependencies[alias] = dep.PackageID
 		}
 		deps[alias] = dep
 	}
+	packages[rootPackageID] = rootPkg
+	pruneUnreachablePackages(packages, rootPackageID)
 	return rootPackageID, packages, deps
+}
+
+// dependencyLockDrift reports how the locked package for a direct dependency
+// disagrees with its ard.toml entry, or "" when the lock still describes the
+// declared source. Only positive evidence counts as drift, so lock entries
+// written by older versions without every field keep working.
+func dependencyLockDrift(projectRoot string, dep DependencyInfo, locked PackageInfo) string {
+	declared := describeDeclaredDependency(projectRoot, dep)
+	pinned := describeLockedPackage(projectRoot, locked)
+	if dep.SourcePath != "" {
+		if locked.Git == "" && lockedPackagePath(projectRoot, locked) == dep.SourcePath {
+			return ""
+		}
+		return fmt.Sprintf("ard.toml uses %s, but ard.lock pins %s", declared, pinned)
+	}
+	if locked.Git == "" || CanonicalGitSource(locked.Git) != CanonicalGitSource(dep.Git) {
+		return fmt.Sprintf("ard.toml requests %s, but ard.lock pins %s", declared, pinned)
+	}
+	switch {
+	case dep.Commit != "":
+		if locked.Commit != "" && !strings.HasPrefix(strings.ToLower(locked.Commit), strings.ToLower(dep.Commit)) {
+			return fmt.Sprintf("ard.toml requests %s, but ard.lock pins %s", declared, pinned)
+		}
+	case dep.Tag != "":
+		if locked.Requested != "" && locked.Requested != dep.Tag {
+			return fmt.Sprintf("ard.toml requests %s, but ard.lock pins %s", declared, pinned)
+		}
+	}
+	return ""
+}
+
+func lockedPackagePath(projectRoot string, locked PackageInfo) string {
+	if locked.Path == "" {
+		return ""
+	}
+	if filepath.IsAbs(locked.Path) {
+		return filepath.Clean(locked.Path)
+	}
+	return filepath.Clean(filepath.Join(projectRoot, locked.Path))
+}
+
+func describeDeclaredDependency(projectRoot string, dep DependencyInfo) string {
+	if dep.SourcePath != "" {
+		return "path " + displayDependencyPath(projectRoot, dep.SourcePath)
+	}
+	switch {
+	case dep.Commit != "":
+		return fmt.Sprintf("%s at commit %s", dep.Git, shortDependencyCommit(dep.Commit))
+	case dep.Tag != "":
+		return fmt.Sprintf("%s at tag %s", dep.Git, dep.Tag)
+	}
+	return dep.Git
+}
+
+func describeLockedPackage(projectRoot string, locked PackageInfo) string {
+	if locked.Git == "" {
+		return "path " + displayDependencyPath(projectRoot, lockedPackagePath(projectRoot, locked))
+	}
+	description := locked.Git
+	if locked.Commit != "" {
+		description += " at commit " + shortDependencyCommit(locked.Commit)
+	}
+	if locked.Requested != "" && locked.Requested != locked.Commit && !strings.HasPrefix(locked.Commit, locked.Requested) {
+		description += " (" + locked.Requested + ")"
+	}
+	return description
+}
+
+// displayDependencyPath shows a dependency path relative to the project, the
+// way ard.toml usually spells it.
+func displayDependencyPath(projectRoot string, path string) string {
+	if rel, err := filepath.Rel(projectRoot, path); err == nil {
+		return filepath.ToSlash(rel)
+	}
+	return path
+}
+
+func shortDependencyCommit(commit string) string {
+	if len(commit) > 7 {
+		return commit[:7]
+	}
+	return commit
+}
+
+// lockDriftError is the error for a Git dependency whose ard.toml entry no
+// longer matches ard.lock.
+func lockDriftError(dep DependencyInfo) error {
+	return fmt.Errorf("ard.lock is out of date for dependency %q: %s; run `ard add <source>@<ref>` to lock the requested ref", dep.Alias, dep.LockDrift)
+}
+
+// pruneUnreachablePackages drops locked packages no longer reachable from the
+// root, such as the Git package a drifted path dependency replaced.
+func pruneUnreachablePackages(packages map[string]PackageInfo, rootPackageID string) {
+	reachable := map[string]bool{}
+	var visit func(string)
+	visit = func(id string) {
+		if reachable[id] {
+			return
+		}
+		pkg, ok := packages[id]
+		if !ok {
+			return
+		}
+		reachable[id] = true
+		for _, child := range pkg.Dependencies {
+			visit(child)
+		}
+	}
+	visit(rootPackageID)
+	for id := range packages {
+		if !reachable[id] {
+			delete(packages, id)
+		}
+	}
 }
 
 func addPathDependencyPackages(packages map[string]PackageInfo, deps map[string]DependencyInfo) {
@@ -1296,12 +1430,44 @@ func FetchDependencies(startPath string) ([]DependencyInfo, error) {
 	return fetched, nil
 }
 
+// VerifyLockMatchesManifest reports the first direct dependency whose ard.lock
+// entry no longer describes its ard.toml entry (#542). Builds tolerate a path
+// dependency that replaced a locked source, because they use the path; `ard
+// deps verify` still reports it so a stale lock is not shipped.
+func VerifyLockMatchesManifest(startPath string) error {
+	project, err := FindProjectRoot(startPath)
+	if err != nil {
+		return err
+	}
+	aliases := make([]string, 0, len(project.Dependencies))
+	for alias := range project.Dependencies {
+		aliases = append(aliases, alias)
+	}
+	sort.Strings(aliases)
+	for _, alias := range aliases {
+		dep := project.Dependencies[alias]
+		if dep.LockDrift == "" {
+			continue
+		}
+		if dep.SourcePath != "" {
+			return fmt.Errorf("ard.lock does not match ard.toml for dependency %q: %s; builds use the path. Run `ard update %s` to lock the path, or restore the locked source in ard.toml", dep.Alias, dep.LockDrift, dep.Alias)
+		}
+		return lockDriftError(dep)
+	}
+	return nil
+}
+
+// VerifyDependencies checks that every Git dependency is locked to what
+// ard.toml requests and that its cached checkout matches the lock.
 func VerifyDependencies(startPath string) error {
 	project, err := FindProjectRoot(startPath)
 	if err != nil {
 		return err
 	}
 	for _, dep := range projectGitDependencies(project) {
+		if dep.LockDrift != "" {
+			return lockDriftError(dep)
+		}
 		if dep.PackageID == "" || dep.Commit == "" || dep.RootPath == "" {
 			return fmt.Errorf("dependency %q is not locked; run `ard add` with a tag, commit, or latest", dep.Alias)
 		}
@@ -1378,6 +1544,9 @@ func fetchDependency(dep DependencyInfo) (DependencyInfo, error) {
 		return dep, nil
 	}
 	if dep.Git != "" {
+		if dep.LockDrift != "" {
+			return DependencyInfo{}, lockDriftError(dep)
+		}
 		if dep.PackageID == "" || dep.Commit == "" || dep.RootPath == "" {
 			return DependencyInfo{}, fmt.Errorf("dependency %q is not locked; run `ard add` with a tag, commit, or latest", dep.Alias)
 		}
@@ -1539,6 +1708,9 @@ func (mr *ModuleResolver) ResolveImport(importerModulePath string, importPath st
 	}
 	if pkg.ID == mr.project.RootPackageID {
 		if dep, ok := mr.project.Dependencies[rootName]; ok {
+			if dep.LockDrift != "" && dep.SourcePath == "" {
+				return ResolvedImport{}, lockDriftError(dep)
+			}
 			modulePath := strings.Join(parts[1:], "/")
 			if modulePath == "" {
 				modulePath = dep.Name

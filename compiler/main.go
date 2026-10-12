@@ -451,10 +451,18 @@ func runUpdateCommand(args []string) error {
 		return err
 	}
 
+	// A path dependency whose lock entry still pins another source (for
+	// example after switching from Git to a local checkout) is re-locked to
+	// its path; there is nothing else to update for paths (#542).
+	pathDrifted := func(alias string) bool {
+		dep, ok := project.Dependencies[alias]
+		return ok && dep.SourcePath != "" && dep.LockDrift != ""
+	}
+
 	targets := append([]string{}, args...)
 	if len(targets) == 0 {
 		for alias, dep := range declared {
-			if dep.Git != "" {
+			if dep.Git != "" || pathDrifted(alias) {
 				targets = append(targets, alias)
 			}
 		}
@@ -467,12 +475,17 @@ func runUpdateCommand(args []string) error {
 
 	// updates maps a canonical git source to the newly resolved commit.
 	updates := map[string]string{}
+	relockedPaths := []string{}
 	for _, alias := range targets {
 		dep, ok := declared[alias]
 		if !ok {
 			return fmt.Errorf("dependency %q is not declared in ard.toml", alias)
 		}
 		if dep.Git == "" {
+			if pathDrifted(alias) {
+				relockedPaths = append(relockedPaths, alias)
+				continue
+			}
 			fmt.Printf("Skipping %s (path dependency)\n", alias)
 			continue
 		}
@@ -493,7 +506,7 @@ func runUpdateCommand(args []string) error {
 		}
 		updates[checker.CanonicalGitSource(dep.Git)] = latest
 	}
-	if len(updates) == 0 {
+	if len(updates) == 0 && len(relockedPaths) == 0 {
 		fmt.Println("All dependencies are up to date")
 		return nil
 	}
@@ -531,6 +544,13 @@ func runUpdateCommand(args []string) error {
 		}
 		fmt.Printf("Updated %s -> %s\n", alias, shortCommit(updates[checker.CanonicalGitSource(declared[alias].Git)]))
 	}
+	for _, alias := range relockedPaths {
+		path := declared[alias].SourcePath
+		if rel, err := filepath.Rel(project.RootPath, path); err == nil {
+			path = filepath.ToSlash(rel)
+		}
+		fmt.Printf("Locked %s -> path %s\n", alias, path)
+	}
 	return nil
 }
 
@@ -558,6 +578,9 @@ func runDepsCommand(args []string) error {
 		}
 		return nil
 	case "verify":
+		if err := checker.VerifyLockMatchesManifest("."); err != nil {
+			return err
+		}
 		if err := checker.VerifyDependencies("."); err != nil {
 			return err
 		}

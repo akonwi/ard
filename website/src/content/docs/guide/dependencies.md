@@ -89,7 +89,7 @@ ard update vaxis tui  # update several
 3. updates `ard.lock`, and
 4. fetches the new commit into the shared cache.
 
-A dependency that is already at the latest commit is left untouched. Path dependencies are skipped, since they track a local directory rather than a commit.
+A dependency that is already at the latest commit is left untouched. Path dependencies are skipped, since they track a local directory rather than a commit. The exception is a path dependency whose `ard.lock` entry still pins another source, such as a Git dependency you switched to a local checkout: `ard update` locks it to its path.
 
 Updating pins the resolved commit for that Git source across the whole graph. If the same repository is also pulled in transitively by another dependency, it is updated there too — Ard keeps a single commit per Git source, and the explicit update wins over the commit a transitive dependency pinned.
 
@@ -118,11 +118,13 @@ Ordinary commands such as `ard check`, `ard run`, `ard build`, and `ard test` ex
 ard deps fetch
 ```
 
-To verify that cached dependencies match `ard.lock`, run:
+To verify that `ard.lock` matches `ard.toml` and that cached dependencies match `ard.lock`, run:
 
 ```sh
 ard deps verify
 ```
+
+`ard.toml` decides what each dependency is, and `ard.lock` only pins it. If you edit a Git dependency's `commit`, `tag`, or `git` source by hand, commands fail with an "`ard.lock` is out of date" error until you re-lock it with `ard add <source>@<ref>`, instead of building the previously locked commit.
 
 ## Removing a dependency
 
@@ -144,6 +146,15 @@ shared = { path = "../shared" }
 ```
 
 They are resolved from the path in `ard.toml` and are not copied into the cache. Path dependencies are useful for local development across multiple packages.
+
+To develop against an unpushed change to a Git dependency, point it at a local checkout:
+
+```toml
+[dependencies]
+cooper = { path = "../cooper" }
+```
+
+Commands build the checkout right away, even though `ard.lock` still pins the Git commit. `ard deps verify` reports the mismatch, so a stale lock is not committed by accident. Either restore the Git entry when you're done, or run `ard update cooper` to lock the path.
 
 ## FFI companions
 
