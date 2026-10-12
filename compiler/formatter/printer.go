@@ -206,13 +206,13 @@ func (p printer) renderVariableAssignmentDoc(node *parse.VariableAssignment) doc
 func (p printer) renderExpressionValueDoc(expression parse.Expression, parentPrecedence int) doc {
 	switch node := expression.(type) {
 	case *parse.AnonymousFunction:
-		return p.renderAnonymousFunctionDoc(node)
+		return wrapLowestPrecedenceDoc(p.renderAnonymousFunctionDoc(node), parentPrecedence)
 	case *parse.Try:
 		return p.renderTryDoc(node, parentPrecedence)
 	case *parse.BlockExpression:
-		return p.renderBlockExpressionDoc(node)
+		return wrapLowestPrecedenceDoc(p.renderBlockExpressionDoc(node), parentPrecedence)
 	case *parse.UnsafeBlock:
-		return p.renderUnsafeBlockDoc(node)
+		return wrapLowestPrecedenceDoc(p.renderUnsafeBlockDoc(node), parentPrecedence)
 	default:
 		return p.renderExpressionDoc(expression, parentPrecedence)
 	}
@@ -1058,20 +1058,23 @@ func (p printer) renderExpressionDoc(expression parse.Expression, parentPreceden
 	case parse.StaticFunction:
 		copy := node
 		return p.renderExpressionDoc(&copy, parentPrecedence)
+	// Block-like expressions bind loosest of all: as an operand they keep
+	// their parentheses, or the parser reads the operand differently, for
+	// example `a or match m { ... }` as `m` followed by a struct literal (#546).
 	case *parse.MatchExpression:
-		return p.renderMatchExpressionDoc(node)
+		return wrapLowestPrecedenceDoc(p.renderMatchExpressionDoc(node), parentPrecedence)
 	case *parse.SelectExpression:
-		return p.renderSelectExpressionDoc(node)
+		return wrapLowestPrecedenceDoc(p.renderSelectExpressionDoc(node), parentPrecedence)
 	case *parse.ConditionalMatchExpression:
-		return p.renderConditionalMatchExpressionDoc(node)
+		return wrapLowestPrecedenceDoc(p.renderConditionalMatchExpressionDoc(node), parentPrecedence)
 	case *parse.AnonymousFunction:
-		return p.renderAnonymousFunctionDoc(node)
+		return wrapLowestPrecedenceDoc(p.renderAnonymousFunctionDoc(node), parentPrecedence)
 	case *parse.Try:
 		return p.renderTryDoc(node, parentPrecedence)
 	case *parse.BlockExpression:
-		return p.renderBlockExpressionDoc(node)
+		return wrapLowestPrecedenceDoc(p.renderBlockExpressionDoc(node), parentPrecedence)
 	case *parse.UnsafeBlock:
-		return p.renderUnsafeBlockDoc(node)
+		return wrapLowestPrecedenceDoc(p.renderUnsafeBlockDoc(node), parentPrecedence)
 	default:
 		return dText(expression.String())
 	}
@@ -1096,11 +1099,11 @@ func (p printer) renderAnonymousFunctionDoc(node *parse.AnonymousFunction) doc {
 func (p printer) renderTryDoc(node *parse.Try, parentPrecedence int) doc {
 	prefix := "try " + p.renderExpression(node.Expression, precedenceUnary)
 	if node.CatchVar == nil {
-		return wrapTryDoc(dText(prefix), parentPrecedence)
+		return wrapLowestPrecedenceDoc(dText(prefix), parentPrecedence)
 	}
 	prefix += " -> " + node.CatchVar.Name
 	if len(node.CatchBlock) == 0 {
-		return wrapTryDoc(dText(prefix+" {}"), parentPrecedence)
+		return wrapLowestPrecedenceDoc(dText(prefix+" {}"), parentPrecedence)
 	}
 	if len(node.CatchBlock) == 1 {
 		if expr, ok := renderableExpressionStatement(node.CatchBlock[0]); ok {
@@ -1108,12 +1111,12 @@ func (p printer) renderTryDoc(node *parse.Try, parentPrecedence int) doc {
 			if !strings.Contains(rendered, "\n") {
 				oneLine := prefix + " { " + rendered + " }"
 				if len(oneLine) <= p.maxLineWidth {
-					return wrapTryDoc(dText(oneLine), parentPrecedence)
+					return wrapLowestPrecedenceDoc(dText(oneLine), parentPrecedence)
 				}
 			}
 		}
 	}
-	return wrapTryDoc(dGroup(dConcat(
+	return wrapLowestPrecedenceDoc(dGroup(dConcat(
 		dText(prefix+" {"),
 		dIndent(dConcat(dHardLine(), p.renderStatementsDoc(node.CatchBlock))),
 		dHardLine(),
@@ -1121,7 +1124,9 @@ func (p printer) renderTryDoc(node *parse.Try, parentPrecedence int) doc {
 	)), parentPrecedence)
 }
 
-func wrapTryDoc(rendered doc, parentPrecedence int) doc {
+// wrapLowestPrecedenceDoc parenthesizes an expression that binds loosest of
+// all (try and the block-like expressions) when it appears as an operand.
+func wrapLowestPrecedenceDoc(rendered doc, parentPrecedence int) doc {
 	if precedenceLowest < parentPrecedence {
 		return dConcat(dText("("), rendered, dText(")"))
 	}
@@ -1663,11 +1668,8 @@ const (
 )
 
 func (p printer) renderMutRefDoc(node parse.MutRef, parentPrecedence int) doc {
-	operand := node.Operand
-	operandDoc := p.renderExpressionValueDoc(operand, precedenceUnary)
-	if requiresExplicitPostfixBaseParens(operand) {
-		operandDoc = dConcat(dText("("), operandDoc, dText(")"))
-	}
+	// Block-like operands parenthesize themselves (wrapLowestPrecedenceDoc).
+	operandDoc := p.renderExpressionValueDoc(node.Operand, precedenceUnary)
 	operator := "mut "
 	if node.Ampersand {
 		operator = "&mut "
@@ -1683,11 +1685,8 @@ func (p printer) renderMutRefDoc(node parse.MutRef, parentPrecedence int) doc {
 }
 
 func (p printer) renderDerefDoc(node parse.Deref, parentPrecedence int) doc {
-	operand := node.Operand
-	operandDoc := p.renderExpressionValueDoc(operand, precedenceCall)
-	if requiresExplicitPostfixBaseParens(operand) {
-		operandDoc = dConcat(dText("("), operandDoc, dText(")"))
-	}
+	// Block-like operands parenthesize themselves (wrapLowestPrecedenceDoc).
+	operandDoc := p.renderExpressionValueDoc(node.Operand, precedenceCall)
 	operator := ".@"
 	if node.Star {
 		operator = ".*"
@@ -1697,19 +1696,6 @@ func (p printer) renderDerefDoc(node parse.Deref, parentPrecedence int) doc {
 		return dConcat(dText("("), result, dText(")"))
 	}
 	return result
-}
-
-func requiresExplicitPostfixBaseParens(expression parse.Expression) bool {
-	switch expression.(type) {
-	case *parse.MatchExpression,
-		*parse.SelectExpression,
-		*parse.ConditionalMatchExpression,
-		*parse.AnonymousFunction,
-		parse.AnonymousFunction:
-		return true
-	default:
-		return false
-	}
 }
 
 func (p printer) renderUnary(node *parse.UnaryExpression, parentPrecedence int) string {

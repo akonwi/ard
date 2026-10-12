@@ -641,3 +641,195 @@ func TestFormatKeepsCommentsWithTheirArms(t *testing.T) {
 		})
 	}
 }
+
+// Block-like expressions (match, select, conditional match, blocks) used as an
+// operand keep their parentheses: without them the operator's operand parses
+// as a struct literal or not at all (#546).
+func TestFormatKeepsParenthesesAroundBlockLikeOperands(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name: "match on the right of or",
+			input: `fn matches(target: Int, focus: Int?) Bool {
+  target == 1 or (match focus {
+    id => id == target,
+    _ => false,
+  })
+}
+`,
+		},
+		{
+			name: "match on the right of and",
+			input: `fn matches(target: Int, focus: Int?) Bool {
+  target == 1 and (match focus {
+    id => id == target,
+    _ => false,
+  })
+}
+`,
+		},
+		{
+			name: "match on the left of or",
+			input: `fn matches(flag: Bool, focus: Int?) Bool {
+  (match focus {
+    id => id == 1,
+    _ => false,
+  }) or flag
+}
+`,
+		},
+		{
+			name: "match as a comparison operand",
+			input: `fn same(target: Int, focus: Int?) Bool {
+  target == (match focus {
+    id => id,
+    _ => 0,
+  })
+}
+`,
+		},
+		{
+			name: "conditional match as an arithmetic operand",
+			input: `fn bump(count: Int) Int {
+  count + (match {
+    count > 1 => 1,
+    _ => 0,
+  })
+}
+`,
+		},
+		{
+			name: "match under unary minus",
+			input: `fn negate(focus: Int?) Int {
+  -(match focus {
+    id => id,
+    _ => 0,
+  })
+}
+`,
+		},
+		{
+			name: "match under try",
+			input: `fn pick(focus: Int?) Int!Str {
+  let value = try (match focus {
+    id => Result::ok(id),
+    _ => Result::err("none"),
+  })
+  Result::ok(value)
+}
+`,
+		},
+		{
+			name: "select as an operand",
+			input: `fn ready(flag: Bool, signals: Chan<Bool>) Bool {
+  flag or (select {
+    let value = signals.recv() => value.or(false),
+  })
+}
+`,
+		},
+		{
+			name: "block expression as an operand",
+			input: `fn total(count: Int) Int {
+  count + ({
+    let extra = 1
+    extra
+  })
+}
+`,
+		},
+		{
+			name: "match as a method receiver",
+			input: `fn label(focus: Int?) Str {
+  (match focus {
+    id => id,
+    _ => 0,
+  }).to_str()
+}
+`,
+		},
+		{
+			name: "immediately called anonymous function",
+			input: `fn answer() Int {
+  (fn() Int {
+    1
+  })()
+}
+`,
+		},
+		{
+			name: "dereferenced match keeps single parentheses",
+			input: `fn read(flag: Bool, a: &Int, b: &Int) Int {
+  (match flag {
+    true => a,
+    false => b,
+  }).*
+}
+`,
+		},
+		{
+			name: "not needs no parentheses around a match",
+			input: `fn missing(focus: Int?) Bool {
+  not (match focus {
+    id => id == 1,
+    _ => false,
+  })
+}
+`,
+			want: `fn missing(focus: Int?) Bool {
+  not match focus {
+    id => id == 1,
+    _ => false,
+  }
+}
+`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			want := tt.want
+			if want == "" {
+				want = tt.input
+			}
+			formatted, err := Format([]byte(tt.input), "test.ard")
+			if err != nil {
+				t.Fatalf("format: %v", err)
+			}
+			if string(formatted) != want {
+				t.Fatalf("formatted =\n%s\nwant\n%s", formatted, want)
+			}
+			if res := parse.Parse(formatted, "test.ard"); len(res.Errors) > 0 {
+				t.Fatalf("formatted output does not parse: %v", res.Errors)
+			}
+			again, err := Format(formatted, "test.ard")
+			if err != nil {
+				t.Fatalf("reformat: %v", err)
+			}
+			if string(again) != string(formatted) {
+				t.Fatalf("formatting is not idempotent:\n%s", again)
+			}
+		})
+	}
+}
+
+// Format never returns source that no longer parses: a printer bug becomes a
+// format error instead of silently corrupting the file (#546).
+func TestFormattedOutputMustParse(t *testing.T) {
+	broken := []byte("fn matches(target: Int, focus: Int?) Bool {\n  target == 1 or match focus {\n    id => id == target,\n    _ => false,\n  }\n}\n")
+	err := checkFormattedOutputParses(broken, "repro.ard")
+	if err == nil {
+		t.Fatal("unparseable output was accepted")
+	}
+	for _, want := range []string{"repro.ard", "would not parse", "bug"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error = %q, want it to mention %q", err, want)
+		}
+	}
+	if err := checkFormattedOutputParses([]byte("fn main() {}\n"), "ok.ard"); err != nil {
+		t.Fatalf("valid output rejected: %v", err)
+	}
+}
