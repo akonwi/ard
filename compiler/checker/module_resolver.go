@@ -55,6 +55,10 @@ type DependencyInfo struct {
 	// ard.toml entry, or is empty when they match (#542). A path dependency
 	// still resolves from its path; a drifted Git dependency fails to resolve.
 	LockDrift string
+	// StaleGitPin marks a path dependency whose checkout declares a Git
+	// dependency at a different ref than ard.lock pins. Builds would compile
+	// the pinned ref, so they fail like a drifted Git dependency.
+	StaleGitPin bool
 }
 
 type PackageInfo struct {
@@ -689,11 +693,13 @@ func addPathDependencyPackages(packages map[string]PackageInfo, rootPackageID st
 		aliases = append(aliases, alias)
 	}
 	sort.Strings(aliases)
+	graph := newLockedGraphIndex(packages, rootPackageID)
 	for _, alias := range aliases {
 		dep := deps[alias]
-		unlocked := addPathDependencyPackage(packages, dep, map[string]bool{})
+		unlocked, stale := addPathDependencyPackage(packages, graph, dep, map[string]bool{})
 		if unlocked != "" && dep.LockDrift == "" {
 			dep.LockDrift = unlocked
+			dep.StaleGitPin = stale
 		}
 		if dep.PackageID != "" {
 			if pkg, ok := packages[dep.PackageID]; ok {
@@ -717,17 +723,93 @@ func addPathDependencyPackages(packages map[string]PackageInfo, rootPackageID st
 	pruneUnreachablePackages(packages, rootPackageID)
 }
 
-// addPathDependencyPackage adds the package for a path dependency missing from
-// ard.lock. Its Git dependencies link to the locked package for the same
-// source and ref when there is one, which covers switching a locked Git
-// dependency to a local checkout of it (#542). It returns a description of the
-// first Git dependency in the subtree that ard.lock does not pin.
-func addPathDependencyPackage(packages map[string]PackageInfo, dep DependencyInfo, seen map[string]bool) string {
-	if dep.SourcePath == "" || dep.PackageID == "" || seen[dep.PackageID] {
+// lockedGraphIndex summarizes the locked graph for matching a path checkout's
+// Git dependencies against it.
+type lockedGraphIndex struct {
+	// rootPins maps a canonical Git source a direct dependency declares to
+	// its locked package. A direct pin wins for the whole graph, as it does
+	// when the lock is rebuilt.
+	rootPins map[string]string
+	// referrers counts the locked edges into each package.
+	referrers map[string]int
+}
+
+func newLockedGraphIndex(packages map[string]PackageInfo, rootPackageID string) lockedGraphIndex {
+	index := lockedGraphIndex{rootPins: map[string]string{}, referrers: map[string]int{}}
+	for _, pkg := range packages {
+		for _, child := range pkg.Dependencies {
+			index.referrers[child]++
+		}
+	}
+	if root, ok := packages[rootPackageID]; ok {
+		for _, child := range root.Dependencies {
+			if pkg, ok := packages[child]; ok && pkg.Git != "" {
+				index.rootPins[CanonicalGitSource(pkg.Git)] = child
+			}
+		}
+	}
+	return index
+}
+
+// gitEdgeMatches reports whether a locked edge to target still serves a path
+// checkout's Git dependency declaration. Only positive disagreement counts, so
+// lockfiles written by older versions keep working.
+func (index lockedGraphIndex) gitEdgeMatches(dep DependencyInfo, target PackageInfo) bool {
+	if rootPin, ok := index.rootPins[CanonicalGitSource(dep.Git)]; ok {
+		return target.ID == rootPin
+	}
+	return !lockedPackageDrifted(dep, target, index.referrers[target.ID] > 1)
+}
+
+// lockedPackageFor returns the locked Git package a path checkout's Git
+// dependency should link to, or "" when ard.lock pins nothing that provably
+// matches its declaration.
+func (index lockedGraphIndex) lockedPackageFor(packages map[string]PackageInfo, dep DependencyInfo) string {
+	if rootPin, ok := index.rootPins[CanonicalGitSource(dep.Git)]; ok {
+		return rootPin
+	}
+	ids := make([]string, 0, len(packages))
+	for id, pkg := range packages {
+		if lockedPackageMatches(dep, pkg) {
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) == 0 {
 		return ""
 	}
-	if _, exists := packages[dep.PackageID]; exists {
-		return ""
+	sort.Strings(ids)
+	return ids[0]
+}
+
+// lockedPackageMatches reports whether a locked Git package provably provides
+// a Git dependency declaration: the same source pinned to its commit, or
+// resolved from its tag.
+func lockedPackageMatches(dep DependencyInfo, locked PackageInfo) bool {
+	if locked.Git == "" || locked.Commit == "" || CanonicalGitSource(locked.Git) != CanonicalGitSource(dep.Git) {
+		return false
+	}
+	switch {
+	case dep.Commit != "":
+		return isCommitPrefix(locked.Commit, dep.Commit) || strings.EqualFold(locked.Requested, dep.Commit)
+	case dep.Tag != "":
+		return locked.Requested == dep.Tag
+	}
+	return false
+}
+
+// addPathDependencyPackage adds the package for a path dependency missing from
+// ard.lock. Its Git dependencies link to the locked package that provably
+// matches them, which covers switching a locked Git dependency to a local
+// checkout of it (#542). A path package ard.lock already has is checked
+// against the checkout's current ard.toml instead. It describes the first
+// dependency in the subtree that ard.lock does not pin as declared, and
+// reports whether ard.lock pins it to a different ref (see StaleGitPin).
+func addPathDependencyPackage(packages map[string]PackageInfo, graph lockedGraphIndex, dep DependencyInfo, seen map[string]bool) (string, bool) {
+	if dep.SourcePath == "" || dep.PackageID == "" || seen[dep.PackageID] {
+		return "", false
+	}
+	if existing, exists := packages[dep.PackageID]; exists {
+		return lockedPathPackageDrift(packages, graph, existing, seen)
 	}
 	seen[dep.PackageID] = true
 	name := dep.Name
@@ -743,40 +825,66 @@ func addPathDependencyPackage(packages map[string]PackageInfo, dep DependencyInf
 	sort.Strings(childAliases)
 	depAliases := map[string]string{}
 	unlocked := ""
+	stale := false
 	for _, alias := range childAliases {
 		child := childDeps[alias]
 		switch {
 		case child.PackageID != "":
 			depAliases[alias] = child.PackageID
-			if missing := addPathDependencyPackage(packages, child, seen); unlocked == "" {
-				unlocked = missing
+			if missing, missingStale := addPathDependencyPackage(packages, graph, child, seen); unlocked == "" {
+				unlocked, stale = missing, missingStale
 			}
 		case child.Git != "":
-			if lockedID := lockedPackageFor(packages, child); lockedID != "" {
+			if lockedID := graph.lockedPackageFor(packages, child); lockedID != "" {
 				depAliases[alias] = lockedID
 			} else if unlocked == "" {
-				unlocked = fmt.Sprintf("ard.lock does not pin Git dependency %q of package %q", alias, name)
+				unlocked = fmt.Sprintf("Git dependency %q of package %q is not pinned in ard.lock", alias, name)
 			}
 		}
 	}
 	packages[dep.PackageID] = PackageInfo{ID: dep.PackageID, Name: name, RootPath: dep.SourcePath, Path: dep.SourcePath, Dependencies: depAliases}
-	return unlocked
+	return unlocked, stale
 }
 
-// lockedPackageFor returns the locked Git package that matches a dependency
-// declaration, or "" when none does.
-func lockedPackageFor(packages map[string]PackageInfo, dep DependencyInfo) string {
-	ids := make([]string, 0, len(packages))
-	for id, pkg := range packages {
-		if pkg.Git != "" && pkg.Commit != "" && !lockedPackageDrifted(dep, pkg, true) {
-			ids = append(ids, id)
+// lockedPathPackageDrift checks a locked path package's edges against the
+// checkout's current ard.toml, since the checkout can change after it was
+// locked (for example, bumping one of its Git dependencies). It returns a
+// description of the first dependency ard.lock no longer pins as declared.
+func lockedPathPackageDrift(packages map[string]PackageInfo, graph lockedGraphIndex, pkg PackageInfo, seen map[string]bool) (string, bool) {
+	if pkg.Git != "" || pkg.RootPath == "" || seen[pkg.ID] {
+		return "", false
+	}
+	seen[pkg.ID] = true
+	declared, err := parseProjectDependencies(filepath.Join(pkg.RootPath, "ard.toml"), pkg.RootPath)
+	if err != nil {
+		return "", false
+	}
+	aliases := make([]string, 0, len(declared))
+	for alias := range declared {
+		aliases = append(aliases, alias)
+	}
+	sort.Strings(aliases)
+	for _, alias := range aliases {
+		child := declared[alias]
+		target, linked := packages[pkg.Dependencies[alias]]
+		switch {
+		case child.Git != "":
+			if !linked {
+				return fmt.Sprintf("Git dependency %q of package %q is not pinned in ard.lock", alias, pkg.Name), false
+			}
+			if !graph.gitEdgeMatches(child, target) {
+				return fmt.Sprintf("package %q declares Git dependency %q as %s, but ard.lock pins %s", pkg.Name, alias, describeDeclaredDependency("", child), describeLockedPackage("", target)), true
+			}
+		case child.SourcePath != "":
+			if !linked || target.Git != "" {
+				return fmt.Sprintf("path dependency %q of package %q is not pinned in ard.lock", alias, pkg.Name), false
+			}
+			if missing, stale := lockedPathPackageDrift(packages, graph, target, seen); missing != "" {
+				return missing, stale
+			}
 		}
 	}
-	if len(ids) == 0 {
-		return ""
-	}
-	sort.Strings(ids)
-	return ids[0]
+	return "", false
 }
 
 func copyStringMap(in map[string]string) map[string]string {
@@ -906,6 +1014,9 @@ func LockDependencyGraphReplacingAliases(projectRoot string, projectName string,
 	}
 	if dep.Git != "" {
 		builder.dropRootDependenciesByGit(dep.Git)
+	}
+	if dep.SourcePath != "" {
+		builder.pinRootGitSources()
 	}
 	if packageName != "" {
 		dep.Name = packageName
@@ -1117,6 +1228,24 @@ func newLockGraphBuilder(projectRoot string, projectName string) (*lockGraphBuil
 	}
 	builder.packages[rootPkg.ID] = rootPkg
 	return builder, nil
+}
+
+// pinRootGitSources prepares locking a path dependency's subtree on its own.
+// Pins left behind by packages the dropped alias no longer reaches are
+// forgotten, and each remaining direct Git dependency pins its source for the
+// whole graph, as it does when the lock is rebuilt.
+func (b *lockGraphBuilder) pinRootGitSources() {
+	b.gitCommits = map[string]string{}
+	for _, pkg := range b.packages {
+		if pkg.Git != "" && pkg.Commit != "" {
+			b.gitCommits[CanonicalGitSource(pkg.Git)] = pkg.Commit
+		}
+	}
+	for _, packageID := range b.packages[b.lock.Root].Dependencies {
+		if pkg := b.packages[packageID]; pkg.Git != "" && pkg.Commit != "" {
+			b.overrides[CanonicalGitSource(pkg.Git)] = pkg.Commit
+		}
+	}
 }
 
 func (b *lockGraphBuilder) dropRootDependency(alias string) {
@@ -1588,7 +1717,7 @@ func VerifyLockMatchesManifest(startPath string) error {
 			continue
 		}
 		if dep.SourcePath != "" {
-			return fmt.Errorf("ard.lock does not match ard.toml for dependency %q: %s; run `ard update %s` to lock the path, or restore the locked source in ard.toml", dep.Alias, dep.LockDrift, dep.Alias)
+			return fmt.Errorf("ard.lock is out of date for path dependency %q: %s; run `ard update %s` to lock it, or restore the locked source in ard.toml", dep.Alias, dep.LockDrift, dep.Alias)
 		}
 		return lockDriftError(dep)
 	}
@@ -1601,6 +1730,16 @@ func VerifyDependencies(startPath string) error {
 	project, err := FindProjectRoot(startPath)
 	if err != nil {
 		return err
+	}
+	aliases := make([]string, 0, len(project.Dependencies))
+	for alias := range project.Dependencies {
+		aliases = append(aliases, alias)
+	}
+	sort.Strings(aliases)
+	for _, alias := range aliases {
+		if dep := project.Dependencies[alias]; dep.StaleGitPin {
+			return fmt.Errorf("ard.lock is out of date for path dependency %q: %s; run `ard update %s` to lock it", dep.Alias, dep.LockDrift, dep.Alias)
+		}
 	}
 	for _, dep := range projectGitDependencies(project) {
 		if dep.LockDrift != "" {

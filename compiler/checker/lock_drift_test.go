@@ -372,3 +372,154 @@ func TestGitLockMatchingIsNotFooledByRefShapes(t *testing.T) {
 		}
 	})
 }
+
+// checkoutWithLib locks `dep` from Git (depending on `lib` at libCommit), then
+// switches `dep` to a local checkout whose manifest declares libEntry.
+type checkoutFixture struct {
+	workspace string
+	root      string
+	local     string
+	libRepo   string
+	c1, c2    string
+}
+
+func newCheckoutFixture(t *testing.T) checkoutFixture {
+	t.Helper()
+	workspace, root := newLockDriftApp(t)
+	libRepo, c1 := createGitPackageRepo(t, workspace, "lib-repo", map[string]string{
+		"ard.toml": "name = \"lib\"\nard = \">= 0.1.0\"\n",
+		"lib.ard":  "fn value() Int { 1 }\n",
+	})
+	c2 := addGitCommit(t, libRepo, map[string]string{"lib.ard": "fn value() Int { 2 }\n"}, "two")
+	runGit(t, libRepo, "tag", "v2")
+	depManifest := "name = \"dep\"\nard = \">= 0.1.0\"\n\n[dependencies]\nlib = { git = \"" + libRepo + "\", commit = \"" + c1 + "\" }\n"
+	depRepo, depCommit := createGitPackageRepo(t, workspace, "dep-repo", map[string]string{"ard.toml": depManifest, "dep.ard": "use lib\n"})
+	lock, err := checker.LockDependencyGraph(root, "app", "dep", checker.DependencyInfo{Alias: "dep", Name: "dep", Git: depRepo, Commit: depCommit}, "dep", depCommit)
+	if err != nil {
+		t.Fatalf("lock dependency graph: %v", err)
+	}
+	if err := checker.WriteDependencyLock(root, lock); err != nil {
+		t.Fatal(err)
+	}
+	return checkoutFixture{workspace: workspace, root: root, local: filepath.Join(workspace, "dep-local"), libRepo: libRepo, c1: c1, c2: c2}
+}
+
+func (f checkoutFixture) useCheckout(t *testing.T, libEntry string, rootEntries ...string) {
+	t.Helper()
+	writePackage(t, f.local, map[string]string{
+		"ard.toml": "name = \"dep\"\nard = \">= 0.1.0\"\n\n[dependencies]\nlib = " + libEntry + "\n",
+		"dep.ard":  "use lib\n",
+	})
+	writeLockDriftManifest(t, f.root, append([]string{`dep = { path = "../dep-local" }`}, rootEntries...)...)
+}
+
+func (f checkoutFixture) libFor(t *testing.T) (string, error) {
+	t.Helper()
+	resolver, err := checker.NewModuleResolver(f.root)
+	if err != nil {
+		t.Fatalf("new resolver: %v", err)
+	}
+	depImport, err := resolver.ResolveImport("", "dep")
+	if err != nil {
+		t.Fatalf("resolve dep: %v", err)
+	}
+	libImport, err := resolver.ResolveImport(depImport.ModulePath, "lib")
+	return libImport.FilePath, err
+}
+
+func (f checkoutFixture) relock(t *testing.T) {
+	t.Helper()
+	lock, err := checker.LockDependencyGraphReplacingAliases(f.root, "app", "dep", nil, checker.DependencyInfo{Alias: "dep", SourcePath: f.local}, "", "")
+	if err != nil {
+		t.Fatalf("re-lock path dependency: %v", err)
+	}
+	if err := checker.WriteDependencyLock(f.root, lock); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A checkout whose Git dependency names another ref than the lock's must not
+// silently reuse the locked commit.
+func TestPathOverrideDoesNotLinkAGitDependencyAtAnotherRef(t *testing.T) {
+	f := newCheckoutFixture(t)
+	f.useCheckout(t, `{ git = "`+f.libRepo+`", tag = "v2" }`)
+	if path, err := f.libFor(t); err == nil || !strings.Contains(err.Error(), "not pinned in ard.lock") {
+		t.Fatalf("lib resolved to %q (err %v), want a not-pinned error", path, err)
+	}
+
+	f.relock(t)
+	path, err := f.libFor(t)
+	if err != nil {
+		t.Fatalf("resolve lib after re-locking: %v", err)
+	}
+	if want := filepath.Join(checker.DependencyCachePath(f.libRepo, f.c2), "lib.ard"); path != want {
+		t.Fatalf("lib resolved to %q, want v2 at %q", path, want)
+	}
+	if err := checker.VerifyLockMatchesManifest(f.root); err != nil {
+		t.Fatalf("verify lock after re-locking: %v", err)
+	}
+}
+
+// Changing a locked checkout's Git dependency is caught like Git drift: builds
+// stop instead of compiling the previously pinned ref.
+func TestLockedPathCheckoutChangingAGitDependencyIsDrift(t *testing.T) {
+	f := newCheckoutFixture(t)
+	f.useCheckout(t, `{ git = "`+f.libRepo+`", commit = "`+f.c1+`" }`)
+	f.relock(t)
+	if err := checker.VerifyLockMatchesManifest(f.root); err != nil {
+		t.Fatalf("verify lock for a freshly locked checkout: %v", err)
+	}
+	if err := checker.VerifyDependencies(f.root); err != nil {
+		t.Fatalf("verify for a freshly locked checkout: %v", err)
+	}
+
+	f.useCheckout(t, `{ git = "`+f.libRepo+`", commit = "`+f.c2+`" }`)
+	for name, verify := range map[string]func(string) error{
+		"verify lock": checker.VerifyLockMatchesManifest,
+		"build-time":  checker.VerifyDependencies,
+	} {
+		if err := verify(f.root); err == nil || !strings.Contains(err.Error(), `Git dependency "lib"`) || !strings.Contains(err.Error(), "ard update dep") {
+			t.Fatalf("%s error = %v, want the stale lib pin reported with an ard update hint", name, err)
+		}
+	}
+	f.relock(t)
+	if err := checker.VerifyDependencies(f.root); err != nil {
+		t.Fatalf("verify after re-locking: %v", err)
+	}
+}
+
+// A direct Git dependency pins its source for the whole graph, so a checkout
+// that asks for another ref of it follows the root, matching a rebuilt lock.
+func TestRootGitPinWinsForACheckoutsGitDependency(t *testing.T) {
+	f := newCheckoutFixture(t)
+	rootLib := `lib = { git = "` + f.libRepo + `", commit = "` + f.c2 + `" }`
+	writeLockDriftManifest(t, f.root, `dep = { path = "../dep-local" }`, rootLib)
+	f.useCheckout(t, `{ git = "`+f.libRepo+`", commit = "`+f.c1+`" }`, rootLib)
+	lock, err := checker.UpdateDependencyGraph(f.root, "app", nil)
+	if err != nil {
+		t.Fatalf("rebuild lock: %v", err)
+	}
+	if err := checker.WriteDependencyLock(f.root, lock); err != nil {
+		t.Fatal(err)
+	}
+	for name, verify := range map[string]func(string) error{
+		"verify lock": checker.VerifyLockMatchesManifest,
+		"build-time":  checker.VerifyDependencies,
+	} {
+		if err := verify(f.root); err != nil {
+			t.Fatalf("%s for a lock where the root pin wins: %v", name, err)
+		}
+	}
+	path, err := f.libFor(t)
+	if err != nil {
+		t.Fatalf("resolve lib: %v", err)
+	}
+	if want := filepath.Join(checker.DependencyCachePath(f.libRepo, f.c2), "lib.ard"); path != want {
+		t.Fatalf("lib resolved to %q, want the root's pin %q", path, want)
+	}
+	// Re-locking only the path keeps the root's pin instead of conflicting.
+	f.relock(t)
+	if err := checker.VerifyDependencies(f.root); err != nil {
+		t.Fatalf("verify after re-locking the path: %v", err)
+	}
+}

@@ -517,9 +517,10 @@ func runUpdateCommand(args []string) error {
 	}
 
 	if len(updates) == 0 {
-		// Only path dependencies need re-locking. Lock each one's subtree
-		// without re-resolving the other Git dependencies, which would need
-		// the network and could move their pins.
+		// Only path dependencies need re-locking. Lock each one's subtree on
+		// its own: the other Git dependencies keep their pins and are not
+		// re-resolved. Git dependencies inside the subtree are still resolved
+		// from their sources.
 		for _, alias := range relockedPaths {
 			lock, err := checker.LockDependencyGraphReplacingAliases(project.RootPath, project.ProjectName, alias, nil, declared[alias], "", "")
 			if err != nil {
