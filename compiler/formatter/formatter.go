@@ -26,8 +26,22 @@ func Format(input []byte, fileName string) ([]byte, error) {
 	removeUnusedImports(result.Program)
 
 	printer := newPrinter(100)
-	formatted := printer.program(result.Program)
-	return []byte(ensureFinalNewline(formatted)), nil
+	formatted := []byte(ensureFinalNewline(printer.program(result.Program)))
+	if err := checkFormattedOutputParses(formatted, fileName); err != nil {
+		return nil, err
+	}
+	return formatted, nil
+}
+
+// checkFormattedOutputParses rejects formatter output that no longer parses,
+// so a printer bug fails the format instead of corrupting valid source (#546).
+func checkFormattedOutputParses(formatted []byte, fileName string) error {
+	result := parse.Parse(formatted, fileName)
+	if len(result.Errors) == 0 {
+		return nil
+	}
+	first := result.Errors[0]
+	return fmt.Errorf("refusing to format %s: the formatted source would not parse (%s %s); the file was left unchanged. This is a formatter bug, please report it", fileName, first.Location.Start, first.Message)
 }
 
 func normalizeLineEndings(source string) string {
