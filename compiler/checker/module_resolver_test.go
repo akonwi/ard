@@ -832,7 +832,7 @@ func TestReadDependencyLockMigratesCanonicalGitPackageIDs(t *testing.T) {
 	root := t.TempDir()
 	commit := "0123456789abcdef0123456789abcdef01234567"
 	oldID := "git:oldhash:" + commit
-	gitSource := "https://github.com/akonwi/vaxis-ard/"
+	gitSource := "https://github.com/akonwi/cooper/"
 	lock := fmt.Sprintf(`{
   "version": 1,
   "root": "root",
@@ -887,15 +887,15 @@ func TestReadDependencyLockPrefersRootTransportWhenMigratingDuplicateGitIDs(t *t
 	}
 }
 func TestCanonicalGitSourceNormalizesGitHubVariants(t *testing.T) {
-	want := "https://github.com/akonwi/vaxis-ard.git"
+	want := "https://github.com/akonwi/cooper.git"
 	for _, input := range []string{
-		"https://github.com/akonwi/vaxis-ard",
-		"https://github.com/akonwi/vaxis-ard/",
-		"https://github.com/akonwi/vaxis-ard.git",
-		"git@github.com:akonwi/vaxis-ard.git",
-		"ssh://git@github.com/akonwi/vaxis-ard.git",
-		"github.com/akonwi/vaxis-ard",
-		"HTTPS://github.com/Akonwi/Vaxis-Ard/",
+		"https://github.com/akonwi/cooper",
+		"https://github.com/akonwi/cooper/",
+		"https://github.com/akonwi/cooper.git",
+		"git@github.com:akonwi/cooper.git",
+		"ssh://git@github.com/akonwi/cooper.git",
+		"github.com/akonwi/cooper",
+		"HTTPS://github.com/Akonwi/Cooper/",
 	} {
 		if got := checker.CanonicalGitSource(input); got != want {
 			t.Fatalf("CanonicalGitSource(%q) = %q, want %q", input, got, want)

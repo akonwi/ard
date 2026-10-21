@@ -14,14 +14,14 @@ name = "my_app"
 ard = ">= 0.13.0"
 
 [dependencies]
-vaxis = { git = "https://github.com/akonwi/vaxis-ard.git", commit = "76f7c1b" }
+cooper = { git = "https://github.com/akonwi/cooper.git", commit = "76f7c1b" }
 shared = { path = "../shared" }
 ```
 
 The dependency key is the import root visible to the package that declares it:
 
 ```ard
-use vaxis
+use cooper
 use shared/strings
 ```
 
@@ -60,9 +60,9 @@ Dependency aliases are package-local. Your root project can import only its dire
 Use `ard add` to add or update a Git dependency:
 
 ```sh
-ard add github.com/akonwi/vaxis-ard@v0.1.0
-ard add github.com/akonwi/vaxis-ard@76f7c1b as tui
-ard add github.com/akonwi/vaxis-ard@latest
+ard add github.com/akonwi/cooper@v0.1.0
+ard add github.com/akonwi/cooper@76f7c1b as tui
+ard add github.com/akonwi/cooper@latest
 ```
 
 `ard add`:
@@ -78,8 +78,8 @@ Use `ard update` to move Git dependencies to the latest commit on their default 
 
 ```sh
 ard update            # update every direct Git dependency
-ard update vaxis      # update one dependency
-ard update vaxis tui  # update several
+ard update cooper     # update one dependency
+ard update cooper tui # update several
 ```
 
 `ard update`:
@@ -96,8 +96,8 @@ Updating pins the resolved commit for that Git source across the whole graph. If
 You can still update a single dependency to a specific ref with `ard add`:
 
 ```sh
-ard add github.com/akonwi/vaxis-ard@v0.2.0
-ard add github.com/akonwi/vaxis-ard@latest
+ard add github.com/akonwi/cooper@v0.2.0
+ard add github.com/akonwi/cooper@latest
 ```
 
 ## Lockfile and cache
@@ -131,7 +131,7 @@ ard deps verify
 Remove a direct dependency with:
 
 ```sh
-ard remove vaxis
+ard remove cooper
 ```
 
 This removes the dependency entry from `ard.toml` and prunes unreachable packages from `ard.lock`.
