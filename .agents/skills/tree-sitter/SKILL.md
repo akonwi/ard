@@ -29,6 +29,6 @@ Maintain the Ard Tree-sitter grammar and highlight queries, validate with `npm r
 
 ## CLI setup notes
 
-- Ensure `~/.config/tree-sitter/config.json` includes the repo path (e.g., `/Users/akonwi/Developer/agent/ard`), or pass `--scope source.ard`.
+- Ensure `~/.config/tree-sitter/config.json` includes the repo path (e.g., `/Users/akonwi/Developer/agent/ardverse/ard`), or pass `--scope source.ard`.
 - If `tree-sitter highlight` uses the wrong grammar, remove conflicting tree-sitter repos or adjust config order.
 ---
