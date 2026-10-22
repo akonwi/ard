@@ -1628,14 +1628,14 @@ test fn private_access() Void!Str {
 	}
 }
 func TestDependencyFromAddSpecGitHubCommit(t *testing.T) {
-	dep, err := dependencyFromAddSpec("github.com/akonwi/vaxis-ard@76f7c1b")
+	dep, err := dependencyFromAddSpec("github.com/akonwi/cooper@76f7c1b")
 	if err != nil {
 		t.Fatalf("dependencyFromAddSpec: %v", err)
 	}
-	if dep.Alias != "vaxis-ard" {
-		t.Fatalf("alias = %q, want vaxis-ard", dep.Alias)
+	if dep.Alias != "cooper" {
+		t.Fatalf("alias = %q, want cooper", dep.Alias)
 	}
-	if dep.Git != "https://github.com/akonwi/vaxis-ard.git" {
+	if dep.Git != "https://github.com/akonwi/cooper.git" {
 		t.Fatalf("git = %q", dep.Git)
 	}
 	if dep.Commit != "76f7c1b" || dep.Tag != "" {
@@ -1643,27 +1643,27 @@ func TestDependencyFromAddSpecGitHubCommit(t *testing.T) {
 	}
 }
 func TestDependencyFromAddSpecSSHTransport(t *testing.T) {
-	dep, err := dependencyFromAddSpec("git@github.com:akonwi/vaxis-ard.git@76f7c1b")
+	dep, err := dependencyFromAddSpec("git@github.com:akonwi/cooper.git@76f7c1b")
 	if err != nil {
 		t.Fatalf("dependencyFromAddSpec: %v", err)
 	}
-	if dep.Alias != "vaxis-ard" || dep.Git != "git@github.com:akonwi/vaxis-ard.git" || dep.Commit != "76f7c1b" {
+	if dep.Alias != "cooper" || dep.Git != "git@github.com:akonwi/cooper.git" || dep.Commit != "76f7c1b" {
 		t.Fatalf("dep = %#v", dep)
 	}
-	dep, err = dependencyFromAddSpec("ssh://git@github.com/akonwi/vaxis-ard.git@v1")
+	dep, err = dependencyFromAddSpec("ssh://git@github.com/akonwi/cooper.git@v1")
 	if err != nil {
 		t.Fatalf("dependencyFromAddSpec ssh url: %v", err)
 	}
-	if dep.Alias != "vaxis-ard" || dep.Git != "ssh://git@github.com/akonwi/vaxis-ard.git" || dep.Tag != "v1" {
+	if dep.Alias != "cooper" || dep.Git != "ssh://git@github.com/akonwi/cooper.git" || dep.Tag != "v1" {
 		t.Fatalf("dep = %#v", dep)
 	}
 }
 func TestDependencyFromAddSpecGitHubHyphenShorthand(t *testing.T) {
-	dep, err := dependencyFromAddSpec("github.com/akonwi-vaxis-ard@76f7c1b")
+	dep, err := dependencyFromAddSpec("github.com/akonwi-cooper@76f7c1b")
 	if err != nil {
 		t.Fatalf("dependencyFromAddSpec: %v", err)
 	}
-	if dep.Alias != "vaxis-ard" || dep.Git != "https://github.com/akonwi/vaxis-ard.git" {
+	if dep.Alias != "cooper" || dep.Git != "https://github.com/akonwi/cooper.git" {
 		t.Fatalf("dep = %#v", dep)
 	}
 }
@@ -1953,7 +1953,7 @@ func TestAddDependencyToManifest(t *testing.T) {
 	if err := os.WriteFile(manifest, []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	dep := checker.DependencyInfo{Alias: "vaxis", Git: "https://github.com/akonwi/vaxis-ard.git", Commit: "76f7c1b"}
+	dep := checker.DependencyInfo{Alias: "vaxis", Git: "https://github.com/akonwi/cooper.git", Commit: "76f7c1b"}
 	if err := addDependencyToManifest(manifest, dep); err != nil {
 		t.Fatalf("addDependencyToManifest: %v", err)
 	}
@@ -1962,18 +1962,18 @@ func TestAddDependencyToManifest(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := string(data)
-	if !strings.Contains(got, "[dependencies]") || !strings.Contains(got, `vaxis = { git = "https://github.com/akonwi/vaxis-ard.git", commit = "76f7c1b" }`) {
+	if !strings.Contains(got, "[dependencies]") || !strings.Contains(got, `vaxis = { git = "https://github.com/akonwi/cooper.git", commit = "76f7c1b" }`) {
 		t.Fatalf("manifest missing dependency:\n%s", got)
 	}
 }
 func TestReplaceDependencyInManifestRemovesOldAlias(t *testing.T) {
 	dir := t.TempDir()
 	manifest := filepath.Join(dir, "ard.toml")
-	input := "name = \"demo\"\nard = \">= 0.1.0\"\n\n[dependencies]\nold_vaxis = { git = \"https://github.com/akonwi/vaxis-ard\", commit = \"old\" }\nother = { path = \"../other\" }\n"
+	input := "name = \"demo\"\nard = \">= 0.1.0\"\n\n[dependencies]\nold_vaxis = { git = \"https://github.com/akonwi/cooper\", commit = \"old\" }\nother = { path = \"../other\" }\n"
 	if err := os.WriteFile(manifest, []byte(input), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	dep := checker.DependencyInfo{Alias: "vaxis", Git: "https://github.com/akonwi/vaxis-ard.git", Commit: "new"}
+	dep := checker.DependencyInfo{Alias: "vaxis", Git: "https://github.com/akonwi/cooper.git", Commit: "new"}
 	if err := replaceDependencyInManifest(manifest, []string{"old_vaxis"}, dep); err != nil {
 		t.Fatalf("replaceDependencyInManifest: %v", err)
 	}
@@ -1985,18 +1985,18 @@ func TestReplaceDependencyInManifestRemovesOldAlias(t *testing.T) {
 	if strings.Contains(got, "old_vaxis =") {
 		t.Fatalf("manifest still has old alias:\n%s", got)
 	}
-	if !strings.Contains(got, `vaxis = { git = "https://github.com/akonwi/vaxis-ard.git", commit = "new" }`) || !strings.Contains(got, "other =") {
+	if !strings.Contains(got, `vaxis = { git = "https://github.com/akonwi/cooper.git", commit = "new" }`) || !strings.Contains(got, "other =") {
 		t.Fatalf("manifest missing replacement or existing dependency:\n%s", got)
 	}
 }
 func TestReplaceDependencyInManifestRejectsMultilineDeclaration(t *testing.T) {
 	dir := t.TempDir()
 	manifestPath := filepath.Join(dir, "ard.toml")
-	input := "name = \"demo\"\nard = \">= 0.1.0\"\n\n[dependencies.vaxis]\ngit = \"https://github.com/akonwi/vaxis-ard.git\"\ncommit = \"old\"\n"
+	input := "name = \"demo\"\nard = \">= 0.1.0\"\n\n[dependencies.vaxis]\ngit = \"https://github.com/akonwi/cooper.git\"\ncommit = \"old\"\n"
 	if err := os.WriteFile(manifestPath, []byte(input), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	dep := checker.DependencyInfo{Alias: "vaxis", Git: "https://github.com/akonwi/vaxis-ard.git", Commit: "new"}
+	dep := checker.DependencyInfo{Alias: "vaxis", Git: "https://github.com/akonwi/cooper.git", Commit: "new"}
 	err := replaceDependencyInManifest(manifestPath, nil, dep)
 	if err == nil || !strings.Contains(err.Error(), "cannot be edited safely") {
 		t.Fatalf("error = %v, want safe-edit diagnostic", err)
@@ -2009,11 +2009,11 @@ func TestReplaceDependencyInManifestRejectsMultilineDeclaration(t *testing.T) {
 func TestDependencyAliasesForGitInManifestCanonicalizesRawEntries(t *testing.T) {
 	dir := t.TempDir()
 	manifest := filepath.Join(dir, "ard.toml")
-	input := "name = \"demo\"\nard = \">= 0.1.0\"\n\n[dependencies]\nold = { git = \"git@github.com:akonwi/vaxis-ard.git\", commit = \"old\" }\nother = { git = \"https://github.com/akonwi/other.git\", commit = \"other\" }\n"
+	input := "name = \"demo\"\nard = \">= 0.1.0\"\n\n[dependencies]\nold = { git = \"git@github.com:akonwi/cooper.git\", commit = \"old\" }\nother = { git = \"https://github.com/akonwi/other.git\", commit = \"other\" }\n"
 	if err := os.WriteFile(manifest, []byte(input), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	aliases, err := dependencyAliasesForGitInManifest(manifest, "https://github.com/akonwi/vaxis-ard", "vaxis")
+	aliases, err := dependencyAliasesForGitInManifest(manifest, "https://github.com/akonwi/cooper", "vaxis")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2023,10 +2023,10 @@ func TestDependencyAliasesForGitInManifestCanonicalizesRawEntries(t *testing.T) 
 }
 func TestDependencyAliasesForGitCanonicalizesSource(t *testing.T) {
 	deps := map[string]checker.DependencyInfo{
-		"old":   {Alias: "old", Git: "https://github.com/akonwi/vaxis-ard"},
+		"old":   {Alias: "old", Git: "https://github.com/akonwi/cooper"},
 		"other": {Alias: "other", Git: "https://github.com/akonwi/other.git"},
 	}
-	aliases := dependencyAliasesForGit(deps, "git@github.com:akonwi/vaxis-ard.git", "vaxis")
+	aliases := dependencyAliasesForGit(deps, "git@github.com:akonwi/cooper.git", "vaxis")
 	if len(aliases) != 1 || aliases[0] != "old" {
 		t.Fatalf("aliases = %#v, want [old]", aliases)
 	}
@@ -2034,7 +2034,7 @@ func TestDependencyAliasesForGitCanonicalizesSource(t *testing.T) {
 func TestRemoveDependencyFromManifest(t *testing.T) {
 	dir := t.TempDir()
 	manifest := filepath.Join(dir, "ard.toml")
-	input := "name = \"demo\"\nard = \">= 0.1.0\"\n\n[dependencies]\nvaxis = { git = \"https://github.com/akonwi/vaxis-ard.git\", commit = \"76f7c1b\" }\nother = { path = \"../other\" }\n"
+	input := "name = \"demo\"\nard = \">= 0.1.0\"\n\n[dependencies]\nvaxis = { git = \"https://github.com/akonwi/cooper.git\", commit = \"76f7c1b\" }\nother = { path = \"../other\" }\n"
 	if err := os.WriteFile(manifest, []byte(input), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -2060,7 +2060,7 @@ func TestRemoveDependencyFromManifest(t *testing.T) {
 func TestRemoveDependencyFromManifestRejectsNestedTable(t *testing.T) {
 	dir := t.TempDir()
 	manifestPath := filepath.Join(dir, "ard.toml")
-	input := "name = \"demo\"\nard = \">= 0.1.0\"\n\n[dependencies.vaxis]\ngit = \"https://github.com/akonwi/vaxis-ard.git\"\ncommit = \"old\"\n"
+	input := "name = \"demo\"\nard = \">= 0.1.0\"\n\n[dependencies.vaxis]\ngit = \"https://github.com/akonwi/cooper.git\"\ncommit = \"old\"\n"
 	if err := os.WriteFile(manifestPath, []byte(input), 0o644); err != nil {
 		t.Fatal(err)
 	}

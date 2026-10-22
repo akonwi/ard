@@ -46,8 +46,8 @@ Vendored dependencies are the source used by the module resolver for external pa
 Vendored dependencies should not auto-update during ordinary builds. `ard build` should use existing vendored dependencies and fail clearly when a required dependency is missing. Dependencies can be added and removed with:
 
 ```bash
-ard add github.com/akonwi/vaxis-ard@76f7c1b
-ard add github.com/akonwi/vaxis-ard@latest
+ard add github.com/akonwi/cooper@76f7c1b
+ard add github.com/akonwi/cooper@latest
 ard remove vaxis
 ```
 

@@ -35,7 +35,7 @@ Ard projects continue to declare direct dependencies in `ard.toml`:
 
 ```toml
 [dependencies]
-ui = { git = "https://github.com/akonwi/vaxis-ard.git", tag = "v0.1.0" }
+ui = { git = "https://github.com/akonwi/cooper.git", tag = "v0.1.0" }
 shared = { path = "../shared" }
 ```
 
@@ -63,8 +63,8 @@ Cache entries are immutable build inputs. A build does not update, fetch, or rew
 The dependency commands should become graph operations:
 
 ```bash
-ard add github.com/akonwi/vaxis-ard@v0.1.0
-ard add github.com/akonwi/vaxis-ard@76f7c1b as ui
+ard add github.com/akonwi/cooper@v0.1.0
+ard add github.com/akonwi/cooper@76f7c1b as ui
 ard deps fetch
 ard deps verify
 ard remove ui
