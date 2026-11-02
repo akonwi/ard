@@ -59,6 +59,8 @@ func (p printer) printDocAtColumn(root doc, baseColumn int) string {
 			}
 		case docIndent:
 			stack = append(stack, printCmd{indent: cmd.indent + indentWidth, mode: cmd.mode, doc: node.content})
+		case docForceBreak:
+			stack = append(stack, printCmd{indent: cmd.indent, mode: modeBreak, doc: node.content})
 		case docIfBreak:
 			if cmd.mode == modeBreak {
 				stack = append(stack, printCmd{indent: cmd.indent, mode: cmd.mode, doc: node.broken})
@@ -112,6 +114,9 @@ func fits(remaining int, stack []printCmd) bool {
 			}
 		case docIndent:
 			stack = append(stack, printCmd{indent: cmd.indent + indentWidth, mode: cmd.mode, doc: node.content})
+		case docForceBreak:
+			// Never fits flat, which makes the enclosing group break.
+			return false
 		case docIfBreak:
 			if cmd.mode == modeBreak {
 				stack = append(stack, printCmd{indent: cmd.indent, mode: cmd.mode, doc: node.broken})

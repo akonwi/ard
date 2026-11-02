@@ -833,3 +833,190 @@ func TestFormattedOutputMustParse(t *testing.T) {
 		t.Fatalf("valid output rejected: %v", err)
 	}
 }
+
+// A comment on its own line inside a multi-line list literal, map literal, or
+// call argument list stays attached to the element that follows it instead of
+// moving above the first element (#548).
+func TestFormatKeepsCommentsWithTheirSequenceElements(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{
+			name: "map literal keeps the comment on the second entry",
+			input: `fn scores() [Str: Int] {
+  [
+    "home": 1,
+    // away goals include the own goal
+    "away": 2,
+  ]
+}
+`,
+		},
+		{
+			name: "list literal keeps the comment on the second element",
+			input: `fn ids() [Int] {
+  [
+    1,
+    // two is special
+    2,
+  ]
+}
+`,
+		},
+		{
+			name: "call arguments keep the comment on the second argument",
+			input: `fn total(a: Int, b: Int) Int {
+  a + b
+}
+
+fn call() Int {
+  total(
+    1,
+    // second argument is the bonus
+    2,
+  )
+}
+`,
+		},
+		{
+			name: "comment after the last element stays last",
+			input: `fn ids() [Int] {
+  [
+    1,
+    2,
+    // trailing note
+  ]
+}
+`,
+		},
+		{
+			name: "multiple comments stay with their own elements",
+			input: `fn ids() [Int] {
+  [
+    // one note
+    1,
+    // two note
+    2,
+    // three note
+    3,
+  ]
+}
+`,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			formatted, err := Format([]byte(test.input), "test.ard")
+			if err != nil {
+				t.Fatalf("format: %v", err)
+			}
+			if string(formatted) != test.input {
+				t.Fatalf("formatted = %q, want unchanged %q", string(formatted), test.input)
+			}
+			if res := parse.Parse(formatted, "test.ard"); len(res.Errors) > 0 {
+				t.Fatalf("formatted output does not re-parse: %v", res.Errors)
+			}
+		})
+	}
+}
+
+// An empty `//` comment inside a struct body or between impl members stays
+// empty; it must not gain a trailing space (#548).
+func TestFormatEmptyCommentsHaveNoTrailingSpace(t *testing.T) {
+	input := `struct Team {
+  // First paragraph.
+  //
+  // Second paragraph.
+  name: Str,
+}
+
+impl Team {
+  fn a() Str {
+    self.name
+  }
+
+  // First paragraph.
+  //
+  // Second paragraph.
+  fn b() Str {
+    self.name
+  }
+}
+`
+	formatted, err := Format([]byte(input), "test.ard")
+	if err != nil {
+		t.Fatalf("format: %v", err)
+	}
+	if string(formatted) != input {
+		t.Fatalf("formatted = %q, want unchanged %q", string(formatted), input)
+	}
+	for i, line := range strings.Split(string(formatted), "\n") {
+		if line != strings.TrimRight(line, " \t") {
+			t.Fatalf("line %d has trailing whitespace: %q", i+1, line)
+		}
+	}
+}
+
+// A sequence that holds nothing but comments keeps its comments and stays
+// multi-line; it must not collapse onto one line or lose its brackets (#548).
+func TestFormatKeepsCommentOnlySequences(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{
+			name: "list with only a comment",
+			input: `fn items() [Int] {
+  [
+    // no items yet
+  ]
+}
+`,
+		},
+		{
+			name: "map with only a comment",
+			input: `fn scores() [Str: Int] {
+  [
+    // no entries yet
+  ]
+}
+`,
+		},
+		{
+			name: "call with only a comment",
+			input: `fn call() Int {
+  total(
+    // no arguments yet
+  )
+}
+`,
+		},
+		{
+			name: "list with several comments and no elements",
+			input: `fn items() [Int] {
+  [
+    // first note
+    // second note
+  ]
+}
+`,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			formatted, err := Format([]byte(test.input), "test.ard")
+			if err != nil {
+				t.Fatalf("format: %v", err)
+			}
+			if string(formatted) != test.input {
+				t.Fatalf("formatted = %q, want unchanged %q", string(formatted), test.input)
+			}
+			for i, line := range strings.Split(string(formatted), "\n") {
+				if line != strings.TrimRight(line, " \t") {
+					t.Fatalf("line %d has trailing whitespace: %q", i+1, line)
+				}
+			}
+		})
+	}
+}

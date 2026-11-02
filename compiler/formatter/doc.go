@@ -12,6 +12,16 @@ type docLine struct {
 	hard bool
 	soft bool
 }
+
+// docForceBreak wraps content that must be printed in break mode, even when
+// it would fit on one line. Unlike a hard line it emits nothing itself, so it
+// can force multi-line output without introducing a blank line.
+type docForceBreak struct {
+	content doc
+}
+
+func (docForceBreak) isDoc() {}
+
 type docIfBreak struct {
 	broken doc
 	flat   doc
@@ -75,6 +85,10 @@ func dLine() doc                        { return docLine{} }
 func dSoftLine() doc                    { return docLine{soft: true} }
 func dHardLine() doc                    { return docLine{hard: true} }
 func dIfBreak(broken doc, flat doc) doc { return docIfBreak{broken: broken, flat: flat} }
+
+// dForceBreak forces the enclosing group to break. Use it for content that is
+// only ever valid across several lines, such as a comment-only sequence.
+func dForceBreak(content doc) doc { return docForceBreak{content: content} }
 func dIfFits(firstLineWidth int, preferred doc, fallback doc) doc {
 	return docIfFits{firstLineWidth: firstLineWidth, preferred: preferred, fallback: fallback}
 }
