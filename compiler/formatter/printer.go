@@ -1277,27 +1277,18 @@ func escapeArdBraces(value string) string {
 
 func (p printer) renderListLiteralDoc(list *parse.ListLiteral) doc {
 	items := make([]string, 0, len(list.Items))
+	itemRows := make([]armDoc, 0, len(list.Items))
 	for _, item := range list.Items {
 		items = append(items, p.renderExpression(item, 0))
 	}
-	if len(items) == 0 {
+	if len(items) == 0 && len(list.Comments) == 0 {
 		return dText("[]")
 	}
 
-	itemDocs := make([]doc, 0, len(items))
-	for _, item := range items {
-		itemDocs = append(itemDocs, dText(item))
+	for index, item := range list.Items {
+		itemRows = append(itemRows, armDoc{doc: dText(items[index]), startRow: startRowOf(item)})
 	}
-	body := dJoin(dConcat(dText(","), dLine()), itemDocs)
-	body = dConcat(body, dIfBreak(dText(","), dText("")))
-
-	if len(list.Comments) > 0 {
-		commentDocs := make([]doc, 0, len(list.Comments))
-		for _, comment := range list.Comments {
-			commentDocs = append(commentDocs, dText(p.renderComment(comment.Value)))
-		}
-		body = dConcat(dJoin(dHardLine(), commentDocs), dHardLine(), body)
-	}
+	body := p.renderCommentRows(itemRows, list.Comments, dText(","))
 
 	return dGroup(dConcat(
 		dText("["),
@@ -1317,19 +1308,11 @@ func (p printer) renderMapLiteralDoc(m *parse.MapLiteral) doc {
 		parts = append(parts, p.renderExpression(entry.Key, 0)+": "+p.renderExpression(entry.Value, 0))
 	}
 
-	partDocs := make([]doc, 0, len(parts))
-	for _, part := range parts {
-		partDocs = append(partDocs, dText(part))
+	partRows := make([]armDoc, 0, len(parts))
+	for index, entry := range m.Entries {
+		partRows = append(partRows, armDoc{doc: dText(parts[index]), startRow: startRowOf(entry.Key)})
 	}
-	body := dJoin(dConcat(dText(","), dLine()), partDocs)
-	body = dConcat(body, dIfBreak(dText(","), dText("")))
-	if len(m.Comments) > 0 {
-		commentDocs := make([]doc, 0, len(m.Comments))
-		for _, comment := range m.Comments {
-			commentDocs = append(commentDocs, dText(p.renderComment(comment.Value)))
-		}
-		body = dConcat(dJoin(dHardLine(), commentDocs), dHardLine(), body)
-	}
+	body := p.renderCommentRows(partRows, m.Comments, dText(","))
 
 	return dGroup(dConcat(
 		dText("["),
@@ -1429,20 +1412,11 @@ func (p printer) renderCallHeadDoc(head doc, headText string, typeArgs []parse.D
 		return dConcat(head, dText("()"))
 	}
 
-	body := dJoin(dConcat(dText(","), dLine()), argDocs)
-	body = dConcat(body, dIfBreak(dText(","), dText("")))
-
-	if len(comments) > 0 {
-		commentDocs := make([]doc, 0, len(comments))
-		for _, comment := range comments {
-			commentDocs = append(commentDocs, dText(p.renderComment(comment.Value)))
-		}
-		if len(argDocs) > 0 {
-			body = dConcat(dJoin(dHardLine(), commentDocs), dHardLine(), body)
-		} else {
-			body = dJoin(dHardLine(), commentDocs)
-		}
+	argRows := make([]armDoc, 0, len(argDocs))
+	for index, arg := range args {
+		argRows = append(argRows, armDoc{doc: argDocs[index], startRow: arg.Location.Start.Row})
 	}
+	body := p.renderCommentRows(argRows, comments, dText(","))
 
 	fallback := dGroup(dConcat(
 		head,
@@ -1489,6 +1463,63 @@ func (p printer) renderCallHeadDoc(head doc, headText string, typeArgs []parse.D
 type armDoc struct {
 	doc      doc
 	startRow int
+}
+
+// startRowOf reports the first row an expression occupies, or 0 when the
+// expression carries no position. Formatting uses it to keep a comment above
+// the element it describes rather than hoisting it (#548).
+func startRowOf(node any) int {
+	located, ok := node.(interface{ GetLocation() parse.Location })
+	if !ok {
+		return 0
+	}
+	return located.GetLocation().Start.Row
+}
+
+// renderCommentRows interleaves comments with one-line element rows so each
+// comment stays attached to the element that follows it (#548). Each row is
+// joined with a hard line and gets a trailing separator, so the sequence
+// always breaks across lines when comments are present.
+func (p printer) renderCommentRows(rows []armDoc, comments []parse.Comment, separator doc) doc {
+	if len(comments) == 0 {
+		if len(rows) == 0 {
+			return dText("")
+		}
+		joined := dJoin(dConcat(separator, dLine()), docsOf(rows))
+		return dConcat(joined, dIfBreak(separator, dText("")))
+	}
+
+	withComments := make([]armDoc, 0, len(rows)+len(comments))
+	commentIndex := 0
+	for _, row := range rows {
+		for commentIndex < len(comments) && (row.startRow <= 0 || comments[commentIndex].Location.Start.Row < row.startRow) {
+			withComments = append(withComments, armDoc{doc: dText(p.renderComment(comments[commentIndex].Value))})
+			commentIndex++
+		}
+		withComments = append(withComments, armDoc{
+			doc:      dConcat(row.doc, separator),
+			startRow: row.startRow,
+		})
+	}
+	for ; commentIndex < len(comments); commentIndex++ {
+		withComments = append(withComments, armDoc{doc: dText(p.renderComment(comments[commentIndex].Value))})
+	}
+
+	docs := docsOf(withComments)
+	if len(docs) == 0 {
+		return dText("")
+	}
+	// Comments are only ever correct across multiple lines, so the enclosing
+	// sequence must break even when the content would fit flat.
+	return dForceBreak(dJoin(dHardLine(), docs))
+}
+
+func docsOf(rows []armDoc) []doc {
+	docs := make([]doc, 0, len(rows))
+	for _, row := range rows {
+		docs = append(docs, row.doc)
+	}
+	return docs
 }
 
 // renderArmsWithComments joins arms one per line, placing each comment before
@@ -1840,6 +1871,11 @@ func (p printer) renderComment(value string) string {
 	trimmed := strings.TrimSpace(value)
 	if strings.HasPrefix(trimmed, "//") {
 		return trimmed
+	}
+	if trimmed == "" {
+		// An empty comment is `//` with nothing after it. Adding the usual
+		// separating space would leave trailing whitespace (#548).
+		return "//"
 	}
 	return "// " + trimmed
 }
