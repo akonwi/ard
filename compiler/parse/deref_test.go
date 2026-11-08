@@ -11,17 +11,17 @@ func TestPostfixDerefExpressionPrecedence(t *testing.T) {
 		source string
 		want   string
 	}{
-		{name: "identifier", source: "reference.@", want: "deref(reference)"},
-		{name: "deref then field", source: "reference.@.field", want: "field(deref(reference),field)"},
-		{name: "field then deref", source: "reference.field.@", want: "deref(field(reference,field))"},
-		{name: "binary binds less tightly", source: "reference.@ + value", want: "add(deref(reference),value)"},
-		{name: "not remains broad", source: "not reference.@ == value", want: "not(equal(deref(reference),value))"},
-		{name: "borrow then deref", source: "(mut value).@", want: "deref(mut(value))"},
-		{name: "deref then borrow", source: "mut reference.@", want: "mut(deref(reference))"},
-		{name: "repeated deref", source: "reference.@.@", want: "deref(deref(reference))"},
-		{name: "call then deref", source: "load().@", want: "deref(call(load))"},
-		{name: "deref then call", source: "reference.@()", want: "invoke(deref(reference))"},
-		{name: "deref call then field", source: "reference.@().field", want: "field(invoke(deref(reference)),field)"},
+		{name: "identifier", source: "reference.*", want: "deref(reference)"},
+		{name: "deref then field", source: "reference.*.field", want: "field(deref(reference),field)"},
+		{name: "field then deref", source: "reference.field.*", want: "deref(field(reference,field))"},
+		{name: "binary binds less tightly", source: "reference.* + value", want: "add(deref(reference),value)"},
+		{name: "not remains broad", source: "not reference.* == value", want: "not(equal(deref(reference),value))"},
+		{name: "borrow then deref", source: "(&mut value).*", want: "deref(mut(value))"},
+		{name: "deref then borrow", source: "&mut reference.*", want: "mut(deref(reference))"},
+		{name: "repeated deref", source: "reference.*.*", want: "deref(deref(reference))"},
+		{name: "call then deref", source: "load().*", want: "deref(call(load))"},
+		{name: "deref then call", source: "reference.*()", want: "invoke(deref(reference))"},
+		{name: "deref call then field", source: "reference.*().field", want: "field(invoke(deref(reference)),field)"},
 	}
 
 	for _, tt := range tests {
@@ -45,7 +45,7 @@ func TestPostfixDerefExpressionPrecedence(t *testing.T) {
 }
 
 func TestPostfixDerefLocationsIncludeOperator(t *testing.T) {
-	result := Parse([]byte("let result = reference.@\n"), "test.ard")
+	result := Parse([]byte("let result = reference.*\n"), "test.ard")
 	if len(result.Errors) > 0 {
 		t.Fatalf("parse errors: %v", result.Errors)
 	}
@@ -59,7 +59,7 @@ func TestPostfixDerefLocationsIncludeOperator(t *testing.T) {
 }
 
 func TestPostfixDerefSupportsDotLeadingChain(t *testing.T) {
-	result := Parse([]byte("let result = reference\n  .@\n  .field\n"), "test.ard")
+	result := Parse([]byte("let result = reference\n  .*\n  .field\n"), "test.ard")
 	if len(result.Errors) > 0 {
 		t.Fatalf("parse errors: %v", result.Errors)
 	}
@@ -70,7 +70,7 @@ func TestPostfixDerefSupportsDotLeadingChain(t *testing.T) {
 }
 
 func TestPostfixCallsStayOnTheSameSourceLine(t *testing.T) {
-	sameLine := Parse([]byte("reference.@ ()\n"), "test.ard")
+	sameLine := Parse([]byte("reference.* ()\n"), "test.ard")
 	if len(sameLine.Errors) > 0 {
 		t.Fatalf("same-line parse errors: %v", sameLine.Errors)
 	}
@@ -81,7 +81,7 @@ func TestPostfixCallsStayOnTheSameSourceLine(t *testing.T) {
 		t.Fatalf("same-line shape = %q", got)
 	}
 
-	separateLines := Parse([]byte("reference.@\n()\n"), "test.ard")
+	separateLines := Parse([]byte("reference.*\n()\n"), "test.ard")
 	if len(separateLines.Errors) > 0 {
 		t.Fatalf("separate-line parse errors: %v", separateLines.Errors)
 	}
@@ -167,5 +167,17 @@ func derefExpressionShape(t *testing.T, expression Expression) string {
 	default:
 		t.Fatalf("unexpected expression %T", expression)
 		return ""
+	}
+}
+
+// ADR 0073 removed the `.@` dereference; `.*` is the only spelling.
+func TestRemovedAtDereferenceIsAParseError(t *testing.T) {
+	result := Parse([]byte("let result = reference.@\n"), "test.ard")
+	if len(result.Errors) == 0 {
+		t.Fatal("expected a parse error")
+	}
+	got := result.Errors[0]
+	if want := (Point{Row: 1, Col: 24}); got.Location.Start != want || got.Message != "Unexpected token: at_sign" {
+		t.Fatalf("first error = %#v, want %q at %#v", got, "Unexpected token: at_sign", want)
 	}
 }

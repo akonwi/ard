@@ -422,18 +422,11 @@ func referenceTypeForOperand(typ Type) Type {
 }
 
 // checkDeref checks the one-layer postfix `<operand>.*` dereference (ADR
-// 0073). Only a pointer qualifies; the result names the pointee itself. The
-// removed `.@` spelling is reported and then checked as `.*`, except on a
-// `mut Trait` value, which has no dereference form.
+// 0073). Only a pointer qualifies; the result names the pointee itself.
 func (c *Checker) checkDeref(s *parse.Deref) Expression {
 	operand := c.checkExpr(s.Operand)
 	if operand == nil {
 		return nil
-	}
-	if !s.Star {
-		if c.reportLegacyDeref(s, operand.Type()) {
-			return nil
-		}
 	}
 	switch t := operand.Type().(type) {
 	case *MutableRef:

@@ -26,8 +26,6 @@ impl View for Box {
 		redundant   = "Removed pointer syntax: `mut` on a pointer"
 		redundantTy = "Removed pointer type syntax: `mut` on a pointer type"
 		traitBorrow = "Removed pointer syntax: `mut` on a trait value"
-		deref       = "Removed dereference syntax: write `.*` instead of `.@`"
-		snapshot    = "Removed dereference syntax: `.@` on a `mut Trait` value"
 	)
 	tests := []struct {
 		name   string
@@ -59,15 +57,6 @@ fn main() {
   mut view: View = Box{value: 1}
   let borrowed = mut view
 }`, want: []string{traitBorrow}},
-		{name: "dereference", source: `fn main() {
-  let box = &mut Box{value: 1}
-  let copy: Box = box.@
-}`, want: []string{deref}},
-		{name: "dereference assignment", source: `fn main() {
-  let box = &mut Box{value: 1}
-  box.@ = Box{value: 2}
-}`, want: []string{deref}},
-		{name: "trait snapshot", source: `fn snap(view: mut View) View { view.@ }`, want: []string{snapshot}},
 		{name: "repeated resolution reports once", source: `fn reset(box: mut Box) { box.value = 0 }
 fn main() {
   reset(&mut Box{value: 1})
@@ -94,30 +83,5 @@ fn main() {
 				t.Fatalf("diagnostics mismatch (-want +got):\n%s", diff)
 			}
 		})
-	}
-}
-
-// `.@` on a value that is not a pointer is still the removed spelling, and
-// the operand is then rejected as `.*` would be.
-func TestRemovedDereferenceOfNonPointerReportsBoth(t *testing.T) {
-	result := parse.Parse([]byte(`fn main() {
-  let value = 1
-  let copy = value.@
-}`), "test.ard")
-	if len(result.Errors) > 0 {
-		t.Fatalf("parse errors: %v", result.Errors)
-	}
-	c := checker.New("test.ard", result.Program, nil)
-	c.Check()
-	var got []string
-	for _, diagnostic := range c.Diagnostics() {
-		got = append(got, string(diagnostic.Code)+": "+diagnostic.Message)
-	}
-	want := []string{
-		"removed_pointer_syntax: Removed dereference syntax: write `.*` instead of `.@`",
-		"invalid_deref_operand: Cannot dereference a value of type Int",
-	}
-	if diff := cmp.Diff(want, got); diff != "" {
-		t.Fatalf("diagnostics mismatch (-want +got):\n%s", diff)
 	}
 }

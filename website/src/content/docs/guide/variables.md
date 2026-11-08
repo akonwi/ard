@@ -204,7 +204,7 @@ context.tree.value = 2                   // OK: writes the Tree
 
 ## Migrating from `mut` references
 
-Releases before v0.46 spelled pointers with `mut`. That syntax is no longer accepted; the compiler reports each old form with the spelling to use instead:
+Releases before v0.46 spelled pointers with `mut` and dereferenced them with `.@`. That syntax is no longer accepted; the compiler reports each old `mut` form with the spelling to use instead:
 
 | Before | Now |
 | --- | --- |

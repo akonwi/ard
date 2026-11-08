@@ -645,23 +645,17 @@ func (m MutRef) String() string {
 	}
 }
 
-// Deref is the explicit one-layer postfix dereference expression. ADR 0073
-// spells it `<operand>.*`. The removed ADR 0060 spelling `<operand>.@` is
-// still parsed so the checker can reject it with its replacement. The
-// checker requires Operand to have pointer type.
+// Deref is the explicit one-layer postfix dereference expression
+// `<operand>.*` (ADR 0073). The checker requires Operand to have pointer
+// type.
 type Deref struct {
 	Location
 	Operand          Expression
 	OperatorLocation Location
-	// Star marks the ADR 0073 `.*` spelling.
-	Star bool
 }
 
 func (d Deref) String() string {
-	if d.Star {
-		return fmt.Sprintf("%s.*", d.Operand)
-	}
-	return fmt.Sprintf("%s.@", d.Operand)
+	return fmt.Sprintf("%s.*", d.Operand)
 }
 
 type FunctionCall struct {

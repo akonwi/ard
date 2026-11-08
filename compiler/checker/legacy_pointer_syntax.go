@@ -18,10 +18,6 @@ const (
 	legacyRedundantMut
 	// legacyTraitBorrow is `mut` on a trait-typed expression.
 	legacyTraitBorrow
-	// legacyDeref is the `.@` dereference.
-	legacyDeref
-	// legacyTraitSnapshot is `.@` on a `mut Trait` value.
-	legacyTraitSnapshot
 )
 
 // removedPointerSyntaxDiagnostic rejects a removed ADR 0057 reference
@@ -59,16 +55,6 @@ func (d removedPointerSyntaxDiagnostic) build() Diagnostic {
 		title = "`mut` on a trait value"
 		text = "`mut Trait` values are created by widening a `&mut T` pointer (ADR 0073). Store a `mut Trait` value instead of borrowing a trait-typed place."
 		label = "borrows a trait-typed place"
-	case legacyDeref:
-		message = "Removed dereference syntax: write `.*` instead of `.@`"
-		title = "Removed `.@` dereference"
-		text = "Pointers are dereferenced with postfix `.*` (ADR 0073)."
-		label = "write `.*` here"
-	case legacyTraitSnapshot:
-		message = "Removed dereference syntax: `.@` on a `mut Trait` value"
-		title = "Removed trait snapshot"
-		text = "A `mut Trait` value is not a pointer, so it has no `.*` form (ADR 0073). Copy the concrete value with `pointer.*` before widening it to a trait."
-		label = "snapshots a trait value"
 	}
 	diagnostic := newLabeledDiagnostic(Error, message, title, text, DiagnosticLabel{Span: d.Span, Message: label})
 	diagnostic.Code = DiagnosticCodeRemovedPointerSyntax
@@ -144,18 +130,4 @@ func (c *Checker) reportLegacyAddressOf(s *parse.MutRef, operand Expression) {
 		return
 	}
 	c.reportLegacyPointerSyntax(legacyAddressOf, location)
-}
-
-// reportLegacyDeref rejects a `.@` dereference. It reports whether the
-// dereference has no `.*` form to recover as: a `mut Trait` value is not a
-// pointer.
-func (c *Checker) reportLegacyDeref(s *parse.Deref, operandType Type) bool {
-	if ref, ok := operandType.(*MutableRef); ok {
-		if _, isTrait := ref.Of().(*Trait); isTrait {
-			c.reportLegacyPointerSyntax(legacyTraitSnapshot, s.OperatorLocation)
-			return true
-		}
-	}
-	c.reportLegacyPointerSyntax(legacyDeref, s.OperatorLocation)
-	return false
 }
