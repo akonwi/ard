@@ -2176,8 +2176,7 @@ func TestGoTargetParityFallbackTraitMutableStorage(t *testing.T) {
 				let reference: mut Counter = &mut box
 				reference.set(2)
 				let ordinary: Counter = reference
-				let copy = box
-				let snapshot: Counter = copy
+				let snapshot: Counter = box
 				let boxed: Any = reference
 				let recovered = unsafe::cast<&mut Box>(boxed).expect("box pointer")
 				recovered.value = 3
@@ -2213,6 +2212,46 @@ func TestGoTargetParityFallbackTraitMutableStorage(t *testing.T) {
 			t.Fatalf("got %s, want fallback Result and Maybe returns to preserve their ABI", got)
 		}
 	})
+}
+
+// Widening a struct value to an ordinary trait copies it even when the
+// implementation's Go method set needs a pointer receiver. Only a pointer
+// source keeps its identity (issue #551).
+func TestGoTargetParityValueTraitUpcastCopiesPointerReceiverImplementation(t *testing.T) {
+	program := lowerParitySource(t, `
+		trait Counter {
+			fn value() Int
+			fn mut set(value: Int)
+		}
+
+		struct Box { value: Int }
+		struct Holder { box: Box }
+
+		impl Counter for Box {
+			fn value() Int { self.value }
+			fn mut set(value: Int) { self.value = value }
+		}
+
+		fn read_later(counter: Counter, box: &mut Box) Int {
+			box.value = 40
+			counter.value()
+		}
+
+		fn main() [Int] {
+			mut box = Box{value: 1}
+			let reference: mut Counter = &mut box
+			let local: Counter = box
+			mut holder = Holder{box: Box{value: 10}}
+			let field: Counter = holder.box
+			let argument = read_later(box, &mut box)
+			reference.set(2)
+			holder.box.value = 20
+			[local.value(), field.value(), argument, box.value, reference.value()]
+		}
+	`)
+	if got := runGoTargetParityJSON(t, program); got != `[1,10,1,2,2]` {
+		t.Fatalf("result = %s, want trait values that copied their struct sources", got)
+	}
 }
 
 func TestGoTargetParityConcreteTraitMethodLookupBeforeImplementation(t *testing.T) {
