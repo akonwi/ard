@@ -388,7 +388,7 @@ fn identity(value: &mut $T) &mut $T {
 	t.Run("explicit type argument", func(t *testing.T) {
 		assertGenericCompatibilityRejected(t, prefix+`
 fn main() {
-  let root = mut Root{}
+  let root = &mut Root{}
   let view: mut Widget = root
   let echoed = identity<Widget>(view)
 }`, "mutable generic parameters")
@@ -396,7 +396,7 @@ fn main() {
 	t.Run("inferred type argument", func(t *testing.T) {
 		assertGenericCompatibilityRejected(t, prefix+`
 fn main() {
-  let root = mut Root{}
+  let root = &mut Root{}
   let view: mut Widget = root
   let echoed = identity(view)
 }`, "mutable generic parameters")

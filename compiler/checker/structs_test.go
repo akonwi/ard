@@ -352,7 +352,7 @@ func TestStructs(t *testing.T) {
 			// Interior mutation flows through an actual reference (ADR 0057).
 			name: "Can reassign to properties through a struct reference",
 			input: fmt.Sprintf(`%s
-				let p = mut Person{name: "Alice", age: 30, employed: true}
+				let p = &mut Person{name: "Alice", age: 30, employed: true}
 				p.age = 31`, personStructInput),
 			diagnostics: []checker.Diagnostic{},
 		},
@@ -725,7 +725,7 @@ func TestArdStructLiteralTypeArgs(t *testing.T) {
 			name: "chained property access resolves a mutable explicit generic field",
 			input: strings.Join([]string{
 				"struct Box<$T> {",
-				"  value: mut $T",
+				"  value: &mut $T",
 				"}",
 				"struct User {",
 				"  name: Str",
@@ -744,7 +744,7 @@ func TestArdStructLiteralTypeArgs(t *testing.T) {
 				"struct User {",
 				"  name: Str",
 				"}",
-				"fn read(box: Box<mut User>) Str {",
+				"fn read(box: Box<&mut User>) Str {",
 				"  box.value.name",
 				"}",
 			}, "\n"),

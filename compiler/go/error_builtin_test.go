@@ -240,7 +240,7 @@ fn main() {
   if not "{generic_error}" == "generic" { panic("generic Error interpolation failed") }
   let generic_as_error: Error = generic_error
   if not "{generic_as_error}" == "generic" { panic("generic Error upcast failed") }
-  let generic_mutable: mut GenericMutableError<Int> = mut GenericMutableError<Int>{value: 1, calls: 0}
+  let generic_mutable: &mut GenericMutableError<Int> = &mut GenericMutableError<Int>{value: 1, calls: 0}
   if not "{generic_mutable}" == "generic mutable" { panic("generic referenced Error interpolation failed") }
   let generic_mutable_as_error: Error = generic_mutable
   if not "{generic_mutable_as_error}" == "generic mutable" { panic("generic referenced Error upcast failed") }

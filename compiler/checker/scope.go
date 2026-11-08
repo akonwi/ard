@@ -5,8 +5,6 @@ import (
 	gotypes "go/types"
 	"slices"
 	"sync"
-
-	"github.com/akonwi/ard/parse"
 )
 
 type SymbolTable struct {
@@ -52,12 +50,6 @@ type Symbol struct {
 	foreignDescriptor   bool
 	typeDeclaration     bool
 	callableDeclaration *FunctionDef
-	// letKeyword locates the `let` keyword of an immutable variable
-	// declaration, for migration fixes that make the binding `mut`.
-	letKeyword *parse.Point
-	// legacyBorrowParameter identifies a parameter whose legacy `mut` borrow
-	// can be migrated by shadowing it in its own function body.
-	legacyBorrowParameter *legacyBorrowParameter
 }
 
 func (s Symbol) IsZero() bool {

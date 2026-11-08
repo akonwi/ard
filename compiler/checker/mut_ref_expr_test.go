@@ -79,7 +79,7 @@ reference = [9, 9]`,
 			source: `struct Inner { n: Int }
 struct Outer { inner: Inner }
 fn make() Outer { Outer{inner: Inner{n: 0}} }
-let reference = mut make().inner`,
+let reference = &mut make().inner`,
 			wantError: true,
 		},
 	}

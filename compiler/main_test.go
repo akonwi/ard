@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -1251,65 +1250,6 @@ func TestFormatPath(t *testing.T) {
 		}
 	})
 }
-func TestMigratePath(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
-		t.Fatalf("failed to write ard.toml: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "shapes.ard"), []byte("struct Box {\n  value: Int,\n}\n\nfn reset(box: mut Box) {\n  box.value = 0\n}\n"), 0o644); err != nil {
-		t.Fatalf("failed to write module: %v", err)
-	}
-	mainPath := filepath.Join(dir, "main.ard")
-	if err := os.WriteFile(mainPath, []byte("use demo/shapes\n\nfn main() {\n  let box = shapes::Box{value: 1}\n  shapes::reset(mut box)\n  let copy = (mut box).@\n}\n"), 0o644); err != nil {
-		t.Fatalf("failed to write main: %v", err)
-	}
-
-	var stdout, stderr bytes.Buffer
-	pending, err := migratePath(&stdout, &stderr, dir, true)
-	if err != nil || !pending {
-		t.Fatalf("check mode: pending = %v, err = %v", pending, err)
-	}
-	if source, _ := os.ReadFile(mainPath); !strings.Contains(string(source), "mut box)") {
-		t.Fatalf("check mode rewrote %s", mainPath)
-	}
-
-	stdout.Reset()
-	if _, err := migratePath(&stdout, &stderr, dir, false); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
-	module, _ := os.ReadFile(filepath.Join(dir, "shapes.ard"))
-	if !strings.Contains(string(module), "fn reset(box: &mut Box)") {
-		t.Fatalf("module not migrated:\n%s", module)
-	}
-	main, _ := os.ReadFile(mainPath)
-	want := "use demo/shapes\n\nfn main() {\n  mut box = shapes::Box{value: 1}\n  shapes::reset(&mut box)\n  let copy = (&mut box).*\n}\n"
-	if string(main) != want {
-		t.Fatalf("main.ard =\n%s\nwant\n%s", main, want)
-	}
-
-	stdout.Reset()
-	stderr.Reset()
-	pending, err = migratePath(&stdout, &stderr, dir, true)
-	if err != nil || pending {
-		t.Fatalf("after migration: pending = %v, err = %v, stderr = %s", pending, err, stderr.String())
-	}
-}
-
-func TestMigratePathCheckReportsFilesWithErrors(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
-		t.Fatalf("failed to write ard.toml: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "main.ard"), []byte("fn main() {\n  let x =\n}\n"), 0o644); err != nil {
-		t.Fatalf("failed to write main: %v", err)
-	}
-	var stdout, stderr bytes.Buffer
-	pending, err := migratePath(&stdout, &stderr, dir, true)
-	if err != nil || !pending {
-		t.Fatalf("pending = %v, err = %v; a file that cannot be analyzed must fail the check", pending, err)
-	}
-}
-
 func TestTestCommand(t *testing.T) {
 	dir := t.TempDir()
 	projectDir := filepath.Join(dir, "project")
@@ -1462,11 +1402,10 @@ test fn same() Void!Str {
 
 // `ard test` checks each test file separately against a shared module cache,
 // so an imported module's warnings attach to whichever test file imports it
-// first. The collapsed-warning summaries must still cover the whole run in a
-// single line each, as they do for `ard check`. (#529)
+// first. The dependency-warning summary must still cover the whole run in a
+// single line, as it does for `ard check`. (#529)
 func TestTestCommandSummarizesCollapsedWarningsOncePerRun(t *testing.T) {
 	const warningLet = "let signal: Void? = Maybe::new()\n"
-	const deprecatedPointer = "struct Box {\n  value: Int,\n}\n\nlet shared = Box{value: 1}\n\nfn get() mut Box {\n  (mut shared)\n}\n"
 	workspace := t.TempDir()
 	app := filepath.Join(workspace, "app")
 	files := map[string]string{
@@ -1475,8 +1414,8 @@ func TestTestCommandSummarizesCollapsedWarningsOncePerRun(t *testing.T) {
 		filepath.Join(workspace, "beta-src", "ard.toml"):   "name = \"beta\"\nard = \">= 0.1.0\"\n",
 		filepath.Join(workspace, "beta-src", "beta.ard"):   warningLet + "\nfn answer() Int { 2 }\n",
 		filepath.Join(app, "ard.toml"):                     "name = \"app\"\nard = \">= 0.1.0\"\n\n[dependencies]\nalpha = { path = \"../alpha-src\" }\nbeta = { path = \"../beta-src\" }\n",
-		filepath.Join(app, "one.ard"):                      deprecatedPointer + "\n" + warningLet,
-		filepath.Join(app, "two.ard"):                      deprecatedPointer,
+		filepath.Join(app, "one.ard"):                      warningLet,
+		filepath.Join(app, "two.ard"):                      "fn two() Int { 2 }\n",
 		filepath.Join(app, "test", "a.ard"): `use ard/testing
 use alpha
 use app/one
@@ -1530,15 +1469,9 @@ test fn in_root() Void!Str {
 	if !strings.Contains(stderr, "warning: 3 warnings from dependencies not shown: alpha (2), beta (1)\n") {
 		t.Fatalf("dependency summary should cover the whole run:\n%s", stderr)
 	}
-	if got := strings.Count(stderr, "deprecated pointer"); got != 1 {
-		t.Fatalf("deprecated pointer summary lines = %d, want 1:\n%s", got, stderr)
-	}
-	// one.ard and two.ard are test entries and also imported by test files;
-	// their diagnostics must be counted and rendered once.
-	if !strings.Contains(stderr, "warning: 4 deprecated pointer uses in 2 files not shown") {
-		t.Fatalf("deprecated pointer summary should count each use once:\n%s", stderr)
-	}
-	if got := strings.Count(stderr, "one.ard:11:"); got != 1 {
+	// one.ard is a test entry and also imported by a test file; its
+	// diagnostics must be rendered once.
+	if got := strings.Count(stderr, "one.ard:1:"); got != 1 {
 		t.Fatalf("project warning rendered %d times, want 1:\n%s", got, stderr)
 	}
 }
@@ -2152,25 +2085,5 @@ test fn embeds_in_tests() Void!Str {
 	})
 	if !testsPassed || !strings.Contains(output, "1 passed; 0 failed; 0 panicked") {
 		t.Fatalf("embedded test workflow failed:\n%s", output)
-	}
-}
-
-// ard check collapses deprecated pointer uses into one line, but ard migrate
-// must still show each site it cannot fix, with its location.
-func TestMigratePathRendersManualSitesInFull(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	source := "struct Box {\n  value: Int,\n}\n\nlet shared = Box{value: 1}\n\nfn get() mut Box {\n  (mut shared)\n}\n"
-	if err := os.WriteFile(filepath.Join(dir, "main.ard"), []byte(source), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	var stdout, stderr bytes.Buffer
-	if _, err := migratePath(&stdout, &stderr, dir, false); err != nil {
-		t.Fatalf("migrate: %v\n%s", err, stderr.String())
-	}
-	if !strings.Contains(stderr.String(), "main.ard:8:") || strings.Contains(stderr.String(), "not shown") {
-		t.Fatalf("manual site should render in full:\n%s", stderr.String())
 	}
 }

@@ -97,8 +97,7 @@ func TestRunProgramPreservesMutableReferencesConvertedToAny(t *testing.T) {
 		}
 
 		fn unmarshal(data: [Byte], target: &mut $T) Void!Error {
-			let input = mut data
-			json::Unmarshal(input, target)
+			json::Unmarshal(data, target)
 		}
 
 		fn main() {

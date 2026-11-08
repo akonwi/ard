@@ -2615,18 +2615,11 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		if err != nil {
 			return loweredExpr{}, err
 		}
-		if l.isReferenceType(expr.Target.Type) {
-			reference := l.program.Types[expr.Target.Type-1]
-			if l.isTraitObjectType(reference.Elem) {
-				traitType, err := l.goType(reference.Elem)
-				if err != nil {
-					return loweredExpr{}, err
-				}
-				return loweredExpr{stmts: target.stmts, expr: &ast.CallExpr{
-					Fun:  &ast.IndexExpr{X: l.runtimeQualified("TraitSnapshot"), Index: traitType},
-					Args: []ast.Expr{target.expr},
-				}}, nil
-			}
+		if l.isReferenceType(expr.Target.Type) && l.isTraitObjectType(l.program.Types[expr.Target.Type-1].Elem) {
+			// `Trait` and `mut Trait` share one Go interface (ADR 0061).
+			// Observing a `mut Trait` value as a `Trait` keeps its current
+			// dynamic object (ADR 0073).
+			return target, nil
 		}
 		return loweredExpr{stmts: target.stmts, expr: &ast.StarExpr{X: target.expr}}, nil
 	case air.ExprMakeClosure:

@@ -152,7 +152,8 @@ struct Sink {}
 
 impl io::Writer for Sink {
   fn write(bytes: &mut [Byte]) Int!Error {
-    let copy = mut bytes.@
+    mut grown = bytes.*
+    let copy = &mut grown
     copy.push(bytes.at(0).expect("byte"))
     Result::ok(copy.size())
   }

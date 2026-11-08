@@ -182,8 +182,6 @@ box.* = Box{value: 2}`},
 box.* = Box{value: 2}`, wantError: true},
 		{name: "write field through dereferenced writable pointer", source: `let box = &mut Box{value: 1}
 box.*.value = 2`},
-		{name: "legacy dereference is not assignable", source: `let box = &mut Box{value: 1}
-box.@ = Box{value: 2}`, wantError: true},
 	}
 
 	for _, tt := range tests {
@@ -249,7 +247,6 @@ func TestADR0073ParametersAreImmutable(t *testing.T) {
   box.* = Box{value: 0}
 }`},
 		{name: "pointer parameter slot cannot be rebound", source: `fn swap(box: &mut Box) { box = &mut Box{value: 0} }`, wantError: true},
-		{name: "legacy reference parameter slot cannot be rebound", source: `fn swap(box: mut Box) { box = mut Box{value: 0} }`, wantError: true},
 		{name: "value parameter can be shadowed as a writable local", source: `fn rename(user: User) User {
   mut user = user
   user.name = "Grace"
