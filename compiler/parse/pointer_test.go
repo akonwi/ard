@@ -103,7 +103,6 @@ func TestAddressOfAndPointerDerefExpressions(t *testing.T) {
 		{name: "address of deref", source: "&mut pointer.*", want: "refmut(deref*(pointer))"},
 		{name: "deref of address", source: "(&value).*", want: "deref*(ref(value))"},
 		{name: "legacy borrow", source: "mut value", want: "mut(value)"},
-		{name: "legacy deref", source: "reference.@", want: "deref(reference)"},
 	}
 
 	for _, tt := range tests {
@@ -225,10 +224,7 @@ func pointerExpressionShape(t *testing.T, expression Expression) string {
 			return "refmut(" + operand + ")"
 		}
 	case *Deref:
-		if value.Star {
-			return "deref*(" + pointerExpressionShape(t, value.Operand) + ")"
-		}
-		return "deref(" + pointerExpressionShape(t, value.Operand) + ")"
+		return "deref*(" + pointerExpressionShape(t, value.Operand) + ")"
 	case *InstanceProperty:
 		return "field(" + pointerExpressionShape(t, value.Target) + "," + value.Property.Name + ")"
 	case *FunctionCall:

@@ -8,31 +8,31 @@ import (
 
 func TestFormatPostfixDereferenceExpressions(t *testing.T) {
 	input := `fn main() {
-let snapshot=reference.@
-let selected=reference.@.field
-let field=reference.field.@
-let sum=reference.@+value
-let same=not reference.@==value
-let shallow=(mut value).@
-let independent=mut reference.@
-let nested=reference.@.@
-let loaded=load().@
-let invoked=reference.@()
+let snapshot=reference.*
+let selected=reference.*.field
+let field=reference.field.*
+let sum=reference.*+value
+let same=not reference.*==value
+let shallow=(&mut value).*
+let independent=&mut reference.*
+let nested=reference.*.*
+let loaded=load().*
+let invoked=reference.*()
 reader.deref()
 Type::deref(value)
 }
 `
 	want := `fn main() {
-  let snapshot = reference.@
-  let selected = reference.@.field
-  let field = reference.field.@
-  let sum = reference.@ + value
-  let same = not reference.@ == value
-  let shallow = (mut value).@
-  let independent = mut reference.@
-  let nested = reference.@.@
-  let loaded = load().@
-  let invoked = reference.@()
+  let snapshot = reference.*
+  let selected = reference.*.field
+  let field = reference.field.*
+  let sum = reference.* + value
+  let same = not reference.* == value
+  let shallow = (&mut value).*
+  let independent = &mut reference.*
+  let nested = reference.*.*
+  let loaded = load().*
+  let invoked = reference.*()
   reader.deref()
   Type::deref(value)
 }
@@ -71,14 +71,14 @@ func TestFormatPostfixDerefPreservesStructuredMutOperand(t *testing.T) {
 let snapshot=(mut [
 ui::TextSpan{Text:"  "},
 ui::TextSpan{Text:"A very long value that keeps this structured mutable list on multiple lines"},
-]).@
+]).*
 }
 `
 	want := `fn main() {
   let snapshot = (mut [
     ui::TextSpan{Text: "  "},
     ui::TextSpan{Text: "A very long value that keeps this structured mutable list on multiple lines"},
-  ]).@
+  ]).*
 }
 `
 
@@ -90,10 +90,10 @@ func TestFormatPostfixDerefPreservesComplexOperandParentheses(t *testing.T) {
 let snapshot=(match true {
 true=>first,
 false=>second,
-}).@
+}).*
 let callable=(fn() Int {
 1
-}).@
+}).*
 let borrowed=mut (match true {
 true=>first,
 false=>second,
@@ -104,10 +104,10 @@ false=>second,
   let snapshot = (match true {
     true => first,
     false => second,
-  }).@
+  }).*
   let callable = (fn() Int {
     1
-  }).@
+  }).*
   let borrowed = mut (match true {
     true => first,
     false => second,
@@ -122,13 +122,13 @@ func TestFormatPostfixDerefPreservesCallableMutOperand(t *testing.T) {
 	input := `fn main() {
 let callable=(mut (fn() Int {
 1
-})).@
+})).*
 }
 `
 	want := `fn main() {
   let callable = (mut (fn() Int {
     1
-  })).@
+  })).*
 }
 `
 
@@ -137,13 +137,13 @@ let callable=(mut (fn() Int {
 
 func TestFormatPostfixDerefCallPreservesStructuredCallee(t *testing.T) {
 	input := `fn main() {
-let invoked=load_callback("A very long callback name or argument that forces the inner call to use its multiline layout").@()
+let invoked=load_callback("A very long callback name or argument that forces the inner call to use its multiline layout").*()
 }
 `
 	want := `fn main() {
   let invoked = load_callback(
     "A very long callback name or argument that forces the inner call to use its multiline layout",
-  ).@()
+  ).*()
 }
 `
 

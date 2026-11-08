@@ -232,8 +232,8 @@ func (v Variable) Name() string {
 
 // Type returns the binding's stored type. A `mut T` binding is a first-class
 // reference value and reports `mut T`; observational reads resolve through the
-// referent at their use sites, and materializing `T` requires explicit `.@`
-// (ADRs 0057 and 0060).
+// referent at their use sites, and materializing `T` requires explicit `.*`
+// (ADRs 0057 and 0073).
 func (v Variable) Type() Type {
 	return v.sym.Type
 }
@@ -283,14 +283,12 @@ func (m *MutableRefExpr) String() string {
 	return fmt.Sprintf("&mut %s", m.Operand)
 }
 
-// DerefExpr is the explicit one-layer dereference `<operand>.*` (ADR 0073)
-// or legacy `<operand>.@` (ADRs 0057 and 0060). The operand must be an actual
-// pointer value; reading it produces a shallow copy of the current pointee.
-// Place is set for the ADR 0073 `.*` spelling, which also names the pointee
-// as an assignment place; the legacy `.@` result is a non-addressable
-// temporary. Observational is set for compiler-inserted pointee reads
-// (arithmetic, interpolation, matching), which share the same shallow-load
-// semantics.
+// DerefExpr is the explicit one-layer dereference `<operand>.*` (ADR 0073).
+// The operand must be an actual pointer value; reading it produces a shallow
+// copy of the current pointee. Place is set for explicit `.*`, which also
+// names the pointee as an assignment place. Observational is set for
+// compiler-inserted pointee reads (arithmetic, interpolation, matching),
+// which share the same shallow-load semantics and are not places.
 type DerefExpr struct {
 	Operand       Expression
 	Observational bool
@@ -303,10 +301,7 @@ func (d *DerefExpr) Type() Type {
 }
 
 func (d *DerefExpr) String() string {
-	if d.Place {
-		return fmt.Sprintf("%s.*", d.Operand)
-	}
-	return fmt.Sprintf("%s.@", d.Operand)
+	return fmt.Sprintf("%s.*", d.Operand)
 }
 
 // ReferenceTraitProjection is the checked widening from a concrete reference

@@ -72,13 +72,11 @@ func TestFormatLegacyReferenceSyntaxIsPreserved(t *testing.T) {
 	input := `fn update(user:mut User) {}
 fn main() {
 let reference=mut user
-let snapshot=reference.@
 }
 `
 	want := `fn update(user: mut User) {}
 fn main() {
   let reference = mut user
-  let snapshot = reference.@
 }
 `
 

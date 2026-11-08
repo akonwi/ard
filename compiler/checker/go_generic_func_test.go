@@ -79,8 +79,8 @@ fn set(c: &mut ffi::StateCtx) {
 			input: `use go:example.com/app/ffi
 
 fn first_present() Int {
-  let values = [0, 4, 0]
-  ffi::Or((mut values)...)
+  mut values = [0, 4, 0]
+  ffi::Or((&mut values)...)
 }`,
 		},
 		{
@@ -107,6 +107,17 @@ fn inferred() Int {
   let values = [1, 2]
   ffi::Or(values...)
 }`,
+		},
+		{
+			name: "removed syntax in an inference argument is reported once",
+			input: `use go:example.com/app/ffi
+
+struct Box { value: Int }
+
+fn main() {
+  let value = ffi::Identity(mut Box{value: 1})
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Removed pointer syntax: write `&mut expression` instead of `mut expression`"}},
 		},
 		{
 			name: "context-free empty spread cannot infer generic element",

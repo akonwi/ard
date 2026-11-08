@@ -3544,8 +3544,9 @@ func (p *parser) addressOfOperand() (Expression, error) {
 	return p.unary()
 }
 
-// legacyMutRefOperand parses the operand of the legacy `mut <operand>`
-// reference expression, preserving its original broad precedence.
+// legacyMutRefOperand parses the operand of the removed `mut <operand>`
+// expression, preserving its original broad precedence, so the checker can
+// reject the whole expression.
 func (p *parser) legacyMutRefOperand() (Expression, error) {
 	if p.structOperandAllowed {
 		return p.structInstance()
@@ -3649,7 +3650,7 @@ func (p *parser) memberAccess() (Expression, error) {
 
 		if p.previous().kind == dot {
 			dotToken := p.previous()
-			if (p.check(at_sign) || p.check(star)) && adjacent(dotToken.getLocation(), p.peek()) {
+			if p.check(star) && adjacent(dotToken.getLocation(), p.peek()) {
 				operatorToken := p.advance()
 				operatorLocation := Location{
 					Start: Point{Row: dotToken.line, Col: dotToken.column},
@@ -3662,7 +3663,6 @@ func (p *parser) memberAccess() (Expression, error) {
 					},
 					Operand:          expr,
 					OperatorLocation: operatorLocation,
-					Star:             operatorToken.kind == star,
 				}
 				continue
 			}
@@ -3907,7 +3907,7 @@ func (p *parser) call() (Expression, error) {
 	}
 
 	// Additional calls are consumed by memberAccess's postfix loop, allowing
-	// left-to-right chains such as reference.@() and foo()().
+	// left-to-right chains such as reference.*() and foo()().
 
 	// Check if it's a function call with potential type arguments
 	// Only parse as type arguments if we have an identifier followed by <

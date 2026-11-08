@@ -46,7 +46,7 @@ fn getter(value: ffi::Box<$T>) ffi::Getter<$T> {
   value
 }
 
-fn pointer_getter(value: mut ffi::Box<$T>) ffi::Getter<$T> {
+fn pointer_getter(value: &mut ffi::Box<$T>) ffi::Getter<$T> {
   value
 }
 

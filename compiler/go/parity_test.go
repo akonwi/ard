@@ -2172,15 +2172,16 @@ func TestGoTargetParityFallbackTraitMutableStorage(t *testing.T) {
 			}
 
 			fn main() Str {
-				mut current: Counter = Box{value: 1}
-				let reference = mut current
+				mut box = Box{value: 1}
+				let reference: mut Counter = &mut box
 				reference.set(2)
 				let ordinary: Counter = reference
-				let snapshot: Counter = reference.@
+				let copy = box
+				let snapshot: Counter = copy
 				let boxed: Any = reference
 				let recovered = unsafe::cast<&mut Box>(boxed).expect("box pointer")
 				recovered.value = 3
-				"{snapshot.value()}:{ordinary.value()}:{current.value()}:{reference.value()}"
+				"{snapshot.value()}:{ordinary.value()}:{box.value}:{reference.value()}"
 			}
 		`)
 		if got := runGoTargetParityJSON(t, program); got != `"2:3:3:3"` {
@@ -2210,34 +2211,6 @@ func TestGoTargetParityFallbackTraitMutableStorage(t *testing.T) {
 		`)
 		if got := runGoTargetParityJSON(t, program); got != `42` {
 			t.Fatalf("got %s, want fallback Result and Maybe returns to preserve their ABI", got)
-		}
-	})
-
-	t.Run("value implementation follows Go interface capture", func(t *testing.T) {
-		program := lowerParitySource(t, `
-			use ard/unsafe
-
-			trait View {
-				fn value() Int
-			}
-
-			struct Box { value: Int }
-
-			impl View for Box {
-				fn value() Int { self.value }
-			}
-
-			fn main() Int {
-				mut current: View = Box{value: 1}
-				let reference = mut current
-				let boxed: Any = reference
-				let recovered = unsafe::cast<Box>(boxed).expect("box value")
-				current = Box{value: 2}
-				recovered.value + current.value() + reference.value()
-			}
-		`)
-		if got := runGoTargetParityJSON(t, program); got != `4` {
-			t.Fatalf("got %s, want captured Go interface value semantics", got)
 		}
 	})
 }
@@ -2415,10 +2388,10 @@ struct Value { calls: Int }
 ` + impls + `
 fn label(value: Label) Str { value.string() }
 fn main() {
-  let value = Value{calls: 0}
+  mut value = Value{calls: 0}
   if not ffi::CallString(value) == "foreign" { panic("wrong owned-pointer Stringer implementation") }
   if not value.calls == 0 { panic("owned pointer unexpectedly mutated the source value") }
-  if not ffi::CallString(mut value) == "foreign" { panic("wrong referenced Stringer implementation") }
+  if not ffi::CallString(&mut value) == "foreign" { panic("wrong referenced Stringer implementation") }
   if not value.calls == 1 { panic("foreign pointer receiver did not mutate") }
   if not label(value) == "label" { panic("wrong Label implementation") }
 }

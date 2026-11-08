@@ -221,7 +221,7 @@ level ownership distinction. Ard can make ownership clear from the source:
 
 ```text
 W source     -> interface-owned box
-mut W source -> existing reference
+&mut W source -> existing reference
 ```
 
 A reassignable Ard binding containing `W` remains a `W` source and therefore
@@ -355,17 +355,17 @@ ADRs 0056 and 0057 adopt these invariants for Ard-owned explicit implementations
 
 1. A foreign interface is an existential conversion boundary, not an ordinary
    concrete `T` destination.
-2. Both `W` and `mut W` are eligible when nominal `W` has the explicit foreign
+2. Both `W` and `&mut W` are eligible when nominal `W` has the explicit foreign
    interface implementation.
 3. A `W` source contributes an owned copy.
-4. A `mut W` source preserves its existing reference identity.
+4. A `&mut W` source preserves its existing reference identity.
 5. Reassignability of a binding slot has no role in ownership or eligibility.
 6. When only generated `*W` has the required Go method set, both forms produce
    dynamic Go type `*W`.
 7. Go does not need to distinguish owned and borrowed pointers; Ard source and
    conversion metadata do.
-8. A caller with `mut W` cannot implicitly request owned-value behavior. It
-   must use `reference.@` to produce the shallow `W` value before
+8. A caller with `&mut W` cannot implicitly request owned-value behavior. It
+   must use `reference.*` to produce the shallow `W` value before
    conversion; Ard provides no deep-copy operation.
 9. Existing interface-to-interface conversions preserve the concrete dynamic
    value rather than nesting interfaces.
@@ -376,8 +376,8 @@ ADRs 0056 and 0057 adopt these invariants for Ard-owned explicit implementations
 12. A Go generic parameter constrained by `any` is not automatically an
     interface-value destination. An inferred Ard reference contributes its
     current pointer-shaped Go boundary type (for example `*W`); an explicitly
-    value-shaped `W` destination rejects bare `mut W` and accepts
-    `reference.@` as the explicit `W` value.
+    value-shaped `W` destination rejects bare `&mut W` and accepts
+    `reference.*` as the explicit `W` value.
 
 ## Related Ard documentation
 

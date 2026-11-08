@@ -281,8 +281,9 @@ func referenceArgType(expr Expression) Type {
 	return expr.Type()
 }
 
-// ReferenceMode classifies an explicit `mut <operand>` expression's operand
-// (ADR 0057). Invalid places are diagnosed before this mode is assigned.
+// ReferenceMode classifies the operand of an `&mut <operand>` expression
+// (ADRs 0057 and 0073). Invalid places are diagnosed before this mode is
+// assigned.
 type ReferenceMode uint8
 
 const (
@@ -295,18 +296,17 @@ const (
 	FreshValue
 )
 
-// checkMutRef checks the explicit `mut <operand>` expression (ADR 0045,
-// ADR 0057). Explicit borrowing depends on addressability, not binding
-// mutability: `mut place` is legal on a `let` binding.
+// checkMutRef checks `&operand` and `&mut operand` (ADR 0073). The removed
+// `mut <operand>` spelling is parsed into the same node and rejected with a
+// diagnostic that names its replacement.
 func (c *Checker) checkMutRef(s *parse.MutRef) Expression {
-	c.markLegacyDerefBorrow(s)
 	return c.checkMutRefFromOperand(s, c.checkExpr(s.Operand))
 }
 
-// checkMutRefAs checks `mut <operand>` at a reference destination whose
-// referent type is known. Container literals infer their element shape from
-// the referent (so `let rows: mut [Int] = mut []` types the fresh storage);
-// every other operand classifies from its own type as usual (ADR 0057).
+// checkMutRefAs checks `&mut <operand>` at a pointer destination whose
+// pointee type is known. Container literals infer their element shape from
+// the pointee (so `let rows: &mut [Int] = &mut []` types the fresh storage);
+// every other operand classifies from its own type as usual (ADR 0073).
 func (c *Checker) checkMutRefAs(s *parse.MutRef, referent Type) Expression {
 	switch s.Operand.(type) {
 	case *parse.ListLiteral, *parse.MapLiteral:
@@ -319,53 +319,11 @@ func (c *Checker) checkMutRefFromOperand(s *parse.MutRef, operand Expression) Ex
 	if operand == nil {
 		return nil
 	}
-	if s.Ampersand {
-		return c.checkAddressOf(s, operand)
-	}
-	c.reportLegacyAddressOf(s, operand)
-	// `mut` is idempotent on an existing reference value: the result copies
-	// the current handle rather than borrowing the slot that stores it.
-	if isReferenceValued(operand) {
-		return &MutableRefExpr{Operand: operand, Mode: ExistingReference, _type: operand.Type()}
-	}
-	mode := FreshValue
-	switch e := operand.(type) {
-	case *ForeignValue:
-		// An assignable imported Go global is addressable storage; a
-		// constant or non-assignable value materializes a fresh copy
-		// (ADR 0057).
-		if e.Assignable {
-			mode = AddressablePlace
-		}
-	case *ModuleSymbol:
-		// Imported Ard globals retain their module storage provenance.
-		// Function declarations remain non-addressable values.
-		if _, function := e.Symbol.Type.(*FunctionDef); function {
-			c.addDiagnostic(nonAddressableBorrowDiagnostic{Span: c.sourceSpan(s.Operand.GetLocation())}.build())
-			return nil
-		}
-		mode = AddressablePlace
-	case *Variable, *InstanceProperty, *ForeignFieldAccess:
-		if !c.isAddressablePlace(operand) {
-			c.addDiagnostic(nonAddressableBorrowDiagnostic{
-				Span: c.sourceSpan(s.Operand.GetLocation()),
-			}.build())
-			return nil
-		}
-		mode = AddressablePlace
-	default:
-		// A value expression materializes fresh mutable storage; the
-		// reference points at it, equivalent to binding a stable local first.
-	}
-	refType := referenceTypeForOperand(operand.Type())
-	if refType == nil {
-		c.addDiagnostic(unsupportedMutableReferenceDiagnostic{
-			Type: operand.Type(),
-			Span: c.sourceSpan(s.GetLocation()),
-		}.build())
+	if !s.Ampersand {
+		c.reportLegacyAddressOf(s, operand)
 		return nil
 	}
-	return &MutableRefExpr{Operand: operand, Mode: mode, _type: refType}
+	return c.checkAddressOf(s, operand)
 }
 
 // checkAddressOf checks `&operand` and `&mut operand` (ADR 0073). Pointer
@@ -463,28 +421,24 @@ func referenceTypeForOperand(typ Type) Type {
 	return MakeMutableRef(typ)
 }
 
-// checkDeref checks the explicit one-layer `<operand>.@` expression (ADRs 0057
-// and 0060). Only an actual reference value qualifies; the result is a shallow,
-// non-addressable copy of the current referent.
+// checkDeref checks the one-layer postfix `<operand>.*` dereference (ADR
+// 0073). Only a pointer qualifies; the result names the pointee itself.
 func (c *Checker) checkDeref(s *parse.Deref) Expression {
 	operand := c.checkExpr(s.Operand)
 	if operand == nil {
 		return nil
 	}
-	if !s.Star && isReferenceValued(operand) {
-		c.reportLegacyDeref(s, operand.Type())
-	}
 	switch t := operand.Type().(type) {
 	case *MutableRef:
 		// A `mut Trait` value is not a pointer, so `.*` does not apply to it
-		// (ADR 0073). The legacy `.@` snapshot remains during migration.
-		if _, isTrait := t.Of().(*Trait); !(isTrait && s.Star) {
-			return &DerefExpr{Operand: operand, Place: s.Star, _type: t.Of()}
+		// (ADR 0073).
+		if _, isTrait := t.Of().(*Trait); !isTrait {
+			return &DerefExpr{Operand: operand, Place: true, _type: t.Of()}
 		}
 	case *ForeignType:
 		if t.Pointer {
 			if value := t.ValueForm(); value != nil {
-				return &DerefExpr{Operand: operand, Place: s.Star, _type: value}
+				return &DerefExpr{Operand: operand, Place: true, _type: value}
 			}
 		}
 	}
@@ -541,10 +495,9 @@ func (c *Checker) isAddressablePlace(expr Expression) bool {
 }
 
 // checkPointeeAssignment checks `pointer.* = value`, which replaces the whole
-// pointee through a writable pointer (ADR 0073). The legacy `.@` spelling
-// produces a temporary and is not an assignment place.
+// pointee through a writable pointer (ADR 0073).
 func (c *Checker) checkPointeeAssignment(s *parse.VariableAssignment, target *parse.Deref) *Statement {
-	if !target.Star || s.Operator != parse.Assign {
+	if s.Operator != parse.Assign {
 		c.addError(fmt.Sprintf("Unsupported reassignment target: %s", target), target.GetLocation())
 		return nil
 	}
@@ -623,9 +576,6 @@ func descriptorArgumentExpectation(parameter Parameter, expected Type, arg parse
 // are validated by the caller's compatibility check.
 func (c *Checker) checkDescriptorArgument(expr parse.Expression, parameter Parameter) Expression {
 	expected := descriptorArgumentExpectation(parameter, parameter.Type, expr)
-	previousLegacyDescriptorArgument := c.legacyDescriptorArgument
-	c.legacyDescriptorArgument, _ = expr.(*parse.MutRef)
-	defer func() { c.legacyDescriptorArgument = previousLegacyDescriptorArgument }()
 	switch expr.(type) {
 	case *parse.ListLiteral, *parse.MapLiteral, *parse.MutRef:
 		return descriptorArgument(parameter, c.checkExprAsArgument(expr, expected, parameter))
@@ -802,7 +752,7 @@ func assignmentSubjectBase(expr Expression) Expression {
 // observeReference wraps a reference-valued expression in an observational
 // shallow referent load. Compiler-defined read-only operations (arithmetic,
 // interpolation, matching, conditions) resolve through the referent without
-// requiring explicit `.@` (ADRs 0057 and 0060).
+// requiring explicit `.*` (ADRs 0057, 0060, and 0073).
 func observeReference(expr Expression) Expression {
 	if expr == nil {
 		return nil
@@ -958,11 +908,7 @@ type Checker struct {
 	matchArmDiscardContext            bool
 	deferredWorkDepth                 int
 	reportedMapKeyErrors              map[parse.Location]bool
-	reportedLegacyPointerSyntax       map[legacyPointerSyntaxKey]bool
-	legacyDerefBorrowed               map[*parse.Deref]bool
-	legacyBorrowFunction              *legacyBorrowFunction
-	legacyBorrowFunctionScope         *legacyBorrowFunction
-	legacyDescriptorArgument          *parse.MutRef
+	removedPointerSyntax              map[removedPointerSyntaxKey]int
 	emptyCollectionBinding            *collectionBindingContext
 	goTypesContext                    *gotypes.Context
 	spans                             *SpanIndex
@@ -1894,13 +1840,15 @@ func (c *Checker) validateMapKeyType(key Type, loc parse.Location) {
 	c.addDiagnostic(invalidMapKeyTypeDiagnostic{KeyType: key, Span: c.sourceSpan(loc)}.build())
 }
 
-// resolveMutableTypeAnnotation resolves a `&T`, `&mut T`, or legacy `mut T`
-// annotation (ADR 0073). Pointer syntax always denotes a real pointer, so it
-// rejects trait referents (spelled `mut Trait`) and pointers to pointers.
+// resolveMutableTypeAnnotation resolves a `&T`, `&mut T`, or `mut Trait`
+// annotation (ADR 0073). A removed `mut T` spelling for a non-trait T is
+// reported and then resolved as `&mut T`. Pointer syntax always denotes a
+// real pointer, so it rejects trait referents (spelled `mut Trait`) and
+// pointers to pointers.
 func (c *Checker) resolveMutableTypeAnnotation(annotation parse.MutableType) Type {
 	inner := c.resolveType(annotation.Inner)
 	if !annotation.Pointer {
-		c.reportLegacyPointerType(annotation.GetLocation(), annotation.GetLocation().Start, inner, false)
+		c.reportLegacyPointerType(annotation.GetLocation(), inner)
 		return c.makeMutableType(inner)
 	}
 	if !c.validPointerReferent(inner, annotation.Inner.GetLocation()) {
@@ -1942,10 +1890,11 @@ func readOnlyPointer(pointer Type) Type {
 	return pointer
 }
 
-// makeMutableType resolves `mut T` annotations. A foreign Go named type's
-// mutable form is its pointer form (`mut image::Point` is `*image.Point`),
-// matching how Go signatures import pointer parameters, so both spellings
-// produce the same type. Everything else wraps in an Ard mutable reference.
+// makeMutableType resolves the pointee of a `&mut T` annotation, and of a
+// removed `mut T` spelling after it is reported. A foreign Go named type's
+// writable pointer form is its Go pointer form (`&mut image::Point` is
+// `*image.Point`), matching how Go signatures import pointer parameters.
+// Everything else, including `mut Trait`, wraps in an Ard mutable reference.
 func (c *Checker) makeMutableType(inner Type) Type {
 	if foreign, ok := inner.(*ForeignType); ok {
 		if foreign.Pointer {
@@ -2188,7 +2137,7 @@ func (c *Checker) resolveType(t parse.DeclaredType) Type {
 			paramType := c.resolveType(param)
 			if mutable && i < len(ty.ParamMutLocations) {
 				mutLocation := ty.ParamMutLocations[i]
-				c.reportLegacyPointerType(parse.Location{Start: mutLocation.Start, End: param.GetLocation().End}, mutLocation.Start, paramType, true)
+				c.reportLegacyPointerType(parse.Location{Start: mutLocation.Start, End: param.GetLocation().End}, paramType)
 			}
 			if mutable {
 				// A `mut pkg::T` parameter in function-type position takes the
@@ -3016,7 +2965,7 @@ func (c *Checker) areCompatible(expected Type, actual Type) bool {
 		if actualRef, ok := actual.(*MutableRef); ok {
 			if inner, ok := actualRef.Of().(*ForeignType); ok && inner.Interface {
 				// Go `*Interface` does not implement `Interface`; passing the
-				// stored interface value requires explicit `.@` (ADRs 0057 and 0060).
+				// stored interface value requires explicit `.*` (ADRs 0057 and 0073).
 				return false
 			}
 		}
@@ -3037,7 +2986,7 @@ func (c *Checker) areCompatible(expected Type, actual Type) bool {
 		}
 	}
 	// There is no implicit `mut T -> T` conversion: a reference flows to a
-	// value destination only through explicit `.@` (ADRs 0057 and 0060). A
+	// value destination only through explicit `.*` (ADRs 0057 and 0073). A
 	// reference satisfies a reference-typed destination only for the same
 	// referent identity or the sanctioned concrete-to-trait projection
 	// (`mut Box` -> `mut View`). General value coercions (Any, Go
@@ -4397,12 +4346,6 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				__type:  __type,
 			}
 			bound := c.scope.add(v.Name, v.__type, v.Mutable)
-			if !s.Mutable && c.scope.parent != nil {
-				// Module-level `mut` bindings are not supported in imported
-				// modules, so only local bindings get the migration fix.
-				letKeyword := s.GetLocation().Start
-				bound.letKeyword = &letKeyword
-			}
 			_, bindingIsReference := mutableRefBase(v.__type)
 			bound.foreignDescriptor = bindingIsReference && expressionUsesForeignDescriptor(val)
 			c.recordBindingWithSpan(s.NameLocation, s.GetLocation(), bound)
@@ -4774,12 +4717,12 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					Start:  start,
 					End:    end,
 				}
-				body := c.checkLoopBody(s.GetLocation(), s.Body, func() {
-					c.recordBinding(s.Cursor.GetLocation(), c.legacyBorrowBinding(c.scope.add(s.Cursor.Name, start.Type(), false)))
+				body := c.checkBlock(s.Body, c.markLoopScope(func() {
+					c.recordBinding(s.Cursor.GetLocation(), c.scope.add(s.Cursor.Name, start.Type(), false))
 					if loop.Index != "" {
-						c.recordBinding(s.Cursor2.GetLocation(), c.legacyBorrowBinding(c.scope.add(loop.Index, Int, false)))
+						c.recordBinding(s.Cursor2.GetLocation(), c.scope.add(loop.Index, Int, false))
 					}
-				})
+				}))
 				loop.Body = body
 				return &Statement{Stmt: loop}
 			}
@@ -4807,13 +4750,13 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				}
 
 				// Create a new scope for the loop body where the cursor is defined
-				body := c.checkLoopBody(s.GetLocation(), s.Body, func() {
+				body := c.checkBlock(s.Body, c.markLoopScope(func() {
 					// Direct string iteration yields Unicode scalar values.
-					c.recordBinding(s.Cursor.GetLocation(), c.legacyBorrowBinding(c.scope.add(s.Cursor.Name, Rune, false)))
+					c.recordBinding(s.Cursor.GetLocation(), c.scope.add(s.Cursor.Name, Rune, false))
 					if loop.Index != "" {
-						c.recordBinding(s.Cursor2.GetLocation(), c.legacyBorrowBinding(c.scope.add(loop.Index, Int, false)))
+						c.recordBinding(s.Cursor2.GetLocation(), c.scope.add(loop.Index, Int, false))
 					}
-				})
+				}))
 
 				loop.Body = body
 				return &Statement{Stmt: loop}
@@ -4830,13 +4773,13 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				}
 
 				// Create a new scope for the loop body where the cursor is defined
-				body := c.checkLoopBody(s.GetLocation(), s.Body, func() {
+				body := c.checkBlock(s.Body, c.markLoopScope(func() {
 					// Add the cursor variable to the scope
-					c.recordBinding(s.Cursor.GetLocation(), c.legacyBorrowBinding(c.scope.add(s.Cursor.Name, Int, false)))
+					c.recordBinding(s.Cursor.GetLocation(), c.scope.add(s.Cursor.Name, Int, false))
 					if loop.Index != "" {
-						c.recordBinding(s.Cursor2.GetLocation(), c.legacyBorrowBinding(c.scope.add(loop.Index, Int, false)))
+						c.recordBinding(s.Cursor2.GetLocation(), c.scope.add(loop.Index, Int, false))
 					}
-				})
+				}))
 
 				loop.Body = body
 				return &Statement{Stmt: loop}
@@ -4851,13 +4794,13 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				}
 				cursorMutable := false // ADR 0073: only `mut` declarations create writable slots
 
-				body := c.checkLoopBody(s.GetLocation(), s.Body, func() {
+				body := c.checkBlock(s.Body, c.markLoopScope(func() {
 					// Add the cursor variable to the scope
-					c.recordBinding(s.Cursor.GetLocation(), c.legacyBorrowBinding(c.scope.add(s.Cursor.Name, listType.of, cursorMutable)))
+					c.recordBinding(s.Cursor.GetLocation(), c.scope.add(s.Cursor.Name, listType.of, cursorMutable))
 					if loop.Index != "" {
-						c.recordBinding(s.Cursor2.GetLocation(), c.legacyBorrowBinding(c.scope.add(loop.Index, Int, false)))
+						c.recordBinding(s.Cursor2.GetLocation(), c.scope.add(loop.Index, Int, false))
 					}
-				})
+				}))
 
 				loop.Body = body
 				return &Statement{Stmt: loop}
@@ -4870,12 +4813,12 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					List:   iterValue,
 				}
 				cursorMutable := false // ADR 0073: only `mut` declarations create writable slots
-				body := c.checkLoopBody(s.GetLocation(), s.Body, func() {
-					c.recordBinding(s.Cursor.GetLocation(), c.legacyBorrowBinding(c.scope.add(s.Cursor.Name, sliceType.of, cursorMutable)))
+				body := c.checkBlock(s.Body, c.markLoopScope(func() {
+					c.recordBinding(s.Cursor.GetLocation(), c.scope.add(s.Cursor.Name, sliceType.of, cursorMutable))
 					if loop.Index != "" {
-						c.recordBinding(s.Cursor2.GetLocation(), c.legacyBorrowBinding(c.scope.add(loop.Index, Int, false)))
+						c.recordBinding(s.Cursor2.GetLocation(), c.scope.add(loop.Index, Int, false))
 					}
-				})
+				}))
 				loop.Body = body
 				return &Statement{Stmt: loop}
 			}
@@ -4888,12 +4831,12 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					Index:  s.Cursor2.Name,
 					List:   iterValue,
 				}
-				body := c.checkLoopBody(s.GetLocation(), s.Body, func() {
-					c.recordBinding(s.Cursor.GetLocation(), c.legacyBorrowBinding(c.scope.add(s.Cursor.Name, elem, false)))
+				body := c.checkBlock(s.Body, c.markLoopScope(func() {
+					c.recordBinding(s.Cursor.GetLocation(), c.scope.add(s.Cursor.Name, elem, false))
 					if loop.Index != "" {
-						c.recordBinding(s.Cursor2.GetLocation(), c.legacyBorrowBinding(c.scope.add(loop.Index, Int, false)))
+						c.recordBinding(s.Cursor2.GetLocation(), c.scope.add(loop.Index, Int, false))
 					}
-				})
+				}))
 				loop.Body = body
 				return &Statement{Stmt: loop}
 			}
@@ -4904,12 +4847,12 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					Index:  s.Cursor2.Name,
 					List:   iterValue,
 				}
-				body := c.checkLoopBody(s.GetLocation(), s.Body, func() {
-					c.recordBinding(s.Cursor.GetLocation(), c.legacyBorrowBinding(c.scope.add(s.Cursor.Name, arrayType.of, false)))
+				body := c.checkBlock(s.Body, c.markLoopScope(func() {
+					c.recordBinding(s.Cursor.GetLocation(), c.scope.add(s.Cursor.Name, arrayType.of, false))
 					if loop.Index != "" {
-						c.recordBinding(s.Cursor2.GetLocation(), c.legacyBorrowBinding(c.scope.add(loop.Index, Int, false)))
+						c.recordBinding(s.Cursor2.GetLocation(), c.scope.add(loop.Index, Int, false))
 					}
-				})
+				}))
 
 				loop.Body = body
 				return &Statement{Stmt: loop}
@@ -4928,11 +4871,11 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				}
 
 				valueMutable := false // ADR 0073: only `mut` declarations create writable slots
-				body := c.checkLoopBody(s.GetLocation(), s.Body, func() {
+				body := c.checkBlock(s.Body, c.markLoopScope(func() {
 					// Add the cursors to the scope
-					c.recordBinding(s.Cursor.GetLocation(), c.legacyBorrowBinding(c.scope.add(loop.Key, mapType.Key(), false)))
-					c.recordBinding(s.Cursor2.GetLocation(), c.legacyBorrowBinding(c.scope.add(loop.Val, mapType.Value(), valueMutable)))
-				})
+					c.recordBinding(s.Cursor.GetLocation(), c.scope.add(loop.Key, mapType.Key(), false))
+					c.recordBinding(s.Cursor2.GetLocation(), c.scope.add(loop.Val, mapType.Value(), valueMutable))
+				}))
 
 				loop.Body = body
 				return &Statement{Stmt: loop}
@@ -4946,10 +4889,10 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					Val: s.Cursor2.Name,
 					Map: iterValue,
 				}
-				body := c.checkLoopBody(s.GetLocation(), s.Body, func() {
-					c.recordBinding(s.Cursor.GetLocation(), c.legacyBorrowBinding(c.scope.add(loop.Key, key, false)))
-					c.recordBinding(s.Cursor2.GetLocation(), c.legacyBorrowBinding(c.scope.add(loop.Val, value, false)))
-				})
+				body := c.checkBlock(s.Body, c.markLoopScope(func() {
+					c.recordBinding(s.Cursor.GetLocation(), c.scope.add(loop.Key, key, false))
+					c.recordBinding(s.Cursor2.GetLocation(), c.scope.add(loop.Val, value, false))
+				}))
 				loop.Body = body
 				return &Statement{Stmt: loop}
 			}
@@ -6705,7 +6648,15 @@ func (c *Checker) checkExprForInference(expr parse.Expression) Expression {
 	diagnosticsLen := len(c.diagnostics)
 	spansMark := c.spansMark()
 	checked := c.checkExpr(expr)
-	c.diagnostics = c.diagnostics[:diagnosticsLen]
+	// A removed pointer spelling is wrong in every context, and an operand
+	// that fails here may never be checked again, so its diagnostic is kept.
+	kept := c.diagnostics[:diagnosticsLen]
+	for _, diagnostic := range c.diagnostics[diagnosticsLen:] {
+		if diagnostic.Code == DiagnosticCodeRemovedPointerSyntax {
+			kept = append(kept, diagnostic)
+		}
+	}
+	c.diagnostics = kept
 	c.spansTruncate(spansMark)
 	return checked
 }
@@ -10543,13 +10494,11 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 			}
 
 			// Check body
-			legacyBorrowFunction := newLegacyBorrowFunction(s.GetLocation(), s.Body)
 			setup := func() {
 				c.scope.expectReturn(returnType)
 				for _, param := range params {
 					sym := c.scope.add(param.Name, param.Type, false)
 					sym.reference = param.Mutable
-					sym.legacyBorrowParameter = &legacyBorrowParameter{name: param.Name, function: legacyBorrowFunction}
 					c.recordBinding(param.Loc, sym)
 				}
 			}
@@ -10557,11 +10506,6 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 			c.pushConstraintFunction(fn, s.GetLocation())
 			previousDeferredWorkDepth := c.deferredWorkDepth
 			c.deferredWorkDepth = 0
-			previousLegacyBorrowFunction := c.legacyBorrowFunction
-			previousLegacyBorrowFunctionScope := c.legacyBorrowFunctionScope
-			legacyBorrowFunction.function = legacyBorrowFunction
-			c.legacyBorrowFunction = legacyBorrowFunction
-			c.legacyBorrowFunctionScope = legacyBorrowFunction
 			var body *Block
 			if fn.InferReturnTypeFromBody {
 				// Without a return annotation, the closure adopts its body's
@@ -10578,8 +10522,6 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 				body = c.checkBlockWithExpected(s.Body, setup, returnType, true)
 			}
 			c.deferredWorkDepth = previousDeferredWorkDepth
-			c.legacyBorrowFunction = previousLegacyBorrowFunction
-			c.legacyBorrowFunctionScope = previousLegacyBorrowFunctionScope
 			c.popConstraintFunction()
 			c.popFunctionGenericContext()
 			c.recordComparableConstraintClosure(parentConstraintFunction, fn, s.GetLocation())
@@ -10768,13 +10710,10 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 					} else {
 						// This is the Some case with a variable binding
 						// Create a new scope for the body with the pattern bound to the unwrapped value
-						someBody = c.checkMatchArmBlockWithLegacyBinding(matchCase, func() {
+						someBody = c.checkMatchArmBlock(matchCase.Body, func() {
 							// Add the pattern name as a variable in the scope with the inner type
 							// For example, if the Maybe is Str?, the pattern should be a Str
-							binding := c.scope.add(id.Name, maybeType.of, bindingMutable)
-							if matchCaseAllowsLegacyBorrowShadow(matchCase) {
-								c.legacyBorrowBinding(binding)
-							}
+							c.scope.add(id.Name, maybeType.of, bindingMutable)
 						})
 
 						// Create an identifier to use in the Match struct
@@ -13079,12 +13018,12 @@ func (c *Checker) finishCheckExprAs(expr parse.Expression, expectedType Type, ex
 	return checked
 }
 
-// resolveParameterType resolves a parameter's declared type. A `mut T`
-// parameter stores a first-class reference type (ADR 0057): the parameter's
-// value is an actual reference, and call sites must supply one. Foreign Go
-// named types use their pointer form so type identity lines up with
-// `mut pkg::T` values and Go signatures; everything else wraps in an Ard
-// mutable reference, including list/map descriptor references.
+// resolveParameterType resolves a parameter's declared type. A `&mut T` or
+// `mut Trait` parameter stores a first-class reference type (ADRs 0057 and
+// 0073): the parameter's value is an actual reference, and call sites must
+// supply one. Foreign Go named types use their pointer form so type identity
+// lines up with `&mut pkg::T` values and Go signatures; everything else wraps
+// in an Ard mutable reference, including list/map descriptor references.
 func (c *Checker) resolveParameterType(t parse.DeclaredType) (Type, bool) {
 	var annotation parse.MutableType
 	switch mt := t.(type) {
@@ -13103,7 +13042,7 @@ func (c *Checker) resolveParameterType(t parse.DeclaredType) (Type, bool) {
 		return nil, !nullable
 	}
 	if !annotation.Pointer {
-		c.reportLegacyPointerType(annotation.GetLocation(), annotation.GetLocation().Start, base, true)
+		c.reportLegacyPointerType(annotation.GetLocation(), base)
 	}
 	if annotation.Pointer && !c.validPointerReferent(base, inner.GetLocation()) {
 		return &TypeVar{name: "unknown"}, false
@@ -13414,24 +13353,15 @@ func (c *Checker) checkFunctionWithSignature(def *parse.FunctionDeclaration, ini
 	parentConstraintFunction := c.currentConstraintFunction()
 	c.pushFunctionGenericContext(fn, extraGenericParams...)
 	c.pushConstraintFunction(fn, def.GetLocation())
-	previousLegacyBorrowFunction := c.legacyBorrowFunction
-	previousLegacyBorrowFunctionScope := c.legacyBorrowFunctionScope
-	legacyBorrowFunction := newLegacyBorrowFunction(def.GetLocation(), def.Body)
-	legacyBorrowFunction.function = legacyBorrowFunction
-	c.legacyBorrowFunction = legacyBorrowFunction
-	c.legacyBorrowFunctionScope = legacyBorrowFunction
 	body := c.checkBlockWithExpected(def.Body, func() {
 		c.scope.expectReturn(returnType)
 		for _, param := range params {
 			sym := c.scope.add(param.Name, param.Type, false)
 			sym.reference = param.Mutable
 			sym.foreignDescriptor = param.ForeignABI == ForeignParameterDescriptorValue
-			sym.legacyBorrowParameter = &legacyBorrowParameter{name: param.Name, function: legacyBorrowFunction}
 			c.recordBinding(param.Loc, sym)
 		}
 	}, returnType, true)
-	c.legacyBorrowFunction = previousLegacyBorrowFunction
-	c.legacyBorrowFunctionScope = previousLegacyBorrowFunctionScope
 	c.popConstraintFunction()
 	c.popFunctionGenericContext()
 	c.recordComparableConstraintClosure(parentConstraintFunction, fn, def.GetLocation())
@@ -14264,11 +14194,6 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 		}
 
 		var checkedArg Expression
-		previousLegacyDescriptorArgument := c.legacyDescriptorArgument
-		c.legacyDescriptorArgument = nil
-		if fnDefCopy.Parameters[i].ForeignABI == ForeignParameterDescriptorValue {
-			c.legacyDescriptorArgument, _ = resolvedExprs[i].(*parse.MutRef)
-		}
 		c.withValueExprContext(func() {
 			switch arg := resolvedExprs[i].(type) {
 			case *parse.ListLiteral, *parse.MapLiteral:
@@ -14321,7 +14246,6 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 				checkedArg = c.checkExpr(resolvedExprs[i])
 			}
 		})
-		c.legacyDescriptorArgument = previousLegacyDescriptorArgument
 
 		checkedArg = descriptorArgument(fnDefCopy.Parameters[i], checkedArg)
 		if checkedArg == nil {

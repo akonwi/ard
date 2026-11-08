@@ -1718,11 +1718,7 @@ func (p printer) renderMutRefDoc(node parse.MutRef, parentPrecedence int) doc {
 func (p printer) renderDerefDoc(node parse.Deref, parentPrecedence int) doc {
 	// Block-like operands parenthesize themselves (wrapLowestPrecedenceDoc).
 	operandDoc := p.renderExpressionValueDoc(node.Operand, precedenceCall)
-	operator := ".@"
-	if node.Star {
-		operator = ".*"
-	}
-	result := dConcat(operandDoc, dText(operator))
+	result := dConcat(operandDoc, dText(".*"))
 	if precedenceCall < parentPrecedence {
 		return dConcat(dText("("), result, dText(")"))
 	}

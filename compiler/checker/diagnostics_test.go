@@ -408,11 +408,11 @@ func TestGenericGoFunctionDiagnosticsAreStructured(t *testing.T) {
 			code: checker.DiagnosticCodeConflictingGoTypeInference, legacyMessage: "Conflicting inferred type arguments for T: Str and Int", secondaries: 1,
 		},
 		{
-			name: "wrong type argument count", source: "use go:example.com/app/ffi\nfn f(c: mut ffi::StateCtx) { ffi::StateValue<Str, Int>(c) }\n",
+			name: "wrong type argument count", source: "use go:example.com/app/ffi\nfn f(c: &mut ffi::StateCtx) { ffi::StateValue<Str, Int>(c) }\n",
 			code: checker.DiagnosticCodeInvalidGoFunctionTypeArgs, legacyMessage: "Go function ffi::StateValue expects 1 type argument(s), got 2",
 		},
 		{
-			name: "uninferable type argument", source: "use go:example.com/app/ffi\nfn f(c: mut ffi::StateCtx) { ffi::StateValue(c) }\n",
+			name: "uninferable type argument", source: "use go:example.com/app/ffi\nfn f(c: &mut ffi::StateCtx) { ffi::StateValue(c) }\n",
 			code: checker.DiagnosticCodeGoTypeInferenceFailure, legacyMessage: "Could not infer type argument T for Go function ffi::StateValue",
 		},
 		{
@@ -1509,8 +1509,8 @@ func TestBorrowAndDerefFailuresUseDistinctDiagnostics(t *testing.T) {
 		source string
 		code   checker.DiagnosticCode
 	}{
-		{name: "non-addressable borrow", source: "struct Box { value: Int }\nfn make() Box { Box{value: 1} }\nlet reference = mut make().value\n", code: checker.DiagnosticCodeNonAddressableBorrow},
-		{name: "ordinary deref operand", source: "let value = 1\nlet snapshot = value.@\n", code: checker.DiagnosticCodeInvalidDerefOperand},
+		{name: "non-addressable borrow", source: "struct Box { value: Int }\nfn make() Box { Box{value: 1} }\nlet reference = &mut make().value\n", code: checker.DiagnosticCodeNonAddressableBorrow},
+		{name: "ordinary deref operand", source: "let value = 1\nlet snapshot = value.*\n", code: checker.DiagnosticCodeInvalidDerefOperand},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

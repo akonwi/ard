@@ -73,7 +73,7 @@ const (
 	DiagnosticCodePointerToPointer              DiagnosticCode = "pointer_to_pointer"
 	DiagnosticCodeNonWritableAddress            DiagnosticCode = "non_writable_address"
 	DiagnosticCodeReadOnlyPointerWrite          DiagnosticCode = "read_only_pointer_write"
-	DiagnosticCodeDeprecatedPointerSyntax       DiagnosticCode = "deprecated_pointer_syntax"
+	DiagnosticCodeRemovedPointerSyntax          DiagnosticCode = "removed_pointer_syntax"
 	DiagnosticCodeValueInteriorMutation         DiagnosticCode = "value_interior_mutation"
 	DiagnosticCodeWholeReferentAssignment       DiagnosticCode = "whole_referent_assignment"
 	DiagnosticCodeReferenceDestination          DiagnosticCode = "reference_destination_requires_reference"
@@ -183,8 +183,6 @@ type Diagnostic struct {
 	// diagnostic. It is empty for the root project. Presentation layers use
 	// it to quiet warnings the user cannot fix locally.
 	Dependency string
-
-	fixes []TextEdit
 }
 
 func NewDiagnostic(kind DiagnosticKind, message string, filePath string, location parse.Location) Diagnostic {

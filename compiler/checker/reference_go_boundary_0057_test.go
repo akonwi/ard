@@ -90,12 +90,12 @@ let echoed: ffi::Item = ffi::Identity<ffi::Item>(reference.*)`},
 let reference = &mut value
 let ok = ffi::IsComparable(reference)`},
 		{name: "comparable generic accepts Ard struct reference", source: `struct Native { N: Int }
-let value = Native{N: 1}
-let ok = ffi::IsComparable(mut value)`},
+mut value = Native{N: 1}
+let ok = ffi::IsComparable(&mut value)`},
 		{name: "unrepresentable sibling does not skip constraint validation", source: `struct Native { N: Int }
-let values = [1, 2]
+mut values = [1, 2]
 let native = Native{N: 1}
-ffi::Two<[Int], Native>(mut values, native)`, wantError: true},
+ffi::Two<[Int], Native>(&mut values, native)`, wantError: true},
 		{name: "foreign pointer equality uses pointer identity", source: `let a = ffi::ItemPtr()
 let b = a
 let same = a == b
@@ -112,8 +112,8 @@ let size = ffi::SliceSize(values)`},
 		{name: "slice shaped generic infers from referent", source: `mut values = [1, 2]
 let reference = &mut values
 let size = ffi::SliceSize(reference)`},
-		{name: "slice shaped generic infers from Slice referent", source: `let view = [1, 2].slice().expect("bounds")
-let size = ffi::SliceSize(mut view)`},
+		{name: "slice shaped generic infers from Slice referent", source: `mut view = [1, 2].slice().expect("bounds")
+let size = ffi::SliceSize(&mut view)`},
 		{name: "generic Go callback Slice parameter is rejected", source: `let consume = ffi::SliceConsumer<Slice<Int>>()`, wantError: true},
 		{name: "map shaped generic accepts bare value", source: `let values = ["a": 1]
 let size = ffi::MapSize(values)`},
@@ -336,7 +336,8 @@ let value = ffi::ReadDoublePtr(pointer)`},
 		{name: "deref removes one foreign pointer layer", source: `let pointer = ffi::DoublePtr()
 let single: &mut ffi::Item = pointer.*
 ffi::TakePtr(single)`},
-		{name: "exact pointer to interface remains unsupported", source: `fn pass(value: ffi::Bumper) { ffi::TakeInterfacePtr(mut value) }`, wantError: true},
+		{name: "exact pointer to interface remains unsupported", source: `mut value = ffi::BumperValue()
+ffi::TakeInterfacePtr(&mut value)`, wantError: true},
 	}
 
 	for _, tt := range tests {
@@ -381,7 +382,7 @@ func assertGoReferenceCheckerResult(t *testing.T, source string, resolver *check
 	if len(result.Errors) > 0 {
 		t.Fatalf("parse errors: %v", result.Errors)
 	}
-	if strings.Contains(source, ".@") && !containsParsedDeref(reflect.ValueOf(result.Program)) {
+	if strings.Contains(source, ".*") && !containsParsedDeref(reflect.ValueOf(result.Program)) {
 		t.Fatal("parser did not produce a dereference expression")
 	}
 	checked := checker.New("test.ard", checker.WrapStatementRuns(result.Program), nil, checker.CheckOptions{GoResolver: resolver})
@@ -394,6 +395,9 @@ func assertGoReferenceCheckerResult(t *testing.T, source string, resolver *check
 				continue
 			}
 			location := diagnostic.Primary.Span.Location
+			if diagnostic.Code == checker.DiagnosticCodeRemovedPointerSyntax {
+				t.Fatalf("source uses removed pointer syntax: %#v", diagnostic)
+			}
 			if diagnostic.Code == checker.DiagnosticCodeUndefinedName || location.Start.Row > targetRow || location.End.Row < targetRow {
 				t.Fatalf("unexpected setup/cascade error before target row %d: %#v", targetRow, checked.Diagnostics())
 			}

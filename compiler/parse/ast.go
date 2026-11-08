@@ -139,7 +139,8 @@ type MutableType struct {
 	Inner    DeclaredType
 	nullable bool
 	// Pointer marks the ADR 0073 `&T` / `&mut T` spelling. When false, the
-	// node is the legacy `mut T` reference spelling.
+	// node is `mut T`, which denotes a mutable trait value; the checker
+	// rejects it for any non-trait T.
 	Pointer bool
 	// ReadOnly marks a `&T` pointer, which forbids writes through itself.
 	// It is only set together with Pointer.
@@ -162,9 +163,9 @@ type FunctionType struct {
 	Nullable        bool
 	Params          []DeclaredType
 	ParamMutability []bool
-	// ParamMutLocations records the legacy `mut` keyword of each mutable
-	// parameter, parallel to ParamMutability, so migration tooling can
-	// rewrite `fn(mut T)` to `fn(&mut T)` (ADR 0073).
+	// ParamMutLocations records the `mut` keyword of each mutable parameter,
+	// parallel to ParamMutability, so the checker can point at a removed
+	// `fn(mut T)` spelling for a non-trait T (ADR 0073).
 	ParamMutLocations []Location
 	// Variadic marks the final parameter as a repeated element in a callable
 	// type. Ard declarations remain fixed-arity; this syntax describes foreign
@@ -619,10 +620,10 @@ type Argument struct {
 }
 
 // MutRef is an address-of expression. ADR 0073 spells it `&<operand>` (a
-// read-only pointer) or `&mut <operand>` (a writable pointer); the legacy ADR
-// 0045 spelling `mut <operand>` produces a mutable reference. It evaluates to
+// read-only pointer) or `&mut <operand>` (a writable pointer). It evaluates to
 // a pointer to the operand's storage, or to fresh storage when the operand is
-// a value expression.
+// a value expression. The removed ADR 0045 spelling `mut <operand>` is still
+// parsed so the checker can reject it with its replacement.
 type MutRef struct {
 	Location
 	Operand Expression
@@ -644,22 +645,17 @@ func (m MutRef) String() string {
 	}
 }
 
-// Deref is the explicit one-layer postfix dereference expression. ADR 0073
-// spells it `<operand>.*`; the legacy ADRs 0057 and 0060 spelling is
-// `<operand>.@`. The checker requires Operand to have pointer type.
+// Deref is the explicit one-layer postfix dereference expression
+// `<operand>.*` (ADR 0073). The checker requires Operand to have pointer
+// type.
 type Deref struct {
 	Location
 	Operand          Expression
 	OperatorLocation Location
-	// Star marks the ADR 0073 `.*` spelling.
-	Star bool
 }
 
 func (d Deref) String() string {
-	if d.Star {
-		return fmt.Sprintf("%s.*", d.Operand)
-	}
-	return fmt.Sprintf("%s.@", d.Operand)
+	return fmt.Sprintf("%s.*", d.Operand)
 }
 
 type FunctionCall struct {

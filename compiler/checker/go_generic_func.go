@@ -59,6 +59,10 @@ func (c *Checker) instantiateGoFunctionCall(modName, name string, goFn *types.Fu
 	} else {
 		inferred := make([]Type, tparams.Len())
 		inferenceSpans = make([]SourceSpan, tparams.Len())
+		// failedArguments are arguments that could not be checked during
+		// inference. When inference then fails, their own diagnostics
+		// explain the failure (ADR 0074).
+		var failedArguments []parse.Expression
 		for i := 0; i < sig.Params().Len() && i < len(s.Function.Args); i++ {
 			goParam := sig.Params().At(i).Type()
 			variadic := sig.Variadic() && i == sig.Params().Len()-1
@@ -71,7 +75,8 @@ func (c *Checker) instantiateGoFunctionCall(modName, name string, goFn *types.Fu
 				continue
 			}
 			value := c.checkExprForInference(s.Function.Args[i].Value)
-			if value == nil {
+			if value == nil || IsInvalid(value.Type()) {
+				failedArguments = append(failedArguments, s.Function.Args[i].Value)
 				continue
 			}
 			valueType := value.Type()
@@ -110,6 +115,12 @@ func (c *Checker) instantiateGoFunctionCall(modName, name string, goFn *types.Fu
 		}
 		for i := 0; i < tparams.Len(); i++ {
 			if inferred[i] == nil {
+				if len(failedArguments) > 0 {
+					for _, argument := range failedArguments {
+						c.checkExpr(argument)
+					}
+					return nil, nil, false
+				}
 				legacy := fmt.Sprintf("Could not infer type argument %s for Go function %s::%s", tparams.At(i).Obj().Name(), modName, name)
 				c.addDiagnostic(goTypeInferenceFailureDiagnostic{
 					Parameter: tparams.At(i).Obj().Name(), EntityKind: "function", EntityName: modName + "::" + name, Span: c.sourceSpan(s.GetLocation()), LegacyMessage: legacy,

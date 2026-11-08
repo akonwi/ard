@@ -117,8 +117,8 @@ func BumpTwice(b Bumper) {
 	if err := os.WriteFile(mainPath, []byte(`use go:mutrefiface/ffi
 
 fn main() {
-  let counter = ffi::Counter{N: 0}
-  ffi::BumpTwice(mut counter)
+  mut counter = ffi::Counter{N: 0}
+  ffi::BumpTwice(&mut counter)
   if not counter.N == 2 { panic("pointer-receiver interface writes lost") }
 }
 `), 0o644); err != nil {

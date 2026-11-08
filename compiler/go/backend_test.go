@@ -2206,11 +2206,11 @@ fn recover_boxed(value: Any, fallback: &mut $T) &mut $T {
 }
 
 fn main() {
-  let fallback_name = "fallback"
-  let name = recover_boxed(ffi::BoxName(), mut fallback_name)
-  if name.@ != "Ada" { panic("mutable name did not match") }
+  mut fallback_name = "fallback"
+  let name = recover_boxed(ffi::BoxName(), &mut fallback_name)
+  if name.* != "Ada" { panic("mutable name did not match") }
 
-  let point = unsafe::cast<mut image::Point>(ffi::BoxPoint()).expect("point")
+  let point = unsafe::cast<&mut image::Point>(ffi::BoxPoint()).expect("point")
   point.X = 42
   if ffi::PointX() != 42 { panic("point reference lost identity") }
 }
@@ -2269,8 +2269,8 @@ use go:anycast/ffi
 fn main() {
   let name = unsafe::cast<&mut Str>(ffi::BoxName())
   if not name.is_some() { panic("mutable cast failed") }
-  if unsafe::cast<mut Str>("Ada").is_some() { panic("mutable cast accepted value") }
-  if unsafe::cast<mut Str>(ffi::BoxNilName()).is_some() { panic("mutable cast accepted nil") }
+  if unsafe::cast<&mut Str>("Ada").is_some() { panic("mutable cast accepted value") }
+  if unsafe::cast<&mut Str>(ffi::BoxNilName()).is_some() { panic("mutable cast accepted nil") }
   if not unsafe::cast<Str>(ffi::BoxName()).expect("value") == "Ada" { panic("value cast did not deref") }
   if unsafe::cast<Str>(ffi::BoxNilName()).is_some() { panic("value cast accepted nil") }
 }
@@ -4480,18 +4480,6 @@ fn main() {
   views::set_mut(returned, 7)
   if not box.number == 7 { panic("mutable method forwarding") }
 
-  mut current: views::View = views::Box{number: 8}
-  // Legacy trait-slot borrow: ADR 0073 has no replacement, so this stays
-  // until the legacy syntax is removed.
-  let storage_reference = mut current
-  if not views::read_mut(storage_reference) == 8 { panic("trait storage read") }
-  views::set_mut(storage_reference, 10)
-  if not views::read_mut(storage_reference) == 10 { panic("trait storage mutation") }
-  current = views::Other{number: 9}
-  views::set_mut(storage_reference, 11)
-  if not views::read_mut(storage_reference) == 11 { panic("captured trait object changed after slot replacement") }
-  if not views::read(current) == 9 { panic("trait slot replacement changed captured object") }
-
   let shared_left = views::shared_ref()
   let shared_right = views::shared_ref()
   if not views::same(shared_left, shared_right) { panic("owner storage identity") }
@@ -4548,17 +4536,14 @@ fn same(left: mut View, right: mut View) Bool { left == right }
 	if err := os.WriteFile(filepath.Join(projectDir, "models.ard"), []byte(`use canonicaltraits/views
 
 struct Box { number: Int }
-struct Holder { current: views::View }
 
 impl views::View for Box {
   fn value() Int { self.number }
 }
 
-let shared = Box{number: 4}
-let holder = Holder{current: Box{number: 5}}
+let shared = &mut Box{number: 4}
 
-fn concrete_ref() mut views::View { (mut shared) }
-fn storage_ref() mut views::View { (mut holder.current) }
+fn concrete_ref() mut views::View { shared }
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -4567,14 +4552,9 @@ fn storage_ref() mut views::View { (mut holder.current) }
 use canonicaltraits/models
 
 fn main() {
-  let direct_concrete: mut views::View = mut models::shared
+  let direct_concrete: mut views::View = models::shared
   let returned_concrete = models::concrete_ref()
   if not views::same(direct_concrete, returned_concrete) { panic("concrete interface identity") }
-
-  let holder = mut models::holder
-  let direct_storage: mut views::View = mut holder.current
-  let returned_storage = models::storage_ref()
-  if not views::same(direct_storage, returned_storage) { panic("captured interface equality") }
 }
 `), 0o644); err != nil {
 		t.Fatal(err)
@@ -4629,9 +4609,9 @@ fn read_mut(value: mut View) Int { value.value() }
 `,
 		"holder.ard": `use privateimpl/views
 
-struct Holder { current: views::View }
+struct Holder { current: mut views::View }
 
-fn borrow(value: &mut Holder) mut views::View { (mut value.current) }
+fn borrow(value: &mut Holder) mut views::View { value.current }
 `,
 		"models.ard": `use privateimpl/views
 use privateimpl/holder
@@ -4642,7 +4622,7 @@ impl views::View for Secret {
   fn value() Int { self.value }
 }
 
-fn make() holder::Holder { holder::Holder{current: Secret{value: 42}} }
+fn make() holder::Holder { holder::Holder{current: &mut Secret{value: 42}} }
 `,
 	}
 	for name, source := range files {
@@ -4656,8 +4636,8 @@ use privateimpl/holder
 use privateimpl/models
 
 fn main() {
-  let value = models::make()
-  let reference = holder::borrow(mut value)
+  mut value = models::make()
+  let reference = holder::borrow(&mut value)
   if not views::read(reference) == 42 { panic("ordinary private implementation") }
   if not views::read_mut(reference) == 42 { panic("private implementation") }
 }
@@ -5102,7 +5082,8 @@ func TestLowerProgramSupportsFieldMutation(t *testing.T) {
 		}
 
 		fn bump(counter: Counter) Int {
-			let current = mut counter
+			mut owned = counter
+			let current = &mut owned
 			current.value = current.value + 1
 			current.value
 		}
@@ -6050,7 +6031,7 @@ struct DemoState {
 	ticks: Int,
 }
 
-fn bump(c: mut ffi::StateCtx) {
+fn bump(c: &mut ffi::StateCtx) {
 	let state = ffi::StateRef<DemoState>(c)
 	let increment = fn() {
 		state.ticks = state.ticks + 1
@@ -6080,9 +6061,9 @@ fn main() {
 	if not copied.ticks == 99 { panic("expected StateSet to preserve reference identity, got {copied.ticks}") }
 	let echoed_state = ffi::Identity(live)
 	if not echoed_state.ticks == 99 { panic("expected Identity to preserve reference identity") }
-	// A value-typed annotation requires an explicit shallow snapshot.
+	// A value-typed annotation requires an explicit shallow copy.
 	let snap_reference = ffi::StateRef<DemoState>(c)
-	let snap: DemoState = snap_reference.@
+	let snap: DemoState = snap_reference.*
 	live.ticks = 123
 	if not snap.ticks == 99 { panic("expected value-typed binding to snapshot, got {snap.ticks}") }
 }
@@ -6133,7 +6114,7 @@ struct DemoState {
 	ticks: Int,
 }
 
-fn pick(c: mut ffi::StateCtx, flag: Bool) {
+fn pick(c: &mut ffi::StateCtx, flag: Bool) {
 	let state = match flag {
 		true => ffi::StateRef<DemoState>(c),
 		false => ffi::StateRef<DemoState>(c),
@@ -6356,7 +6337,7 @@ func Apply(s Setter, c *Counter) { s(c) }
 	if err := os.WriteFile(mainPath, []byte(`use go:mutfn/ffi
 
 fn main() {
-  let set: fn(mut ffi::Counter) = fn(c: mut ffi::Counter) {
+  let set: fn(&mut ffi::Counter) = fn(c: &mut ffi::Counter) {
     c.N = 7
   }
   // The annotated fn value satisfies the named Go func type (reverse flow).

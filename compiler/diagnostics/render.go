@@ -31,13 +31,6 @@ type RenderOptions struct {
 	// full. By default they are replaced by one summary line, since the user
 	// cannot fix them until the dependency publishes a new version.
 	ShowDependencyWarnings bool
-	// ShowDeprecationWarnings renders each deprecated pointer syntax use in
-	// full. By default they collapse into one summary line pointing at
-	// `ard migrate`, so real errors are not buried before migration.
-	ShowDeprecationWarnings bool
-	// MigratePath is the path suggested in the `ard migrate` hint. It
-	// defaults to ".".
-	MigratePath string
 }
 
 const (
@@ -87,11 +80,8 @@ func Render(w io.Writer, diagnostics []checker.Diagnostic, source SourceProvider
 
 func RenderWithOptions(w io.Writer, diagnostics []checker.Diagnostic, source SourceProvider, options RenderOptions) error {
 	color := colorEnabled(w, options.Color)
-	shown, deprecated, dependency := splitCollapsedWarnings(diagnostics, options)
+	shown, dependency := splitCollapsedWarnings(diagnostics, options)
 	var summaries []string
-	if len(deprecated) > 0 {
-		summaries = append(summaries, deprecatedPointerSummary(deprecated, options.MigratePath))
-	}
 	if len(dependency) > 0 {
 		summaries = append(summaries, dependencyWarningSummary(dependency))
 	}
@@ -120,41 +110,19 @@ func RenderWithOptions(w io.Writer, diagnostics []checker.Diagnostic, source Sou
 }
 
 // splitCollapsedWarnings separates the diagnostics rendered in full from the
-// warnings collapsed into summary lines. Dependency warnings are summarized
-// per dependency even when they are deprecations, since `ard migrate` cannot
-// fix them locally.
-func splitCollapsedWarnings(diagnostics []checker.Diagnostic, options RenderOptions) (shown, deprecated, dependency []checker.Diagnostic) {
+// dependency warnings collapsed into a summary line.
+func splitCollapsedWarnings(diagnostics []checker.Diagnostic, options RenderOptions) (shown, dependency []checker.Diagnostic) {
 	for _, diagnostic := range diagnostics {
 		switch {
 		case diagnostic.Kind != checker.Warn:
 			shown = append(shown, diagnostic)
 		case diagnostic.Dependency != "" && !options.ShowDependencyWarnings:
 			dependency = append(dependency, diagnostic)
-		case diagnostic.Dependency == "" && diagnostic.Code == checker.DiagnosticCodeDeprecatedPointerSyntax && !options.ShowDeprecationWarnings:
-			deprecated = append(deprecated, diagnostic)
 		default:
 			shown = append(shown, diagnostic)
 		}
 	}
-	return shown, deprecated, dependency
-}
-
-func deprecatedPointerSummary(deprecated []checker.Diagnostic, migratePath string) string {
-	if migratePath == "" {
-		migratePath = "."
-	}
-	files := map[string]bool{}
-	for _, diagnostic := range deprecated {
-		files[diagnostic.Primary.Span.FilePath] = true
-	}
-	uses, fileNoun, pronoun := "uses", "files", "them"
-	if len(deprecated) == 1 {
-		uses, pronoun = "use", "it"
-	}
-	if len(files) == 1 {
-		fileNoun = "file"
-	}
-	return fmt.Sprintf("%d deprecated pointer %s in %d %s not shown; run `ard migrate %s` to update %s", len(deprecated), uses, len(files), fileNoun, migratePath, pronoun)
+	return shown, dependency
 }
 
 // dependencyWarningSummary describes hidden dependency warnings, listing
@@ -201,12 +169,6 @@ func RenderRelativeWithOptions(w io.Writer, diagnostics []checker.Diagnostic, so
 		rebased[i].Secondary = make([]checker.DiagnosticLabel, len(diagnostic.Secondary))
 		for j, label := range diagnostic.Secondary {
 			rebased[i].Secondary[j] = rebaseLabel(label, sourceRoot, displayRoot)
-		}
-	}
-	if options.MigratePath == "" {
-		options.MigratePath = sourceRoot
-		if relative, err := filepath.Rel(displayRoot, sourceRoot); err == nil && len(relative) < len(sourceRoot) {
-			options.MigratePath = relative
 		}
 	}
 	return RenderWithOptions(w, rebased, FileSourceProvider(displayRoot), options)

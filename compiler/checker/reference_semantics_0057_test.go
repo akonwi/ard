@@ -51,9 +51,9 @@ reference.value = 2`},
 let reference = &mut box
 reference.set(2)`},
 		{name: "let reference rejects reference slot rebinding", source: `mut first = Box{value: 1}
-let second = Box{value: 2}
+mut second = Box{value: 2}
 let reference = &mut first
-reference = mut second`, wantError: true},
+reference = &mut second`, wantError: true},
 		{name: "mut reference permits reference slot rebinding", source: `mut first = Box{value: 1}
 mut second = Box{value: 2}
 mut reference = &mut first
@@ -108,7 +108,10 @@ let reference = &mut value
 let alias = reference
 take(alias)`},
 		{name: "return rejects ordinary value", source: `fn take(value: Box) &mut Box { value }`, wantError: true},
-		{name: "return accepts explicit reference", source: `fn take(value: Box) &mut Box { (mut value) }`},
+		{name: "return accepts explicit reference", source: `fn take(value: Box) &mut Box {
+  mut owned = value
+  &mut owned
+}`},
 		{name: "field rejects ordinary value", source: `struct Holder { item: &mut Box }
 let value = Box{value: 1}
 let holder = Holder{item: value}`, wantError: true},
@@ -193,15 +196,15 @@ let reference = &mut make()`},
 let reference = &mut values.at(0).expect("item")`},
 		{name: "temporary selector is rejected", source: `struct Outer { inner: Box }
 fn make() Outer { Outer{inner: Box{value: 1}} }
-let reference = mut make().inner`, wantError: true},
+let reference = &mut make().inner`, wantError: true},
 		{name: "function declarations are not addressable", source: `fn helper() Int { 1 }
-let reference = mut helper`, wantError: true},
+let reference = &mut helper`, wantError: true},
 		{name: "mut existing reference is idempotent", source: `mut value = Box{value: 1}
 let reference = &mut value
 let same: &mut Box = reference`},
 		{name: "Ard owned nested reference type is rejected", source: `mut value = Box{value: 1}
 let reference = &mut value
-let nested: mut &mut Box = reference`, wantError: true},
+let nested: &mut &mut Box = reference`, wantError: true},
 		{name: "annotation types empty list through mut", source: `let rows: &mut [Int] = &mut []
 rows.push(1)`},
 		{name: "annotation types empty map through mut", source: `let scores: &mut [Str: Int] = &mut [:]
@@ -211,7 +214,7 @@ let rows = make()
 rows.push(1)`},
 		{name: "reference parameter types fresh empty list", source: `fn take(values: &mut [Int]) { values.push(1) }
 take(&mut [])`},
-		{name: "annotation rejects mismatched fresh list element", source: `let rows: &mut [Int] = mut ["a"]`, wantError: true},
+		{name: "annotation rejects mismatched fresh list element", source: `let rows: &mut [Int] = &mut ["a"]`, wantError: true},
 		{name: "generic annotation types empty list through mut", source: `fn keep_all(from: [$T]) [$T] {
   let out: &mut [$T] = &mut []
   for t in from {
@@ -249,7 +252,7 @@ func TestADR0057ExplicitDereferenceContexts(t *testing.T) {
 		wantError bool
 	}{
 		{name: "ordinary value operand is rejected", source: `let value = Box{value: 1}
-let copy = value.@`, wantError: true},
+let copy = value.*`, wantError: true},
 		{name: "value binding requires deref", source: `mut value = Box{value: 1}
 let reference = &mut value
 let copy: Box = reference`, wantError: true},
@@ -290,15 +293,6 @@ let maybe: Box? = Maybe::new(reference)`, wantError: true},
 let reference = &mut value
 let list: [Box] = [reference.*]
 let maybe: Box? = Maybe::new(reference.*)`},
-		{name: "legacy deref is not an assignment place", source: `mut value = Box{value: 1}
-let reference = &mut value
-reference.@ = Box{value: 2}`, wantError: true},
-		{name: "field of legacy deref temporary is not mutable", source: `mut value = Box{value: 1}
-let reference = &mut value
-reference.@.value = 2`, wantError: true},
-		{name: "legacy mut deref creates independent top level storage", source: `mut value = Box{value: 1}
-let reference = &mut value
-let independent: &mut Box = mut reference.@`},
 		{name: "mutable trait implicitly narrows to ordinary trait", source: `trait View {
   fn get() Int
 }
@@ -312,15 +306,6 @@ let observed = inspect(reference)
 let direct = inspect(&mut value)
 let ordinary: View = reference
 let ordinary_direct: View = &mut value`},
-		{name: "mutable trait dereference produces ordinary trait", source: `trait View {
-  fn get() Int
-}
-impl View for Box {
-  fn get() Int { self.value }
-}
-mut value = Box{value: 1}
-let reference: mut View = &mut value
-let snapshot: View = reference.@`},
 	}
 
 	for _, tt := range tests {
@@ -529,7 +514,7 @@ func assertReferenceCheckerResult(t *testing.T, source string, wantError bool) {
 	if len(result.Errors) > 0 {
 		t.Fatalf("parse errors: %v", result.Errors)
 	}
-	if strings.Contains(source, ".@") && !containsParsedDeref(reflect.ValueOf(result.Program)) {
+	if strings.Contains(source, ".*") && !containsParsedDeref(reflect.ValueOf(result.Program)) {
 		t.Fatal("parser did not produce a dereference expression")
 	}
 	checked := checker.New("test.ard", checker.WrapStatementRuns(result.Program), nil)
@@ -542,6 +527,9 @@ func assertReferenceCheckerResult(t *testing.T, source string, wantError bool) {
 				continue
 			}
 			location := diagnostic.Primary.Span.Location
+			if diagnostic.Code == checker.DiagnosticCodeRemovedPointerSyntax {
+				t.Fatalf("source uses removed pointer syntax: %#v", diagnostic)
+			}
 			if diagnostic.Code == checker.DiagnosticCodeUndefinedName || location.Start.Row > targetRow || location.End.Row < targetRow {
 				t.Fatalf("unexpected setup/cascade error before target row %d: %#v", targetRow, checked.Diagnostics())
 			}

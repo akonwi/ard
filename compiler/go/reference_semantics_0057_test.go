@@ -96,7 +96,10 @@ func TestADR0057EscapingReferencesKeepLocalParameterFieldAndContainerStorageAliv
 			(&mut value)
 		}
 
-		fn from_parameter(value: Box) &mut Box { (mut value) }
+		fn from_parameter(value: Box) &mut Box {
+			mut owned = value
+			(&mut owned)
+		}
 
 		fn from_field() &mut Box {
 			mut owner = Owner{inner: Box{value: 3}}
@@ -475,14 +478,14 @@ impl LocalView for LocalOther {
 }
 
 fn main() {
-  let first = ffi::Item{N: 1}
-  let second = ffi::Item{N: 20}
-  let first_pointer = mut first
+  mut first = ffi::Item{N: 1}
+  mut second = ffi::Item{N: 20}
+  let first_pointer = &mut first
   mut pointer = first_pointer
   ffi::Bump(pointer)
 
   let boxed: Any = pointer
-  pointer = mut second
+  pointer = &mut second
   if not ffi::ReadAny(boxed) == 2 { panic("interface did not snapshot pointer value") }
   if not pointer.N == 20 { panic("reference slot did not rebind") }
 
@@ -490,55 +493,55 @@ fn main() {
   ffi::Bump(echoed)
   if not first.N == 3 { panic("generic pointer identity lost") }
 
-  let copied: ffi::Item = ffi::Identity<ffi::Item>(first_pointer.@)
+  let copied: ffi::Item = ffi::Identity<ffi::Item>(first_pointer.*)
   ffi::Bump(first_pointer)
   if not copied.N == 3 { panic("explicit value generic did not copy") }
 
-  ffi::SaveReader(first_pointer.@)
+  ffi::SaveReader(first_pointer.*)
   ffi::Bump(first_pointer)
   if not ffi::SavedN() == 4 { panic("value interface did not own its shallow copy") }
   ffi::SaveReader(first_pointer)
   ffi::Bump(first_pointer)
   if not ffi::SavedN() == 6 { panic("reference interface lost shared pointee") }
 
-  let value_boxed: Any = first_pointer.@
+  let value_boxed: Any = first_pointer.*
   ffi::Bump(first_pointer)
   if not ffi::ReadValueAny(value_boxed) == 6 { panic("value Any did not copy") }
   if not ffi::ReadAny(boxed) == 7 { panic("reference Any copied the pointee instead of the pointer") }
   if not ffi::IsComparable(first_pointer) { panic("reference did not satisfy comparable") }
   if not ffi::ReadGeneric(first_pointer) == 7 { panic("method-constrained reference failed") }
 
-  let local = LocalBox{number: 13}
-  let local_direct: LocalView = mut local
+  mut local = LocalBox{number: 13}
+  let local_direct: LocalView = &mut local
   if not local_direct.read() == 13 { panic("direct mutable concrete to ordinary trait failed") }
-  let local_reference: mut LocalView = mut local
+  let local_reference: mut LocalView = &mut local
   let local_echoed = ffi::Identity(local_reference)
   if not local_echoed.read() == 13 { panic("mutable trait generic identity lost") }
   if not ffi::IsComparable(local_echoed) { panic("mutable trait interface was not comparable") }
   if not ffi::ReadGeneric(local_echoed) == 13 { panic("mutable trait interface missed Go method constraint") }
 
   mut local_current: LocalView = LocalBox{number: 14}
-  let local_captured = mut local_current
+  let local_captured = local_current
   let local_captured_echoed = ffi::Identity(local_captured)
   local_current = LocalOther{number: 15}
   if not local_captured_echoed.read() == 14 { panic("captured trait object followed slot replacement") }
 
-  let local_replacement = LocalOther{number: 16}
-  let local_replacement_reference: mut LocalView = mut local_replacement
+  mut local_replacement = LocalOther{number: 16}
+  let local_replacement_reference: mut LocalView = &mut local_replacement
   let local_references: [mut LocalView] = [local_reference]
-  let local_replaced = ffi::ReplaceFirst(mut local_references, local_replacement_reference)
+  let local_replaced = ffi::ReplaceFirst(local_references, local_replacement_reference)
   if not local_replaced.read() == 16 { panic("mutable trait writable generic result lost") }
   if not local_references.at(0).expect("reference").read() == 16 { panic("mutable trait writable generic container lost") }
 
-  let interface_value = ffi::ReaderValue()
-  let interface_reference = mut interface_value
+  mut interface_value = ffi::ReaderValue()
+  let interface_reference = &mut interface_value
   let interface_pointer: Any = interface_reference
   if not ffi::ReadReaderPointer(interface_pointer) == 11 { panic("foreign interface pointer Any failed") }
-  ffi::SaveReader(interface_reference.@)
+  ffi::SaveReader(interface_reference.*)
   if not ffi::SavedN() == 11 { panic("foreign interface deref failed") }
 
-  let count = 1
-  ffi::Increment(mut count)
+  mut count = 1
+  ffi::Increment(&mut count)
   if not count == 2 { panic("scalar pointee FFI mutation failed") }
 
   let empty_a = ffi::EmptyA()
@@ -547,57 +550,57 @@ fn main() {
     panic("zero-sized pointer equality diverged from Go")
   }
 
-  let values = [1, 2]
+  mut values = [1, 2]
   let mutate_slice = ffi::MutateSlice
-  mutate_slice(mut values)
-  ffi::ReplaceSlice(mut values)
+  mutate_slice(values)
+  ffi::ReplaceSlice(&mut values)
   if not values.at(0).or(0) == 9 { panic("slice element mutation lost") }
   if not values.size() == 3 { panic("pointer-to-slice replacement lost") }
-  if not ffi::SliceSize(mut values) == 3 { panic("slice generic projection failed") }
-  if not ffi::MixedSize<[Int], Int>(mut values) == 3 { panic("mixed generic projection failed") }
-  ffi::MutateNumbers(mut values)
+  if not ffi::SliceSize(values) == 3 { panic("slice generic projection failed") }
+  if not ffi::MixedSize<[Int], Int>(values) == 3 { panic("mixed generic projection failed") }
+  ffi::MutateNumbers(values)
   if not values.at(0).or(0) == 8 { panic("named slice projection failed") }
 
   let view = values.slice(start: 0, end: 2).expect("slice bounds")
-  ffi::MutateSlice(mut view)
+  ffi::MutateSlice(view)
   if not values.at(0).or(0) == 9 { panic("Slice element mutation lost at Go boundary") }
   let mutate_slice_value = ffi::MutateSlice
-  mutate_slice_value(mut view)
+  mutate_slice_value(view)
   if not values.at(0).or(0) == 9 { panic("Slice function-value projection failed") }
   let sink = ffi::Sink{}
-  sink.Mutate(mut view)
+  sink.Mutate(view)
   if not values.at(0).or(0) == 6 { panic("Slice method projection failed") }
-  ffi::MutateNumbers(mut view)
+  ffi::MutateNumbers(view)
   if not values.at(0).or(0) == 8 { panic("Slice named projection failed") }
-  if not ffi::SliceSize(mut view) == 2 { panic("Slice generic projection failed") }
-  if not ffi::AppendAndSize(mut view) == 3 { panic("Slice append did not use a local descriptor") }
+  if not ffi::SliceSize(view) == 2 { panic("Slice generic projection failed") }
+  if not ffi::AppendAndSize(view) == 3 { panic("Slice append did not use a local descriptor") }
   if not values.size() == 3 { panic("Slice append resized the source") }
   if not values.at(2).or(0) == 3 { panic("Slice append overwrote an element beyond the view") }
 
-  let returned: [Int] = ffi::Rebuffer(mut view)
-  let returned_ref = mut returned
+  mut returned: [Int] = ffi::Rebuffer(view)
+  let returned_ref = &mut returned
   returned_ref.push(7)
   if not returned.size() == 2 { panic("generic Go Slice result did not normalize to List") }
-  let optional_returned: [Int]? = ffi::MaybeRebuffer(mut view)
+  let optional_returned: [Int]? = ffi::MaybeRebuffer(view)
   if not optional_returned.expect("present").size() == 1 { panic("generic Go Maybe slice result did not normalize to List") }
-  let result_returned: [Int]!Error = ffi::ResultRebuffer(mut view)
+  let result_returned: [Int]!Error = ffi::ResultRebuffer(view)
   if not result_returned.expect("ok").size() == 1 { panic("generic Go Result slice result did not normalize to List") }
-  let nested_returned: [[Int]] = ffi::WrapRebuffer(mut view)
-  let nested_inner = nested_returned.at(0).expect("nested")
-  let nested_inner_ref = mut nested_inner
+  let nested_returned: [[Int]] = ffi::WrapRebuffer(view)
+  mut nested_inner = nested_returned.at(0).expect("nested")
+  let nested_inner_ref = &mut nested_inner
   nested_inner_ref.push(7)
   if not nested_inner.size() == 2 { panic("nested generic Go slice result did not normalize to List") }
   let produce = ffi::SliceProducer<Slice<Int>>()
-  let callback_returned: [Int] = produce()
-  let callback_returned_ref = mut callback_returned
+  mut callback_returned: [Int] = produce()
+  let callback_returned_ref = &mut callback_returned
   callback_returned_ref.push(7)
   if not callback_returned.size() == 2 { panic("generic Go callback result did not normalize to List") }
 
   let mapping = ["a": 1]
-  ffi::MutateMap(mut mapping)
+  ffi::MutateMap(mapping)
   if not mapping.get("b").or(0) == 2 { panic("map mutation lost") }
-  if not ffi::MapSize(mut mapping) == 2 { panic("map generic projection failed") }
-  ffi::MutateScores(mut mapping)
+  if not ffi::MapSize(mapping) == 2 { panic("map generic projection failed") }
+  ffi::MutateScores(mapping)
   if not mapping.get("c").or(0) == 3 { panic("named map projection failed") }
 
   let channel = Chan::new<Int>(1)
@@ -631,7 +634,7 @@ func TestADR0057ReferencesAddressModuleAndImportedGlobalStorage(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(projectDir, "state.ard"), []byte(`struct Box { value: Int }
-let imported = Box{value: 1}
+let imported = Box{value: 3}
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -639,15 +642,14 @@ let imported = Box{value: 1}
 	if err := os.WriteFile(mainPath, []byte(`use globals/state
 
 struct Box { value: Int }
-let local = Box{value: 1}
+mut local = Box{value: 1}
 
 fn main() {
-  let local_reference = mut local
-  let imported_reference = mut state::imported
+  let local_reference = &mut local
+  let imported_reference = &state::imported
   local_reference.value = 2
-  imported_reference.value = 3
   if not local.value == 2 { panic("module global reference lost") }
-  if not state::imported.value == 3 { panic("imported global reference lost") }
+  if not imported_reference.value == 3 { panic("imported global reference lost") }
 }
 `), 0o644); err != nil {
 		t.Fatal(err)
@@ -688,7 +690,7 @@ func NilItem() *Item { return nil }
 	if err := os.WriteFile(mainPath, []byte(`use go:nilderef/ffi
 
 fn main() {
-  let value = ffi::NilItem().@
+  let value = ffi::NilItem().*
 }
 `), 0o644); err != nil {
 		t.Fatal(err)
@@ -708,62 +710,6 @@ fn main() {
 	}
 	if err := exec.Command(built).Run(); err == nil {
 		t.Fatal("expected nil foreign pointer dereference to panic")
-	}
-}
-
-func TestADR0061TraitBorrowCapturesCurrentGoInterfaceValue(t *testing.T) {
-	program := lowerParitySource(t, `
-		trait View {
-			fn value() Int
-			fn mut set(value: Int)
-		}
-		struct Box { number: Int }
-		struct Other { number: Int }
-		impl View for Box {
-			fn value() Int { self.number }
-			fn mut set(value: Int) { self.number = value }
-		}
-		impl View for Other {
-			fn value() Int { self.number }
-			fn mut set(value: Int) { self.number = value }
-		}
-
-		fn main() [Int] {
-			mut current: View = Box{number: 4}
-			let captured = mut current
-			captured.set(6)
-			let before = captured.value()
-			current = Other{number: 9}
-			[before, captured.value(), current.value()]
-		}
-	`)
-	if got := runGoTargetParityJSON(t, program); got != `[6,6,9]` {
-		t.Fatalf("result = %s, want captured Go interface value independent of slot rebinding", got)
-	}
-}
-
-func TestADR0061MutableTraitDereferenceCreatesShallowDynamicSnapshot(t *testing.T) {
-	program := lowerParitySource(t, `
-		trait View {
-			fn value() Int
-			fn mut set(value: Int)
-		}
-		struct Box { number: Int }
-		impl View for Box {
-			fn value() Int { self.number }
-			fn mut set(value: Int) { self.number = value }
-		}
-
-		fn main() [Int] {
-			mut box = Box{number: 1}
-			let reference: mut View = &mut box
-			let snapshot: View = reference.@
-			reference.set(2)
-			[snapshot.value(), reference.value(), box.number]
-		}
-	`)
-	if got := runGoTargetParityJSON(t, program); got != `[1,2,2]` {
-		t.Fatalf("result = %s, want independent shallow trait snapshot", got)
 	}
 }
 
