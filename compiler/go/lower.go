@@ -2555,13 +2555,9 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 			return loweredExpr{}, fmt.Errorf("trait upcast is missing its payload")
 		}
 		if l.implRequiresPointerReceiver(payload.Impl) {
-			place, setup, ok, err := l.mutableTraitUpcastPlace(fn, *expr.Target)
-			if err != nil {
-				return loweredExpr{}, err
-			}
-			if ok {
-				return loweredExpr{stmts: setup, expr: &ast.CallExpr{Fun: traitType, Args: []ast.Expr{addressOfPlace(place)}}}, nil
-			}
+			// The Go method set lives on the pointer, so the interface holds a
+			// pointer to a fresh copy. A value source is never aliased: only a
+			// pointer source keeps its identity (ADR 0073).
 			target, err := l.lowerExpr(fn, *expr.Target)
 			if err != nil {
 				return loweredExpr{}, err
@@ -5167,41 +5163,6 @@ func addressOfPlace(place ast.Expr) ast.Expr {
 		return star.X
 	}
 	return &ast.UnaryExpr{Op: token.AND, X: place}
-}
-
-func (l *lowerer) mutableTraitUpcastPlace(fn air.Function, arg air.Expr) (ast.Expr, []ast.Stmt, bool, error) {
-	switch arg.Kind {
-	case air.ExprLoadLocal:
-		payload := arg.LocalPayload()
-		if payload == nil {
-			return nil, nil, false, nil
-		}
-		return l.localAssignExpr(fn, payload.Local), nil, true, nil
-	case air.ExprGetField:
-		if arg.Target == nil || !validTypeID(l.program, arg.Target.Type) {
-			return nil, nil, false, nil
-		}
-		targetPlace, setup, ok, err := l.mutableTraitUpcastPlace(fn, *arg.Target)
-		if err != nil || !ok {
-			return nil, nil, ok, err
-		}
-		targetType := l.program.Types[arg.Target.Type-1]
-		if targetType.Kind == air.TypeReference && validTypeID(l.program, targetType.Elem) {
-			targetType = l.program.Types[targetType.Elem-1]
-		}
-		payload := arg.FieldPayload()
-		if payload == nil || targetType.Kind != air.TypeStruct || payload.Field < 0 || payload.Field >= len(targetType.Fields) {
-			return nil, nil, false, nil
-		}
-		field := targetType.Fields[payload.Field]
-		fieldTarget := ast.Expr(&ast.SelectorExpr{X: targetPlace, Sel: l.ident(l.goFieldName(targetType, field.Name))})
-		if l.isReferenceType(field.Type) {
-			fieldTarget = &ast.StarExpr{X: fieldTarget}
-		}
-		return fieldTarget, setup, true, nil
-	default:
-		return nil, nil, false, nil
-	}
 }
 
 // lowerMutRef lowers one of AIR's explicit reference creation modes. Every
