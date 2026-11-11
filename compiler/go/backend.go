@@ -169,6 +169,12 @@ func RunProgram(program *air.Program, args []string, projectInfo ...*checker.Pro
 }
 
 func BuildProgram(program *air.Program, outputPath string, projectInfo ...*checker.ProjectInfo) (string, error) {
+	return BuildProgramWithStageObserver(program, outputPath, nil, projectInfo...)
+}
+
+// BuildProgramWithStageObserver is BuildProgram reporting each backend stage's
+// duration to observer when it is non-nil.
+func BuildProgramWithStageObserver(program *air.Program, outputPath string, observer StageObserver, projectInfo ...*checker.ProjectInfo) (string, error) {
 	info := optionalProjectInfo(projectInfo)
 	if outputPath == "" {
 		outputPath = "main"
@@ -185,10 +191,12 @@ func BuildProgram(program *air.Program, outputPath string, projectInfo ...*check
 	if err != nil {
 		return "", err
 	}
-	if err := writeProgram(workspaceDir, program, Options{PackageName: "main", ProjectInfo: info}); err != nil {
+	if err := writeProgramWithStageObserver(workspaceDir, program, Options{PackageName: "main", ProjectInfo: info}, observer); err != nil {
 		return "", err
 	}
-	if err := buildGeneratedProgram(workspaceDir, absOutput, goBuildTags(info)...); err != nil {
+	if err := observeStage(observer, "go.compile_link", func() error {
+		return buildGeneratedProgram(workspaceDir, absOutput, goBuildTags(info)...)
+	}); err != nil {
 		return "", err
 	}
 	return absOutput, nil
