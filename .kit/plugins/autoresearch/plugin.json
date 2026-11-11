@@ -1,0 +1,12 @@
+{
+  "$schema": "https://raw.githubusercontent.com/akonwi/kit/main/docs/plugin-protocol/v2/manifest.schema.json",
+  "manifestVersion": 1,
+  "protocolVersion": 2,
+  "id": "autoresearch",
+  "name": "Autoresearch",
+  "transport": {
+    "type": "stdio",
+    "command": "bun",
+    "args": ["plugin.ts"]
+  }
+}
