@@ -151,7 +151,7 @@ func TestGeneratedGoModAvoidsTransitiveModulePathOverlap(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(transitive, "demo.go"), []byte("package demo\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := buildGeneratedProgram(output, filepath.Join(output, "demo-bin")); err != nil {
+	if err := buildGeneratedProgram(output, filepath.Join(output, "demo-bin"), goBuildOptions{}); err != nil {
 		t.Fatalf("build generated module with transitive name collision: %v", err)
 	}
 }
@@ -200,7 +200,7 @@ func TestGeneratedGoModWiresPathDependencyModule(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(output, "main.go"), []byte(mainSource), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := buildGeneratedProgram(output, filepath.Join(output, "consumer-bin")); err != nil {
+	if err := buildGeneratedProgram(output, filepath.Join(output, "consumer-bin"), goBuildOptions{}); err != nil {
 		t.Fatalf("build generated program with path dependency FFI: %v", err)
 	}
 }
@@ -455,7 +455,7 @@ func TestBuildGeneratedProgramUsesConfiguredBuildTags(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "needs_tag.go"), []byte("//go:build !special\n\npackage main\n\nfunc init() { missingSymbol() }\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := buildGeneratedProgram(dir, filepath.Join(dir, "tagged-bin"), "special"); err != nil {
+	if err := buildGeneratedProgram(dir, filepath.Join(dir, "tagged-bin"), goBuildOptions{tags: []string{"special"}}); err != nil {
 		t.Fatalf("buildGeneratedProgram with tag: %v", err)
 	}
 }
@@ -493,7 +493,7 @@ func main() {
 	}
 	t.Setenv("GOFLAGS", "-trimpath '-ldflags=-X main.stamp=from-goflags'")
 	binary := filepath.Join(dir, "flagged-bin")
-	if err := buildGeneratedProgram(dir, binary); err != nil {
+	if err := buildGeneratedProgram(dir, binary, goBuildOptions{}); err != nil {
 		t.Fatalf("buildGeneratedProgram with GOFLAGS: %v", err)
 	}
 	output, err := exec.Command(binary).Output()

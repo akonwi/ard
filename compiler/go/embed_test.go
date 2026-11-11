@@ -148,7 +148,7 @@ func TestWriteProgramStagesEmbeddedBlobs(t *testing.T) {
 	if string(got) != string(content) {
 		t.Fatalf("staged blob = %v, want %v", got, content)
 	}
-	if err := buildGeneratedProgram(out, filepath.Join(out, "embedded-test")); err != nil {
+	if err := buildGeneratedProgram(out, filepath.Join(out, "embedded-test"), goBuildOptions{}); err != nil {
 		t.Fatalf("build generated embedded program: %v", err)
 	}
 }

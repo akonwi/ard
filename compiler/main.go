@@ -284,7 +284,7 @@ Commands:
   check <file.ard>                  Type-check a program
   run <file.ard>                    Run a program
   build <file.ard> [--out <path>] [--release] [--define <name=value>]
-                                      Build a program
+                                      Build a program (--release keeps Go debug sections)
   test [path] [--filter <pattern>]   Run Ard tests
   add <git-source@ref> [as alias]    Add or update a Git dependency and lock it
   update [alias...]                  Update Git dependencies to their latest commit
@@ -1650,7 +1650,7 @@ func buildGoBinaryWithOptions(inputPath string, outputPath string, buildOptions 
 	}
 	if err := profile.Time("go.build", func() error {
 		var buildErr error
-		builtPath, buildErr = gotarget.BuildProgramWithStageObserver(program, outputPath, stageObserver, loaded.ProjectInfo)
+		builtPath, buildErr = gotarget.BuildProgramWithOptions(program, outputPath, gotarget.BuildOptions{Release: buildOptions.Release}, stageObserver, loaded.ProjectInfo)
 		return buildErr
 	}); err != nil {
 		return "", err
