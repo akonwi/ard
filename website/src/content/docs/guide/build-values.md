@@ -77,10 +77,10 @@ Release tooling should collect that metadata and pass it explicitly.
 ## Go toolchain flags
 
 Build values replace linker-stamped metadata such as `-ldflags -X`, which would
-otherwise depend on generated Go names. Packaging options that do not change
-program behavior, such as stripping symbols or removing local paths, belong to
-the Go toolchain. The Go target runs `go build` with the current environment,
-so pass them through `GOFLAGS`:
+otherwise depend on generated Go names. Other packaging options that do not
+change program behavior, such as removing local paths, belong to the Go
+toolchain. The Go target runs `go build` with the current environment, so pass
+them through `GOFLAGS`:
 
 ```sh
 GOFLAGS="-trimpath -ldflags=-s" ard build main.ard \
@@ -89,8 +89,14 @@ GOFLAGS="-trimpath -ldflags=-s" ard build main.ard \
   --out example
 ```
 
-Since Go 1.22, `-s` also omits DWARF debug information, as `-w` does. Quote
-flags whose values contain spaces, for example
+Ard sets one linker default itself: builds without `--release` pass
+`-ldflags=-s -w` to omit the symbol table and DWARF, and `--release` passes
+nothing. Because an explicit `-ldflags` would otherwise replace one from
+`GOFLAGS`, Ard merges them: your `-ldflags` value is kept and `-s -w` is
+appended. Stripping through `GOFLAGS` is therefore only needed for `--release`
+builds, as in the example above.
+
+Quote flags whose values contain spaces, for example
 `GOFLAGS="'-ldflags=-s -w'"`. Setting `GOFLAGS` replaces any value already in
 the environment, so include existing flags when release scripts extend it.
 `GOFLAGS` also applies to `ard run`, `ard test`, and Go package resolution
