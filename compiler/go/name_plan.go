@@ -110,6 +110,39 @@ type topLevelNamePlanner struct {
 	naturalByName        map[string][]plannedNaturalName
 	legacyTypeBase       map[air.TypeID]string
 	legacyTypeBaseCounts map[string]int
+	// legacyModuleNames caches moduleName per module: legacy function and
+	// global names embed it, and computing it scans every module.
+	legacyModuleNames map[air.ModuleID]string
+	// functionNameCounts counts functions per (module, Ard name) so legacy
+	// function names can detect duplicates without rescanning all functions.
+	functionNameCounts map[moduleFunctionName]int
+}
+
+type moduleFunctionName struct {
+	module air.ModuleID
+	name   string
+}
+
+func (p *topLevelNamePlanner) functionNameIsDuplicated(fn air.Function) bool {
+	if p.functionNameCounts == nil {
+		p.functionNameCounts = make(map[moduleFunctionName]int, len(p.program.Functions))
+		for _, other := range p.program.Functions {
+			p.functionNameCounts[moduleFunctionName{other.Module, other.Name}]++
+		}
+	}
+	return p.functionNameCounts[moduleFunctionName{fn.Module, fn.Name}] > 1
+}
+
+func (p *topLevelNamePlanner) legacyModuleName(module air.ModuleID) string {
+	if name, ok := p.legacyModuleNames[module]; ok {
+		return name
+	}
+	name := moduleName(p.program, module)
+	if p.legacyModuleNames == nil {
+		p.legacyModuleNames = map[air.ModuleID]string{}
+	}
+	p.legacyModuleNames[module] = name
+	return name
 }
 
 func newTopLevelNamePlanner(program *air.Program) *topLevelNamePlanner {
@@ -212,7 +245,7 @@ func (p *topLevelNamePlanner) functionName(fn air.Function) string {
 	key := topLevelNameKey{kind: topLevelNameFunction, id: int(fn.ID)}
 	name, ok := p.naturalName(key)
 	if !ok {
-		return legacyFunctionName(p.program, fn)
+		return legacyFunctionNameInModule(fn, p.legacyModuleName(fn.Module), p.functionNameIsDuplicated(fn))
 	}
 	return p.valueNameAlias(key, name)
 }
@@ -221,7 +254,7 @@ func (p *topLevelNamePlanner) globalName(global air.Global) string {
 	key := topLevelNameKey{kind: topLevelNameGlobal, id: int(global.ID)}
 	name, ok := p.naturalName(key)
 	if !ok {
-		return legacyGlobalName(p.program, global)
+		return legacyGlobalNameInModule(global, p.legacyModuleName(global.Module))
 	}
 	return p.valueNameAlias(key, name)
 }

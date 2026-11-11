@@ -46,23 +46,27 @@ type lowerer struct {
 	generatedModulePath      string
 	inlineClosures           map[air.FunctionID]bool
 	goMethodCollisions       map[string]bool
-	functionComparable       map[air.FunctionID]map[string]bool
-	functionModules          map[air.FunctionID]air.ModuleID
-	moduleByPath             map[string]air.ModuleID
-	typeModulePaths          []string
-	typeOwnerModules         []air.ModuleID
-	typeHasOwner             []bool
-	typesByModule            map[air.ModuleID][]*air.TypeInfo
-	ownerlessTypes           []*air.TypeInfo
-	declaredTypes            []bool
-	declaredTypeCounts       map[air.ModuleID]int
-	emitTypeOwnerModules     []air.ModuleID
-	emitTypeHasOwner         []bool
-	suppressMain             bool
-	includeTests             bool
-	useModulePackages        bool
-	forceValueResultReturns  bool
-	namePlan                 *namePlan
+	// memberGoNamesByType caches, per struct or union type, the Go field
+	// names its members occupy, so method-name collision checks do not
+	// recompute every member's identifier per method.
+	memberGoNamesByType     map[air.TypeID]map[string]bool
+	functionComparable      map[air.FunctionID]map[string]bool
+	functionModules         map[air.FunctionID]air.ModuleID
+	moduleByPath            map[string]air.ModuleID
+	typeModulePaths         []string
+	typeOwnerModules        []air.ModuleID
+	typeHasOwner            []bool
+	typesByModule           map[air.ModuleID][]*air.TypeInfo
+	ownerlessTypes          []*air.TypeInfo
+	declaredTypes           []bool
+	declaredTypeCounts      map[air.ModuleID]int
+	emitTypeOwnerModules    []air.ModuleID
+	emitTypeHasOwner        []bool
+	suppressMain            bool
+	includeTests            bool
+	useModulePackages       bool
+	forceValueResultReturns bool
+	namePlan                *namePlan
 
 	// When the entry root lives in a module named `main` (main.ard) that no
 	// other module imports, that module is emitted as the root `package main`
@@ -1707,22 +1711,36 @@ func (l *lowerer) goMethodNameUnavailableOnType(typeID air.TypeID, methodName st
 		if generatedStructReceiverMethodName(methodName) {
 			return true
 		}
-		for _, field := range info.Fields {
-			if l.goFieldName(info, field.Name) == methodName {
-				return true
-			}
-		}
+		return l.memberGoNames(typeID, info)[methodName]
 	case air.TypeUnion:
-		if methodName == unionTagFieldName(info) {
-			return true
-		}
-		for _, member := range info.Members {
-			if unionMemberFieldName(info, member) == methodName {
-				return true
-			}
-		}
+		return l.memberGoNames(typeID, info)[methodName]
 	}
 	return false
+}
+
+// memberGoNames returns the set of Go field names occupied by a struct's
+// fields, or by a union's tag and member fields.
+func (l *lowerer) memberGoNames(typeID air.TypeID, info air.TypeInfo) map[string]bool {
+	if names, ok := l.memberGoNamesByType[typeID]; ok {
+		return names
+	}
+	names := map[string]bool{}
+	switch info.Kind {
+	case air.TypeStruct:
+		for _, field := range info.Fields {
+			names[l.goFieldName(info, field.Name)] = true
+		}
+	case air.TypeUnion:
+		names[unionTagFieldName(info)] = true
+		for _, name := range unionMemberFieldNames(info) {
+			names[name] = true
+		}
+	}
+	if l.memberGoNamesByType == nil {
+		l.memberGoNamesByType = map[air.TypeID]map[string]bool{}
+	}
+	l.memberGoNamesByType[typeID] = names
+	return names
 }
 
 func generatedStructReceiverMethodName(name string) bool {
