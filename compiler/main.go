@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime/pprof"
 	"sort"
 	"strconv"
 	"strings"
@@ -28,6 +29,13 @@ import (
 )
 
 func main() {
+	if path := os.Getenv("ARD_CPU_PROFILE"); path != "" {
+		f, err := os.Create(path)
+		if err == nil {
+			pprof.StartCPUProfile(f)
+			defer pprof.StopCPUProfile()
+		}
+	}
 	if len(os.Args) < 2 {
 		reportCLIError(os.Stderr, fmt.Errorf("expected a command"))
 		fmt.Fprintln(os.Stderr)
@@ -1636,9 +1644,13 @@ func buildGoBinaryWithOptions(inputPath string, outputPath string, buildOptions 
 		}
 	}
 	var builtPath string
+	var stageObserver gotarget.StageObserver
+	if profile != nil {
+		stageObserver = profile.Observe
+	}
 	if err := profile.Time("go.build", func() error {
 		var buildErr error
-		builtPath, buildErr = gotarget.BuildProgram(program, outputPath, loaded.ProjectInfo)
+		builtPath, buildErr = gotarget.BuildProgramWithStageObserver(program, outputPath, stageObserver, loaded.ProjectInfo)
 		return buildErr
 	}); err != nil {
 		return "", err
