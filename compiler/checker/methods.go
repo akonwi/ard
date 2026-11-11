@@ -1,6 +1,10 @@
 package checker
 
-import "github.com/akonwi/ard/parse"
+import (
+	"sync"
+
+	"github.com/akonwi/ard/parse"
+)
 
 type preparedInherentMethod struct {
 	Signature *FunctionDef
@@ -378,36 +382,68 @@ func (p *Program) implementsForeignInterface(owner MethodOwner, iface *ForeignTy
 	return false
 }
 
+// moduleSeenPool recycles the visited-module sets used by the import-graph
+// lookups below. Each lookup visits the whole transitive import graph, so a
+// fresh set per call grew to the module count every time.
+var moduleSeenPool = sync.Pool{
+	New: func() any { return make(map[string]bool) },
+}
+
+func acquireModuleSeen() map[string]bool {
+	return moduleSeenPool.Get().(map[string]bool)
+}
+
+func releaseModuleSeen(seen map[string]bool) {
+	clear(seen)
+	moduleSeenPool.Put(seen)
+}
+
 func StructMethodInModules(modules map[string]Module, owner MethodOwner, name string) (*FunctionDef, bool) {
-	return structMethodInModulesSeen(modules, owner, name, map[string]bool{})
+	seen := acquireModuleSeen()
+	defer releaseModuleSeen(seen)
+	return structMethodInModulesSeen(modules, owner, name, seen)
 }
 
 func StructMethodsInModules(modules map[string]Module, owner MethodOwner) map[string]*FunctionDef {
-	return structMethodsInModulesSeen(modules, owner, map[string]bool{})
+	seen := acquireModuleSeen()
+	defer releaseModuleSeen(seen)
+	return structMethodsInModulesSeen(modules, owner, seen)
 }
 
 func InherentMethodsInModules(modules map[string]Module, owner MethodOwner) map[string]*FunctionDef {
-	return inherentMethodsInModulesSeen(modules, owner, map[string]bool{})
+	seen := acquireModuleSeen()
+	defer releaseModuleSeen(seen)
+	return inherentMethodsInModulesSeen(modules, owner, seen)
 }
 
 func TraitMethodsInModules(modules map[string]Module, owner MethodOwner, trait *Trait) map[string]*FunctionDef {
-	return traitMethodsInModulesSeen(modules, owner, trait, map[string]bool{})
+	seen := acquireModuleSeen()
+	defer releaseModuleSeen(seen)
+	return traitMethodsInModulesSeen(modules, owner, trait, seen)
 }
 
 func AmbiguousTraitMethodInModules(modules map[string]Module, owner MethodOwner, name string) bool {
-	return ambiguousTraitMethodInModulesSeen(modules, owner, name, map[string]bool{})
+	seen := acquireModuleSeen()
+	defer releaseModuleSeen(seen)
+	return ambiguousTraitMethodInModulesSeen(modules, owner, name, seen)
 }
 
 func RequiredGoMethodsInModules(modules map[string]Module, owner MethodOwner) map[string]*FunctionDef {
-	return requiredGoMethodsInModulesSeen(modules, owner, map[string]bool{})
+	seen := acquireModuleSeen()
+	defer releaseModuleSeen(seen)
+	return requiredGoMethodsInModulesSeen(modules, owner, seen)
 }
 
 func StructDefinitionInModules(modules map[string]Module, owner MethodOwner) (*StructDef, bool) {
-	return structDefinitionInModulesSeen(modules, owner, map[string]bool{})
+	seen := acquireModuleSeen()
+	defer releaseModuleSeen(seen)
+	return structDefinitionInModulesSeen(modules, owner, seen)
 }
 
 func foreignInterfaceImplementationInModules(modules map[string]Module, owner MethodOwner, iface *ForeignType) bool {
-	return foreignInterfaceImplementationInModulesSeen(modules, owner, iface, map[string]bool{})
+	seen := acquireModuleSeen()
+	defer releaseModuleSeen(seen)
+	return foreignInterfaceImplementationInModulesSeen(modules, owner, iface, seen)
 }
 
 func foreignInterfaceImplementationInModulesSeen(modules map[string]Module, owner MethodOwner, iface *ForeignType, seen map[string]bool) bool {

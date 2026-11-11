@@ -434,6 +434,18 @@ func releaseTypeTraversalSeen(seen map[Type]struct{}) {
 	typeTraversalSeenPool.Put(seen)
 }
 
+// typeWalkRecurses reports whether t is one of the compound (or type
+// variable) kinds that the recursive type walks descend into. Every other
+// type is a leaf whose walk result does not depend on the cycle guard.
+func typeWalkRecurses(t Type) bool {
+	switch t.(type) {
+	case *TypeVar, *List, *Slice, *FixedArray, *Chan, *Receiver, *Sender, *Map, *Maybe, *Result, *MutableRef, *Union, *ForeignType, *StructDef, *FunctionDef:
+		return true
+	default:
+		return false
+	}
+}
+
 // hasGenericsInType checks if a type contains any generic parameters.
 // Used for quick detection before generic handling.
 func hasGenericsInType(t Type) bool {
@@ -444,6 +456,11 @@ func hasGenericsInType(t Type) bool {
 
 func hasGenericsInTypeSeen(t Type, seen map[Type]struct{}) bool {
 	if t == nil {
+		return false
+	}
+	if !typeWalkRecurses(t) {
+		// Leaf types never contain generics; skipping the cycle guard for
+		// them avoids a map write per primitive operand.
 		return false
 	}
 	if _, ok := seen[t]; ok {
