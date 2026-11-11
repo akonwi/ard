@@ -6811,3 +6811,48 @@ func TestGoflagsLinkerFlags(t *testing.T) {
 		})
 	}
 }
+
+// Anonymous function helpers must be named from stable source facts, not
+// pointer addresses, so an unchanged module generates byte-identical Go and
+// stays a go build cache hit for itself and every package that imports it.
+func TestAnonymousFunctionHelperNamesAreDeterministicAcrossCompiles(t *testing.T) {
+	source := `fn register(name: Str, action: fn() Bool) Str { name }
+
+let keep = register("keep", fn() Bool { true })
+let drop = register("drop", fn() Bool { false })
+
+fn main() {
+  let callbacks = [fn() Int { 1 }, fn() Int { 2 }]
+  callbacks.size()
+}
+`
+	render := func() string {
+		program := lowerSource(t, source)
+		files := lowerProgramAST(t, program, Options{PackageName: "main"})
+		names := make([]string, 0, len(files))
+		for name := range files {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		var out strings.Builder
+		for _, name := range names {
+			rendered, err := renderFile(files[name])
+			if err != nil {
+				t.Fatalf("render %s: %v", name, err)
+			}
+			out.Write(rendered)
+		}
+		return out.String()
+	}
+	first := render()
+	second := render()
+	if first != second {
+		t.Fatalf("generated Go differs between identical compiles:\n--- first\n%s\n--- second\n%s", first, second)
+	}
+	if !strings.Contains(first, "anon_func_") {
+		t.Fatal("expected at least one hoisted anonymous function helper to exercise naming")
+	}
+	if strings.Contains(first, "anon_func_0x") {
+		t.Fatalf("anonymous function names still derive from pointer addresses:\n%s", first)
+	}
+}

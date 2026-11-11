@@ -27,8 +27,8 @@ cd compiler && go run ./internal/compilebench -input <path>/main.ard -reps 5 \
 - Profile allocation as well as CPU. When allocation is high, GC and
   `madvise` dominate the flat profile and only allocating less reduces them.
 - Record the `compilebench` hash before changing anything and require every
-  change to reproduce it. The hash normalises `anon_func_0x…` names (pointer
-  derived, vary per run); fixing that is an output change, not a perf change.
+  change to reproduce it. Generated Go is deterministic, so any hash change is
+  an output change, not a perf change, and needs its own justification.
 - Compare two binaries from the same toolchain, run alternately, and read
   medians. The machine is noisy; a single wall-clock number proves nothing.
 - Use a large real program (the Kit CLI, ~120 files) as the benchmark. The

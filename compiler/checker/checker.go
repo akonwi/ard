@@ -10511,7 +10511,7 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 			returnType := c.resolveReturnTypeWithContext(s.ReturnType, nil)
 
 			// Create function definition
-			uniqueName := fmt.Sprintf("anon_func_%p", s)
+			uniqueName := anonymousFunctionName(s)
 			fn := &FunctionDef{
 				Name:                    uniqueName,
 				CallGenericParams:       []string{},
@@ -12833,7 +12833,7 @@ func (c *Checker) checkExprAsInner(expr parse.Expression, expectedType Type, exp
 			returnType := c.resolveReturnTypeWithContext(s.ReturnType, expectedFnType)
 
 			// Create function definition
-			uniqueName := fmt.Sprintf("anon_func_%p", s)
+			uniqueName := anonymousFunctionName(s)
 			fn := &FunctionDef{
 				Name:                    uniqueName,
 				CallGenericParams:       []string{},
@@ -15227,4 +15227,14 @@ func (c *Checker) wrapAccessorInMatch(subject Expression, innerType Type, proper
 		InnerType:  innerType,
 		ResultType: resultType,
 	}
+}
+
+// anonymousFunctionName names the FunctionDef for an anonymous function from
+// its source position. The name is unique within a module because two
+// anonymous functions cannot start at the same point, and it is stable across
+// compiles, which keeps generated Go byte-identical for unchanged modules so
+// the Go build cache can reuse them. A pointer-derived name would change on
+// every run and invalidate the module and all of its importers.
+func anonymousFunctionName(fn *parse.AnonymousFunction) string {
+	return fmt.Sprintf("anon_func_%d_%d", fn.Start.Row, fn.Start.Col)
 }
