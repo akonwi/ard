@@ -1,6 +1,7 @@
 package gotarget
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/akonwi/ard/air"
@@ -252,6 +253,82 @@ func TestNaturalGoIdentifierUsesVisibility(t *testing.T) {
 	for _, tt := range tests {
 		if got := naturalGoIdentifier(tt.raw, tt.exported); got != tt.want {
 			t.Fatalf("naturalGoIdentifier(%q, %v) = %q, want %q", tt.raw, tt.exported, got, tt.want)
+		}
+	}
+}
+
+// TestUnionMemberFieldNamesResolveCollisionsAgainstEarlierMembersOnly pins
+// the single-pass naming to the original rule: a member takes the smallest
+// suffix that avoids the final names of members before it, and later members
+// never rename earlier ones, including when a suffixed name itself collides
+// with a later member's natural name.
+func TestUnionMemberFieldNamesResolveCollisionsAgainstEarlierMembersOnly(t *testing.T) {
+	typ := air.TypeInfo{Kind: air.TypeUnion, Name: "value", Members: []air.UnionMember{
+		{Type: 1, Tag: 0, Name: "Foo"},
+		{Type: 2, Tag: 1, Name: "foo"},
+		{Type: 3, Tag: 2, Name: "Foo1"},
+		{Type: 4, Tag: 3, Name: "---"},
+		{Type: 5, Tag: 4, Name: "member_4"},
+		{Type: 6, Tag: 5, Name: "ArdTag"},
+	}}
+	want := []string{"Foo", "Foo1", "Foo11", "Member3", "Member4", "ArdTag"}
+	if got := unionMemberFieldNames(typ); !slices.Equal(got, want) {
+		t.Fatalf("unionMemberFieldNames = %v, want %v", got, want)
+	}
+	for i, member := range typ.Members {
+		if got := unionMemberFieldName(typ, member); got != want[i] {
+			t.Errorf("member %d field = %q, want %q", i, got, want[i])
+		}
+	}
+	if got := unionTagFieldName(typ); got != "ArdTag1" {
+		t.Fatalf("union tag field = %q, want ArdTag1", got)
+	}
+	outsider := air.UnionMember{Type: 9, Tag: 9, Name: "foo"}
+	if got := unionMemberFieldName(typ, outsider); got != "Foo2" {
+		t.Fatalf("outsider field = %q, want Foo2", got)
+	}
+}
+
+// TestPlannedLegacyFunctionNamesMatchUnplanned pins the planner's cached
+// module names and duplicate detection to the per-call legacyFunctionName
+// and legacyGlobalName they replace, including a module whose sanitized
+// path collides with another module's and a duplicated function name.
+func TestPlannedLegacyFunctionNamesMatchUnplanned(t *testing.T) {
+	program := &air.Program{
+		Modules: []air.Module{
+			{ID: 0, Path: "app/util.ard"},
+			{ID: 1, Path: "app-util.ard"},
+			{ID: 2, Path: "lib/other.ard"},
+		},
+		Functions: []air.Function{
+			{ID: 0, Module: 0, Name: "anon_func_0x1", Private: true},
+			{ID: 1, Module: 0, Name: "anon_func_0x1", Private: true},
+			{ID: 2, Module: 1, Name: "anon_func_0x2", Private: true},
+			{ID: 3, Module: 2, Name: "anon_func_0x1", Private: true},
+			{ID: 4, Module: 2, Name: "with-receiver", Receiver: 1},
+		},
+		Globals: []air.Global{
+			{ID: 0, Module: 1, Name: "1bad name"},
+			{ID: 1, Module: 2, Name: "ok", Private: true},
+		},
+	}
+	planner := newTopLevelNamePlanner(program)
+	for _, fn := range program.Functions {
+		want := legacyFunctionName(program, fn)
+		if got := planner.functionName(fn); got != want {
+			t.Errorf("function %d: planner=%q unplanned=%q", fn.ID, got, want)
+		}
+	}
+	if got := planner.functionName(program.Functions[0]); got != "app_util_ard_m0__anon_func_0x1_0" {
+		t.Errorf("duplicated legacy function name = %q", got)
+	}
+	if got := planner.functionName(program.Functions[3]); got != "lib_other_ard__anon_func_0x1" {
+		t.Errorf("unique legacy function name = %q", got)
+	}
+	for _, global := range program.Globals {
+		want := legacyGlobalName(program, global)
+		if got := legacyGlobalNameInModule(global, planner.legacyModuleName(global.Module)); got != want {
+			t.Errorf("global %d: cached module name gives %q, unplanned %q", global.ID, got, want)
 		}
 	}
 }

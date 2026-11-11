@@ -5,6 +5,7 @@ import (
 	"go/token"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 	"unicode"
 
@@ -131,7 +132,12 @@ func naturalGlobalName(program *air.Program, global air.Global) (string, bool) {
 }
 
 func legacyGlobalName(program *air.Program, global air.Global) string {
-	moduleName := moduleName(program, global.Module)
+	return legacyGlobalNameInModule(global, moduleName(program, global.Module))
+}
+
+// legacyGlobalNameInModule is legacyGlobalName with the owning module's
+// moduleName already computed.
+func legacyGlobalNameInModule(global air.Global, moduleName string) string {
 	name := sanitizeName(global.Name)
 	if name == "" {
 		name = fmt.Sprintf("global_%d", global.ID)
@@ -166,17 +172,26 @@ func naturalFunctionNameEligible(fn air.Function) bool {
 }
 
 func legacyFunctionName(program *air.Program, fn air.Function) string {
-	moduleName := moduleName(program, fn.Module)
+	return legacyFunctionNameInModule(fn, moduleName(program, fn.Module), functionNameIsDuplicated(program, fn))
+}
+
+// functionNameIsDuplicated reports whether another function in fn's module
+// shares its Ard name, which makes the legacy Go name carry the function ID.
+func functionNameIsDuplicated(program *air.Program, fn air.Function) bool {
+	for _, other := range program.Functions {
+		if other.ID != fn.ID && other.Module == fn.Module && other.Name == fn.Name {
+			return true
+		}
+	}
+	return false
+}
+
+// legacyFunctionNameInModule is legacyFunctionName with the owning module's
+// moduleName and the duplicate-name check already computed.
+func legacyFunctionNameInModule(fn air.Function, moduleName string, duplicate bool) string {
 	suffix := sanitizeName(fn.Name)
 	if suffix == "" {
 		suffix = fmt.Sprintf("fn_%d", fn.ID)
-	}
-	duplicate := false
-	for _, other := range program.Functions {
-		if other.ID != fn.ID && other.Module == fn.Module && other.Name == fn.Name {
-			duplicate = true
-			break
-		}
 	}
 	out := moduleName + "__" + suffix
 	if duplicate {
@@ -612,27 +627,42 @@ func legacyEnumVariantName(program *air.Program, typ air.TypeInfo, variant air.V
 }
 
 func unionTagFieldName(typ air.TypeInfo) string {
+	names := unionMemberFieldNames(typ)
 	base := "ArdTag"
 	candidate := base
-	for i := 1; unionTagFieldNameCollides(typ, candidate); i++ {
+	for i := 1; slices.Contains(names, candidate); i++ {
 		candidate = fmt.Sprintf("%s%d", base, i)
 	}
 	return candidate
 }
 
-func unionTagFieldNameCollides(typ air.TypeInfo, candidate string) bool {
+// unionMemberFieldNames returns the Go field name of every member of a union
+// in member order. A member's name is its natural identifier, suffixed with
+// the smallest positive integer that avoids colliding with an earlier member's
+// final name; later members never influence earlier ones. Computing the names
+// in one pass keeps this linear in the member count.
+func unionMemberFieldNames(typ air.TypeInfo) []string {
+	names := make([]string, 0, len(typ.Members))
 	for _, member := range typ.Members {
-		if unionMemberFieldName(typ, member) == candidate {
-			return true
-		}
+		names = append(names, uniqueUnionMemberFieldName(unionMemberFieldNameBase(member), names))
 	}
-	return false
+	return names
 }
 
 func unionMemberFieldName(typ air.TypeInfo, member air.UnionMember) string {
-	base := unionMemberFieldNameBase(member)
+	names := unionMemberFieldNames(typ)
+	if index := unionMemberIndex(typ, member); index < len(names) {
+		return names[index]
+	}
+	// A member that is not part of the union is named after all of its members.
+	return uniqueUnionMemberFieldName(unionMemberFieldNameBase(member), names)
+}
+
+// uniqueUnionMemberFieldName suffixes base until it differs from every name
+// in earlier.
+func uniqueUnionMemberFieldName(base string, earlier []string) string {
 	candidate := base
-	for i := 1; unionMemberFieldNameCollidesEarlier(typ, member, candidate); i++ {
+	for i := 1; slices.Contains(earlier, candidate); i++ {
 		candidate = fmt.Sprintf("%s%d", base, i)
 	}
 	return candidate
@@ -643,19 +673,6 @@ func unionMemberFieldNameBase(member air.UnionMember) string {
 		return fmt.Sprintf("Member%d", member.Tag)
 	}
 	return naturalGoIdentifier(member.Name, true)
-}
-
-func unionMemberFieldNameCollidesEarlier(typ air.TypeInfo, member air.UnionMember, candidate string) bool {
-	self := unionMemberIndex(typ, member)
-	for i, other := range typ.Members {
-		if i >= self {
-			break
-		}
-		if unionMemberFieldName(typ, other) == candidate {
-			return true
-		}
-	}
-	return false
 }
 
 func unionMemberIndex(typ air.TypeInfo, member air.UnionMember) int {
