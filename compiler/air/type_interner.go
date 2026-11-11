@@ -2,7 +2,6 @@ package air
 
 import (
 	"fmt"
-	"reflect"
 	"sort"
 	"strings"
 
@@ -89,7 +88,7 @@ func (i *typeInterner) internAtomic(t checker.Type, info TypeInfo) (TypeID, erro
 	if id, ok := i.atomic[t]; ok {
 		existing := i.program.Types[id-1]
 		info.ID = id
-		if !reflect.DeepEqual(existing, info) {
+		if !typeInfoEqual(existing, info) {
 			return NoType, fmt.Errorf("conflicting AIR metadata for atomic type %s", info.Name)
 		}
 		return id, nil
@@ -103,7 +102,7 @@ func (i *typeInterner) internTraitObject(trait TraitID, info TypeInfo) (TypeID, 
 	if id, ok := i.traitObjects[trait]; ok {
 		existing := i.program.Types[id-1]
 		info.ID = id
-		if !reflect.DeepEqual(existing, info) {
+		if !typeInfoEqual(existing, info) {
 			return NoType, fmt.Errorf("conflicting AIR metadata for trait object %d", trait)
 		}
 		return id, nil
@@ -117,7 +116,7 @@ func (i *typeInterner) internTypeParam(key typeParamKey, info TypeInfo) (TypeID,
 	if id, ok := i.typeParams[key]; ok {
 		existing := i.program.Types[id-1]
 		info.ID = id
-		if !reflect.DeepEqual(existing, info) {
+		if !typeInfoEqual(existing, info) {
 			return NoType, fmt.Errorf("conflicting AIR metadata for type parameter %q index %d", key.owner, key.index)
 		}
 		return id, nil
@@ -156,7 +155,7 @@ func (i *typeInterner) completeNominal(key nominalTypeKey, info TypeInfo) (TypeI
 	info.ID = entry.id
 	if entry.state == nominalComplete {
 		existing := i.program.Types[entry.id-1]
-		if !reflect.DeepEqual(existing, info) {
+		if !typeInfoEqual(existing, info) {
 			return NoType, fmt.Errorf("conflicting AIR metadata for nominal type %s", info.Name)
 		}
 		return entry.id, nil
