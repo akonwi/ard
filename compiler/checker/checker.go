@@ -77,6 +77,10 @@ func derefTypeSeen(t Type, seen map[Type]struct{}) Type {
 	if t == nil {
 		return nil
 	}
+	if !typeWalkRecurses(t) {
+		// Leaf types have nothing inside to dereference.
+		return t
+	}
 	if _, ok := seen[t]; ok {
 		return t
 	}
@@ -151,15 +155,8 @@ func derefTypeSeen(t Type, seen map[Type]struct{}) Type {
 		}
 		return typ.withOf(derefInner)
 	case *Union:
-		newTypes := make([]Type, len(typ.Types))
-		changed := false
-		for i, t := range typ.Types {
-			newTypes[i] = derefTypeSeen(t, seen)
-			if newTypes[i] != typ.Types[i] {
-				changed = true
-			}
-		}
-		if !changed {
+		newTypes := derefTypesSeen(typ.Types, seen)
+		if newTypes == nil {
 			return typ // No change, return original
 		}
 		return &Union{
@@ -170,52 +167,49 @@ func derefTypeSeen(t Type, seen map[Type]struct{}) Type {
 			Private:     typ.Private,
 		}
 	case *ForeignType:
-		newTypeArgs := make([]Type, len(typ.TypeArgs))
-		changed := false
-		for i, typeArg := range typ.TypeArgs {
-			newTypeArgs[i] = derefTypeSeen(typeArg, seen)
-			if newTypeArgs[i] != typeArg {
-				changed = true
-			}
-		}
-		if !changed {
+		newTypeArgs := derefTypesSeen(typ.TypeArgs, seen)
+		if newTypeArgs == nil {
 			return typ
 		}
 		return foreignTypeWithArgs(typ, newTypeArgs)
 	case *StructDef:
 		if typ.Definition != nil {
-			newTypeArgs := make([]Type, len(typ.TypeArgs))
-			changed := false
-			for i, typeArg := range typ.TypeArgs {
-				newTypeArgs[i] = derefTypeSeen(typeArg, seen)
-				if newTypeArgs[i] != typeArg {
-					changed = true
-				}
-			}
-			if !changed {
+			newTypeArgs := derefTypesSeen(typ.TypeArgs, seen)
+			if newTypeArgs == nil {
 				return typ
 			}
 			return newStructApplication(typ, newTypeArgs)
 		}
-		fieldsChanged := false
-		newFields := make(map[string]Type, len(typ.Fields))
+		// Allocate the rebuilt field map and type arguments only once a
+		// member actually changes; the unchanged case is by far the most
+		// common and used to allocate a full copy every call.
+		var newFields map[string]Type
 		for name, fieldType := range typ.Fields {
 			derefFieldType := derefTypeSeen(fieldType, seen)
+			if newFields == nil {
+				if derefFieldType == fieldType {
+					continue
+				}
+				newFields = make(map[string]Type, len(typ.Fields))
+				for otherName, otherType := range typ.Fields {
+					newFields[otherName] = otherType
+				}
+			}
 			newFields[name] = derefFieldType
-			if derefFieldType != fieldType {
-				fieldsChanged = true
-			}
 		}
-		newTypeArgs := make([]Type, len(typ.TypeArgs))
-		typeArgsChanged := false
-		for i, typeArg := range typ.TypeArgs {
-			newTypeArgs[i] = derefTypeSeen(typeArg, seen)
-			if newTypeArgs[i] != typeArg {
-				typeArgsChanged = true
-			}
-		}
-		if !fieldsChanged && !typeArgsChanged {
+		newTypeArgs := derefTypesSeen(typ.TypeArgs, seen)
+		if newFields == nil && newTypeArgs == nil {
 			return typ
+		}
+		if newFields == nil {
+			newFields = make(map[string]Type, len(typ.Fields))
+			for name, fieldType := range typ.Fields {
+				newFields[name] = fieldType
+			}
+		}
+		if newTypeArgs == nil {
+			newTypeArgs = make([]Type, len(typ.TypeArgs))
+			copy(newTypeArgs, typ.TypeArgs)
 		}
 		return &StructDef{
 			Name:             typ.Name,
@@ -232,20 +226,26 @@ func derefTypeSeen(t Type, seen map[Type]struct{}) Type {
 			Private:          typ.Private,
 		}
 	case *FunctionDef:
-		newParams := make([]Parameter, len(typ.Parameters))
-		paramsChanged := false
+		var newParams []Parameter
 		for i, param := range typ.Parameters {
 			derefParamType := derefTypeSeen(param.Type, seen)
-			newParams[i] = param
-			newParams[i].Type = derefParamType
-			if derefParamType != param.Type {
-				paramsChanged = true
+			if newParams == nil {
+				if derefParamType == param.Type {
+					continue
+				}
+				newParams = make([]Parameter, len(typ.Parameters))
+				copy(newParams, typ.Parameters)
 			}
+			newParams[i].Type = derefParamType
 		}
 		derefReturnType := derefTypeSeen(typ.ReturnType, seen)
 		returnChanged := derefReturnType != typ.ReturnType
-		if !paramsChanged && !returnChanged {
+		if newParams == nil && !returnChanged {
 			return typ // No change, return original
+		}
+		if newParams == nil {
+			newParams = make([]Parameter, len(typ.Parameters))
+			copy(newParams, typ.Parameters)
 		}
 		return &FunctionDef{
 			Name:                    typ.Name,
@@ -267,6 +267,25 @@ func derefTypeSeen(t Type, seen map[Type]struct{}) Type {
 	default:
 		return t
 	}
+}
+
+// derefTypesSeen dereferences every element of types with derefTypeSeen and
+// returns the rebuilt slice, or nil when no element changed. The copy is
+// allocated only on the first change.
+func derefTypesSeen(types []Type, seen map[Type]struct{}) []Type {
+	var result []Type
+	for i, t := range types {
+		derefInner := derefTypeSeen(t, seen)
+		if result == nil {
+			if derefInner == t {
+				continue
+			}
+			result = make([]Type, len(types))
+			copy(result, types)
+		}
+		result[i] = derefInner
+	}
+	return result
 }
 
 // referenceArgType returns the type used when matching an argument against a
@@ -6074,6 +6093,15 @@ func (c *Checker) primeGoResolver() {
 		// omitted resolver rather than panicking during import resolution.
 		c.options.GoResolver = nil
 	} else if c.options.GoResolver != nil && !ok {
+		return
+	}
+	if resolver != nil && resolver.primed {
+		// Imported modules are checked with the root's resolver, which the
+		// root already primed with the whole program's Go import closure.
+		// Priming is one-shot, so a second Prime call could only report a
+		// coverage gap that the import-resolution pass reports anyway;
+		// skipping the pre-scan avoids rescanning the import graph once per
+		// module.
 		return
 	}
 	paths := CollectGoImportPaths(c.moduleResolver, GoImportScanEntry{Program: c.input, ModulePath: c.modulePath})
@@ -14133,8 +14161,10 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 		// Get the expected parameter type from the copy (which has fresh TypeVar instances for generics).
 		// For generic functions, dereference to see bound generics from previous arguments.
 		// derefType walks the type tree so List($T) becomes List(Int) if $T was bound to Int.
+		// genericScope is nil for non-generic callees; testing it first skips
+		// the type walk in hasGenerics, which is pure, for the common case.
 		paramType := fnDefCopy.Parameters[i].Type
-		if fnDef.hasGenerics() && genericScope != nil {
+		if genericScope != nil && fnDef.hasGenerics() {
 			paramType = derefType(paramType)
 		}
 
@@ -14339,7 +14369,7 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 		// unifyTypes uses deref() to see bound generics and calls bindGeneric()
 		// to mutate TypeVar instances in-place. This binds generics so that
 		// subsequent arguments see bound types.
-		if fnDef.hasGenerics() && genericScope != nil {
+		if genericScope != nil && fnDef.hasGenerics() {
 			discardCoerced := false
 			if target, source, ok := discardingFunctionTypes(paramType, checkedArg.Type()); ok {
 				for paramIndex := range target.Parameters {
@@ -14410,7 +14440,7 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 	for i := range allExprs {
 		if allExprs[i] == nil {
 			paramType := fnDefCopy.Parameters[i].Type
-			if fnDef.hasGenerics() && genericScope != nil {
+			if genericScope != nil && fnDef.hasGenerics() {
 				paramType = derefType(paramType)
 			}
 			allExprs[i] = c.synthesizeMaybeNone(paramType)

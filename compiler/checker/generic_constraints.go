@@ -37,11 +37,13 @@ type comparableBindingRequirement struct {
 	impossible bool
 }
 
+// comparableGenericNames returns the generic parameter names in t that must
+// be comparable; the result is nil when t has no generics.
 func comparableGenericNames(t Type, requireComparable bool) map[string]bool {
-	result := map[string]bool{}
 	if t == nil || !hasGenericsInType(t) {
-		return result
+		return nil
 	}
+	result := map[string]bool{}
 	collectComparableGenericNames(t, requireComparable, map[comparableTypeVisit]bool{}, result, true)
 	return result
 }
