@@ -178,10 +178,12 @@ func NewLexer(source []byte) *lexer {
 	return &lexer{
 		source:     source,
 		lineStarts: sourceLineStarts(source),
-		tokens:     []token{},
-		cursor:     0,
-		line:       1,
-		column:     1,
+		// Ard source averages roughly 4.5 bytes per token; sizing the slice up
+		// front avoids the repeated doubling copies of a large token stream.
+		tokens: make([]token, 0, len(source)/4+1),
+		cursor: 0,
+		line:   1,
+		column: 1,
 	}
 }
 
