@@ -17,7 +17,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"runtime/pprof"
 	"sort"
@@ -27,8 +26,6 @@ import (
 	"github.com/akonwi/ard/frontend"
 	gotarget "github.com/akonwi/ard/go"
 )
-
-var anonFuncPattern = regexp.MustCompile(`anon_func_0x[0-9a-f]+`)
 
 type stageTimes struct {
 	load, lower, validate, generate time.Duration
@@ -180,7 +177,7 @@ func hashSources(sources map[string][]byte) string {
 	for _, name := range names {
 		h.Write([]byte(name))
 		h.Write([]byte{0})
-		h.Write(anonFuncPattern.ReplaceAll(sources[name], []byte("anon_func_X")))
+		h.Write(sources[name])
 		h.Write([]byte{0})
 	}
 	return hex.EncodeToString(h.Sum(nil))
