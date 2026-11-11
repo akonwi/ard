@@ -4177,7 +4177,7 @@ func normalizeReflectValue(v reflect.Value) any {
 		t.Fatalf("write go.mod: %v", err)
 	}
 	binaryPath := filepath.Join(tempDir, "parity-bin")
-	if err := buildGeneratedProgram(tempDir, binaryPath); err != nil {
+	if err := buildGeneratedProgram(tempDir, binaryPath, goBuildOptions{}); err != nil {
 		t.Fatalf("build generated program: %v", err)
 	}
 	cmd := exec.Command(binaryPath)
@@ -4209,7 +4209,7 @@ func runGoTargetSourceStdout(t *testing.T, input string) string {
 		t.Fatalf("write go.mod: %v", err)
 	}
 	binaryPath := filepath.Join(tempDir, "stdout-bin")
-	if err := buildGeneratedProgram(tempDir, binaryPath); err != nil {
+	if err := buildGeneratedProgram(tempDir, binaryPath, goBuildOptions{}); err != nil {
 		t.Fatalf("build generated program: %v", err)
 	}
 	cmd := exec.Command(binaryPath)

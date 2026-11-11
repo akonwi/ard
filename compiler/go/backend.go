@@ -158,7 +158,7 @@ func RunProgram(program *air.Program, args []string, projectInfo ...*checker.Pro
 	if err := os.MkdirAll(filepath.Dir(binaryPath), 0o755); err != nil {
 		return err
 	}
-	if err := buildGeneratedProgram(workspaceDir, binaryPath, goBuildTags(info)...); err != nil {
+	if err := buildGeneratedProgram(workspaceDir, binaryPath, goBuildOptionsFor(info, false)); err != nil {
 		return err
 	}
 	cmd := exec.Command(binaryPath, programArgs(args)...)
@@ -169,12 +169,26 @@ func RunProgram(program *air.Program, args []string, projectInfo ...*checker.Pro
 }
 
 func BuildProgram(program *air.Program, outputPath string, projectInfo ...*checker.ProjectInfo) (string, error) {
-	return BuildProgramWithStageObserver(program, outputPath, nil, projectInfo...)
+	return BuildProgramWithOptions(program, outputPath, BuildOptions{}, nil, projectInfo...)
 }
 
 // BuildProgramWithStageObserver is BuildProgram reporting each backend stage's
 // duration to observer when it is non-nil.
 func BuildProgramWithStageObserver(program *air.Program, outputPath string, observer StageObserver, projectInfo ...*checker.ProjectInfo) (string, error) {
+	return BuildProgramWithOptions(program, outputPath, BuildOptions{}, observer, projectInfo...)
+}
+
+// BuildOptions controls how BuildProgramWithOptions compiles the generated Go
+// program.
+type BuildOptions struct {
+	// Release keeps DWARF and the symbol table in the output binary so external
+	// tools can symbolise it. Development builds strip both for faster linking.
+	Release bool
+}
+
+// BuildProgramWithOptions is BuildProgram honouring options and reporting each
+// backend stage's duration to observer when it is non-nil.
+func BuildProgramWithOptions(program *air.Program, outputPath string, options BuildOptions, observer StageObserver, projectInfo ...*checker.ProjectInfo) (string, error) {
 	info := optionalProjectInfo(projectInfo)
 	if outputPath == "" {
 		outputPath = "main"
@@ -195,7 +209,7 @@ func BuildProgramWithStageObserver(program *air.Program, outputPath string, obse
 		return "", err
 	}
 	if err := observeStage(observer, "go.compile_link", func() error {
-		return buildGeneratedProgram(workspaceDir, absOutput, goBuildTags(info)...)
+		return buildGeneratedProgram(workspaceDir, absOutput, goBuildOptionsFor(info, options.Release))
 	}); err != nil {
 		return "", err
 	}
@@ -227,7 +241,7 @@ func RunTestsWithStageObserver(program *air.Program, args []string, tests []Test
 	}
 	binaryPath := filepath.Join(workspaceDir, "ard-tests")
 	if err := observeStage(observer, "go.compile_link", func() error {
-		return buildGeneratedProgram(workspaceDir, binaryPath, goBuildTags(info)...)
+		return buildGeneratedProgram(workspaceDir, binaryPath, goBuildOptionsFor(info, false))
 	}); err != nil {
 		return nil, err
 	}
@@ -1369,24 +1383,122 @@ func writeGeneratedRuntimePackage(dir string) error {
 	return nil
 }
 
-func buildGeneratedProgram(dir string, outputPath string, buildTags ...string) error {
+// goBuildOptions controls how the generated Go workspace is compiled and linked.
+type goBuildOptions struct {
+	tags []string
+	// release keeps DWARF and the symbol table in the output binary. Development
+	// builds strip both: Go's own runtime tables (pclntab) still give panics,
+	// runtime.Caller and pprof full file:line information, and the only thing lost
+	// is source-level debugging of the generated Go, which is an intermediate
+	// artifact nobody debugs directly. Dropping them cuts link time by more than
+	// half on large programs because the linker no longer has to merge and
+	// compress every package's DWARF.
+	release bool
+	// goflags is the effective GOFLAGS value the go tool would apply. An explicit
+	// -ldflags on the command line replaces, rather than extends, one from
+	// GOFLAGS, so any linker flags found here are carried into ours.
+	goflags string
+}
+
+const stripDebugLinkFlags = "-s -w"
+
+// goBuildArgs is the argument list passed to the go tool for opts.
+func goBuildArgs(outputPath string, opts goBuildOptions) []string {
 	args := []string{"build", "-mod=mod", "-o", outputPath}
-	if len(buildTags) > 0 {
-		args = append(args, "-tags="+strings.Join(buildTags, ","))
+	if len(opts.tags) > 0 {
+		args = append(args, "-tags="+strings.Join(opts.tags, ","))
 	}
-	args = append(args, ".")
-	cmd := exec.Command("go", args...)
+	if !opts.release {
+		ldflags := stripDebugLinkFlags
+		if inherited := goflagsLinkerFlags(opts.goflags); inherited != "" {
+			ldflags = inherited + " " + ldflags
+		}
+		args = append(args, "-ldflags="+ldflags)
+	}
+	return append(args, ".")
+}
+
+// goflagsLinkerFlags returns the value of the last -ldflags entry in a GOFLAGS
+// string, or "" when there is none.
+func goflagsLinkerFlags(goflags string) string {
+	fields := splitGoflags(goflags)
+	value := ""
+	for i := 0; i < len(fields); i++ {
+		field := fields[i]
+		switch {
+		case strings.HasPrefix(field, "-ldflags="):
+			value = strings.TrimPrefix(field, "-ldflags=")
+		case field == "-ldflags" && i+1 < len(fields):
+			i++
+			value = fields[i]
+		}
+	}
+	return value
+}
+
+// splitGoflags splits a GOFLAGS value the way the go tool does: fields are
+// separated by whitespace, and a field starting with a single or double quote
+// extends to the matching quote with no escape sequences.
+func splitGoflags(goflags string) []string {
+	var fields []string
+	rest := goflags
+	for {
+		rest = strings.TrimLeft(rest, " \t\n\r")
+		if rest == "" {
+			return fields
+		}
+		if quote := rest[0]; quote == '\'' || quote == '"' {
+			end := strings.IndexByte(rest[1:], quote)
+			if end < 0 {
+				return append(fields, rest[1:])
+			}
+			fields = append(fields, rest[1:1+end])
+			rest = rest[2+end:]
+			continue
+		}
+		end := strings.IndexAny(rest, " \t\n\r")
+		if end < 0 {
+			return append(fields, rest)
+		}
+		fields = append(fields, rest[:end])
+		rest = rest[end:]
+	}
+}
+
+func buildGeneratedProgram(dir string, outputPath string, opts goBuildOptions) error {
+	if !opts.release {
+		goflags, err := effectiveGoflags(dir)
+		if err != nil {
+			return err
+		}
+		opts.goflags = goflags
+	}
+	cmd := exec.Command("go", goBuildArgs(outputPath, opts)...)
 	cmd.Dir = dir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
 }
 
-func goBuildTags(projectInfo *checker.ProjectInfo) []string {
-	if projectInfo == nil || len(projectInfo.Go.BuildTags) == 0 {
-		return nil
+// effectiveGoflags asks the go tool for the GOFLAGS it will apply, which
+// combines the environment with any value stored by `go env -w`.
+func effectiveGoflags(dir string) (string, error) {
+	cmd := exec.Command("go", "env", "GOFLAGS")
+	cmd.Dir = dir
+	cmd.Stderr = os.Stderr
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("read GOFLAGS: %w", err)
 	}
-	return append([]string(nil), projectInfo.Go.BuildTags...)
+	return strings.TrimSpace(string(out)), nil
+}
+
+func goBuildOptionsFor(projectInfo *checker.ProjectInfo, release bool) goBuildOptions {
+	opts := goBuildOptions{release: release}
+	if projectInfo != nil && len(projectInfo.Go.BuildTags) > 0 {
+		opts.tags = append([]string(nil), projectInfo.Go.BuildTags...)
+	}
+	return opts
 }
 
 func programArgs(args []string) []string {

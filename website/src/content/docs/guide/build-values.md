@@ -63,8 +63,13 @@ ard build main.ard --release --define version=v1.2.3
 ```
 
 The default does not satisfy this requirement, even when the value is unused.
-An explicit override equal to the default does satisfy it. `--release` only
-enforces this policy; it does not change optimization or target settings.
+An explicit override equal to the default does satisfy it.
+
+`--release` also keeps the Go debug sections (DWARF and the symbol table) in
+the output binary so external tools can symbolise it. Development builds strip
+them for faster linking; panic traces, `runtime.Caller` and profiles are
+unaffected either way because Go reads those from its own runtime tables.
+`--release` does not change optimization or target settings.
 
 Ard does not inspect environment variables, Git state, timestamps, or hostnames.
 Release tooling should collect that metadata and pass it explicitly.

@@ -7,6 +7,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -5386,7 +5387,7 @@ func buildProgramFromGeneratedSources(t *testing.T, program *air.Program, output
 	if err := os.WriteFile(filepath.Join(tempDir, "go.mod"), []byte(goMod), 0o644); err != nil {
 		t.Fatalf("write go.mod: %v", err)
 	}
-	if err := buildGeneratedProgram(tempDir, filepath.Join(tempDir, outputName)); err != nil {
+	if err := buildGeneratedProgram(tempDir, filepath.Join(tempDir, outputName), goBuildOptions{}); err != nil {
 		t.Fatalf("build generated program: %v", err)
 	}
 }
@@ -5523,7 +5524,7 @@ func TestTestRunnerImportAliasAvoidsRunnerLocalNames(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "ard_tests.go"), []byte(runner), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := buildGeneratedProgram(dir, filepath.Join(dir, "ard-tests")); err != nil {
+	if err := buildGeneratedProgram(dir, filepath.Join(dir, "ard-tests"), goBuildOptions{}); err != nil {
 		t.Fatalf("build test runner with a module matching a runner local: %v\n%s", err, runner)
 	}
 }
@@ -6743,5 +6744,70 @@ func TestUnionDeclsCarryOnlyMarshalJSON(t *testing.T) {
 	}
 	if strings.Contains(unionFile, "UnmarshalJSON") {
 		t.Fatal("unions must not carry UnmarshalJSON (decoding into a union is ambiguous)")
+	}
+}
+
+func TestGoBuildArgsStripDebugInfoUnlessRelease(t *testing.T) {
+	tests := []struct {
+		name string
+		opts goBuildOptions
+		want []string
+	}{
+		{
+			name: "development builds drop DWARF and the symbol table",
+			opts: goBuildOptions{},
+			want: []string{"build", "-mod=mod", "-o", "out/app", "-ldflags=-s -w", "."},
+		},
+		{
+			name: "release builds keep debug sections",
+			opts: goBuildOptions{release: true},
+			want: []string{"build", "-mod=mod", "-o", "out/app", "."},
+		},
+		{
+			name: "build tags are forwarded alongside link flags",
+			opts: goBuildOptions{tags: []string{"foo", "bar"}},
+			want: []string{"build", "-mod=mod", "-o", "out/app", "-tags=foo,bar", "-ldflags=-s -w", "."},
+		},
+		{
+			name: "linker flags from GOFLAGS are kept because an explicit -ldflags would replace them",
+			opts: goBuildOptions{goflags: "-trimpath '-ldflags=-X main.stamp=v1'"},
+			want: []string{"build", "-mod=mod", "-o", "out/app", "-ldflags=-X main.stamp=v1 -s -w", "."},
+		},
+		{
+			name: "release builds leave GOFLAGS to the go tool",
+			opts: goBuildOptions{release: true, goflags: "-ldflags=-X main.stamp=v1"},
+			want: []string{"build", "-mod=mod", "-o", "out/app", "."},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := goBuildArgs("out/app", tt.opts)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("goBuildArgs() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestGoflagsLinkerFlags(t *testing.T) {
+	tests := []struct {
+		goflags string
+		want    string
+	}{
+		{goflags: "", want: ""},
+		{goflags: "-trimpath -mod=vendor", want: ""},
+		{goflags: "-ldflags=-w", want: "-w"},
+		{goflags: "-ldflags -w", want: "-w"},
+		{goflags: `-trimpath '-ldflags=-X main.a=1 -X main.b=2' -race`, want: "-X main.a=1 -X main.b=2"},
+		{goflags: `"-ldflags=-X main.a=with space"`, want: "-X main.a=with space"},
+		{goflags: `'-ldflags=-X main.a=1' '-ldflags=-X main.a=2'`, want: "-X main.a=2"},
+		{goflags: "-ldflags=", want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.goflags, func(t *testing.T) {
+			if got := goflagsLinkerFlags(tt.goflags); got != tt.want {
+				t.Fatalf("goflagsLinkerFlags(%q) = %q, want %q", tt.goflags, got, tt.want)
+			}
+		})
 	}
 }
