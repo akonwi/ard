@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/akonwi/ard/checker"
 )
@@ -78,20 +79,27 @@ type lowerer struct {
 	inherentMethodsByOwner   map[checker.MethodOwner]map[string]*checker.FunctionDef
 	unresolvedTypeVarByType  map[checker.Type]bool
 
-	loweringModules     map[string]bool
-	loweredModules      map[string]bool
-	loweringFuncs       map[FunctionID]bool
-	loweredFuncs        map[FunctionID]bool
-	loweringGlobals     map[GlobalID]bool
-	loweredGlobals      map[GlobalID]bool
-	functionTypeVars    map[FunctionID]map[string]TypeID
-	genericStructDefs   map[string]TypeID
-	genericFunctionDefs map[string]FunctionID
-	genericMethodDefs   map[string]FunctionID
-	localNamedFunctions map[*checker.FunctionDef]FunctionID
-	defParams           map[string]int
-	defParamOwner       string
-	includeTests        bool
+	loweringModules map[string]bool
+	loweredModules  map[string]bool
+	loweringFuncs   map[FunctionID]bool
+	loweredFuncs    map[FunctionID]bool
+	// traitImplsDeclared records modules whose ensureModuleTraitImplsDeclared
+	// pass ran to completion, so later demands skip the (idempotent) rescan.
+	traitImplsDeclared map[string]bool
+	// sortedImportsByProgram caches each checked program's imports in
+	// lowering order. Import maps are immutable once checking finishes, and
+	// the import graph is walked once per method demand.
+	sortedImportsByProgram map[*checker.Program][]checker.Module
+	loweringGlobals        map[GlobalID]bool
+	loweredGlobals         map[GlobalID]bool
+	functionTypeVars       map[FunctionID]map[string]TypeID
+	genericStructDefs      map[string]TypeID
+	genericFunctionDefs    map[string]FunctionID
+	genericMethodDefs      map[string]FunctionID
+	localNamedFunctions    map[*checker.FunctionDef]FunctionID
+	defParams              map[string]int
+	defParamOwner          string
+	includeTests           bool
 }
 
 type functionLowerer struct {
@@ -126,18 +134,20 @@ func newLowerer(options LowerOptions, rootCount int) *lowerer {
 		cacheMethodLookups:      rootCount == 1,
 		unresolvedTypeVarByType: map[checker.Type]bool{},
 
-		loweringModules:     map[string]bool{},
-		loweredModules:      map[string]bool{},
-		loweringFuncs:       map[FunctionID]bool{},
-		loweredFuncs:        map[FunctionID]bool{},
-		loweringGlobals:     map[GlobalID]bool{},
-		loweredGlobals:      map[GlobalID]bool{},
-		functionTypeVars:    map[FunctionID]map[string]TypeID{},
-		genericStructDefs:   map[string]TypeID{},
-		genericFunctionDefs: map[string]FunctionID{},
-		genericMethodDefs:   map[string]FunctionID{},
-		localNamedFunctions: map[*checker.FunctionDef]FunctionID{},
-		includeTests:        options.IncludeTests,
+		loweringModules:        map[string]bool{},
+		loweredModules:         map[string]bool{},
+		loweringFuncs:          map[FunctionID]bool{},
+		loweredFuncs:           map[FunctionID]bool{},
+		traitImplsDeclared:     map[string]bool{},
+		sortedImportsByProgram: map[*checker.Program][]checker.Module{},
+		loweringGlobals:        map[GlobalID]bool{},
+		loweredGlobals:         map[GlobalID]bool{},
+		functionTypeVars:       map[FunctionID]map[string]TypeID{},
+		genericStructDefs:      map[string]TypeID{},
+		genericFunctionDefs:    map[string]FunctionID{},
+		genericMethodDefs:      map[string]FunctionID{},
+		localNamedFunctions:    map[*checker.FunctionDef]FunctionID{},
+		includeTests:           options.IncludeTests,
 	}
 	l.typeInterner = newTypeInterner(&l.program)
 	if l.cacheMethodLookups {
@@ -369,7 +379,7 @@ func (l *lowerer) lowerModule(module checker.Module) error {
 		return nil
 	}
 
-	for _, imported := range sortedModules(prog.Imports) {
+	for _, imported := range l.sortedImports(prog) {
 		l.moduleByName[imported.Path()] = imported
 		importID := l.internModule(imported.Path())
 		mod.Imports = append(mod.Imports, importID)
@@ -926,8 +936,15 @@ type typeVarBindingVisit struct {
 	actual  TypeID
 }
 
+var typeVarBindingSeenPool = sync.Pool{
+	New: func() any { return make(map[typeVarBindingVisit]struct{}) },
+}
+
 func (fl *functionLowerer) bindTypeVars(pattern checker.Type, actual TypeID) {
-	fl.bindTypeVarsSeen(pattern, actual, map[typeVarBindingVisit]struct{}{})
+	seen := typeVarBindingSeenPool.Get().(map[typeVarBindingVisit]struct{})
+	fl.bindTypeVarsSeen(pattern, actual, seen)
+	clear(seen)
+	typeVarBindingSeenPool.Put(seen)
 }
 
 func (fl *functionLowerer) bindTypeVarsSeen(pattern checker.Type, actual TypeID, seen map[typeVarBindingVisit]struct{}) {
@@ -2607,7 +2624,9 @@ func functionHasUnresolvedTypeVar(def *checker.FunctionDef) bool {
 			return true
 		}
 	}
-	return typeHasUnresolvedTypeVarSeen(def, map[checker.Type]struct{}{})
+	seen := acquireTypeTraversalSeen()
+	defer releaseTypeTraversalSeen(seen)
+	return typeHasUnresolvedTypeVarSeen(def, seen)
 }
 
 func functionSignatureHasUnresolvedTypeVarSeen(def *checker.FunctionDef, seen map[checker.Type]struct{}) bool {
@@ -2634,8 +2653,26 @@ func functionHasTypeVar(def *checker.FunctionDef) bool {
 	return typeContainsTypeVar(def.ReturnType)
 }
 
+// typeTraversalSeenPool recycles the cycle-guard sets used by the type
+// walks below; a walk is short-lived and visits few types, so a fresh map
+// per call was almost pure allocation.
+var typeTraversalSeenPool = sync.Pool{
+	New: func() any { return make(map[checker.Type]struct{}) },
+}
+
+func acquireTypeTraversalSeen() map[checker.Type]struct{} {
+	return typeTraversalSeenPool.Get().(map[checker.Type]struct{})
+}
+
+func releaseTypeTraversalSeen(seen map[checker.Type]struct{}) {
+	clear(seen)
+	typeTraversalSeenPool.Put(seen)
+}
+
 func typeContainsTypeVar(t checker.Type) bool {
-	return typeContainsTypeVarSeen(t, map[checker.Type]struct{}{})
+	seen := acquireTypeTraversalSeen()
+	defer releaseTypeTraversalSeen(seen)
+	return typeContainsTypeVarSeen(t, seen)
 }
 
 func typeContainsTypeVarSeen(t checker.Type, seen map[checker.Type]struct{}) bool {
@@ -2708,7 +2745,9 @@ func typeContainsTypeVarSeen(t checker.Type, seen map[checker.Type]struct{}) boo
 }
 
 func typeHasUnresolvedTypeVar(t checker.Type) bool {
-	return typeHasUnresolvedTypeVarSeen(t, map[checker.Type]struct{}{})
+	seen := acquireTypeTraversalSeen()
+	defer releaseTypeTraversalSeen(seen)
+	return typeHasUnresolvedTypeVarSeen(t, seen)
 }
 
 func typeHasUnresolvedTypeVarSeen(t checker.Type, seen map[checker.Type]struct{}) bool {
@@ -6050,7 +6089,7 @@ func (l *lowerer) ensureModuleImportTraitImplsDeclared(moduleID ModuleID) error 
 	if !ok || mod.Program() == nil {
 		return nil
 	}
-	for _, imported := range sortedModules(mod.Program().Imports) {
+	for _, imported := range l.sortedImports(mod.Program()) {
 		importedID := l.internModule(imported.Path())
 		l.program.Modules[moduleID].Imports = appendUniqueModule(l.program.Modules[moduleID].Imports, importedID)
 		if err := l.ensureModuleTraitImplsDeclaredRecursive(imported.Path(), map[string]bool{}); err != nil {
@@ -6072,7 +6111,7 @@ func (l *lowerer) ensureModuleTraitImplsDeclaredRecursive(modulePath string, see
 	if !ok || mod.Program() == nil {
 		return nil
 	}
-	for _, imported := range sortedModules(mod.Program().Imports) {
+	for _, imported := range l.sortedImports(mod.Program()) {
 		if err := l.ensureModuleTraitImplsDeclaredRecursive(imported.Path(), seen); err != nil {
 			return err
 		}
@@ -6080,7 +6119,19 @@ func (l *lowerer) ensureModuleTraitImplsDeclaredRecursive(modulePath string, see
 	return nil
 }
 
+// ensureModuleTraitImplsDeclared declares every trait impl and inherent
+// method of the module's types and lowers their bodies. Expression lowering
+// demands this for any module whose methods it references, so it runs many
+// times per module; every declaration it makes is keyed and deduplicated, and
+// every body it lowers is memoized, so once a pass has completed the module
+// is fully declared and later demands return immediately. The memo is set
+// only after a successful complete pass: a pass that is re-entered while
+// still running (a method body demanding its own module) still rescans,
+// which keeps declaration order, and therefore AIR IDs, unchanged.
 func (l *lowerer) ensureModuleTraitImplsDeclared(modulePath string) error {
+	if l.traitImplsDeclared[modulePath] {
+		return nil
+	}
 	if err := l.ensureModuleGlobalsDeclared(modulePath); err != nil {
 		return err
 	}
@@ -6114,6 +6165,7 @@ func (l *lowerer) ensureModuleTraitImplsDeclared(modulePath string) error {
 			}
 		}
 	}
+	l.traitImplsDeclared[modulePath] = true
 	return nil
 }
 
@@ -6124,7 +6176,7 @@ func (l *lowerer) ensureModuleTypesDeclared(modulePath string) error {
 	}
 	modID := l.internModule(modulePath)
 	prog := mod.Program()
-	for _, imported := range sortedModules(prog.Imports) {
+	for _, imported := range l.sortedImports(prog) {
 		l.moduleByName[imported.Path()] = imported
 		importedID := l.internModule(imported.Path())
 		l.program.Modules[modID].Imports = appendUniqueModule(l.program.Modules[modID].Imports, importedID)
@@ -6173,7 +6225,7 @@ func (l *lowerer) ensureModuleGlobalsDeclared(modulePath string) error {
 	}
 	modID := l.internModule(modulePath)
 	prog := mod.Program()
-	for _, imported := range sortedModules(prog.Imports) {
+	for _, imported := range l.sortedImports(prog) {
 		l.moduleByName[imported.Path()] = imported
 		importedID := l.internModule(imported.Path())
 		l.program.Modules[modID].Imports = appendUniqueModule(l.program.Modules[modID].Imports, importedID)
@@ -6324,6 +6376,18 @@ func sortedFieldNames(fields map[string]checker.Type) []string {
 // sortedModules makes checker map traversal safe for AIR ID allocation. Module,
 // type, and function IDs become part of generated names, so discovery order must
 // not depend on Go's randomized map iteration.
+// sortedImports returns prog's imports in the same order as
+// sortedModules(prog.Imports), computed once per program. Callers must not
+// modify the returned slice.
+func (l *lowerer) sortedImports(prog *checker.Program) []checker.Module {
+	if imports, ok := l.sortedImportsByProgram[prog]; ok {
+		return imports
+	}
+	imports := sortedModules(prog.Imports)
+	l.sortedImportsByProgram[prog] = imports
+	return imports
+}
+
 func sortedModules(modules map[string]checker.Module) []checker.Module {
 	type moduleEntry struct {
 		key    string
@@ -6423,10 +6487,18 @@ func globalKey(module ModuleID, name string) string {
 }
 
 func concreteFunctionKey(module ModuleID, name string, signature Signature, genericKey string) string {
-	if genericKey == "" {
-		return fmt.Sprintf("%d:%s:%s", module, name, signatureKey(signature))
+	var key strings.Builder
+	key.Grow(len(name) + len(genericKey) + 16 + 8*len(signature.Params))
+	key.WriteString(strconv.Itoa(int(module)))
+	key.WriteByte(':')
+	key.WriteString(name)
+	key.WriteByte(':')
+	writeSignatureKey(&key, signature)
+	if genericKey != "" {
+		key.WriteByte(':')
+		key.WriteString(genericKey)
 	}
-	return fmt.Sprintf("%d:%s:%s:%s", module, name, signatureKey(signature), genericKey)
+	return key.String()
 }
 
 func (l *lowerer) genericBindingsKey(def *checker.FunctionDef) (string, error) {
@@ -6560,15 +6632,24 @@ func typeIDsEqual(left, right []TypeID) bool {
 }
 
 func signatureKey(signature Signature) string {
-	key := "("
+	var key strings.Builder
+	writeSignatureKey(&key, signature)
+	return key.String()
+}
+
+// writeSignatureKey appends "(type:abi,...)->return" for signature.
+func writeSignatureKey(key *strings.Builder, signature Signature) {
+	key.WriteByte('(')
 	for i, param := range signature.Params {
 		if i > 0 {
-			key += ","
+			key.WriteByte(',')
 		}
-		key += fmt.Sprintf("%d:%d", param.Type, param.ABI)
+		key.WriteString(strconv.Itoa(int(param.Type)))
+		key.WriteByte(':')
+		key.WriteString(strconv.Itoa(int(param.ABI)))
 	}
-	key += fmt.Sprintf(")->%d", signature.Return)
-	return key
+	key.WriteString(")->")
+	key.WriteString(strconv.Itoa(int(signature.Return)))
 }
 
 func checkerTraitKey(trait *checker.Trait) string {
