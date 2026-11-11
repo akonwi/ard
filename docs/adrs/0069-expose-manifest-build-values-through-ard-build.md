@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted
+Accepted. Partially superseded by ADR 0076: `--release` also selects the Go
+linker's debug-section policy.
 
 ## Context
 
