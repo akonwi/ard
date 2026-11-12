@@ -107,9 +107,15 @@ func TestPostfixDerefRequiresAdjacentDotAndAt(t *testing.T) {
 }
 
 func TestPrefixDerefSyntaxIsNotDereference(t *testing.T) {
+	// `deref` is an ordinary identifier, so `reference` is a stray token
+	// after the declaration rather than a dereference operand.
 	result := Parse([]byte("let result = deref reference\n"), "test.ard")
-	if len(result.Errors) > 0 {
-		t.Fatalf("parse errors: %v", result.Errors)
+	want := ParseError{
+		Location: Location{Start: Point{Row: 1, Col: 20}, End: Point{Row: 1, Col: 28}},
+		Message:  "Expected new line after statement",
+	}
+	if len(result.Errors) != 1 || result.Errors[0] != want {
+		t.Fatalf("parse errors = %v, want [%v]", result.Errors, want)
 	}
 	declaration := result.Program.Statements[0].(*VariableDeclaration)
 	identifier, ok := declaration.Value.(*Identifier)

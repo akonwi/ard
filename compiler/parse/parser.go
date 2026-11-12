@@ -355,6 +355,12 @@ func (p *parser) breakStatement() *Break {
 }
 
 func (p *parser) parseStatement() (Statement, error) {
+	return p.parseStatementEndingAt()
+}
+
+// parseStatementEndingAt parses a statement that may also end at one of the
+// given tokens, as the C-style for-loop update ends at `;` or `{`.
+func (p *parser) parseStatementEndingAt(terminators ...kind) (Statement, error) {
 	// A statement starts a fresh struct-operand context so a struct-allowing
 	// value position doesn't leak into statements nested in it (e.g. an
 	// anonymous-function body containing `if mut x { ... }`). (#285)
@@ -380,7 +386,8 @@ func (p *parser) parseStatement() (Statement, error) {
 		return p.deferStatement()
 	}
 	if p.match(let, mut) {
-		return p.parseVariableDef()
+		stmt, err := p.parseVariableDef()
+		return p.endStatement(stmt, err, terminators)
 	}
 	if p.match(if_) {
 		return p.ifStatement()
@@ -455,7 +462,73 @@ func (p *parser) parseStatement() (Statement, error) {
 		}
 		return p.implBlock(), nil
 	}
-	return p.assignment()
+	stmt, err := p.assignment()
+	return p.endStatement(stmt, err, terminators)
+}
+
+// endStatement requires the statement just parsed to end at a new line
+// (consumed), a closing brace, a trailing comment, the end of the file, or
+// one of the context's extra terminators (not consumed).
+// Without this, leftover tokens on the same line silently became the next
+// statement: `let a = 5 & 4` parsed as `let a = 5` and a stray `&4`.
+// The rest of the offending line is skipped so it reports once.
+func (p *parser) endStatement(stmt Statement, err error, terminators []kind) (Statement, error) {
+	if err != nil || stmt == nil {
+		return stmt, err
+	}
+	if p.match(new_line) || slices.Contains(terminators, p.peek().kind) {
+		return stmt, nil
+	}
+	stray := p.peek()
+	location := stray.getLocation()
+	// Symbol tokens carry no text, so their location ends before it starts.
+	if location.End.Row == location.Start.Row && location.End.Col < location.Start.Col {
+		location.End = location.Start
+	}
+	message := "Expected new line after statement"
+	switch stray.kind {
+	case right_brace, comment, eof:
+		return stmt, nil
+	case ampersand:
+		if next := p.peek2(); next.kind == ampersand && adjacent(location, next) {
+			location.End = Point{Row: next.line, Col: next.column}
+			message = "Unexpected '&&' after expression; use 'and' for logical and"
+		} else {
+			message = "Unexpected '&' after expression; Ard has no bitwise '&' operator"
+		}
+	}
+	p.errors = append(p.errors, ParseError{Location: location, Message: message})
+	p.skipRestOfStatement(terminators)
+	return stmt, nil
+}
+
+// skipRestOfStatement skips to the next new line (consumed), or to a closing
+// brace of an enclosing block or one of the context's terminators (neither
+// consumed). Braces opened by the skipped tokens are skipped through their
+// matching close, across lines.
+func (p *parser) skipRestOfStatement(terminators []kind) {
+	depth := 0
+	for !p.isAtEnd() {
+		if depth == 0 && slices.Contains(terminators, p.peek().kind) {
+			return
+		}
+		switch p.peek().kind {
+		case new_line:
+			p.advance()
+			if depth == 0 {
+				return
+			}
+			continue
+		case left_brace:
+			depth++
+		case right_brace:
+			if depth == 0 {
+				return
+			}
+			depth--
+		}
+		p.advance()
+	}
 }
 
 func (p *parser) deferStatement() (Statement, error) {
@@ -500,7 +573,6 @@ func (p *parser) parseVariableDef() (Statement, error) {
 		return nil, err
 	}
 	end := value.GetLocation().End
-	p.match(new_line)
 	return &VariableDeclaration{
 		Mutable:      kind == mut,
 		Name:         name.text,
@@ -713,7 +785,7 @@ func (p *parser) forLoop() (Statement, error) {
 		return nil, nil
 	}
 	p.advance() // consume second ';'
-	incrementer, err := p.parseStatement()
+	incrementer, err := p.parseStatementEndingAt(semicolon, left_brace)
 	if err != nil {
 		return nil, err
 	}
@@ -1638,7 +1710,6 @@ func (p *parser) assignment() (Statement, error) {
 		if err != nil {
 			return nil, err
 		}
-		p.match(new_line)
 
 		switch opToken.kind {
 		case increment:
@@ -1689,8 +1760,6 @@ func (p *parser) assignment() (Statement, error) {
 			}, nil
 		}
 	}
-	p.match(new_line)
-
 	return expr, nil
 }
 

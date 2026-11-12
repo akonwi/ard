@@ -49,8 +49,10 @@ func TestExplicitNullableVoidHasStructuredWarning(t *testing.T) {
 
 func TestPrefixDerefSyntaxNoLongerChecksAsDereference(t *testing.T) {
 	result := parse.Parse([]byte("mut value = 1\nlet reference = &mut value\nlet snapshot = deref reference\n"), "main.ard")
-	if len(result.Errors) > 0 {
-		t.Fatalf("parse errors: %v", result.Errors)
+	// `deref` is an ordinary identifier, so `reference` is rejected as a
+	// stray token after the declaration.
+	if len(result.Errors) != 1 || result.Errors[0].Message != "Expected new line after statement" {
+		t.Fatalf("parse errors = %v, want the stray `reference` token reported", result.Errors)
 	}
 	c := checker.New("main.ard", checker.WrapStatementRuns(result.Program), nil)
 	c.Check()
