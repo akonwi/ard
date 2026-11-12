@@ -105,15 +105,15 @@ type plannedNaturalName struct {
 // code generation uses this index to avoid rescanning every AIR declaration
 // for every generated name.
 type topLevelNamePlanner struct {
-	program              *air.Program
-	naturalByKey         map[topLevelNameKey]plannedNaturalName
-	naturalByName        map[string][]plannedNaturalName
-	legacyTypeBase       map[air.TypeID]string
-	legacyTypeBaseCounts map[string]int
-	// legacyModuleNames caches moduleName per module: legacy function and
+	program                 *air.Program
+	naturalByKey            map[topLevelNameKey]plannedNaturalName
+	naturalByName           map[string][]plannedNaturalName
+	qualifiedTypeBase       map[air.TypeID]string
+	qualifiedTypeBaseCounts map[string]int
+	// qualifiedModuleNames caches moduleName per module: qualified function and
 	// global names embed it, and computing it scans every module.
-	legacyModuleNames map[air.ModuleID]string
-	// functionNameCounts counts functions per (module, Ard name) so legacy
+	qualifiedModuleNames map[air.ModuleID]string
+	// functionNameCounts counts functions per (module, Ard name) so qualified
 	// function names can detect duplicates without rescanning all functions.
 	functionNameCounts map[moduleFunctionName]int
 }
@@ -133,25 +133,25 @@ func (p *topLevelNamePlanner) functionNameIsDuplicated(fn air.Function) bool {
 	return p.functionNameCounts[moduleFunctionName{fn.Module, fn.Name}] > 1
 }
 
-func (p *topLevelNamePlanner) legacyModuleName(module air.ModuleID) string {
-	if name, ok := p.legacyModuleNames[module]; ok {
+func (p *topLevelNamePlanner) qualifiedModuleName(module air.ModuleID) string {
+	if name, ok := p.qualifiedModuleNames[module]; ok {
 		return name
 	}
 	name := moduleName(p.program, module)
-	if p.legacyModuleNames == nil {
-		p.legacyModuleNames = map[air.ModuleID]string{}
+	if p.qualifiedModuleNames == nil {
+		p.qualifiedModuleNames = map[air.ModuleID]string{}
 	}
-	p.legacyModuleNames[module] = name
+	p.qualifiedModuleNames[module] = name
 	return name
 }
 
 func newTopLevelNamePlanner(program *air.Program) *topLevelNamePlanner {
 	p := &topLevelNamePlanner{
-		program:              program,
-		naturalByKey:         map[topLevelNameKey]plannedNaturalName{},
-		naturalByName:        map[string][]plannedNaturalName{},
-		legacyTypeBase:       map[air.TypeID]string{},
-		legacyTypeBaseCounts: map[string]int{},
+		program:                 program,
+		naturalByKey:            map[topLevelNameKey]plannedNaturalName{},
+		naturalByName:           map[string][]plannedNaturalName{},
+		qualifiedTypeBase:       map[air.TypeID]string{},
+		qualifiedTypeBaseCounts: map[string]int{},
 	}
 	add := func(key topLevelNameKey, name string) {
 		owner, hasOwner := topLevelNameModule(program, key.kind, key.id)
@@ -161,8 +161,8 @@ func newTopLevelNamePlanner(program *air.Program) *topLevelNamePlanner {
 	}
 	for _, typ := range program.Types {
 		base := typeNameBase(program, typ)
-		p.legacyTypeBase[typ.ID] = base
-		p.legacyTypeBaseCounts[base]++
+		p.qualifiedTypeBase[typ.ID] = base
+		p.qualifiedTypeBaseCounts[base]++
 		if naturalTypeNameEligible(typ) {
 			add(topLevelNameKey{kind: topLevelNameType, id: int(typ.ID)}, naturalGoIdentifier(typ.Name, !typ.Private))
 		}
@@ -222,8 +222,8 @@ func (p *topLevelNamePlanner) typeName(typ air.TypeInfo) string {
 	if name, ok := p.naturalTypeName(typ); ok {
 		return name
 	}
-	base := p.legacyTypeBase[typ.ID]
-	if p.legacyTypeBaseCounts[base] > 1 {
+	base := p.qualifiedTypeBase[typ.ID]
+	if p.qualifiedTypeBaseCounts[base] > 1 {
 		base = fmt.Sprintf("%s_%d", base, typ.ID)
 	}
 	if !typ.Private {
@@ -236,7 +236,7 @@ func (p *topLevelNamePlanner) traitName(trait air.Trait) string {
 	key := topLevelNameKey{kind: topLevelNameTrait, id: int(trait.ID)}
 	name, ok := p.naturalName(key)
 	if !ok || isReservedTopLevelName(name) || p.collides(key, name, true) {
-		return legacyTraitInterfaceTypeName(trait)
+		return qualifiedTraitInterfaceTypeName(trait)
 	}
 	return name
 }
@@ -245,7 +245,7 @@ func (p *topLevelNamePlanner) functionName(fn air.Function) string {
 	key := topLevelNameKey{kind: topLevelNameFunction, id: int(fn.ID)}
 	name, ok := p.naturalName(key)
 	if !ok {
-		return legacyFunctionNameInModule(fn, p.legacyModuleName(fn.Module), p.functionNameIsDuplicated(fn))
+		return qualifiedFunctionNameInModule(fn, p.qualifiedModuleName(fn.Module), p.functionNameIsDuplicated(fn))
 	}
 	return p.valueNameAlias(key, name)
 }
@@ -254,7 +254,7 @@ func (p *topLevelNamePlanner) globalName(global air.Global) string {
 	key := topLevelNameKey{kind: topLevelNameGlobal, id: int(global.ID)}
 	name, ok := p.naturalName(key)
 	if !ok {
-		return legacyGlobalNameInModule(global, p.legacyModuleName(global.Module))
+		return qualifiedGlobalNameInModule(global, p.qualifiedModuleName(global.Module))
 	}
 	return p.valueNameAlias(key, name)
 }
@@ -339,11 +339,11 @@ func (p *namePlan) buildVariantNames(l *lowerer, naturalTypeNames map[air.TypeID
 
 func (p *namePlan) plannedVariantName(typ air.TypeInfo, variant air.VariantInfo, naturalType string, owner air.ModuleID, hasOwner bool, actualNames, preceding []plannedTopLevelName) string {
 	if naturalType == "" || variant.Name == "" || len(goIdentifierParts(variant.Name)) == 0 {
-		return p.legacyVariantName(typ, variant)
+		return p.qualifiedVariantName(typ, variant)
 	}
 	variantPart := naturalGoIdentifier(variant.Name, true)
 	if variantPart == "" || variantPart == "_" {
-		return p.legacyVariantName(typ, variant)
+		return p.qualifiedVariantName(typ, variant)
 	}
 	base := naturalType + variantPart
 	candidate := base
@@ -353,7 +353,7 @@ func (p *namePlan) plannedVariantName(typ air.TypeInfo, variant air.VariantInfo,
 	return candidate
 }
 
-func (p *namePlan) legacyVariantName(typ air.TypeInfo, variant air.VariantInfo) string {
+func (p *namePlan) qualifiedVariantName(typ air.TypeInfo, variant air.VariantInfo) string {
 	name := sanitizeName(variant.Name)
 	if name == "" {
 		name = fmt.Sprintf("variant_%d", variant.Discriminant)

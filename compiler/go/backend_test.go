@@ -91,10 +91,10 @@ func TestTraitInterfaceTypeNameFallsBackOnCrossModuleTraitCollision(t *testing.T
 		{ID: 1, Name: "Drawable", ModulePath: "svg/drawable.ard"},
 	}}}
 	if got := l.traitInterfaceTypeName(l.program.Traits[0]); got != "ardTrait_Drawable_0" {
-		t.Fatalf("first colliding trait interface name = %q, want legacy fallback", got)
+		t.Fatalf("first colliding trait interface name = %q, want qualified fallback", got)
 	}
 	if got := l.traitInterfaceTypeName(l.program.Traits[1]); got != "ardTrait_Drawable_1" {
-		t.Fatalf("second colliding trait interface name = %q, want legacy fallback", got)
+		t.Fatalf("second colliding trait interface name = %q, want qualified fallback", got)
 	}
 }
 func TestTraitInterfaceTypeNameFallsBackOnTopLevelCollision(t *testing.T) {
@@ -105,7 +105,7 @@ func TestTraitInterfaceTypeNameFallsBackOnTopLevelCollision(t *testing.T) {
 		Globals:   []air.Global{{ID: 0, Module: 0, Name: "configured"}},
 	}}
 	if got := l.traitInterfaceTypeName(l.program.Traits[0]); got != "ardTrait_Drawable_0" {
-		t.Fatalf("trait colliding with type = %q, want legacy fallback", got)
+		t.Fatalf("trait colliding with type = %q, want qualified fallback", got)
 	}
 	if got := l.traitInterfaceTypeName(l.program.Traits[1]); got != "Encodable" {
 		t.Fatalf("trait name should take precedence over function collisions = %q, want Encodable", got)
