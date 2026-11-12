@@ -355,6 +355,12 @@ func (p *parser) breakStatement() *Break {
 }
 
 func (p *parser) parseStatement() (Statement, error) {
+	return p.parseStatementEndingAt()
+}
+
+// parseStatementEndingAt parses a statement that may also end at one of the
+// given tokens, as the C-style for-loop update ends at `;` or `{`.
+func (p *parser) parseStatementEndingAt(terminators ...kind) (Statement, error) {
 	// A statement starts a fresh struct-operand context so a struct-allowing
 	// value position doesn't leak into statements nested in it (e.g. an
 	// anonymous-function body containing `if mut x { ... }`). (#285)
@@ -380,7 +386,8 @@ func (p *parser) parseStatement() (Statement, error) {
 		return p.deferStatement()
 	}
 	if p.match(let, mut) {
-		return p.parseVariableDef()
+		stmt, err := p.parseVariableDef()
+		return p.endStatement(stmt, err, terminators)
 	}
 	if p.match(if_) {
 		return p.ifStatement()
@@ -455,7 +462,111 @@ func (p *parser) parseStatement() (Statement, error) {
 		}
 		return p.implBlock(), nil
 	}
-	return p.assignment()
+	stmt, err := p.assignment()
+	return p.endStatement(stmt, err, terminators)
+}
+
+// endStatement requires the statement just parsed to end at a new line
+// (consumed), a closing brace, a trailing comment, the end of the file, or
+// one of the context's extra terminators (not consumed).
+// Without this, leftover tokens on the same line silently became the next
+// statement: `let a = 5 & 4` parsed as `let a = 5` and a stray `&4`.
+// The rest of the offending line is skipped so it reports once.
+func (p *parser) endStatement(stmt Statement, err error, terminators []kind) (Statement, error) {
+	if err != nil || stmt == nil {
+		return stmt, err
+	}
+	if p.match(new_line) || slices.Contains(terminators, p.peek().kind) {
+		return stmt, nil
+	}
+	switch p.peek().kind {
+	case right_brace, comment, eof:
+		return stmt, nil
+	}
+	p.reportStrayToken(p.index, "Expected new line after statement", true)
+	p.skipRestOfStatement(terminators)
+	return stmt, nil
+}
+
+// reportStrayToken reports the token at index i, which cannot continue what
+// precedes it, with the given message. After an expression, `&` and `&&` get
+// specific messages: they look like binary operators Ard doesn't have, but
+// would otherwise parse as the address-of prefix of a separate item.
+func (p *parser) reportStrayToken(i int, message string, afterExpression bool) {
+	stray := p.tokens[i]
+	location := stray.getLocation()
+	// Symbol tokens carry no text, so their location ends before it starts.
+	if location.End.Row == location.Start.Row && location.End.Col < location.Start.Col {
+		location.End = location.Start
+	}
+	if afterExpression && stray.kind == ampersand {
+		if next := &p.tokens[i+1]; next.kind == ampersand && adjacent(location, next) {
+			location.End = Point{Row: next.line, Col: next.column}
+			message = "Unexpected '&&' after expression; use 'and' for logical and"
+		} else {
+			message = "Unexpected '&' after expression; Ard has no bitwise '&' operator"
+		}
+	}
+	p.errors = append(p.errors, ParseError{Location: location, Message: message})
+}
+
+// expectSeparator consumes the comma after an item of a delimited list. The
+// comma may only be omitted after the last item, i.e. when a closing
+// delimiter follows, possibly after new lines and comments. With lineBreaks,
+// a new line (or trailing comment) also separates items, as for enum
+// variants and match arms. A missing separator is reported at the next item,
+// and parsing continues as if the comma were present. Without this, a
+// missing comma was silently accepted: `[5 4]` parsed as `[5, 4]`.
+func (p *parser) expectSeparator(lineBreaks, afterExpression bool, message string) {
+	// A comma consumed as a malformed item (`[1,,2]`) was already reported.
+	if p.match(comma) || p.previous().kind == comma {
+		return
+	}
+	i := p.index
+	if lineBreaks {
+		if k := p.tokens[i].kind; k == new_line || k == comment {
+			return
+		}
+	} else {
+		for p.tokens[i].kind == new_line || p.tokens[i].kind == comment {
+			i++
+		}
+	}
+	switch p.tokens[i].kind {
+	case right_paren, right_bracket, right_brace, eof:
+		// The list's own loop reports a mismatched closer.
+		return
+	}
+	p.reportStrayToken(i, message, afterExpression)
+}
+
+// skipRestOfStatement skips to the next new line (consumed), or to a closing
+// brace of an enclosing block or one of the context's terminators (neither
+// consumed). Braces opened by the skipped tokens are skipped through their
+// matching close, across lines.
+func (p *parser) skipRestOfStatement(terminators []kind) {
+	depth := 0
+	for !p.isAtEnd() {
+		if depth == 0 && slices.Contains(terminators, p.peek().kind) {
+			return
+		}
+		switch p.peek().kind {
+		case new_line:
+			p.advance()
+			if depth == 0 {
+				return
+			}
+			continue
+		case left_brace:
+			depth++
+		case right_brace:
+			if depth == 0 {
+				return
+			}
+			depth--
+		}
+		p.advance()
+	}
 }
 
 func (p *parser) deferStatement() (Statement, error) {
@@ -500,7 +611,6 @@ func (p *parser) parseVariableDef() (Statement, error) {
 		return nil, err
 	}
 	end := value.GetLocation().End
-	p.match(new_line)
 	return &VariableDeclaration{
 		Mutable:      kind == mut,
 		Name:         name.text,
@@ -713,11 +823,17 @@ func (p *parser) forLoop() (Statement, error) {
 		return nil, nil
 	}
 	p.advance() // consume second ';'
-	incrementer, err := p.parseStatement()
+	incrementer, err := p.parseStatementEndingAt(semicolon, left_brace)
 	if err != nil {
 		return nil, err
 	}
 	p.match(semicolon)
+	if p.check(comment) {
+		// The header runs up to the body's `{`, so a comment can't end it.
+		p.addError(p.peek(), "Comments are not allowed after a for-loop update")
+		p.advance()
+		p.match(new_line)
+	}
 	body, err := p.block()
 	if err != nil {
 		return nil, err
@@ -884,7 +1000,7 @@ func (p *parser) enumDef(private bool) Statement {
 		}
 
 		enum.Variants = append(enum.Variants, variant)
-		p.match(comma)
+		p.expectSeparator(true, false, "Expected ',' or new line between enum variants")
 		p.match(new_line)
 	}
 
@@ -1638,7 +1754,6 @@ func (p *parser) assignment() (Statement, error) {
 		if err != nil {
 			return nil, err
 		}
-		p.match(new_line)
 
 		switch opToken.kind {
 		case increment:
@@ -1689,8 +1804,6 @@ func (p *parser) assignment() (Statement, error) {
 			}, nil
 		}
 	}
-	p.match(new_line)
-
 	return expr, nil
 }
 
@@ -2463,7 +2576,7 @@ func (p *parser) selectExpr() (Expression, error) {
 		selCase.Body = body
 		selCase.Location.End = Point{Row: p.previous().line, Col: p.previous().column}
 		sel.Cases = append(sel.Cases, selCase)
-		p.match(comma)
+		p.expectSeparator(true, true, "Expected ',' or new line between select cases")
 	}
 
 	sel.Location.End = Point{Row: p.previous().line, Col: p.previous().column}
@@ -2565,7 +2678,7 @@ func (p *parser) matchExpr() (Expression, error) {
 				Pattern:  pattern,
 				Body:     body,
 			})
-			p.match(comma)
+			p.expectSeparator(true, true, "Expected ',' or new line between match arms")
 		}
 
 		matchExpr.Location.End = Point{Row: p.previous().line, Col: p.previous().column}
@@ -2660,7 +2773,7 @@ func (p *parser) parseConditionalMatch(keyword token) (Expression, error) {
 			Condition: condition,
 			Body:      body,
 		})
-		p.match(comma)
+		p.expectSeparator(true, true, "Expected ',' or new line between match arms")
 	}
 
 	conditionalMatch.Location.End = Point{Row: p.previous().line, Col: p.previous().column}
@@ -3034,7 +3147,7 @@ func (p *parser) functionDef(asMethod bool, isTest bool) (Statement, error) {
 				functionComments = append(functionComments, *c)
 			}
 
-			p.match(comma)
+			p.expectSeparator(false, false, "Expected ',' between parameters")
 		}
 
 		// The return type is optional: a '{' (or newline before it) means the
@@ -3292,7 +3405,7 @@ func (p *parser) parseStructFields(name *Identifier) (*StructInstance, error) {
 			instance.Comments = append(instance.Comments, *c)
 		}
 
-		p.match(comma)
+		p.expectSeparator(false, true, "Expected ',' between fields")
 		p.match(new_line)
 	}
 	instance.Location.End = Point{Row: p.previous().line, Col: p.previous().column}
@@ -4235,7 +4348,7 @@ func (p *parser) list() (Expression, error) {
 			comments = append(comments, *c)
 		}
 
-		p.match(comma)
+		p.expectSeparator(false, true, "Expected ',' between list items")
 		p.match(new_line)
 	}
 	endToken := p.previous()
@@ -4312,7 +4425,7 @@ func (p *parser) map_() (Expression, error) {
 			node.Comments = append(node.Comments, *c)
 		}
 
-		p.match(comma)
+		p.expectSeparator(false, true, "Expected ',' between map entries")
 		p.match(new_line)
 	}
 
@@ -4668,7 +4781,7 @@ func (p *parser) parseFunctionArguments() ([]Argument, []Comment, error) {
 			comments = append(comments, *c)
 		}
 
-		p.match(comma)
+		p.expectSeparator(false, true, "Expected ',' between arguments")
 		p.match(new_line)
 		if spread && !p.check(right_paren) && !p.isAtEnd() {
 			p.addError(p.previous(), "Spread argument must be final")
