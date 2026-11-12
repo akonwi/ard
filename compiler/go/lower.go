@@ -1049,7 +1049,7 @@ func (l *lowerer) traitInterfaceTypeName(trait air.Trait) string {
 	if name, ok := l.naturalTraitInterfaceTypeName(trait); ok {
 		return name
 	}
-	return legacyTraitInterfaceTypeName(trait)
+	return qualifiedTraitInterfaceTypeName(trait)
 }
 
 func (l *lowerer) naturalTraitInterfaceTypeName(trait air.Trait) (string, bool) {
@@ -1192,7 +1192,7 @@ func (l *lowerer) moduleImportAlias(module air.ModuleID) string {
 	}
 }
 
-func legacyTraitInterfaceTypeName(trait air.Trait) string {
+func qualifiedTraitInterfaceTypeName(trait air.Trait) string {
 	return fmt.Sprintf("ardTrait_%s_%d", sanitizeName(trait.Name), trait.ID)
 }
 

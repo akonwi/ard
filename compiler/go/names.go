@@ -117,7 +117,7 @@ func globalName(program *air.Program, global air.Global) string {
 	if name, ok := naturalGlobalName(program, global); ok {
 		return name
 	}
-	return legacyGlobalName(program, global)
+	return qualifiedGlobalName(program, global)
 }
 
 func naturalGlobalName(program *air.Program, global air.Global) (string, bool) {
@@ -131,13 +131,13 @@ func naturalGlobalName(program *air.Program, global air.Global) (string, bool) {
 	return topLevelValueNameAlias(program, topLevelNameGlobal, int(global.ID), name), true
 }
 
-func legacyGlobalName(program *air.Program, global air.Global) string {
-	return legacyGlobalNameInModule(global, moduleName(program, global.Module))
+func qualifiedGlobalName(program *air.Program, global air.Global) string {
+	return qualifiedGlobalNameInModule(global, moduleName(program, global.Module))
 }
 
-// legacyGlobalNameInModule is legacyGlobalName with the owning module's
+// qualifiedGlobalNameInModule is qualifiedGlobalName with the owning module's
 // moduleName already computed.
-func legacyGlobalNameInModule(global air.Global, moduleName string) string {
+func qualifiedGlobalNameInModule(global air.Global, moduleName string) string {
 	name := sanitizeName(global.Name)
 	if name == "" {
 		name = fmt.Sprintf("global_%d", global.ID)
@@ -153,7 +153,7 @@ func functionName(program *air.Program, fn air.Function) string {
 	if name, ok := naturalFunctionName(program, fn); ok {
 		return name
 	}
-	return legacyFunctionName(program, fn)
+	return qualifiedFunctionName(program, fn)
 }
 
 func naturalFunctionName(program *air.Program, fn air.Function) (string, bool) {
@@ -171,12 +171,12 @@ func naturalFunctionNameEligible(fn air.Function) bool {
 	return fn.Name != "" && fn.Receiver == air.NoType && len(fn.Captures) == 0 && !strings.HasPrefix(fn.Name, "anon_func_")
 }
 
-func legacyFunctionName(program *air.Program, fn air.Function) string {
-	return legacyFunctionNameInModule(fn, moduleName(program, fn.Module), functionNameIsDuplicated(program, fn))
+func qualifiedFunctionName(program *air.Program, fn air.Function) string {
+	return qualifiedFunctionNameInModule(fn, moduleName(program, fn.Module), functionNameIsDuplicated(program, fn))
 }
 
 // functionNameIsDuplicated reports whether another function in fn's module
-// shares its Ard name, which makes the legacy Go name carry the function ID.
+// shares its Ard name, which makes the qualified Go name carry the function ID.
 func functionNameIsDuplicated(program *air.Program, fn air.Function) bool {
 	for _, other := range program.Functions {
 		if other.ID != fn.ID && other.Module == fn.Module && other.Name == fn.Name {
@@ -186,9 +186,9 @@ func functionNameIsDuplicated(program *air.Program, fn air.Function) bool {
 	return false
 }
 
-// legacyFunctionNameInModule is legacyFunctionName with the owning module's
+// qualifiedFunctionNameInModule is qualifiedFunctionName with the owning module's
 // moduleName and the duplicate-name check already computed.
-func legacyFunctionNameInModule(fn air.Function, moduleName string, duplicate bool) string {
+func qualifiedFunctionNameInModule(fn air.Function, moduleName string, duplicate bool) string {
 	suffix := sanitizeName(fn.Name)
 	if suffix == "" {
 		suffix = fmt.Sprintf("fn_%d", fn.ID)
@@ -511,7 +511,7 @@ func enumVariantName(program *air.Program, typ air.TypeInfo, variant air.Variant
 	if name, ok := naturalEnumVariantName(program, typ, variant); ok {
 		return name
 	}
-	return legacyEnumVariantName(program, typ, variant)
+	return qualifiedEnumVariantName(program, typ, variant)
 }
 
 func naturalEnumVariantName(program *air.Program, typ air.TypeInfo, variant air.VariantInfo) (string, bool) {
@@ -618,7 +618,7 @@ func enumVariantIndex(typ air.TypeInfo, variant air.VariantInfo) int {
 	return len(typ.Variants)
 }
 
-func legacyEnumVariantName(program *air.Program, typ air.TypeInfo, variant air.VariantInfo) string {
+func qualifiedEnumVariantName(program *air.Program, typ air.TypeInfo, variant air.VariantInfo) string {
 	name := sanitizeName(variant.Name)
 	if name == "" {
 		name = fmt.Sprintf("variant_%d", variant.Discriminant)

@@ -84,18 +84,18 @@ func TestNaturalEnumVariantNameAliasesCollisions(t *testing.T) {
 		{ID: 3, Kind: air.TypeEnum, Name: "Direction", ModulePath: "direction2.ard", Variants: []air.VariantInfo{{Name: "Down", Discriminant: 0}}},
 	}}
 	if got := enumVariantName(program, program.Types[1], program.Types[1].Variants[0]); got != "Direction_ard__Direction__Down" {
-		t.Fatalf("variant on enum with colliding type name = %q, want legacy name", got)
+		t.Fatalf("variant on enum with colliding type name = %q, want qualified name", got)
 	}
 	// Give the second enum a non-colliding type name but colliding variant name.
 	program.Types[2].Name = "DirectionDown"
 	program.Types[2].Variants[0].Name = ""
-	// Empty variant names keep the legacy spelling.
+	// Empty variant names keep the qualified spelling.
 	if got := enumVariantName(program, program.Types[2], program.Types[2].Variants[0]); got != "Direction2_ard__DirectionDown__variant_0" {
-		t.Fatalf("empty variant = %q, want legacy fallback", got)
+		t.Fatalf("empty variant = %q, want qualified fallback", got)
 	}
 	program.Types[2].Variants[0].Name = "__"
 	if got := enumVariantName(program, program.Types[2], program.Types[2].Variants[0]); got != "Direction2_ard__DirectionDown__variant_0" {
-		t.Fatalf("underscore-only variant = %q, want legacy fallback", got)
+		t.Fatalf("underscore-only variant = %q, want qualified fallback", got)
 	}
 }
 func TestNaturalEnumVariantNameAliasesDuplicateVariantNames(t *testing.T) {
@@ -289,11 +289,11 @@ func TestUnionMemberFieldNamesResolveCollisionsAgainstEarlierMembersOnly(t *test
 	}
 }
 
-// TestPlannedLegacyFunctionNamesMatchUnplanned pins the planner's cached
-// module names and duplicate detection to the per-call legacyFunctionName
-// and legacyGlobalName they replace, including a module whose sanitized
+// TestPlannedQualifiedFunctionNamesMatchUnplanned pins the planner's cached
+// module names and duplicate detection to the per-call qualifiedFunctionName
+// and qualifiedGlobalName they replace, including a module whose sanitized
 // path collides with another module's and a duplicated function name.
-func TestPlannedLegacyFunctionNamesMatchUnplanned(t *testing.T) {
+func TestPlannedQualifiedFunctionNamesMatchUnplanned(t *testing.T) {
 	program := &air.Program{
 		Modules: []air.Module{
 			{ID: 0, Path: "app/util.ard"},
@@ -314,20 +314,20 @@ func TestPlannedLegacyFunctionNamesMatchUnplanned(t *testing.T) {
 	}
 	planner := newTopLevelNamePlanner(program)
 	for _, fn := range program.Functions {
-		want := legacyFunctionName(program, fn)
+		want := qualifiedFunctionName(program, fn)
 		if got := planner.functionName(fn); got != want {
 			t.Errorf("function %d: planner=%q unplanned=%q", fn.ID, got, want)
 		}
 	}
 	if got := planner.functionName(program.Functions[0]); got != "app_util_ard_m0__anon_func_0x1_0" {
-		t.Errorf("duplicated legacy function name = %q", got)
+		t.Errorf("duplicated qualified function name = %q", got)
 	}
 	if got := planner.functionName(program.Functions[3]); got != "lib_other_ard__anon_func_0x1" {
-		t.Errorf("unique legacy function name = %q", got)
+		t.Errorf("unique qualified function name = %q", got)
 	}
 	for _, global := range program.Globals {
-		want := legacyGlobalName(program, global)
-		if got := legacyGlobalNameInModule(global, planner.legacyModuleName(global.Module)); got != want {
+		want := qualifiedGlobalName(program, global)
+		if got := qualifiedGlobalNameInModule(global, planner.qualifiedModuleName(global.Module)); got != want {
 			t.Errorf("global %d: cached module name gives %q, unplanned %q", global.ID, got, want)
 		}
 	}
