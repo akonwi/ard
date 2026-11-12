@@ -163,3 +163,37 @@ func TestStatementEndRecoverySkipsMultilineStrayBlock(t *testing.T) {
 		t.Fatalf("second statement = %#v, want `let z`", decl)
 	}
 }
+
+// The C-style for-loop header ends at its body's `{`, so a comment cannot
+// follow the update.
+func TestForLoopUpdateRejectsTrailingComment(t *testing.T) {
+	for name, tt := range map[string]struct {
+		input string
+		col   int
+	}{
+		"body on the next line": {"for mut i = 0; i < 3; i =+ 1 // update\n{\n}\n", 30},
+		"no body":               {"for mut i = 0; i < 3; i =+ 1 // update\n", 30},
+		"after optional ';'":    {"for mut i = 0; i < 3; i =+ 1; // update\n{\n}\n", 31},
+	} {
+		t.Run(name, func(t *testing.T) {
+			result := Parse([]byte(tt.input), "test.ard")
+			want := ParseError{
+				Location: Location{Start: Point{Row: 1, Col: tt.col}, End: Point{Row: 1, Col: tt.col + 8}},
+				Message:  "Comments are not allowed after a for-loop update",
+			}
+			if len(result.Errors) == 0 || result.Errors[0] != want {
+				t.Fatalf("errors = %v, want first [%v]", result.Errors, want)
+			}
+		})
+	}
+	t.Run("recovery parses the body", func(t *testing.T) {
+		result := Parse([]byte("for mut i = 0; i < 3; i =+ 1 // update\n{\n  i\n}\n"), "test.ard")
+		if len(result.Errors) != 1 {
+			t.Fatalf("errors = %v, want exactly one", result.Errors)
+		}
+		loop := result.Program.Statements[0].(*ForLoop)
+		if len(loop.Body) != 1 {
+			t.Fatalf("body = %#v, want one statement", loop.Body)
+		}
+	})
+}

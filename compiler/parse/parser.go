@@ -828,6 +828,12 @@ func (p *parser) forLoop() (Statement, error) {
 		return nil, err
 	}
 	p.match(semicolon)
+	if p.check(comment) {
+		// The header runs up to the body's `{`, so a comment can't end it.
+		p.addError(p.peek(), "Comments are not allowed after a for-loop update")
+		p.advance()
+		p.match(new_line)
+	}
 	body, err := p.block()
 	if err != nil {
 		return nil, err
