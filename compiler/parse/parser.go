@@ -4396,15 +4396,20 @@ func (p *parser) primary() (Expression, error) {
 
 		openParen := p.previous()
 		leading := p.skipTupleLayout(nil)
+		// Grouping parentheses have no node to hold comments, so detach
+		// them now, before any comments in the expression inside, to keep
+		// their source order.
+		mark := len(p.detachedComments)
+		p.detachedComments = append(p.detachedComments, leading...)
 		expr, err := p.parseExpression()
 		if err != nil {
 			return nil, err
 		}
 		if p.startsTupleRest() {
+			// A tuple holds its own comments; take them back.
+			p.detachedComments = slices.Delete(p.detachedComments, mark, mark+len(leading))
 			return p.finishTupleLiteral(openParen, expr, leading)
 		}
-		// Grouping parentheses have no node to hold comments.
-		p.detachedComments = append(p.detachedComments, leading...)
 
 		if !p.check(right_paren) {
 			p.addError(p.peek(), "Expected ')' after expression")

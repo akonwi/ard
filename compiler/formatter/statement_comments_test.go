@@ -193,3 +193,39 @@ let x = (1 + 2) * 3
 		},
 	})
 }
+
+// Comments in nested grouping parentheses keep their source order when they
+// move above the statement.
+func TestFormatKeepsTheOrderOfCommentsInNestedGroupingParentheses(t *testing.T) {
+	assertTrailingCommentCases(t, []trailingCommentCase{
+		{
+			name: "nested groupings",
+			input: `fn main() {
+  foo(( // first
+    ( // second
+      1)))
+}
+`,
+			want: `fn main() {
+  // first
+  // second
+  foo(1)
+}
+`,
+		},
+		{
+			name: "grouping inside a tuple's first element",
+			input: `let t = ( // the pair
+  ( // inner
+    1), 2)
+`,
+			want: `// inner
+let t = (
+  // the pair
+  1,
+  2,
+)
+`,
+		},
+	})
+}
