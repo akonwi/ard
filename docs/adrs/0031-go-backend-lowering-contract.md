@@ -390,6 +390,8 @@ Statement hoisting normally suffices inside a function. Two positions need diffe
 - a package-level initializer cannot hoist statements to package scope, so a statement-producing initializer remains attached to its `var` declaration through an immediately-invoked function literal
 - a short-circuit operand (the right side of `&&` or `||`) that requires statements is lowered with a guarded temporary, so its statements run only when the operand is actually evaluated
 
+When an expression combines several operands and a later operand requires statements, the earlier operands are evaluated into temporaries first, so operands still evaluate in source order (see `0078-evaluate-operands-in-source-order.md`).
+
 #### Blocks, if, and match
 
 - A block evaluates to its final expression: its statements lower in order and the final expression becomes the block's value. Setup statements retain an explicit Go block scope so nested Ard bindings and shadowed names are not flattened into the surrounding scope.
