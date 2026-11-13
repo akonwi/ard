@@ -324,3 +324,61 @@ func TestEnumVariantsRecordTheirLocation(t *testing.T) {
 		}
 	}
 }
+
+// A comment may follow the `{` that opens a match, select, impl, or trait
+// body, as it may after the `{` of a block, struct, or enum (#583).
+func TestCommentsAfterAnOpeningBrace(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		comments func(program *Program) []Comment
+	}{
+		{
+			name:  "match",
+			input: "let r = match 1 { // arms\n  _ => 2,\n}\n",
+			comments: func(program *Program) []Comment {
+				return program.Statements[0].(*VariableDeclaration).Value.(*MatchExpression).Comments
+			},
+		},
+		{
+			name:  "conditional match",
+			input: "let r = match { // arms\n  _ => 2,\n}\n",
+			comments: func(program *Program) []Comment {
+				return program.Statements[0].(*VariableDeclaration).Value.(*ConditionalMatchExpression).Comments
+			},
+		},
+		{
+			name:  "select",
+			input: "fn f(c: Chan<Int>) Int? {\n  select { // arms\n    let v = c.recv() => v,\n  }\n}\n",
+			comments: func(program *Program) []Comment {
+				return program.Statements[0].(*FunctionDeclaration).Body[0].(*SelectExpression).Comments
+			},
+		},
+		{
+			name:  "impl",
+			input: "impl P { // methods\n  fn a() Int {\n    1\n  }\n}\n",
+			comments: func(program *Program) []Comment {
+				return program.Statements[0].(*ImplBlock).Comments
+			},
+		},
+		{
+			name:  "trait",
+			input: "trait Shape { // methods\n  fn area() Int\n}\n",
+			comments: func(program *Program) []Comment {
+				return program.Statements[0].(*TraitDefinition).Comments
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result := Parse([]byte(test.input), "test.ard")
+			if len(result.Errors) > 0 {
+				t.Fatalf("parse errors: %v", result.Errors)
+			}
+			comments := test.comments(result.Program)
+			if len(comments) != 1 || !comments[0].Trailing {
+				t.Fatalf("comments = %+v, want the one after the brace, marked trailing", comments)
+			}
+		})
+	}
+}

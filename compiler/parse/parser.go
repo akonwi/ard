@@ -1486,12 +1486,7 @@ func (p *parser) implBlock() *ImplBlock {
 	}
 	p.advance()
 
-	if !p.check(new_line) {
-		p.addError(p.peek(), "Expected new line after '{'")
-		// Continue parsing - this is not a critical error
-	} else {
-		p.advance()
-	}
+	p.newLineAfterOpenBrace()
 
 	for !p.match(right_brace) {
 		// Parse and collect comments
@@ -1556,12 +1551,7 @@ func (p *parser) traitDef(private bool) *TraitDefinition {
 	}
 	p.advance()
 
-	if !p.check(new_line) {
-		p.addError(p.peek(), "Expected new line after '{'")
-		// Continue parsing - non-critical error
-	} else {
-		p.advance()
-	}
+	p.newLineAfterOpenBrace()
 
 	for !p.match(right_brace) {
 		// Parse and collect comments
@@ -2646,11 +2636,7 @@ func (p *parser) selectExpr() (Expression, error) {
 	}
 	p.advance() // consume '{'
 
-	if p.check(new_line) {
-		p.advance()
-	} else {
-		p.addError(p.peek(), "Expected new line after '{'")
-	}
+	p.newLineAfterOpenBrace()
 
 	for !p.match(right_brace) {
 		// Stop at end of input so a missing '}' cannot loop forever (issue #349).
@@ -2766,12 +2752,7 @@ func (p *parser) matchExpr() (Expression, error) {
 		}
 		p.advance() // consume the '{'
 
-		if !p.check(new_line) {
-			p.addError(p.peek(), "Expected new line after '{'")
-			// Continue parsing - this is not a critical error
-		} else {
-			p.advance()
-		}
+		p.newLineAfterOpenBrace()
 
 		for !p.isAtEnd() && !p.match(right_brace) {
 			// Parse and collect comments
@@ -2848,12 +2829,7 @@ func (p *parser) parseConditionalMatch(keyword token) (Expression, error) {
 	}
 	p.advance() // consume the '{'
 
-	if !p.check(new_line) {
-		p.addError(p.peek(), "Expected new line after '{'")
-		// Continue parsing - this is not a critical error
-	} else {
-		p.advance()
-	}
+	p.newLineAfterOpenBrace()
 
 	for !p.isAtEnd() && !p.match(right_brace) {
 		// Parse and collect comments
@@ -4943,6 +4919,22 @@ func (p *parser) closesAfterLayout(closer kind) bool {
 		i++
 	}
 	return p.tokens[i].kind == closer || p.tokens[i].kind == eof
+}
+
+// newLineAfterOpenBrace consumes the new line after the `{` of a construct
+// whose body is one item per line, such as a match or an impl block. A
+// comment may come first, on the brace's line; it is left for the
+// construct's loop to collect along with the new line after it.
+func (p *parser) newLineAfterOpenBrace() {
+	if p.check(comment) {
+		return
+	}
+	if !p.check(new_line) {
+		// Not critical: parsing continues with the construct's body.
+		p.addError(p.peek(), "Expected new line after '{'")
+		return
+	}
+	p.advance()
 }
 
 func (p *parser) isAtEnd() bool {

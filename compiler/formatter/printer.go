@@ -1644,28 +1644,16 @@ func docsOf(rows []armDoc) []doc {
 	return docs
 }
 
-// renderArmsWithComments joins arms one per line, placing each comment before
-// the first arm that starts after it, so a comment stays attached to the arm
-// it describes (#543). A comment that shares a row with an arm, or follows
-// the last arm, comes after that arm. An arm without a recorded position
-// keeps every pending comment above it.
+// renderArmsWithComments joins arms one per line with their comments,
+// placed by placeComments: a comment on a line of its own stays with the arm
+// that follows it (#543), and a trailing comment stays on its arm's line
+// (#583).
 func (p printer) renderArmsWithComments(arms []armDoc, comments []parse.Comment) doc {
-	docs := make([]doc, 0, len(arms)+len(comments))
-	commentIndex := 0
-	for _, arm := range arms {
-		for commentIndex < len(comments) && (arm.startRow <= 0 || comments[commentIndex].Location.Start.Row < arm.startRow) {
-			docs = append(docs, dText(p.renderComment(comments[commentIndex].Value)))
-			commentIndex++
-		}
-		docs = append(docs, arm.doc)
-	}
-	for ; commentIndex < len(comments); commentIndex++ {
-		docs = append(docs, dText(p.renderComment(comments[commentIndex].Value)))
-	}
-	if len(docs) == 0 {
+	placed := p.placeComments(arms, comments)
+	if len(placed) == 0 {
 		return dText("")
 	}
-	return dJoin(dHardLine(), docs)
+	return dJoin(dHardLine(), docsOfPlaced(placed))
 }
 
 func (p printer) renderMatchExpressionDoc(node *parse.MatchExpression) doc {
