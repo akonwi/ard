@@ -51,6 +51,14 @@ func TestFormatKeepsCommentsInParameterLists(t *testing.T) {
   a + b
 }
 `,
+			want: `fn add(
+  // operands
+  a: Int,
+  b: Int,
+) Int {
+  a + b
+}
+`,
 		},
 		{
 			name: "method",

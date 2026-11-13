@@ -1508,78 +1508,90 @@ func startRowOf(node any) int {
 // can, and otherwise puts one element per line with a trailing comma. The
 // caller wraps the result in a group.
 func (p printer) renderSequenceDoc(open string, rows []armDoc, comments []parse.Comment, close string) doc {
-	opening, body := p.renderCommentRows(rows, comments, dText(","))
-	if body == nil {
-		// Only a comment after the opening bracket: the closing bracket must
-		// go on the next line, or the comment would swallow it.
-		return dConcat(dText(open), opening, dHardLine(), dText(close))
-	}
 	return dConcat(
 		dText(open),
-		opening,
-		dIndent(dConcat(dSoftLine(), body)),
+		dIndent(dConcat(dSoftLine(), p.renderCommentRows(rows, comments, dText(",")))),
 		dSoftLine(),
 		dText(close),
 	)
 }
 
-// renderCommentRows interleaves comments with one-line element rows. A
-// comment on a line of its own stays attached to the element that follows it
-// (#548). A comment that trails code on its line stays on that line: after
-// the separator of the element before it (#583), or, before any element,
-// after the opening bracket, which it returns as opening. Rows are joined
-// with hard lines and get a trailing separator, so the sequence always
-// breaks across lines when comments are present. Every comment is followed
-// by a line break, so none can swallow the code after it.
-func (p printer) renderCommentRows(rows []armDoc, comments []parse.Comment, separator doc) (opening doc, body doc) {
+// renderCommentRows joins one-line element rows with their comments, placed
+// by placeComments. Rows are joined with hard lines and get a trailing
+// separator, so the sequence always breaks across lines when comments are
+// present, and a trailing comment follows its element's separator.
+func (p printer) renderCommentRows(rows []armDoc, comments []parse.Comment, separator doc) doc {
 	if len(comments) == 0 {
 		if len(rows) == 0 {
-			return nil, dText("")
+			return dText("")
 		}
 		joined := dJoin(dConcat(separator, dLine()), docsOf(rows))
-		return nil, dConcat(joined, dIfBreak(separator, dText("")))
+		return dConcat(joined, dIfBreak(separator, dText("")))
 	}
 
-	docs := make([]doc, 0, len(rows)+len(comments))
-	// trailable is the index in docs of the element row a trailing comment
-	// can follow, or -1 once that row has a comment or a comment follows it.
+	items := make([]armDoc, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, armDoc{doc: dConcat(row.doc, separator), startRow: row.startRow})
+	}
+	// Comments are only ever correct across multiple lines, so the enclosing
+	// sequence must break even when the content would fit flat.
+	return dForceBreak(dJoin(dHardLine(), docsOfPlaced(p.placeComments(items, comments))))
+}
+
+// placedDoc is an item or a comment on a line of its own, in output order.
+type placedDoc struct {
+	doc     doc
+	comment bool
+	// item is the index of the item in the input, or -1 for a comment.
+	item int
+}
+
+// placeComments merges comments into items, which are in source order, by
+// source position. A comment on a line of its own goes before the first item
+// that starts on a later row, so it stays with the item it describes (#548);
+// an item without a recorded row keeps every pending comment above it. A
+// comment that trails code on its line stays at the end of the item before
+// it (#583), after anything that item's doc already ends with, such as a
+// separator. A trailing comment with no item before it, such as one after an
+// opening bracket, goes on a line of its own, and an item takes at most one
+// trailing comment; a second one goes on the next line.
+func (p printer) placeComments(items []armDoc, comments []parse.Comment) []placedDoc {
+	placed := make([]placedDoc, 0, len(items)+len(comments))
+	// trailable is the index in placed of the item a trailing comment can
+	// follow, or -1 once that item has one or a comment follows it.
 	trailable := -1
-	emit := func(comment parse.Comment) {
+	place := func(comment parse.Comment) {
 		text := p.renderComment(comment.Value)
-		if comment.Trailing {
-			if trailable >= 0 {
-				docs[trailable] = dConcat(docs[trailable], dText(" "+text))
-				trailable = -1
-				return
-			}
-			if len(docs) == 0 && opening == nil {
-				opening = dText(" " + text)
-				return
-			}
+		if comment.Trailing && trailable >= 0 {
+			placed[trailable].doc = dConcat(placed[trailable].doc, dTrailingComment(text))
+			trailable = -1
+			return
 		}
-		docs = append(docs, dText(text))
+		placed = append(placed, placedDoc{doc: dText(text), comment: true, item: -1})
 		trailable = -1
 	}
 
 	commentIndex := 0
-	for _, row := range rows {
-		for commentIndex < len(comments) && (row.startRow <= 0 || comments[commentIndex].Location.Start.Row < row.startRow) {
-			emit(comments[commentIndex])
+	for index, item := range items {
+		for commentIndex < len(comments) && (item.startRow <= 0 || comments[commentIndex].Location.Start.Row < item.startRow) {
+			place(comments[commentIndex])
 			commentIndex++
 		}
-		docs = append(docs, dConcat(row.doc, separator))
-		trailable = len(docs) - 1
+		placed = append(placed, placedDoc{doc: item.doc, item: index})
+		trailable = len(placed) - 1
 	}
 	for ; commentIndex < len(comments); commentIndex++ {
-		emit(comments[commentIndex])
+		place(comments[commentIndex])
 	}
+	return placed
+}
 
-	if len(docs) == 0 {
-		return opening, nil
+func docsOfPlaced(placed []placedDoc) []doc {
+	docs := make([]doc, 0, len(placed))
+	for _, entry := range placed {
+		docs = append(docs, entry.doc)
 	}
-	// Comments are only ever correct across multiple lines, so the enclosing
-	// sequence must break even when the content would fit flat.
-	return opening, dForceBreak(dJoin(dHardLine(), docs))
+	return docs
 }
 
 func docsOf(rows []armDoc) []doc {

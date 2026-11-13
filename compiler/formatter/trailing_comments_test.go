@@ -112,8 +112,14 @@ func TestFormatKeepsTrailingCommentsInListLiterals(t *testing.T) {
 `,
 		},
 		{
-			name: "comment after the opening bracket stays on its line",
+			name: "comment after the opening bracket moves to the first line inside",
 			input: `let l = [ // ids
+  1,
+  2,
+]
+`,
+			want: `let l = [
+  // ids
   1,
   2,
 ]
@@ -124,10 +130,19 @@ func TestFormatKeepsTrailingCommentsInListLiterals(t *testing.T) {
 			input: `let l = [ // nothing yet
 ]
 `,
+			want: `let l = [
+  // nothing yet
+]
+`,
 		},
 		{
 			name: "comment after the opening bracket and a comment-only body",
 			input: `let l = [ // ids
+  // none yet
+]
+`,
+			want: `let l = [
+  // ids
   // none yet
 ]
 `,
@@ -138,7 +153,8 @@ func TestFormatKeepsTrailingCommentsInListLiterals(t *testing.T) {
   [
     1, // inner
   ], // outer
-  [ // open
+  [
+    // open
     2,
   ],
 ]
@@ -172,7 +188,8 @@ func TestFormatKeepsTrailingCommentsInMapLiterals(t *testing.T) {
   "away": 2
 ]
 `,
-			want: `let m = [ // scores
+			want: `let m = [
+  // scores
   "home": 1, // includes the own goal
   // away
   "away": 2,
@@ -220,6 +237,12 @@ func TestFormatKeepsTrailingCommentsInTupleLiterals(t *testing.T) {
   2,
 )
 `,
+			want: `let t = (
+  // bounds
+  1,
+  2,
+)
+`,
 		},
 	})
 }
@@ -256,6 +279,12 @@ func TestFormatKeepsTrailingCommentsInCallArguments(t *testing.T) {
 		{
 			name: "comment after the opening paren",
 			input: `foo( // args
+  1,
+  2,
+)
+`,
+			want: `foo(
+  // args
   1,
   2,
 )
@@ -325,7 +354,8 @@ func TestFormatKeepsTrailingCommentsInStructLiterals(t *testing.T) {
   // closing note
 }
 `,
-			want: `let p = Point{ // origin
+			want: `let p = Point{
+  // origin
   // about x
   x, // shorthand
   y: 2,
@@ -347,6 +377,10 @@ func TestFormatKeepsTrailingCommentsInStructLiterals(t *testing.T) {
 		{
 			name: "comment-only struct literal",
 			input: `let p = Point{ // empty
+}
+`,
+			want: `let p = Point{
+  // empty
 }
 `,
 		},
