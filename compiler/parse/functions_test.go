@@ -410,6 +410,21 @@ func TestFunctionCalls(t *testing.T) {
 			input:    `print(values_reference..., "later")`,
 			wantErrs: []string{"Spread argument must be final"},
 		},
+		{
+			name:     "Spread argument must be final across lines and comments",
+			input:    "print(\n  values..., // rest\n  // more\n  \"later\",\n)",
+			wantErrs: []string{"Spread argument must be final"},
+		},
+		{
+			name:  "Comments may follow a final spread argument",
+			input: "print(\n  values..., // rest\n  // done\n)",
+			output: Program{Imports: []Import{}, Statements: []Statement{
+				&FunctionCall{Name: "print", Args: []Argument{{Value: &Identifier{Name: "values"}, Spread: true}}, Comments: []Comment{
+					{Value: "rest"},
+					{Value: "done"},
+				}},
+			}},
+		},
 	}
 
 	runTests(t, tests)

@@ -4920,6 +4920,17 @@ func (p *parser) previous() *token {
 	return &p.tokens[p.index-1]
 }
 
+// closesAfterLayout reports whether the next token after any new lines and
+// comments is closer or the end of input, so a comment after the last
+// element of a sequence does not count as another element.
+func (p *parser) closesAfterLayout(closer kind) bool {
+	i := p.index
+	for p.tokens[i].kind == new_line || p.tokens[i].kind == comment {
+		i++
+	}
+	return p.tokens[i].kind == closer || p.tokens[i].kind == eof
+}
+
 func (p *parser) isAtEnd() bool {
 	return p.tokens[p.index].kind == eof
 }
@@ -5016,7 +5027,7 @@ func (p *parser) parseFunctionArguments() ([]Argument, []Comment, error) {
 
 		p.expectSeparator(false, true, "Expected ',' between arguments")
 		p.match(new_line)
-		if spread && !p.check(right_paren) && !p.isAtEnd() {
+		if spread && !p.closesAfterLayout(right_paren) {
 			p.addError(p.previous(), "Spread argument must be final")
 		}
 
