@@ -371,7 +371,7 @@ type TupleBinding struct {
 }
 
 // TupleDestructure binds each element of a tuple value to its own name:
-// `let (a, b) = pair`. Every name shares the statement's `let` or `mut`.
+// `let a, b = pair`. Every name shares the statement's `let` or `mut`.
 type TupleDestructure struct {
 	Location
 	Names   []TupleBinding
@@ -388,7 +388,7 @@ func (t TupleDestructure) String() string {
 	for i, name := range t.Names {
 		names[i] = name.Name
 	}
-	return fmt.Sprintf("%s (%s)", binding, strings.Join(names, ", "))
+	return fmt.Sprintf("%s %s", binding, strings.Join(names, ", "))
 }
 
 type VariableAssignment struct {

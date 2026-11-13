@@ -207,7 +207,7 @@ func (v *VariableDef) Type() Type {
 }
 
 // TupleDestructure binds the elements of a tuple value to names in order
-// (`let (a, b) = pair`). An empty name discards the element at that position.
+// (`let a, b = pair`). An empty name discards the element at that position.
 type TupleDestructure struct {
 	Mutable bool
 	Names   []string

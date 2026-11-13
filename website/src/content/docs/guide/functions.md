@@ -100,7 +100,7 @@ fn divide(a: Int, b: Int) (Int, Int) {
   (a / b, a % b)
 }
 
-let (quotient, remainder) = divide(17, 5)
+let quotient, remainder = divide(17, 5)
 ```
 
 ## Nullable Parameters

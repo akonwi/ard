@@ -153,11 +153,11 @@ fn min_max(values: [Int]) (Int, Int) {
 }
 ```
 
-Read a tuple by destructuring it into names. Use `_` for an element to ignore:
+Read a tuple by destructuring it into a comma-separated list of names, without parentheses. Use `_` for an element to ignore:
 
 ```ard
-let (low, high) = min_max([3, 1, 4])
-let (_, largest) = min_max([3, 1, 4])
+let low, high = min_max([3, 1, 4])
+let _, largest = min_max([3, 1, 4])
 ```
 
 `let` makes every name immutable and `mut` makes every name mutable. The number of names must match the number of elements, and destructuring is a statement inside a function, not a module-level declaration.

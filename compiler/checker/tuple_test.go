@@ -29,7 +29,7 @@ let same: (Int, Str) = pair`,
 		{
 			name: "tuples are function parameters and results",
 			input: `fn swap(pair: (Int, Str)) (Str, Int) {
-  let (number, text) = pair
+  let number, text = pair
   (text, number)
 }
 
@@ -55,7 +55,7 @@ let span = Span{bounds: (0, 1)}`,
 		{
 			name: "generic tuple elements are inferred",
 			input: `fn first(pair: ($A, $B)) $A {
-  let (a, _) = pair
+  let a, _ = pair
   a
 }
 
@@ -132,7 +132,7 @@ func TestTupleDestructuring(t *testing.T) {
 		{
 			name: "binds each element with its type",
 			input: `fn main() {
-  let (number, text, flag) = (1, "a", true)
+  let number, text, flag = (1, "a", true)
   let a: Int = number
   let b: Str = text
   let c: Bool = flag
@@ -141,7 +141,7 @@ func TestTupleDestructuring(t *testing.T) {
 		{
 			name: "mut makes every binding writable",
 			input: `fn main() {
-  mut (count, label) = (1, "a")
+  mut count, label = (1, "a")
   count = 2
   label = "b"
 }`,
@@ -149,7 +149,7 @@ func TestTupleDestructuring(t *testing.T) {
 		{
 			name: "let bindings are immutable",
 			input: `fn main() {
-  let (count, label) = (1, "a")
+  let count, label = (1, "a")
   count = 2
 }`,
 			diagnostics: []checker.Diagnostic{
@@ -159,14 +159,14 @@ func TestTupleDestructuring(t *testing.T) {
 		{
 			name: "underscore discards an element",
 			input: `fn main() {
-  let (_, text, _) = (1, "a", true)
+  let _, text, _ = (1, "a", true)
   let b: Str = text
 }`,
 		},
 		{
 			name: "discarded elements are not bound",
 			input: `fn main() {
-  let (_, text) = (1, "a")
+  let _, text = (1, "a")
   let n = _
 }`,
 			diagnostics: []checker.Diagnostic{
@@ -176,7 +176,7 @@ func TestTupleDestructuring(t *testing.T) {
 		{
 			name: "name count must match the tuple arity",
 			input: `fn main() {
-  let (a, b) = (1, "a", true)
+  let a, b = (1, "a", true)
 }`,
 			diagnostics: []checker.Diagnostic{
 				{Kind: checker.Error, Message: "Cannot destructure (Int, Str, Bool) into 2 names"},
@@ -185,7 +185,7 @@ func TestTupleDestructuring(t *testing.T) {
 		{
 			name: "a failed destructuring still binds its names",
 			input: `fn main() {
-  let (a, b) = (1, "a", true)
+  let a, b = (1, "a", true)
   let c = a
 }`,
 			diagnostics: []checker.Diagnostic{
@@ -196,7 +196,7 @@ func TestTupleDestructuring(t *testing.T) {
 			name: "only tuples can be destructured",
 			input: `fn main() {
   let value = 1
-  let (a, b) = value
+  let a, b = value
 }`,
 			diagnostics: []checker.Diagnostic{
 				{Kind: checker.Error, Message: "Cannot destructure Int: expected a tuple"},
@@ -209,7 +209,7 @@ func TestTupleDestructuring(t *testing.T) {
 }
 
 fn main() {
-  let (a, b) = find()
+  let a, b = find()
 }`,
 			diagnostics: []checker.Diagnostic{
 				{Kind: checker.Error, Message: "Cannot destructure (Int, Str)?: expected a tuple"},
@@ -218,7 +218,7 @@ fn main() {
 		{
 			name: "names in one destructuring must be distinct",
 			input: `fn main() {
-  let (a, a) = (1, 2)
+  let a, a = (1, 2)
 }`,
 			diagnostics: []checker.Diagnostic{
 				{Kind: checker.Error, Message: "Duplicate name in tuple destructuring: a"},
@@ -231,14 +231,14 @@ fn main() {
 }
 
 fn use_it() Int!Str {
-  let (number, _) = try load()
+  let number, _ = try load()
   Result::ok(number)
 }`,
 		},
 		{
 			name: "destructuring is not the value of a block",
 			input: `fn make() Int {
-  let (a, b) = (1, 2)
+  let a, b = (1, 2)
 }`,
 			diagnostics: []checker.Diagnostic{
 				{Kind: checker.Error, Message: "Type mismatch: Expected Int, got Void"},
@@ -254,7 +254,7 @@ func TestGoMultiResultFunctionsReturnTuples(t *testing.T) {
 			input: `use go:context
 
 fn main() {
-  let (ctx, cancel) = context::WithCancel(context::Background())
+  let ctx, cancel = context::WithCancel(context::Background())
   let same: context::Context = ctx
   let stop: context::CancelFunc = cancel
 }`,
@@ -269,7 +269,7 @@ fn split(value: Float64) (Float64, Float64) {
 
 fn main() {
   let parts: (Float64, Float64) = split(1.5)
-  let (whole, fraction) = parts
+  let whole, fraction = parts
 }`,
 		},
 		{
@@ -286,7 +286,7 @@ fn main() {
 			input: `use go:os
 
 fn open_pipe() Void!Error {
-  let (reader, writer) = try os::Pipe()
+  let reader, writer = try os::Pipe()
   try reader.Close()
   writer.Close()
 }`,
@@ -296,7 +296,7 @@ fn open_pipe() Void!Error {
 			input: `use go:strings
 
 fn main() {
-  let (before, after, found) = strings::Cut("key=value", "=")
+  let before, after, found = strings::Cut("key=value", "=")
   let a: Str = before
   let b: Str = after
   let c: Bool = found
@@ -315,7 +315,7 @@ fn main() {
 			input: `use go:time
 
 fn main() {
-  let (year, month, day) = time::Now().Date()
+  let year, month, day = time::Now().Date()
   let y: Int = year
   let m: time::Month = month
   let d: Int = day
@@ -327,7 +327,7 @@ fn main() {
 
 fn main() {
   let split: fn(Float64) (Float64, Float64) = math::Modf
-  let (whole, fraction) = split(1.5)
+  let whole, fraction = split(1.5)
 }`,
 		},
 	})
@@ -343,37 +343,37 @@ func TestTupleDestructuringDiagnosticsAreStructured(t *testing.T) {
 	}{
 		{
 			name:          "name count",
-			source:        "fn main() {\n  let (a, b) = (1, \"a\", true)\n}\n",
+			source:        "fn main() {\n  let a, b = (1, \"a\", true)\n}\n",
 			legacyMessage: "Cannot destructure (Int, Str, Bool) into 2 names",
 			text:          "Bind every element, using `_` for the ones to discard.",
 			secondaries:   1,
 		},
 		{
 			name:          "non-tuple value",
-			source:        "fn main() {\n  let (a, b) = 1\n}\n",
+			source:        "fn main() {\n  let a, b = 1\n}\n",
 			legacyMessage: "Cannot destructure Int: expected a tuple",
 		},
 		{
 			name:          "nullable tuple",
-			source:        "fn find() (Int, Str)? {\n  Maybe::new()\n}\n\nfn main() {\n  let (a, b) = find()\n}\n",
+			source:        "fn find() (Int, Str)? {\n  Maybe::new()\n}\n\nfn main() {\n  let a, b = find()\n}\n",
 			legacyMessage: "Cannot destructure (Int, Str)?: expected a tuple",
 			text:          "Unwrap the Maybe first, for example with `try`, `match`, or `.or(...)`.",
 		},
 		{
 			name:          "fallible tuple",
-			source:        "fn load() (Int, Str)!Str {\n  Result::err(\"no\")\n}\n\nfn main() {\n  let (a, b) = load()\n}\n",
+			source:        "fn load() (Int, Str)!Str {\n  Result::err(\"no\")\n}\n\nfn main() {\n  let a, b = load()\n}\n",
 			legacyMessage: "Cannot destructure (Int, Str)!Str: expected a tuple",
 			text:          "Unwrap the Result first, for example with `try` or `match`.",
 		},
 		{
 			name:          "pointer to a tuple",
-			source:        "fn main() {\n  mut pair = (1, \"a\")\n  let pointer = &mut pair\n  let (a, b) = pointer\n}\n",
+			source:        "fn main() {\n  mut pair = (1, \"a\")\n  let pointer = &mut pair\n  let a, b = pointer\n}\n",
 			legacyMessage: "Cannot destructure &mut (Int, Str): expected a tuple",
 			text:          "Read the tuple through the pointer first with `.*`.",
 		},
 		{
 			name:          "duplicate name",
-			source:        "fn main() {\n  let (a, a) = (1, 2)\n}\n",
+			source:        "fn main() {\n  let a, a = (1, 2)\n}\n",
 			legacyMessage: "Duplicate name in tuple destructuring: a",
 			secondaries:   1,
 		},

@@ -37,8 +37,8 @@ func TestFormatTupleLiteralsAndDestructuring(t *testing.T) {
 	input := `fn main() {
 let pair=(1,"a")
 let nested=((1,2),[3],true,)
-let (number,text)=pair
-mut (count,_,rest,)=triple()
+let number,text=pair
+mut count,_,rest=triple()
 let grouped=(1+2)*3
 use_pair((1,"a"))
 (text,number)
@@ -47,8 +47,8 @@ use_pair((1,"a"))
 	want := `fn main() {
   let pair = (1, "a")
   let nested = ((1, 2), [3], true)
-  let (number, text) = pair
-  mut (count, _, rest) = triple()
+  let number, text = pair
+  mut count, _, rest = triple()
   let grouped = (1 + 2) * 3
   use_pair((1, "a"))
   (text, number)
@@ -104,7 +104,7 @@ func TestUnusedImportRemovalKeepsTupleUses(t *testing.T) {
 		},
 		{
 			name:  "module used only in a destructured value",
-			input: "use go:example.com/ui\n\nfn f() {\n  let (theme, size) = ui::Load()\n}\n",
+			input: "use go:example.com/ui\n\nfn f() {\n  let theme, size = ui::Load()\n}\n",
 		},
 	}
 

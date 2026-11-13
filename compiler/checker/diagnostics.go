@@ -1750,7 +1750,7 @@ func (d invalidGoFunctionValueDiagnostic) build() Diagnostic {
 
 type topLevelStatementDiagnostic struct {
 	Span SourceSpan
-	// Destructuring marks `let (a, b) = value`, which reads like the allowed
+	// Destructuring marks `let a, b = value`, which reads like the allowed
 	// module-level `let` but binds several names from one evaluation.
 	Destructuring bool
 }
@@ -2792,7 +2792,7 @@ func (d fixedArrayLengthMismatchDiagnostic) build() Diagnostic {
 	return diagnostic
 }
 
-// tupleDestructureNonTupleDiagnostic reports `let (a, b) = value` where value
+// tupleDestructureNonTupleDiagnostic reports `let a, b = value` where value
 // is not a tuple.
 type tupleDestructureNonTupleDiagnostic struct {
 	Actual Type

@@ -208,7 +208,7 @@ func (p printer) renderTupleDestructureDoc(node *parse.TupleDestructure) doc {
 	for i, name := range node.Names {
 		names[i] = name.Name
 	}
-	prefix := binding + " (" + strings.Join(names, ", ") + ") = "
+	prefix := binding + " " + strings.Join(names, ", ") + " = "
 	return dConcat(dText(prefix), p.renderExpressionValueDoc(node.Value, 0))
 }
 

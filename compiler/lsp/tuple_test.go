@@ -15,7 +15,7 @@ func TestHoverOnTupleDestructuring(t *testing.T) {
 }
 
 fn main() {
-  let (number, text) = pair()
+  let number, text = pair()
   let copy = text
   let whole = pair()
 }
@@ -68,7 +68,7 @@ func TestNavigationOnTupleDestructuring(t *testing.T) {
 }
 
 fn main() Str {
-  let (number, text) = pair()
+  let number, text = pair()
   let copy = number
   text
 }
@@ -77,7 +77,7 @@ fn main() Str {
 
 	t.Run("definition of a destructured name", func(t *testing.T) {
 		loc := requireDefinition(t, source, filePath, 7, 3)
-		assertDefinitionStart(t, loc, filePath, 5, 15)
+		assertDefinitionStart(t, loc, filePath, 5, 14)
 	})
 
 	t.Run("references to a destructured name", func(t *testing.T) {

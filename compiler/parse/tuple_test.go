@@ -164,7 +164,7 @@ func TestTupleDestructuring(t *testing.T) {
 	runTests(t, []test{
 		{
 			name:  "let destructuring",
-			input: `let (ctx, cancel) = pair`,
+			input: `let ctx, cancel = pair`,
 			output: Program{Imports: []Import{}, Statements: []Statement{
 				&TupleDestructure{
 					Names: []TupleBinding{{Name: "ctx"}, {Name: "cancel"}},
@@ -174,7 +174,7 @@ func TestTupleDestructuring(t *testing.T) {
 		},
 		{
 			name:  "mut destructuring with a discard",
-			input: `mut (count, _, rest,) = triple()`,
+			input: `mut count, _, rest = triple()`,
 			output: Program{Imports: []Import{}, Statements: []Statement{
 				&TupleDestructure{
 					Mutable: true,
@@ -184,23 +184,53 @@ func TestTupleDestructuring(t *testing.T) {
 			}},
 		},
 		{
-			name:     "single name",
-			input:    `let (a) = pair`,
-			wantErrs: []string{"Tuple destructuring needs at least two names"},
+			name:  "destructuring a tuple literal",
+			input: `let a, b = (1, 2)`,
+			output: Program{Imports: []Import{}, Statements: []Statement{
+				&TupleDestructure{
+					Names: []TupleBinding{{Name: "a"}, {Name: "b"}},
+					Value: &TupleLiteral{Items: []Expression{&NumLiteral{Value: "1"}, &NumLiteral{Value: "2"}}},
+				},
+			}},
 		},
 		{
-			name:     "nested pattern",
-			input:    `let ((a, b), c) = nested`,
+			name:     "parenthesized names",
+			input:    `let (a, b) = pair`,
+			wantErrs: []string{"Tuple destructuring does not use parentheses: write `let a, b = value`"},
+		},
+		{
+			name:     "parenthesized names after mut",
+			input:    `mut (a, b) = pair`,
+			wantErrs: []string{"Tuple destructuring does not use parentheses: write `mut a, b = value`"},
+		},
+		{
+			name:     "trailing comma",
+			input:    `let a, b, = pair`,
 			wantErrs: []string{"Expected a name in tuple destructuring"},
 		},
 		{
-			name:     "type annotation",
-			input:    `let (a, b): (Int, Str) = pair`,
+			name:     "nested pattern",
+			input:    `let a, (b, c) = nested`,
+			wantErrs: []string{"Expected a name in tuple destructuring"},
+		},
+		{
+			name:     "type annotation on a later name",
+			input:    `let a, b: Str = pair`,
 			wantErrs: []string{"Tuple destructuring cannot have a type annotation"},
 		},
 		{
+			name:     "type annotation on the first name",
+			input:    `let a: Int, b = pair`,
+			wantErrs: []string{"Tuple destructuring cannot have a type annotation"},
+		},
+		{
+			name:     "bare values are not a tuple",
+			input:    `let a, b = 1, 2`,
+			wantErrs: []string{"Tuple destructuring takes one tuple value: wrap the values in parentheses, as in `let a, b = (1, 2)`"},
+		},
+		{
 			name:     "missing initializer",
-			input:    `let (a, b)`,
+			input:    `let a, b`,
 			wantErrs: []string{"Expected '=' after tuple destructuring names"},
 		},
 	})

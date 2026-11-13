@@ -32,14 +32,14 @@ impl Shape for Square {
 }
 
 fn swap(pair: (Int, Str)) (Str, Int) {
-  let (number, text) = pair
+  let number, text = pair
   (text, number)
 }
 
 fn widest(spans: [Span]) (Int, Str) {
-  mut (width, label) = (0, "")
+  mut width, label = (0, "")
   for span in spans {
-    let (start, end) = span.bounds
+    let start, end = span.bounds
     if end - start > width {
       width = end - start
       label = span.label
@@ -62,28 +62,28 @@ fn loud(n: Int) (Int, Int) {
 }
 
 fn main() {
-  let (text, number) = swap((1, "a"))
+  let text, number = swap((1, "a"))
   fmt::Println(text, number)
 
-  let (width, label) = widest([Span{bounds: (0, 3), label: "x"}, Span{bounds: (2, 9), label: "y"}])
+  let width, label = widest([Span{bounds: (0, 3), label: "x"}, Span{bounds: (2, 9), label: "y"}])
   fmt::Println(width, label)
 
-  let (inner, name) = nested()
-  let (one, two) = inner
+  let inner, name = nested()
+  let one, two = inner
   fmt::Println(one, two, name)
 
-  let (shape, count) = shapes()
+  let shape, count = shapes()
   fmt::Println(shape.area(), count)
 
   // Each destructuring evaluates its value once, including when every
   // element is discarded.
-  let (_, _) = loud(1)
-  let (a, _) = loud(2)
-  let (a, b) = (a + 1, "shadow")
-  let (b, a) = (a, b)
+  let _, _ = loud(1)
+  let a, _ = loud(2)
+  let a, b = (a + 1, "shadow")
+  let b, a = (a, b)
   fmt::Println(a, b)
 
-  mut (counter, status) = (0, "start")
+  mut counter, status = (0, "start")
   let bump = fn() {
     counter = counter + 1
     status = "bumped"
@@ -94,13 +94,13 @@ fn main() {
   mut target = (1, "one")
   let pointer = &mut target
   pointer.* = (2, "two")
-  let (t1, t2) = target
+  let t1, t2 = target
   fmt::Println(t1, t2)
 
   let lookup: [Str: (Int, Int)] = ["a": (1, 2)]
-  let (m1, m2) = lookup.get("a").expect("a")
+  let m1, m2 = lookup.get("a").expect("a")
   let pairs: [(Int, Str)] = [(1, "p"), (2, "q")]
-  let (p1, p2) = pairs.at(1).expect("second")
+  let p1, p2 = pairs.at(1).expect("second")
   fmt::Println(m1, m2, p1, p2)
 
   let any: Any = (1, "any")
@@ -135,7 +135,7 @@ func TestGoTargetTupleReturnsUseGoMultiResults(t *testing.T) {
 		}
 
 		fn main() {
-			let (a, b) = pair()
+			let a, b = pair()
 		}
 	`)
 
@@ -237,7 +237,7 @@ fn load(ok: Bool) (Int, Str)!Str {
 }
 
 fn load_twice(ok: Bool) (Int, Str)!Str {
-  let (n, s) = try load(ok)
+  let n, s = try load(ok)
   Result::ok((n * 2, s))
 }
 
@@ -260,7 +260,7 @@ fn find(ok: Bool) (Int, Str)? {
 }
 
 fn first_found(ok: Bool) Int? {
-  let (n, _) = try find(ok)
+  let n, _ = try find(ok)
   Maybe::new(n)
 }
 
@@ -279,36 +279,36 @@ fn risky(n: Int) (Int, Str) {
 }
 
 fn area(shape: Bounded) Int {
-  let (w, h) = shape.bounds()
+  let w, h = shape.bounds()
   w * h
 }
 
 fn main() {
   let counter = Counter{count: 7}
-  let (lo, hi) = counter.split()
+  let lo, hi = counter.split()
   fmt::Println(lo, hi, area(Box{w: 3, h: 4}))
 
-  let (n1, s1) = via_var()
-  let (n2, s2) = via_call()
-  let (n3, s3) = via_generic()
-  let (n4, s4) = via_if(true)
-  let (n5, s5) = via_if(false)
-  let (n6, s6) = via_match(4)
+  let n1, s1 = via_var()
+  let n2, s2 = via_call()
+  let n3, s3 = via_generic()
+  let n4, s4 = via_if(true)
+  let n5, s5 = via_if(false)
+  let n6, s6 = via_match(4)
   fmt::Println(n1, s1, n2, s2, n3, s3, n4, s4, n5, s5, n6, s6)
 
-  let (l1, l2) = load_twice(true).expect("ok")
+  let l1, l2 = load_twice(true).expect("ok")
   fmt::Println(l1, l2, load_twice(false).is_err(), load_tail(true).is_ok())
-  let (c1, c2) = load_or(false)
+  let c1, c2 = load_or(false)
   fmt::Println(c1, c2)
 
-  let (f1, f2) = find(true).expect("found")
-  let (d1, d2) = find(false).or((0, "default"))
+  let f1, f2 = find(true).expect("found")
+  let d1, d2 = find(false).or((0, "default"))
   fmt::Println(f1, f2, d1, d2, first_found(true).or(0), first_found(false).is_none())
 
-  let (e1, e2) = custom(true).expect("custom")
+  let e1, e2 = custom(true).expect("custom")
   fmt::Println(e1, e2, custom(false).is_err())
 
-  let (u1, u2) = unsafe { risky(1) }.expect("safe")
+  let u1, u2 = unsafe { risky(1) }.expect("safe")
   let failed = unsafe { risky(2) }
   fmt::Println(u1, u2, failed.is_err())
 }
@@ -337,7 +337,7 @@ struct Holder {
 
 impl Holder {
   fn swap() (Int, $T) {
-    let (item, n) = self.pair
+    let item, n = self.pair
     (n, item)
   }
 
@@ -351,7 +351,7 @@ fn pair_of(a: $A, b: $B) ($A, $B) {
 }
 
 fn first(pair: ($A, $B)) $A {
-  let (a, _) = pair
+  let a, _ = pair
   a
 }
 
@@ -381,42 +381,42 @@ fn fallible() (Int, Str)!Str {
 
 fn main() {
   let made = pair_of("x", true)
-  let (x, y) = made
+  let x, y = made
   fmt::Println(x, y, first(made))
 
   let double = fn(n: Int) (Int, Int) { (n, n * 2) }
-  let (d1, d2) = double(4)
-  let (d3, d4) = apply(double, 5)
-  let (d5, d6) = apply(fn(n: Int) (Int, Int) { (n + 1, n + 2) }, 1)
+  let d1, d2 = double(4)
+  let d3, d4 = apply(double, 5)
+  let d5, d6 = apply(fn(n: Int) (Int, Int) { (n + 1, n + 2) }, 1)
   fmt::Println(d1, d2, d3, d4, d5, d6)
 
-  let (inc, pair) = funcs()
-  let (p1, p2) = pair()
+  let inc, pair = funcs()
+  let p1, p2 = pair()
   fmt::Println(inc(1), p1, p2)
 
   // A tuple-returning function passed where the declaration returns a bare
   // generic adapts to the one-value Go signature of that declaration.
   let pairs = list::map([1, 2, 3], fn(n: Int) (Int, Str) { (n, "{n}") })
   let labels = list::map([4], label)
-  let (l1, l2) = labels.at(0).expect("label")
-  let (c1, c2) = call(fn() (Int, Str) { (6, "six") })
-  let (r1, r2) = retry(fallible).expect("retry")
-  let (r3, r4) = call(fallible).expect("call")
+  let l1, l2 = labels.at(0).expect("label")
+  let c1, c2 = call(fn() (Int, Str) { (6, "six") })
+  let r1, r2 = retry(fallible).expect("retry")
+  let r3, r4 = call(fallible).expect("call")
   fmt::Println(pairs.size(), l1, l2, c1, c2, r1, r2, r3, r4)
 
   let holder = Holder{item: "h", pair: ("p", 4)}
-  let (n, item) = holder.swap()
-  let (h1, h2) = holder.map_pair(fn(s: Str) (Str, Str) { (s, s + s) })
+  let n, item = holder.swap()
+  let h1, h2 = holder.map_pair(fn(s: Str) (Str, Str) { (s, s + s) })
   fmt::Println(n, item, h1, h2)
 
   let found: (Int, Str)? = Maybe::new((9, "found"))
-  let (ms, mn) = found.map(fn(pair: (Int, Str)) (Str, Int) {
-    let (n, s) = pair
+  let ms, mn = found.map(fn(pair: (Int, Str)) (Str, Int) {
+    let n, s = pair
     (s, n)
   }).or(("none", 0))
   let loaded: (Int, Str)!Str = Result::ok((1, "r"))
-  let (rs, rn) = loaded.map(fn(pair: (Int, Str)) (Str, Int) {
-    let (n, s) = pair
+  let rs, rn = loaded.map(fn(pair: (Int, Str)) (Str, Int) {
+    let n, s = pair
     (s, n)
   }).expect("mapped")
   fmt::Println(ms, mn, rs, rn)
@@ -425,7 +425,7 @@ fn main() {
   async::start(fn() {
     results.send((42, "async"))
   })
-  let (a1, a2) = results.recv().expect("result")
+  let a1, a2 = results.recv().expect("result")
   fmt::Println(a1, a2)
 }
 `)
@@ -513,7 +513,7 @@ fn read_first(text: Str) (Int32, Int)!Error {
 }
 
 fn pipe_roundtrip() Int!Error {
-  let (reader, writer) = try os::Pipe()
+  let reader, writer = try os::Pipe()
   try writer.WriteString("ping")
   try writer.Close()
   mut buffer: [Byte] = [0, 0, 0, 0]
@@ -523,27 +523,27 @@ fn pipe_roundtrip() Int!Error {
 }
 
 fn main() {
-  let (ctx, cancel) = context::WithCancel(context::Background())
+  let ctx, cancel = context::WithCancel(context::Background())
   cancel()
   fmt::Println(ctx.Err().is_err())
 
-  let (whole, fraction) = split(1.5)
+  let whole, fraction = split(1.5)
   fmt::Println(whole, fraction)
 
-  let (before, after, found) = strings::Cut("key=value", "=")
+  let before, after, found = strings::Cut("key=value", "=")
   fmt::Println(before, after, found)
 
-  let (rune, size) = read_first("héllo").expect("rune")
+  let rune, size = read_first("héllo").expect("rune")
   fmt::Println(rune, size, read_first("").is_err())
 
   let date = time::Date(2024, time::March, 9, 0, 0, 0, 0, time::UTC)
-  let (year, month, day) = date.Date()
+  let year, month, day = date.Date()
   fmt::Println(year, month, day)
 
   let modf: fn(Float64) (Float64, Float64) = math::Modf
-  let (w2, f2) = modf(2.25)
+  let w2, f2 = modf(2.25)
   let clock = date.Clock
-  let (h, m, s) = clock()
+  let h, m, s = clock()
   fmt::Println(w2, f2, h, m, s)
 
   fmt::Println(pipe_roundtrip().or(0))
@@ -687,26 +687,26 @@ fn main() {
   expect("{shapes::RunNamed(fn(n: Int) (Int, Int) { (n, n + 1) })}", "1011")
 
   let splitter = shapes::MakeSplitter()
-  let (q, r) = splitter(10)
+  let q, r = splitter(10)
   let make = shapes::MakePair()
-  let (s, n) = make()
+  let s, n = make()
   expect("{q} {r} {s} {n}", "3 1 made 7")
 
-  let (a, b) = shapes::Pair("left", 2)
-  let (t1, t2) = shapes::Triple(9, false).expect("triple")
+  let a, b = shapes::Pair("left", 2)
+  let t1, t2 = shapes::Triple(9, false).expect("triple")
   expect("{a} {b} {t1} {t2} {shapes::Triple(9, true).is_err()}", "left 2 9 9 true")
 
-  let (e1, e2) = shapes::Echo((1, "echo"))
-  let (m1, m2) = shapes::MapPair<Int, Str>(4, fn(n: Int) (Str, Str) { ("{n}", "{n + 1}") })
+  let e1, e2 = shapes::Echo((1, "echo"))
+  let m1, m2 = shapes::MapPair<Int, Str>(4, fn(n: Int) (Str, Str) { ("{n}", "{n + 1}") })
   expect("{e1} {e2} {m1} {m2}", "1 echo 4 5")
 
   expect("{shapes::Area(Rect{w: 3, h: 5})}", "15")
-  let (rune, size) = shapes::FirstRune(Text{value: "abc"}).expect("rune")
+  let rune, size = shapes::FirstRune(Text{value: "abc"}).expect("rune")
   expect("{rune} {size} {shapes::FirstRune(Text{value: ""}).is_err()}", "65 3 true")
   let source: shapes::RuneSource = Text{value: "hello"}
-  let (r2, s2) = source.ReadRune().expect("rune")
+  let r2, s2 = source.ReadRune().expect("rune")
   let bounded: shapes::Bounded = Rect{w: 2, h: 2}
-  let (bw, bh) = bounded.Bounds()
+  let bw, bh = bounded.Bounds()
   expect("{r2} {s2} {bw} {bh}", "65 5 2 2")
 }
 `), 0o644); err != nil {
@@ -751,15 +751,15 @@ fn returned() (Int, (Int, Int)) {
 
 fn main() {
   let literal = (loud("literal first", 1), -1.5, pair("literal second"), loud("literal third", 4))
-  let (a, ratio, inner, d) = literal
-  let (b, c) = inner
+  let a, ratio, inner, d = literal
+  let b, c = inner
   fmt::Println(a, ratio, b, c, d)
 
-  let (e, nested) = returned()
-  let (f, g) = nested
+  let e, nested = returned()
+  let f, g = nested
   fmt::Println(e, f, g)
 
-  let (h, _, i) = (loud("void first", 5), silent("void second"), loud("void third", 6))
+  let h, _, i = (loud("void first", 5), silent("void second"), loud("void third", 6))
   fmt::Println(h, i)
 }
 `)

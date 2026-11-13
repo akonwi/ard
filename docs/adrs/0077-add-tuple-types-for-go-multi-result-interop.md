@@ -69,12 +69,17 @@ fn min_max(values: [Int]) (Int, Int) {
 ### Destructuring is the only way to read a tuple
 
 ```ard
-let (low, high) = min_max(values)
-mut (count, _) = totals()
+let low, high = min_max(values)
+mut count, _ = totals()
 ```
 
-- The names in parentheses must match the tuple's element count. `_` discards
-  an element and binds nothing.
+- The names are a comma-separated list with no parentheses, matching
+  `for key, value in map` and Go's `a, b := f()`. `let (a, b) = value` is a
+  parse error that shows the form to write.
+- The right side is one tuple value. Go's `a, b := 1, 2` has no counterpart;
+  `let a, b = 1, 2` is a parse error that says to write `(1, 2)`.
+- The number of names must match the tuple's element count. `_` discards an
+  element and binds nothing.
 - `let` makes every binding immutable and `mut` makes every binding mutable.
 - The value is evaluated once.
 - The value must be a tuple. A `(A, B)?`, `(A, B)!E`, or `&(A, B)` must be

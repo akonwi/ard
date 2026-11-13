@@ -386,11 +386,12 @@ func (p *parser) parseStatementEndingAt(terminators ...kind) (Statement, error) 
 		return p.deferStatement()
 	}
 	if p.match(let, mut) {
-		if p.check(left_paren) {
+		// A comma after the first name makes this `let a, b = value`.
+		if p.check(left_paren) || p.peek2().kind == comma {
 			stmt, err := p.parseTupleDestructure(p.previous(), terminators)
 			return p.endStatement(stmt, err, terminators)
 		}
-		stmt, err := p.parseVariableDef()
+		stmt, err := p.parseVariableDef(terminators)
 		return p.endStatement(stmt, err, terminators)
 	}
 	if p.match(if_) {
@@ -592,7 +593,11 @@ func (p *parser) deferStatement() (Statement, error) {
 	return &Defer{Expr: expr, Location: Location{Start: start.getLocation().Start, End: expr.GetLocation().End}}, nil
 }
 
-func (p *parser) parseVariableDef() (Statement, error) {
+const tupleDestructureAnnotationError = "Tuple destructuring cannot have a type annotation"
+
+// parseVariableDef parses `name[: Type] = value` after `let` or `mut`.
+// terminators are the tokens that end the statement in the current context.
+func (p *parser) parseVariableDef(terminators []kind) (Statement, error) {
 	start := p.previous()
 	kind := start.kind
 	name := p.consumeVariableName(fmt.Sprintf("Expected identifier after '%s'", string(kind)))
@@ -602,6 +607,12 @@ func (p *parser) parseVariableDef() (Statement, error) {
 		if declaredType == nil {
 			p.recoverFromBadType()
 		}
+	}
+	if declaredType != nil && p.check(comma) {
+		// `let a: Int, b = pair` annotates the first name of a destructuring.
+		p.addError(p.peek(), tupleDestructureAnnotationError)
+		p.skipRestOfStatement(terminators)
+		return nil, nil
 	}
 	if !p.check(equal) {
 		p.addError(p.peek(), "Expected '=' after variable name")
@@ -628,7 +639,7 @@ func (p *parser) parseVariableDef() (Statement, error) {
 	}, nil
 }
 
-// parseTupleDestructure parses `let (a, b) = value` after the `let` or `mut`
+// parseTupleDestructure parses `let a, b = value` after the `let` or `mut`
 // keyword. Each position takes a plain name or `_`; nested patterns and type
 // annotations are not part of the syntax. A malformed header is reported once
 // and the rest of the statement is skipped.
@@ -638,27 +649,23 @@ func (p *parser) parseTupleDestructure(start *token, terminators []kind) (Statem
 		p.skipRestOfStatement(terminators)
 		return nil, nil
 	}
-	p.advance() // consume the '('
+	if p.check(left_paren) {
+		return fail(p.peek(), fmt.Sprintf("Tuple destructuring does not use parentheses: write `%s a, b = value`", string(start.kind)))
+	}
 	names := []TupleBinding{}
-	for !p.check(right_paren) {
+	for {
 		current := p.peek()
 		if current.kind != identifier && !p.isAllowedIdentifierKeyword(current.kind) {
 			return fail(current, "Expected a name in tuple destructuring")
 		}
 		name := p.consumeVariableName("Expected a name in tuple destructuring")
 		names = append(names, TupleBinding{Name: name.text, Location: name.getLocation()})
+		if p.check(colon) {
+			return fail(p.peek(), tupleDestructureAnnotationError)
+		}
 		if !p.match(comma) {
 			break
 		}
-	}
-	if !p.match(right_paren) {
-		return fail(p.peek(), "Expected ')' after tuple destructuring names")
-	}
-	if len(names) < 2 {
-		return fail(p.previous(), "Tuple destructuring needs at least two names")
-	}
-	if p.check(colon) {
-		return fail(p.peek(), "Tuple destructuring cannot have a type annotation")
 	}
 	if !p.match(equal) {
 		return fail(p.peek(), "Expected '=' after tuple destructuring names")
@@ -666,6 +673,11 @@ func (p *parser) parseTupleDestructure(start *token, terminators []kind) (Statem
 	value, err := p.parseExpression()
 	if err != nil {
 		return nil, err
+	}
+	if p.check(comma) && !slices.Contains(terminators, comma) {
+		// Go's `a, b := 1, 2` has no Ard counterpart: the right side is one
+		// tuple value.
+		return fail(p.peek(), fmt.Sprintf("Tuple destructuring takes one tuple value: wrap the values in parentheses, as in `%s a, b = (1, 2)`", string(start.kind)))
 	}
 	return &TupleDestructure{
 		Mutable: start.kind == mut,
@@ -855,7 +867,7 @@ func (p *parser) forLoop() (Statement, error) {
 
 	// Parse C-style for loop: for [let|mut] variable = ...; condition; update
 	p.match(let, mut)
-	initial, err := p.parseVariableDef()
+	initial, err := p.parseVariableDef([]kind{semicolon})
 	if err != nil {
 		return nil, err
 	}

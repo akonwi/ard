@@ -439,8 +439,8 @@ Everything beyond the first three rows is a [tuple](/guide/types/#tuples), which
 use go:path/filepath
 use go:strings
 
-let (dir, file) = filepath::Split("/var/log/app.log")
-let (key, value, found) = strings::Cut("name=ard", "=")
+let dir, file = filepath::Split("/var/log/app.log")
+let key, value, found = strings::Cut("name=ard", "=")
 ```
 
 A trailing `error` is always the failure channel, so the remaining results arrive as a tuple inside a `Result`:
@@ -449,7 +449,7 @@ A trailing `error` is always the failure channel, so the remaining results arriv
 use go:net
 
 fn host_of(address: Str) Str!Error {
-  let (host, _) = try net::SplitHostPort(address)
+  let host, _ = try net::SplitHostPort(address)
   Result::ok(host)
 }
 ```

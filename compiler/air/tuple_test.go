@@ -12,7 +12,7 @@ func TestLowerTupleDestructuringBindsElementsFromOneEvaluation(t *testing.T) {
 		}
 
 		fn main() {
-			let (number, _) = pair()
+			let number, _ = pair()
 			let copy = number
 		}
 	`)
@@ -80,7 +80,7 @@ func TestValidateRejectsMalformedTuples(t *testing.T) {
 			}
 
 			fn main() {
-				let (number, _) = pair()
+				let number, _ = pair()
 			}
 		`)
 	}

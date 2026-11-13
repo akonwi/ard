@@ -5188,7 +5188,7 @@ func (c *Checker) checkTuple(expected *Tuple, expr *parse.TupleLiteral) *TupleLi
 	return &TupleLiteral{Elements: elements, _type: MakeTuple(types)}
 }
 
-// checkTupleDestructure checks `let (a, b) = value`: the value must be a
+// checkTupleDestructure checks `let a, b = value`: the value must be a
 // tuple with one element per name, and each name other than `_` is bound to
 // its element.
 func (c *Checker) checkTupleDestructure(s *parse.TupleDestructure) *Statement {
