@@ -1,6 +1,8 @@
 package parse
 
 import (
+	"fmt"
+	"slices"
 	"testing"
 )
 
@@ -368,6 +370,13 @@ func TestCommentsAfterAnOpeningBrace(t *testing.T) {
 				return program.Statements[0].(*TraitDefinition).Comments
 			},
 		},
+		{
+			name:  "trait implementation",
+			input: "impl Shape for P { // methods\n  fn area() Int {\n    1\n  }\n}\n",
+			comments: func(program *Program) []Comment {
+				return program.Statements[0].(*TraitImplementation).Comments
+			},
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -380,5 +389,26 @@ func TestCommentsAfterAnOpeningBrace(t *testing.T) {
 				t.Fatalf("comments = %+v, want the one after the brace, marked trailing", comments)
 			}
 		})
+	}
+}
+
+// A trait implementation's body accepts comments anywhere an impl block's
+// does; it used to reject every comment (#583).
+func TestCommentsInTraitImplementations(t *testing.T) {
+	input := "impl Shape for P {\n  // the area\n  fn area() Int {\n    1\n  } // end\n  // closing\n}\n"
+	result := Parse([]byte(input), "test.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	impl := result.Program.Statements[0].(*TraitImplementation)
+	if len(impl.Methods) != 1 {
+		t.Fatalf("methods = %d, want 1", len(impl.Methods))
+	}
+	got := make([]string, 0, len(impl.Comments))
+	for _, comment := range impl.Comments {
+		got = append(got, fmt.Sprintf("%s:%t", comment.Value, comment.Trailing))
+	}
+	if want := []string{"the area:false", "end:true", "closing:false"}; !slices.Equal(got, want) {
+		t.Fatalf("comments = %v, want %v", got, want)
 	}
 }

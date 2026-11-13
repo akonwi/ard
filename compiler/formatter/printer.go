@@ -558,11 +558,11 @@ func (p printer) renderTraitImplementationDoc(node *parse.TraitImplementation) d
 	if node.Receiver.Name != "" && node.Receiver.Name != "self" {
 		header += " as " + node.Receiver.Name
 	}
-	if len(node.Methods) == 0 {
+	if len(node.Methods) == 0 && len(node.Comments) == 0 {
 		return dText(header + " {}")
 	}
 
-	body := dJoin(dHardLine(), p.interleaveMethodDocs(node.Methods, nil, false))
+	body := dJoin(dHardLine(), p.interleaveMethodDocs(node.Methods, node.Comments, false))
 	return dGroup(dConcat(
 		dText(header+" {"),
 		dIndent(dConcat(dHardLine(), body)),
@@ -571,42 +571,29 @@ func (p printer) renderTraitImplementationDoc(node *parse.TraitImplementation) d
 	))
 }
 
+// interleaveMethodDocs places comments among methods with placeComments and
+// separates each method from what follows it with a blank line. A comment
+// after a method's closing brace or a trait signature stays on that line
+// (#583).
 func (p printer) interleaveMethodDocs(methods []parse.FunctionDeclaration, comments []parse.Comment, traitSignatureOnly bool) []doc {
 	if len(methods) == 0 && len(comments) == 0 {
 		return nil
 	}
 
-	items := make([]doc, 0, len(methods)+len(comments)*2)
-	lastKind := ""
-	commentIndex := 0
-	for _, method := range methods {
-		methodStart := method.Location.Start.Row
-		for commentIndex < len(comments) && (methodStart == 0 || comments[commentIndex].Location.Start.Row < methodStart) {
-			if lastKind == "method" {
-				items = append(items, dText(""))
-			}
-			items = append(items, dText(p.renderComment(comments[commentIndex].Value)))
-			lastKind = "comment"
-			commentIndex++
-		}
-
-		if lastKind == "method" {
-			items = append(items, dText(""))
-		}
-		items = append(items, p.renderFunctionDeclarationDoc(&method, traitSignatureOnly))
-		lastKind = "method"
-
+	items := make([]armDoc, 0, len(methods))
+	for index := range methods {
+		method := &methods[index]
+		items = append(items, armDoc{doc: p.renderFunctionDeclarationDoc(method, traitSignatureOnly), startRow: method.Location.Start.Row})
 	}
-
-	for ; commentIndex < len(comments); commentIndex++ {
-		if lastKind == "method" {
-			items = append(items, dText(""))
+	placed := p.placeComments(items, comments)
+	docs := make([]doc, 0, len(placed)*2)
+	for index, entry := range placed {
+		if index > 0 && !placed[index-1].comment {
+			docs = append(docs, dText(""))
 		}
-		items = append(items, dText(p.renderComment(comments[commentIndex].Value)))
-		lastKind = "comment"
+		docs = append(docs, entry.doc)
 	}
-
-	return items
+	return docs
 }
 
 func (p printer) renderTypeDeclaration(node *parse.TypeDeclaration) string {

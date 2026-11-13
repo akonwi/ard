@@ -111,3 +111,97 @@ func TestFormatKeepsCommentsWithEnumVariants(t *testing.T) {
 		},
 	})
 }
+
+// A comment after a method's closing brace or at the end of a trait
+// signature stays on that line, instead of moving down to read as describing
+// the next method. Trait implementations accept comments like impl blocks
+// (#583).
+func TestFormatKeepsCommentsWithMethods(t *testing.T) {
+	assertTrailingCommentCases(t, []trailingCommentCase{
+		{
+			name: "impl block",
+			input: `impl P { // methods
+  // doc for a
+  fn a() Int {
+    self.x
+  } // end a
+
+  fn b() Int {
+    self.x
+  }
+  // closing note
+}
+`,
+			want: `impl P {
+  // methods
+  // doc for a
+  fn a() Int {
+    self.x
+  } // end a
+
+  fn b() Int {
+    self.x
+  }
+
+  // closing note
+}
+`,
+		},
+		{
+			name: "trait definition",
+			input: `trait Shape { // shapes
+  // the area
+  fn area() Int // in square units
+  fn name() Str
+  // closing note
+}
+`,
+			want: `trait Shape {
+  // shapes
+  // the area
+  fn area() Int // in square units
+
+  fn name() Str
+
+  // closing note
+}
+`,
+		},
+		{
+			name: "trait implementation",
+			input: `impl Shape for P { // shapes
+  // the area
+  fn area() Int {
+    self.x
+  } // end area
+
+  fn name() Str {
+    "p"
+  }
+  // closing note
+}
+`,
+			want: `impl Shape for P {
+  // shapes
+  // the area
+  fn area() Int {
+    self.x
+  } // end area
+
+  fn name() Str {
+    "p"
+  }
+
+  // closing note
+}
+`,
+		},
+		{
+			name: "comment-only trait implementation",
+			input: `impl Shape for P {
+  // nothing yet
+}
+`,
+		},
+	})
+}

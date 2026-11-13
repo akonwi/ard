@@ -1773,12 +1773,18 @@ func (p *parser) traitImpl() (*TraitImplementation, error) {
 		return traitImpl, nil
 	}
 
-	if !p.match(new_line) {
+	// A comment may follow the '{'; the loop collects it.
+	if !p.check(comment) && !p.match(new_line) {
 		p.addError(p.peek(), "Expected new line")
 		// Continue parsing block contents even without newline
 	}
 
 	for !p.match(right_brace) {
+		if c := p.parseInlineComment(); c != nil {
+			traitImpl.Comments = append(traitImpl.Comments, *c)
+			p.match(new_line)
+			continue
+		}
 		if p.match(new_line) {
 			continue
 		}

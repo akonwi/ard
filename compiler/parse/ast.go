@@ -557,6 +557,7 @@ type TraitImplementation struct {
 	ForType  Identifier
 	Receiver Identifier
 	Methods  []FunctionDeclaration
+	Comments []Comment // Comments found within the implementation body
 }
 
 func (i ImplBlock) String() string {
