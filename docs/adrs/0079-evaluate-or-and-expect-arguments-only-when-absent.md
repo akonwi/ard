@@ -56,7 +56,10 @@ expression that produces the callback is now always evaluated, once, after
 the target and before the branch. Whether the callback is called still
 depends on the value. A callback whose evaluation has no effect (a function
 literal, a named function, a Go function, or a variable or field read) stays
-inline in the branch, so its generated Go is unchanged.
+inline in the branch, so its generated Go is unchanged. A read there needs
+no `ard.Read` (ADR 0078): the branch runs after the target, and no Ard code
+runs between them, so the read sees every write the target made and nothing
+later.
 
 ## Consequences
 

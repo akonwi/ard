@@ -401,3 +401,94 @@ result map_err plain, err
 		t.Fatalf("stdout = %q, want %q", got, want)
 	}
 }
+
+// A read in the target of `or`, `expect`, or `map` is evaluated before the
+// argument, even when a call in the argument writes what the target reads
+// (#575), and a callback read sees what a call in the target wrote.
+func TestGoTargetOrExpectAndCallbackReadsFollowSourceOrder(t *testing.T) {
+	got := runGoTargetSourceStdout(t, `use go:fmt
+
+struct MaybeBox {
+  value: Int?,
+}
+
+struct ResultBox {
+  value: Int!Str,
+}
+
+struct Holder {
+  f: fn(Int) Int,
+}
+
+fn fill(box: &mut MaybeBox, label: Str) Int {
+  fmt::Println(label)
+  box.value = Maybe::new(5)
+  7
+}
+
+fn fill_later(box: &mut MaybeBox, label: Str) Int? {
+  fmt::Println(label)
+  box.value = Maybe::new(5)
+  Maybe::new(7)
+}
+
+fn fill_message(box: &mut MaybeBox, label: Str) Str {
+  fmt::Println(label)
+  box.value = Maybe::new(5)
+  "missing"
+}
+
+fn repair(box: &mut ResultBox, label: Str) Int {
+  fmt::Println(label)
+  box.value = Result::ok(5)
+  7
+}
+
+fn adder(box: &mut MaybeBox, label: Str) fn(Int) Int {
+  fmt::Println(label)
+  box.value = Maybe::new(5)
+  fn(n: Int) Int { n + 1 }
+}
+
+fn retarget(holder: &mut Holder) Int? {
+  holder.f = fn(n: Int) Int { n + 100 }
+  Maybe::new(1)
+}
+
+fn main() {
+  let box = &mut MaybeBox{value: Maybe::new()}
+  let a = box.value.or(fill(box, "maybe or, absent"))
+  let b = box.value.or(fill(box, "maybe or, present"))
+  box.value = Maybe::new()
+  let c = box.value.or(fill_later(box, "maybe or setup, absent").or(0))
+  box.value = Maybe::new(2)
+  let d = box.value.expect(fill_message(box, "maybe expect, present"))
+  fmt::Println(a, b, c, d)
+
+  let rbox = &mut ResultBox{value: Result::err("bad")}
+  let e = rbox.value.or(repair(rbox, "result or, err"))
+  let f = rbox.value.or(repair(rbox, "result or, ok"))
+  fmt::Println(e, f)
+
+  box.value = Maybe::new()
+  let g = box.value.map(adder(box, "map callback, absent"))
+  fmt::Println(g.is_none())
+
+  let holder = &mut Holder{f: fn(n: Int) Int { n + 1 }}
+  let h = retarget(holder).map(holder.f)
+  fmt::Println(h.or(0))
+}
+`)
+	want := `maybe or, absent
+maybe or setup, absent
+7 5 7 2
+result or, err
+7 5
+map callback, absent
+true
+101
+`
+	if got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+}

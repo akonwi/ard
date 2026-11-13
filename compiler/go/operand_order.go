@@ -263,9 +263,11 @@ func lazyOperandBody(lazy loweredExpr, use ast.Stmt) []ast.Stmt {
 // branch runs. The caller appends it after every earlier operand.
 //
 // A callback whose evaluation has no effect, such as a function literal or a
-// named function, stays inline, which keeps its generated Go unchanged. The
-// temporary takes the callee's own Go type because the branch calls it as it
-// is.
+// named function, stays inline, which keeps its generated Go unchanged. A
+// variable or field read can stay inline too, unlike a read to the left of a
+// call (ADR 0078): it is read in the branch, after the target, and no Ard
+// code runs in between, so it sees what source order gives it. The temporary
+// takes the callee's own Go type because the branch calls it as it is.
 func (l *lowerer) evaluateBranchCallee(stmts []ast.Stmt, callee *loweredExpr, arg air.Expr) []ast.Stmt {
 	if evaluationHasNoEffect(arg) {
 		return stmts
