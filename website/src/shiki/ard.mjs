@@ -207,6 +207,13 @@ export default [
               2: { name: 'variable.other.definition.ard' },
             },
           },
+          {
+            // Tuple destructuring: `let (a, b) = pair`.
+            match: '\\b(let|mut)(?=\\s*\\()',
+            captures: {
+              1: { name: 'keyword.declaration.variable.ard' },
+            },
+          },
         ],
       },
 
