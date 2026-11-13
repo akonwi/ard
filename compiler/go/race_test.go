@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/akonwi/ard/air"
 	"github.com/akonwi/ard/checker"
 )
 
@@ -95,5 +96,38 @@ func TestGoTargetParityAsyncStartIsRaceFree(t *testing.T) {
 				t.Fatalf("go output = %s, want %s", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestRenderTestRunnerChecksRacesPerTestOnlyInRaceMode(t *testing.T) {
+	program := &air.Program{
+		Modules:   []air.Module{{ID: 0, Path: "math.ard", Functions: []air.FunctionID{0}}},
+		Functions: []air.Function{{ID: 0, Module: 0, Name: "adds", IsTest: true}},
+	}
+	tests := []TestCase{{Name: "adds", DisplayName: "math::adds", Function: 0}}
+
+	plain := renderTestRunner(program, tests, TestOptions{}, nil)
+	if strings.Contains(plain, "RaceErrors") || strings.Contains(plain, "\"runtime\"") || strings.Contains(plain, "Race bool") {
+		t.Fatalf("runner without --race must not reference the race runtime:\n%s", plain)
+	}
+
+	raced := renderTestRunner(program, tests, TestOptions{Race: true}, nil)
+	for _, want := range []string{"\"runtime\"", "runtime.RaceErrors()", "out.Race = true", "data race detected"} {
+		if !strings.Contains(raced, want) {
+			t.Fatalf("race runner missing %q:\n%s", want, raced)
+		}
+	}
+}
+
+func TestTestRunnerReservesRuntimeAliasOnlyInRaceMode(t *testing.T) {
+	program := &air.Program{
+		Modules:   []air.Module{{ID: 0, Path: "runtime.ard", Functions: []air.FunctionID{0}}},
+		Functions: []air.Function{{ID: 0, Module: 0, Name: "enum_test", IsTest: true}},
+	}
+	if got := testRunnerImportAliases(program, []TestCase{{Function: 0}}, false).modules[0]; got != "runtime" {
+		t.Fatalf("module alias without --race = %q, want runtime (unchanged default output)", got)
+	}
+	if got := testRunnerImportAliases(program, []TestCase{{Function: 0}}, true).modules[0]; got != "runtime_1" {
+		t.Fatalf("module alias with --race = %q, want runtime_1", got)
 	}
 }

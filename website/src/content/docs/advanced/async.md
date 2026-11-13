@@ -85,11 +85,13 @@ ard build main.ard --race
 The detector reports races that actually happen while the program runs, so it
 only finds races on the code paths that a run exercises. A report names the
 accessing goroutines with file and line positions in the generated Go under
-`ard-out/go/`, which stays on disk after the run. The program then exits with
-status 66, so `ard run --race` fails. `ard test --race` still lists every test
-result and then fails with `data race detected`. Go's `GORACE` environment
-variable passes through, for example `GORACE=halt_on_error=1` to stop at the
-first race.
+`ard-out/go/`, which stays on disk after the run. A program that raced exits
+with status 66, and `ard run --race` exits with that status too. Under
+`ard test --race`, a test that triggers a race fails with `data race detected`.
+A race counts against the test running when the detector reports it, so a
+test should wait for the goroutines it starts; otherwise a race from one test
+can fail a later one. Go's `GORACE` environment variable passes through, for
+example `GORACE=halt_on_error=1` to stop at the first race.
 
 Race-enabled programs run several times slower and use more memory, so `--race`
 is for development and CI rather than release builds. Builds without the flag

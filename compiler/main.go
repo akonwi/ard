@@ -100,6 +100,12 @@ func main() {
 			}
 			runCommand := append([]string{os.Args[0], os.Args[1], inputPath}, args.ProgramArgs...)
 			if err := gotarget.RunProgramWithOptions(program, runCommand, gotarget.RunOptions{Race: args.Race}, loaded.ProjectInfo); err != nil {
+				// The program ran and failed: exit with its status and add nothing
+				// to the output it already wrote.
+				var exitErr *gotarget.ProgramExitError
+				if errors.As(err, &exitErr) {
+					os.Exit(exitErr.Code)
+				}
 				reportCLIError(os.Stderr, err)
 				os.Exit(1)
 			}
@@ -1324,16 +1330,16 @@ func runGoTests(args testArgs) bool {
 		}
 
 		reportTestSummary(outcomes)
-		if raceDetected {
-			reportCLIError(os.Stderr, gotarget.ErrDataRaceDetected)
-			testsPassed = false
-		}
 		for _, outcome := range outcomes {
 			if outcome.status != testPass {
 				reportCLIError(os.Stderr, fmt.Errorf("tests failed"))
 				testsPassed = false
-				return nil
+				break
 			}
+		}
+		if unattributedRace(raceDetected, goOutcomes) {
+			reportCLIError(os.Stderr, gotarget.ErrDataRaceDetected)
+			testsPassed = false
 		}
 		return nil
 	}); err != nil {
@@ -1619,6 +1625,21 @@ func collectTests(module checker.Module, filePath string, filter string) []disco
 
 func (t discoveredTest) displayName() string {
 	return fmt.Sprintf("%s::%s", t.displayPath, t.name)
+}
+
+// unattributedRace reports whether the race detector failed the test run
+// without any test being marked as racing, so the outcomes alone would not
+// show the race.
+func unattributedRace(raceDetected bool, outcomes []gotarget.TestOutcome) bool {
+	if !raceDetected {
+		return false
+	}
+	for _, outcome := range outcomes {
+		if outcome.Race {
+			return false
+		}
+	}
+	return true
 }
 
 func reportTestOutcome(outcome testOutcome) {

@@ -103,7 +103,7 @@ ard test --fail-fast
 ard test --race
 ```
 
-`--race` fails the run when a test triggers a data race; see
+With `--race`, a test that triggers a data race fails; see
 [Detecting data races](/advanced/async/#detecting-data-races).
 
 ## Test Output

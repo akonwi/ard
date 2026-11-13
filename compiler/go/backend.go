@@ -41,6 +41,9 @@ type TestOutcome struct {
 	DisplayName string `json:"displayName"`
 	Status      string `json:"status"`
 	Message     string `json:"message,omitempty"`
+	// Race is set under --race when the race detector reported a race while
+	// this test ran. Such a test never passes.
+	Race bool `json:"race,omitempty"`
 }
 
 type StageObserver func(name string, duration time.Duration, err error)
@@ -179,7 +182,25 @@ func RunProgramWithOptions(program *air.Program, args []string, options RunOptio
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
-	return cmd.Run()
+	if err := cmd.Run(); err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && exitErr.ExitCode() >= 0 {
+			return &ProgramExitError{Code: exitErr.ExitCode()}
+		}
+		return err
+	}
+	return nil
+}
+
+// ProgramExitError reports that a program started by RunProgramWithOptions ran
+// and exited with a non-zero status. Callers pass Code on as their own exit
+// status; the program has already explained the failure on its own output.
+type ProgramExitError struct {
+	Code int
+}
+
+func (e *ProgramExitError) Error() string {
+	return fmt.Sprintf("exit status %d", e.Code)
 }
 
 func BuildProgram(program *air.Program, outputPath string, projectInfo ...*checker.ProjectInfo) (string, error) {
@@ -251,15 +272,14 @@ type TestOptions struct {
 	Observer StageObserver
 }
 
-// ErrDataRaceDetected reports that the race detector found a data race while
-// the tests ran. RunTestsWithOptions returns it together with the outcomes of
-// every test that ran, because the detector fails the run as a whole rather
-// than the test that raced.
+// ErrDataRaceDetected reports that the race detector failed the test run.
+// RunTestsWithOptions returns it together with the outcomes of every test that
+// ran. Outcomes with Race set show which tests the races were attributed to;
+// when none is set, the race was reported outside every test.
 var ErrDataRaceDetected = errors.New("data race detected")
 
 func RunTestsWithOptions(program *air.Program, args []string, tests []TestCase, options TestOptions, projectInfo ...*checker.ProjectInfo) ([]TestOutcome, error) {
 	info := optionalProjectInfo(projectInfo)
-	failFast := options.FailFast
 	observer := options.Observer
 	pathHint := artifactPathHint(info, inputPathFromCLIArgs(args))
 	var workspaceDir string
@@ -274,7 +294,7 @@ func RunTestsWithOptions(program *air.Program, args []string, tests []TestCase, 
 		return nil, err
 	}
 	if err := observeStage(observer, "go.render_write_test_runner", func() error {
-		return os.WriteFile(filepath.Join(workspaceDir, "ard_tests.go"), []byte(renderTestRunner(program, tests, failFast, info)), 0o644)
+		return os.WriteFile(filepath.Join(workspaceDir, "ard_tests.go"), []byte(renderTestRunner(program, tests, options, info)), 0o644)
 	}); err != nil {
 		return nil, err
 	}
@@ -398,7 +418,10 @@ type testRunnerImports struct {
 	modules map[air.ModuleID]string
 }
 
-func testRunnerImportAliases(program *air.Program, tests []TestCase) testRunnerImports {
+// testRunnerImportAliases picks import aliases for the test runner. race adds
+// the runtime import and the local the race check uses; both are reserved only
+// then so runners built without --race are unchanged.
+func testRunnerImportAliases(program *air.Program, tests []TestCase, race bool) testRunnerImports {
 	imports := testRunnerImports{std: map[string]string{}, modules: map[air.ModuleID]string{}}
 	// The runner is a synthetic package main. Ard declarations live in imported
 	// module packages, so they cannot collide with imports here. Reserve only the
@@ -425,7 +448,12 @@ func testRunnerImportAliases(program *air.Program, tests []TestCase) testRunnerI
 		"recovered":      true,
 		"string":         true,
 	}
-	for _, base := range []string{"json", "fmt", "os"} {
+	stdImports := []string{"json", "fmt", "os"}
+	if race {
+		used["racesBefore"] = true
+		stdImports = append(stdImports, "runtime")
+	}
+	for _, base := range stdImports {
 		alias := base
 		for i := 1; used[alias]; i++ {
 			alias = fmt.Sprintf("%s_%d", base, i)
@@ -457,8 +485,9 @@ func testRunnerImportAliases(program *air.Program, tests []TestCase) testRunnerI
 	return imports
 }
 
-func renderTestRunner(program *air.Program, tests []TestCase, failFast bool, projectInfo *checker.ProjectInfo) string {
-	imports := testRunnerImportAliases(program, tests)
+func renderTestRunner(program *air.Program, tests []TestCase, options TestOptions, projectInfo *checker.ProjectInfo) string {
+	failFast := options.FailFast
+	imports := testRunnerImportAliases(program, tests, options.Race)
 	aliases := imports.std
 	var b strings.Builder
 	b.WriteString("package main\n\n")
@@ -466,6 +495,9 @@ func renderTestRunner(program *air.Program, tests []TestCase, failFast bool, pro
 	writeImportSpec(&b, aliases["json"], "json", "encoding/json")
 	writeImportSpec(&b, aliases["fmt"], "fmt", "fmt")
 	writeImportSpec(&b, aliases["os"], "os", "os")
+	if options.Race {
+		writeImportSpec(&b, aliases["runtime"], "runtime", "runtime")
+	}
 	moduleIDs := make([]int, 0, len(imports.modules))
 	for moduleID := range imports.modules {
 		moduleIDs = append(moduleIDs, int(moduleID))
@@ -485,10 +517,29 @@ func renderTestRunner(program *air.Program, tests []TestCase, failFast bool, pro
 	b.WriteString("\tDisplayName string `json:\"displayName\"`\n")
 	b.WriteString("\tStatus string `json:\"status\"`\n")
 	b.WriteString("\tMessage string `json:\"message,omitempty\"`\n")
+	if options.Race {
+		b.WriteString("\tRace bool `json:\"race,omitempty\"`\n")
+	}
 	b.WriteString("}\n\n")
 	b.WriteString("func ardRunTest(name string, displayName string, fn func() error) (out ardTestOutcome) {\n")
 	b.WriteString("\tout = ardTestOutcome{Name: name, DisplayName: displayName, Status: \"panic\"}\n")
-	fmt.Fprintf(&b, "\tdefer func() { if recovered := recover(); recovered != nil { out.Status = \"panic\"; out.Message = %s.Sprint(recovered) } }()\n", aliases["fmt"])
+	if options.Race {
+		// runtime.RaceErrors is the race detector's public report count, the
+		// signal Go's testing package uses for the same purpose. A race counts
+		// against the test running when the detector reports it, so a goroutine
+		// that outlives its test can fail a later one, as in `go test -race`.
+		// The check runs after recover in the same deferred call: a passing test
+		// that raced fails, and a failure or panic keeps its status and message
+		// with the race noted.
+		fmt.Fprintf(&b, "\tracesBefore := %s.RaceErrors()\n", aliases["runtime"])
+		fmt.Fprintf(&b, "\tdefer func() {\n\t\tif recovered := recover(); recovered != nil { out.Status = \"panic\"; out.Message = %s.Sprint(recovered) }\n", aliases["fmt"])
+		fmt.Fprintf(&b, "\t\tif %s.RaceErrors() > racesBefore {\n", aliases["runtime"])
+		b.WriteString("\t\t\tout.Race = true\n")
+		b.WriteString("\t\t\tif out.Status == \"pass\" { out.Status = \"fail\"; out.Message = \"data race detected\" } else { out.Message += \" (data race detected)\" }\n")
+		b.WriteString("\t\t}\n\t}()\n")
+	} else {
+		fmt.Fprintf(&b, "\tdefer func() { if recovered := recover(); recovered != nil { out.Status = \"panic\"; out.Message = %s.Sprint(recovered) } }()\n", aliases["fmt"])
+	}
 	b.WriteString("\terr := fn()\n")
 	b.WriteString("\tif err == nil { out.Status = \"pass\"; out.Message = \"\" } else { out.Status = \"fail\"; out.Message = err.Error() }\n")
 	b.WriteString("\treturn out\n")

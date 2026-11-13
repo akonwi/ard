@@ -373,14 +373,18 @@ helper = { git = "https://github.com/example/helper.git", commit = "deadbeef" }
 			t.Fatal(err)
 		}
 		stdout, stderr, err := runCLIForTest(t, "run", mainPath)
-		if err == nil {
-			t.Fatal("run succeeded; expected runtime failure")
+		// ard run exits with the program's status: 2 for an unrecovered Go panic.
+		if code := cliExitCode(t, err); code != 2 {
+			t.Fatalf("run exit = %d, want 2\nstderr:\n%s", code, stderr)
 		}
 		if stdout != "" {
 			t.Fatalf("stdout = %q, want empty", stdout)
 		}
-		if !strings.Contains(stderr, "panic: boom") || !strings.Contains(stderr, "error: exit status") {
+		if !strings.Contains(stderr, "panic: boom") {
 			t.Fatalf("stderr missing runtime failure details:\n%s", stderr)
+		}
+		if strings.Contains(stderr, "error: exit status") {
+			t.Fatalf("stderr repeats the exit status after the panic:\n%s", stderr)
 		}
 	})
 
