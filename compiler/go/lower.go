@@ -6549,6 +6549,7 @@ func (l *lowerer) lowerMaybeMap(fn air.Function, expr air.Expr) (loweredExpr, er
 	}
 	stmts = append(stmts, targetDecls...)
 	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{targetExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{target.expr}})
+	stmts = l.evaluateBranchCallee(stmts, &callback, expr.Args[0])
 	stmts = append(stmts, resultDecls...)
 	call := &ast.CallExpr{Fun: callback.expr, Args: []ast.Expr{l.maybeValueExpr(targetExpr)}}
 	someBody, valueExpr, err := l.callbackValueCall(expr.Args[0].Type, call)
@@ -6608,6 +6609,7 @@ func (l *lowerer) lowerMaybeAndThen(fn air.Function, expr air.Expr) (loweredExpr
 	}
 	stmts = append(stmts, targetDecls...)
 	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{targetExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{target.expr}})
+	stmts = l.evaluateBranchCallee(stmts, &callback, expr.Args[0])
 	stmts = append(stmts, resultDecls...)
 	call := &ast.CallExpr{Fun: callback.expr, Args: []ast.Expr{l.maybeValueExpr(targetExpr)}}
 	callExpr := ast.Expr(call)
@@ -6684,6 +6686,7 @@ func (l *lowerer) lowerResultMap(fn air.Function, expr air.Expr) (loweredExpr, e
 	}
 	stmts = append(stmts, targetDecls...)
 	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{targetExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{target.expr}})
+	stmts = l.evaluateBranchCallee(stmts, &callback, expr.Args[0])
 	stmts = append(stmts, resultDecls...)
 	resultType, err := l.goType(expr.Type)
 	if err != nil {
@@ -6752,6 +6755,7 @@ func (l *lowerer) lowerResultMapErr(fn air.Function, expr air.Expr) (loweredExpr
 	}
 	stmts = append(stmts, targetDecls...)
 	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{targetExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{target.expr}})
+	stmts = l.evaluateBranchCallee(stmts, &callback, expr.Args[0])
 	stmts = append(stmts, resultDecls...)
 	resultType, err := l.goType(expr.Type)
 	if err != nil {
@@ -6820,6 +6824,7 @@ func (l *lowerer) lowerResultAndThen(fn air.Function, expr air.Expr) (loweredExp
 	}
 	stmts = append(stmts, targetDecls...)
 	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{targetExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{target.expr}})
+	stmts = l.evaluateBranchCallee(stmts, &callback, expr.Args[0])
 	stmts = append(stmts, resultDecls...)
 	resultType, err := l.goType(expr.Type)
 	if err != nil {

@@ -47,6 +47,17 @@ in the none or error branch, the same shape as the right side of `and` and
 This is a special rule for these four methods. Every other method argument
 is evaluated before the call, in source order (ADR 0078).
 
+That includes the callback of `map` and `and_then` on Maybe and Result and
+of `map_err` on Result. These methods call the callback only on one path,
+and had the same split: a call that produces the callback, such as
+`value.map(make_callback())`, ran only on that path when it lowered to a
+plain expression and always ran when it lowered to setup statements. The
+expression that produces the callback is now always evaluated, once, after
+the target and before the branch. Whether the callback is called still
+depends on the value. A callback whose evaluation has no effect (a function
+literal, a named function, a Go function, or a variable or field read) stays
+inline in the branch, so its generated Go is unchanged.
+
 ## Consequences
 
 - Generated Go is byte-identical for arguments that lower to a plain
@@ -61,7 +72,7 @@ is evaluated before the call, in source order (ADR 0078).
 - Callers cannot rely on side effects in the argument when the value is
   present. Code that needs an effect on both paths has to perform it before
   the call.
-- The callback expression of `map`, `and_then`, and `map_err` has the same
-  split today: a callback-producing call that lowers to a plain expression
-  runs only when the callback is called, and one with setup statements
-  always runs. This decision does not cover those methods.
+- A call that produces a callback for `map`, `and_then`, or `map_err` now
+  runs on both paths. Callbacks written as function literals or names, the
+  common case, generate the same Go as before; this was checked against the
+  same programs.

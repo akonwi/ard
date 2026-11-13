@@ -11,7 +11,8 @@ import (
 )
 
 // The argument of `or` and `expect` on Maybe and Result is evaluated only when
-// the value is absent (#580). Every helper prints its label, so stdout shows
+// the value is absent, and the callback of `map`, `and_then`, and `map_err` is
+// evaluated on both paths (ADR 0079, #580). Every helper prints its label, so stdout shows
 // which operands ran. An argument written with `later` lowers to setup
 // statements (the call returns a Maybe, unpacked from Go's `(T, bool)`
 // results), which must not run when the value is present either.
@@ -297,4 +298,106 @@ func runGoTargetSourceOutput(t *testing.T, input string) (string, string, error)
 	cmd.Stderr = &stderr
 	err = cmd.Run()
 	return stdout.String(), stderr.String(), err
+}
+
+// The callback of `map`, `and_then`, and `map_err` is an ordinary argument:
+// the expression that produces it is evaluated once, after the target and
+// before the call, whether or not the callback is then called (ADR 0079).
+func TestGoTargetCallbackArgumentsAreEvaluatedEagerly(t *testing.T) {
+	got := runGoTargetSourceStdout(t, `use go:fmt
+`+lazyOrExpectHelpers+`
+fn inc(label: Str) fn(Int) Int {
+  fmt::Println(label)
+  fn(x: Int) Int { x + 1 }
+}
+
+fn inc_later(label: Str) (fn(Int) Int)? {
+  fmt::Println(label)
+  Maybe::new(fn(x: Int) Int { x + 1 })
+}
+
+fn keep(label: Str) fn(Int) Int? {
+  fmt::Println(label)
+  fn(x: Int) Int? { Maybe::new(x) }
+}
+
+fn keep_ok(label: Str) fn(Int) Int!Str {
+  fmt::Println(label)
+  fn(x: Int) Int!Str { Result::ok(x) }
+}
+
+fn shout(label: Str) fn(Str) Str {
+  fmt::Println(label)
+  fn(s: Str) Str { "{s}!" }
+}
+
+fn ident(label: Str) fn($T) $T {
+  fmt::Println(label)
+  fn(x: $T) $T { x }
+}
+
+fn main() {
+  let absent: Int? = Maybe::new()
+  let bad: Int!Str = Result::err("bad")
+  let good: Int!Str = Result::ok(1)
+
+  fmt::Println("-- maybe map")
+  let a = some("maybe map target, present", 1).map(inc("maybe map plain, present"))
+  let b = absent.map(inc("maybe map plain, absent"))
+  let c = none("maybe map target, absent").map(inc_later("maybe map setup, absent").expect(""))
+  let d = absent.map(ident<Int>("maybe map generic, absent"))
+  fmt::Println(a.or(0), b.is_none(), c.is_none(), d.is_none())
+
+  fmt::Println("-- maybe and_then")
+  let e = some("maybe and_then target, present", 1).and_then(keep("maybe and_then plain, present"))
+  let f = absent.and_then(keep("maybe and_then plain, absent"))
+  fmt::Println(e.or(0), f.is_none())
+
+  fmt::Println("-- result map")
+  let g = good.map(inc("result map plain, ok"))
+  let h = err("result map target, err", "bad").map(inc("result map plain, err"))
+  let i = bad.map(inc_later("result map setup, err").expect(""))
+  fmt::Println(g.or(0), h.is_err(), i.is_err())
+
+  fmt::Println("-- result and_then")
+  let j = bad.and_then(keep_ok("result and_then plain, err"))
+  fmt::Println(j.is_err())
+
+  fmt::Println("-- result map_err")
+  let k = ok("result map_err target, ok", 1).map_err(shout("result map_err plain, ok"))
+  let l = bad.map_err(shout("result map_err plain, err"))
+  fmt::Println(k.or(0), l.is_err())
+}
+`)
+	want := `-- maybe map
+maybe map target, present
+maybe map plain, present
+maybe map plain, absent
+maybe map target, absent
+maybe map setup, absent
+maybe map generic, absent
+2 true true true
+-- maybe and_then
+maybe and_then target, present
+maybe and_then plain, present
+maybe and_then plain, absent
+1 true
+-- result map
+result map plain, ok
+result map target, err
+result map plain, err
+result map setup, err
+2 true true
+-- result and_then
+result and_then plain, err
+true
+-- result map_err
+result map_err target, ok
+result map_err plain, ok
+result map_err plain, err
+1 true
+`
+	if got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
 }
