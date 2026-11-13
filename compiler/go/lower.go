@@ -2068,20 +2068,17 @@ func concreteCallParams(expr air.Expr, target air.Function) []air.Param {
 // adapts each function-valued argument to the Go signature its declared
 // parameter type has.
 func (l *lowerer) lowerDeclaredCallArgs(fn air.Function, expr air.Expr, target air.Function) ([]ast.Expr, []ast.Stmt, []ast.Stmt, error) {
-	args, stmts, writeback, err := l.lowerCallArgs(fn, expr.Args, concreteCallParams(expr, target))
+	var buf operandBuffer
+	ops := buf.operands(len(expr.Args))
+	writeback, err := l.lowerCallArgOperands(ops, fn, expr.Args, concreteCallParams(expr, target), target.Signature.Params)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	for i := range args {
-		if i >= len(target.Signature.Params) {
-			break
-		}
-		stmts, args[i], err = l.adaptCallableReturnABI(stmts, args[i], expr.Args[i].Type, target.Signature.Params[i].Type)
-		if err != nil {
-			return nil, nil, nil, err
-		}
+	stmts, err := l.sequenceOperands(ops)
+	if err != nil {
+		return nil, nil, nil, err
 	}
-	return args, stmts, writeback, nil
+	return operandExprs(ops), stmts, writeback, nil
 }
 
 // adaptCallableReturnABI converts a function value of concreteType to the Go
@@ -2378,12 +2375,16 @@ func (l *lowerer) lowerStmt(fn air.Function, stmt air.Stmt) ([]ast.Stmt, error) 
 		if err != nil {
 			return nil, err
 		}
-		out := append([]ast.Stmt{}, target.stmts...)
-		out = append(out, value.stmts...)
+		field := loweredExpr{stmts: target.stmts, expr: &ast.SelectorExpr{X: target.expr, Sel: l.ident(stmt.ForeignSymbol)}}
+		ops := [2]operand{placeOperand(field), valueOperand(value, stmt.Type)}
+		out, err := l.sequenceOperands(ops[:])
+		if err != nil {
+			return nil, err
+		}
 		out = append(out, &ast.AssignStmt{
-			Lhs: []ast.Expr{&ast.SelectorExpr{X: target.expr, Sel: l.ident(stmt.ForeignSymbol)}},
+			Lhs: []ast.Expr{ops[0].expr},
 			Tok: token.ASSIGN,
-			Rhs: []ast.Expr{value.expr},
+			Rhs: []ast.Expr{ops[1].expr},
 		})
 		return out, nil
 	case air.StmtSetPointee:
@@ -2398,17 +2399,18 @@ func (l *lowerer) lowerStmt(fn air.Function, stmt air.Stmt) ([]ast.Stmt, error) 
 		if err != nil {
 			return nil, err
 		}
-		out := append([]ast.Stmt{}, target.stmts...)
-		out = append(out, value.stmts...)
-		valueExpr := value.expr
-		if l.isVoidType(stmt.Type) || isVoidExpr(valueExpr) {
-			out = l.appendVoidValueEval(out, valueExpr)
-			valueExpr = l.voidValueExpr()
+		if l.isVoidType(stmt.Type) || isVoidExpr(value.expr) {
+			value = l.materializeVoidValue(value)
+		}
+		ops := [2]operand{valueOperand(target, stmt.Target.Type), valueOperand(value, stmt.Type)}
+		out, err := l.sequenceOperands(ops[:])
+		if err != nil {
+			return nil, err
 		}
 		out = append(out, &ast.AssignStmt{
-			Lhs: []ast.Expr{&ast.StarExpr{X: target.expr}},
+			Lhs: []ast.Expr{&ast.StarExpr{X: ops[0].expr}},
 			Tok: token.ASSIGN,
-			Rhs: []ast.Expr{valueExpr},
+			Rhs: []ast.Expr{ops[1].expr},
 		})
 		return out, nil
 	case air.StmtSetField:
@@ -2443,18 +2445,19 @@ func (l *lowerer) lowerStmt(fn air.Function, stmt air.Stmt) ([]ast.Stmt, error) 
 		if err != nil {
 			return nil, err
 		}
-		out := append([]ast.Stmt{}, target.stmts...)
-		out = append(out, value.stmts...)
-		fieldTarget := ast.Expr(&ast.SelectorExpr{X: target.expr, Sel: l.ident(l.goFieldName(targetType, field.Name))})
-		valueExpr := value.expr
-		if l.isVoidType(field.Type) || isVoidExpr(valueExpr) {
-			out = l.appendVoidValueEval(out, valueExpr)
-			valueExpr = l.voidValueExpr()
+		fieldTarget := loweredExpr{stmts: target.stmts, expr: &ast.SelectorExpr{X: target.expr, Sel: l.ident(l.goFieldName(targetType, field.Name))}}
+		if l.isVoidType(field.Type) || isVoidExpr(value.expr) {
+			value = l.materializeVoidValue(value)
+		}
+		ops := [2]operand{placeOperand(fieldTarget), valueOperand(value, field.Type)}
+		out, err := l.sequenceOperands(ops[:])
+		if err != nil {
+			return nil, err
 		}
 		out = append(out, &ast.AssignStmt{
-			Lhs: []ast.Expr{fieldTarget},
+			Lhs: []ast.Expr{ops[0].expr},
 			Tok: token.ASSIGN,
-			Rhs: []ast.Expr{valueExpr},
+			Rhs: []ast.Expr{ops[1].expr},
 		})
 		return out, nil
 	case air.StmtExpr:
@@ -2971,7 +2974,10 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		if err != nil {
 			return loweredExpr{}, err
 		}
-		stmts := append(target.stmts, substr.stmts...)
+		stmts, err := l.sequenceOperandPair(&target, expr.Target.Type, &substr, expr.Args[0].Type)
+		if err != nil {
+			return loweredExpr{}, err
+		}
 		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("strings", "strings", "Contains"), Args: []ast.Expr{target.expr, substr.expr}}}, nil
 	case air.ExprStrReplace:
 		if expr.Target == nil || len(expr.Args) != 2 {
@@ -2989,8 +2995,10 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		if err != nil {
 			return loweredExpr{}, err
 		}
-		stmts := append(target.stmts, from.stmts...)
-		stmts = append(stmts, to.stmts...)
+		stmts, err := l.sequenceOperandTriple(&target, expr.Target.Type, &from, expr.Args[0].Type, &to, expr.Args[1].Type)
+		if err != nil {
+			return loweredExpr{}, err
+		}
 		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("strings", "strings", "Replace"), Args: []ast.Expr{target.expr, from.expr, to.expr, &ast.BasicLit{Kind: token.INT, Value: "1"}}}}, nil
 	case air.ExprStrReplaceAll:
 		if expr.Target == nil || len(expr.Args) != 2 {
@@ -3008,8 +3016,10 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		if err != nil {
 			return loweredExpr{}, err
 		}
-		stmts := append(target.stmts, from.stmts...)
-		stmts = append(stmts, to.stmts...)
+		stmts, err := l.sequenceOperandTriple(&target, expr.Target.Type, &from, expr.Args[0].Type, &to, expr.Args[1].Type)
+		if err != nil {
+			return loweredExpr{}, err
+		}
 		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("strings", "strings", "ReplaceAll"), Args: []ast.Expr{target.expr, from.expr, to.expr}}}, nil
 	case air.ExprStrStartsWith:
 		if expr.Target == nil || len(expr.Args) != 1 {
@@ -3023,7 +3033,10 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		if err != nil {
 			return loweredExpr{}, err
 		}
-		stmts := append(target.stmts, prefix.stmts...)
+		stmts, err := l.sequenceOperandPair(&target, expr.Target.Type, &prefix, expr.Args[0].Type)
+		if err != nil {
+			return loweredExpr{}, err
+		}
 		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("strings", "strings", "HasPrefix"), Args: []ast.Expr{target.expr, prefix.expr}}}, nil
 	case air.ExprStrEndsWith:
 		if expr.Target == nil || len(expr.Args) != 1 {
@@ -3037,7 +3050,10 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		if err != nil {
 			return loweredExpr{}, err
 		}
-		stmts := append(target.stmts, suffix.stmts...)
+		stmts, err := l.sequenceOperandPair(&target, expr.Target.Type, &suffix, expr.Args[0].Type)
+		if err != nil {
+			return loweredExpr{}, err
+		}
 		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("strings", "strings", "HasSuffix"), Args: []ast.Expr{target.expr, suffix.expr}}}, nil
 	case air.ExprToAny:
 		if expr.Target == nil {
@@ -3108,7 +3124,10 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		if err != nil {
 			return loweredExpr{}, err
 		}
-		stmts := append(target.stmts, index.stmts...)
+		stmts, err := l.sequenceOperandPair(&target, expr.Target.Type, &index, expr.Args[0].Type)
+		if err != nil {
+			return loweredExpr{}, err
+		}
 		if validTypeID(l.program, expr.Type) && l.program.Types[expr.Type-1].Kind == air.TypeMaybe {
 			resultTemp := l.nextTemp()
 			decls, err := l.declareTemp(expr.Type, resultTemp)
@@ -3170,7 +3189,10 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		if err != nil {
 			return loweredExpr{}, err
 		}
-		stmts := append(target.stmts, index.stmts...)
+		stmts, err := l.sequenceOperandPair(&target, expr.Target.Type, &index, expr.Args[0].Type)
+		if err != nil {
+			return loweredExpr{}, err
+		}
 		return loweredExpr{stmts: stmts, expr: &ast.IndexExpr{X: l.valueThroughReference(expr.Target.Type, target.expr), Index: index.expr}}, nil
 	case air.ExprListAtChecked:
 		// User-facing list.at: a bounds-checked access producing Maybe(elem).
@@ -3191,7 +3213,10 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		if err != nil {
 			return loweredExpr{}, err
 		}
-		stmts := append(target.stmts, index.stmts...)
+		stmts, err := l.sequenceOperandPair(&target, expr.Target.Type, &index, expr.Args[0].Type)
+		if err != nil {
+			return loweredExpr{}, err
+		}
 		resultTemp := l.nextTemp()
 		decls, err := l.declareTemp(expr.Type, resultTemp)
 		if err != nil {
@@ -3295,27 +3320,34 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		if payload == nil {
 			return loweredExpr{}, fmt.Errorf("struct value is missing its payload")
 		}
-		stmts := []ast.Stmt{}
-		elts := make([]ast.Expr, 0, len(payload.Fields))
-		for _, field := range payload.Fields {
+		var buf operandBuffer
+		ops := buf.operands(len(payload.Fields))
+		for i, field := range payload.Fields {
 			fieldInfo, hasFieldInfo := structFieldByName(typ, field.Name)
 			var value loweredExpr
 			var err error
+			valueType := field.Value.Type
 			if hasFieldInfo {
 				value, err = l.lowerExprWithExpectedType(fn, field.Value, fieldInfo.Type)
+				valueType = fieldInfo.Type
 			} else {
 				value, err = l.lowerExpr(fn, field.Value)
 			}
 			if err != nil {
 				return loweredExpr{}, err
 			}
-			stmts = append(stmts, value.stmts...)
-			fieldValue := value.expr
 			if hasFieldInfo && l.isVoidType(fieldInfo.Type) {
-				stmts = l.appendVoidValueEval(stmts, fieldValue)
-				fieldValue = l.voidValueExpr()
+				value = l.materializeVoidValue(value)
 			}
-			elts = append(elts, &ast.KeyValueExpr{Key: l.ident(l.goFieldName(typ, field.Name)), Value: fieldValue})
+			ops[i] = valueOperand(value, valueType)
+		}
+		stmts, err := l.sequenceOperands(ops)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		elts := make([]ast.Expr, len(payload.Fields))
+		for i, field := range payload.Fields {
+			elts[i] = &ast.KeyValueExpr{Key: l.ident(l.goFieldName(typ, field.Name)), Value: ops[i].expr}
 		}
 		return loweredExpr{stmts: stmts, expr: &ast.CompositeLit{Type: l.compositeTypeExpr(typ), Elts: elts}}, nil
 	case air.ExprMakeTuple:
@@ -3461,6 +3493,10 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		if err != nil {
 			return loweredExpr{}, err
 		}
+		stmts, err := l.sequenceOperandPair(&left, leftTypeID, &right, rightTypeID)
+		if err != nil {
+			return loweredExpr{}, err
+		}
 		l.castEnumIntComparisonOperands(&left, leftTypeID, &right, rightTypeID)
 		var equality ast.Expr = &ast.BinaryExpr{X: left.expr, Op: l.binaryToken(expr.Kind), Y: right.expr}
 		if l.isMaybeType(leftTypeID) || l.isMaybeType(rightTypeID) {
@@ -3469,7 +3505,7 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 				equality = &ast.UnaryExpr{Op: token.NOT, X: equality}
 			}
 		}
-		return loweredExpr{stmts: append(left.stmts, right.stmts...), expr: equality}, nil
+		return loweredExpr{stmts: stmts, expr: equality}, nil
 	case air.ExprAnd, air.ExprOr:
 		payload := expr.BinaryPayload()
 		if payload == nil || payload.Left == nil || payload.Right == nil {
@@ -3519,11 +3555,15 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		if err != nil {
 			return loweredExpr{}, err
 		}
+		stmts, err := l.sequenceOperandPair(&left, leftTypeID, &right, rightTypeID)
+		if err != nil {
+			return loweredExpr{}, err
+		}
 		if isComparisonKind(expr.Kind) {
 			l.castEnumIntComparisonOperands(&left, leftTypeID, &right, rightTypeID)
 		}
 		return loweredExpr{
-			stmts: append(left.stmts, right.stmts...),
+			stmts: stmts,
 			expr:  &ast.BinaryExpr{X: left.expr, Op: l.binaryToken(expr.Kind), Y: right.expr},
 		}, nil
 	case air.ExprNot:
@@ -3809,20 +3849,27 @@ func (l *lowerer) lowerForeignStructInstance(fn air.Function, expr air.Expr) (lo
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	var stmts []ast.Stmt
-	elts := make([]ast.Expr, 0, len(payload.Fields))
 	fields := make([]*air.StructFieldValue, len(payload.Fields))
 	for i := range payload.Fields {
 		fields[i] = &payload.Fields[i]
 	}
 	sort.Slice(fields, func(i, j int) bool { return fields[i].Name < fields[j].Name })
-	for _, field := range fields {
+	var buf operandBuffer
+	ops := buf.operands(len(fields))
+	for i, field := range fields {
 		value, err := l.lowerExpr(fn, field.Value)
 		if err != nil {
 			return loweredExpr{}, err
 		}
-		stmts = append(stmts, value.stmts...)
-		elts = append(elts, &ast.KeyValueExpr{Key: l.ident(field.Name), Value: value.expr})
+		ops[i] = valueOperand(value, field.Value.Type)
+	}
+	stmts, err := l.sequenceOperands(ops)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	elts := make([]ast.Expr, len(fields))
+	for i, field := range fields {
+		elts[i] = &ast.KeyValueExpr{Key: l.ident(field.Name), Value: ops[i].expr}
 	}
 	return loweredExpr{stmts: stmts, expr: &ast.CompositeLit{Type: typ, Elts: elts}}, nil
 }
@@ -4002,6 +4049,71 @@ func (l *lowerer) lowerSpreadArgument(fn air.Function, arg air.Expr) (loweredExp
 	return lowered, nil
 }
 
+// lowerForeignCallArgs lowers the arguments of a Go call, after its receiver
+// when there is one, and returns them with the statements that evaluate the
+// receiver and arguments in source order. receiver.expr is updated in place.
+// A spread call evaluates every component into a temporary (ADR 0062).
+func (l *lowerer) lowerForeignCallArgs(fn air.Function, expr air.Expr, payload *air.ForeignExprPayload, receiver *operand) ([]ast.Expr, []ast.Stmt, error) {
+	spread := payload.Spread != nil
+	if spread {
+		var stmts []ast.Stmt
+		if receiver != nil {
+			stmts = append([]ast.Stmt{}, receiver.stmts...)
+			stmts, receiver.expr = l.materializeCallOperand(stmts, receiver.expr)
+		}
+		args := make([]ast.Expr, 0, len(expr.Args))
+		for i := range expr.Args {
+			var arg loweredExpr
+			var err error
+			if i == len(expr.Args)-1 {
+				arg, err = l.lowerSpreadArgument(fn, expr.Args[i])
+			} else {
+				arg, err = l.lowerExpr(fn, expr.Args[i])
+			}
+			if err != nil {
+				return nil, nil, err
+			}
+			stmts = append(stmts, arg.stmts...)
+			argExpr := arg.expr
+			if i != len(expr.Args)-1 {
+				argExpr = l.foreignABIValueArg(expr.Args[i], argExpr, payload.ArgABI[i])
+			}
+			stmts, argExpr = l.materializeCallOperand(stmts, argExpr)
+			args = append(args, argExpr)
+		}
+		return args, stmts, nil
+	}
+	lead := 0
+	if receiver != nil {
+		lead = 1
+	}
+	var buf operandBuffer
+	ops := buf.operands(lead + len(expr.Args))
+	if receiver != nil {
+		ops[0] = *receiver
+	}
+	for i := range expr.Args {
+		arg, err := l.lowerExpr(fn, expr.Args[i])
+		if err != nil {
+			return nil, nil, err
+		}
+		op := valueOperand(arg, expr.Args[i].Type)
+		if adapted := l.foreignABIValueArg(expr.Args[i], arg.expr, payload.ArgABI[i]); adapted != arg.expr {
+			// The adapted expression has its own Go type.
+			op.expr, op.typ = adapted, air.NoType
+		}
+		ops[lead+i] = op
+	}
+	stmts, err := l.sequenceOperands(ops)
+	if err != nil {
+		return nil, nil, err
+	}
+	if receiver != nil {
+		receiver.expr = ops[0].expr
+	}
+	return operandExprs(ops[lead:]), stmts, nil
+}
+
 func (l *lowerer) materializeCallOperand(stmts []ast.Stmt, value ast.Expr) ([]ast.Stmt, ast.Expr) {
 	temp := l.nextTemp()
 	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{l.ident(temp)}, Tok: token.DEFINE, Rhs: []ast.Expr{value}})
@@ -4021,29 +4133,9 @@ func (l *lowerer) lowerForeignCall(fn air.Function, expr air.Expr) (loweredExpr,
 	}
 	spread := payload.Spread != nil
 
-	args := make([]ast.Expr, 0, len(expr.Args))
-	var stmts []ast.Stmt
-	for i := range expr.Args {
-		var arg loweredExpr
-		var err error
-		if spread && i == len(expr.Args)-1 {
-			arg, err = l.lowerSpreadArgument(fn, expr.Args[i])
-		} else {
-			arg, err = l.lowerExpr(fn, expr.Args[i])
-		}
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		stmts = append(stmts, arg.stmts...)
-		argExpr := arg.expr
-		if !spread || i != len(expr.Args)-1 {
-			mode := payload.ArgABI[i]
-			argExpr = l.foreignABIValueArg(expr.Args[i], argExpr, mode)
-		}
-		if spread {
-			stmts, argExpr = l.materializeCallOperand(stmts, argExpr)
-		}
-		args = append(args, argExpr)
+	args, stmts, err := l.lowerForeignCallArgs(fn, expr, payload, nil)
+	if err != nil {
+		return loweredExpr{}, err
 	}
 	importPath := payload.Namespace
 	functionName := payload.Symbol
@@ -4434,35 +4526,12 @@ func (l *lowerer) lowerForeignMethodCall(fn air.Function, expr air.Expr) (lowere
 		return loweredExpr{}, err
 	}
 	spread := payload.Spread != nil
-	args := make([]ast.Expr, 0, len(expr.Args))
-	stmts := append([]ast.Stmt{}, target.stmts...)
-	receiverExpr := target.expr
-	if spread {
-		stmts, receiverExpr = l.materializeCallOperand(stmts, receiverExpr)
+	receiver := valueOperand(target, expr.Target.Type)
+	args, stmts, err := l.lowerForeignCallArgs(fn, expr, payload, &receiver)
+	if err != nil {
+		return loweredExpr{}, err
 	}
-	for i := range expr.Args {
-		var arg loweredExpr
-		var err error
-		if spread && i == len(expr.Args)-1 {
-			arg, err = l.lowerSpreadArgument(fn, expr.Args[i])
-		} else {
-			arg, err = l.lowerExpr(fn, expr.Args[i])
-		}
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		stmts = append(stmts, arg.stmts...)
-		argExpr := arg.expr
-		if !spread || i != len(expr.Args)-1 {
-			mode := payload.ArgABI[i]
-			argExpr = l.foreignABIValueArg(expr.Args[i], argExpr, mode)
-		}
-		if spread {
-			stmts, argExpr = l.materializeCallOperand(stmts, argExpr)
-		}
-		args = append(args, argExpr)
-	}
-	call := &ast.CallExpr{Fun: &ast.SelectorExpr{X: receiverExpr, Sel: l.ident(payload.Symbol)}, Args: args}
+	call := &ast.CallExpr{Fun: &ast.SelectorExpr{X: receiver.expr, Sel: l.ident(payload.Symbol)}, Args: args}
 	if spread {
 		call.Ellipsis = token.Pos(1)
 	}
@@ -4505,7 +4574,10 @@ func (l *lowerer) lowerEmbeddedFSOperation(fn air.Function, expr air.Expr) (lowe
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	stmts := append(append([]ast.Stmt{}, target.stmts...), arg.stmts...)
+	stmts, err := l.sequenceOperandPair(&target, expr.Target.Type, &arg, expr.Args[0].Type)
+	if err != nil {
+		return loweredExpr{}, err
+	}
 	var function ast.Expr
 	switch expr.Kind {
 	case air.ExprEmbeddedFSReadFile:
@@ -4852,6 +4924,14 @@ func (l *lowerer) mapKeyValueTypes(mapTypeID air.TypeID) (air.TypeID, air.TypeID
 		return air.NoType, air.NoType
 	}
 	return info.Key, info.Value
+}
+
+// mapKeyArgType is the type lowerMapKeyArg lowers a key argument to.
+func (l *lowerer) mapKeyArgType(mapTypeID air.TypeID, expr air.Expr) air.TypeID {
+	if keyType, _ := l.mapKeyValueTypes(mapTypeID); keyType != air.NoType {
+		return keyType
+	}
+	return expr.Type
 }
 
 func (l *lowerer) lowerMapKeyArg(fn air.Function, mapTypeID air.TypeID, expr air.Expr) (loweredExpr, error) {
@@ -5420,39 +5500,68 @@ func (l *lowerer) resultErrorIsVoid(typeID air.TypeID) bool {
 }
 
 func (l *lowerer) lowerCallArgs(fn air.Function, rawArgs []air.Expr, params []air.Param) ([]ast.Expr, []ast.Stmt, []ast.Stmt, error) {
-	args := make([]ast.Expr, 0, len(rawArgs))
-	stmts := []ast.Stmt{}
-	writeback := []ast.Stmt{}
+	var buf operandBuffer
+	ops := buf.operands(len(rawArgs))
+	writeback, err := l.lowerCallArgOperands(ops, fn, rawArgs, params, nil)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	stmts, err := l.sequenceOperands(ops)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return operandExprs(ops), stmts, writeback, nil
+}
+
+// lowerCallArgOperands lowers call arguments into ops, one operand per
+// argument, each adapted to its parameter in params. When declared is given,
+// a function-valued argument is also adapted to the Go signature of its
+// declared parameter type (see adaptCallableReturnABI). The statements an
+// adaptation emits belong to its argument, so they run in the argument's
+// place in source order.
+func (l *lowerer) lowerCallArgOperands(ops []operand, fn air.Function, rawArgs []air.Expr, params []air.Param, declared []air.Param) ([]ast.Stmt, error) {
+	var writeback []ast.Stmt
 	for i, arg := range rawArgs {
 		var loweredArg loweredExpr
 		var err error
+		argType := arg.Type
 		if i < len(params) && !l.isReferenceType(params[i].Type) {
 			loweredArg, err = l.lowerExprWithExpectedType(fn, arg, params[i].Type)
+			argType = params[i].Type
 		} else {
 			loweredArg, err = l.lowerExpr(fn, arg)
 		}
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, err
 		}
-		stmts = append(stmts, loweredArg.stmts...)
+		stmts := loweredArg.stmts
 		argExpr := loweredArg.expr
 		if i < len(params) && l.isVoidType(params[i].Type) {
 			stmts = l.appendVoidValueEval(stmts, argExpr)
 			argExpr = l.voidValueExpr()
 		}
 		if i < len(params) {
-			var setup []ast.Stmt
-			var post []ast.Stmt
-			argExpr, setup, post, err = l.adaptCallArgWithStmts(fn, arg, argExpr, params[i])
+			adapted, setup, post, err := l.adaptCallArgWithStmts(fn, arg, argExpr, params[i])
 			if err != nil {
-				return nil, nil, nil, err
+				return nil, err
+			}
+			if adapted != argExpr {
+				// The adapted expression has its own Go type.
+				argType = air.NoType
+				argExpr = adapted
 			}
 			stmts = append(stmts, setup...)
 			writeback = append(writeback, post...)
 		}
-		args = append(args, argExpr)
+		if i < len(declared) {
+			stmts, argExpr, err = l.adaptCallableReturnABI(stmts, argExpr, arg.Type, declared[i].Type)
+			if err != nil {
+				return nil, err
+			}
+		}
+		ops[i] = operand{stmts: stmts, expr: argExpr, typ: argType}
 	}
-	return args, stmts, writeback, nil
+	return writeback, nil
 }
 
 func (l *lowerer) lowerCallArgsMaterialized(fn air.Function, rawArgs []air.Expr, params []air.Param) ([]ast.Expr, []ast.Stmt, []ast.Stmt, error) {
@@ -6190,7 +6299,10 @@ func (l *lowerer) lowerMaybeExpect(fn air.Function, expr air.Expr) (loweredExpr,
 		return loweredExpr{}, err
 	}
 	resultExpr := l.ident(resultTemp)
-	stmts := append(target.stmts, message.stmts...)
+	stmts, err := l.sequenceOperandPair(&target, expr.Target.Type, &message, expr.Args[0].Type)
+	if err != nil {
+		return loweredExpr{}, err
+	}
 	stmts = append(stmts, resultDecls...)
 	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{resultExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{target.expr}})
 	if l.isVoidType(expr.Type) {
@@ -6263,7 +6375,10 @@ func (l *lowerer) lowerMaybeOr(fn air.Function, expr air.Expr) (loweredExpr, err
 		return loweredExpr{}, err
 	}
 	resultExpr := l.ident(resultTemp)
-	stmts := append(target.stmts, defaultValue.stmts...)
+	stmts, err := l.sequenceOperandPair(&target, expr.Target.Type, &defaultValue, expr.Type)
+	if err != nil {
+		return loweredExpr{}, err
+	}
 	defaultExpr := defaultValue.expr
 	if l.isVoidType(expr.Type) || isVoidExpr(defaultExpr) {
 		stmts = l.appendVoidValueEval(stmts, defaultExpr)
@@ -6304,7 +6419,10 @@ func (l *lowerer) lowerResultOr(fn air.Function, expr air.Expr) (loweredExpr, er
 		return loweredExpr{}, err
 	}
 	resultExpr := l.ident(resultTemp)
-	stmts := append(target.stmts, defaultValue.stmts...)
+	stmts, err := l.sequenceOperandPair(&target, expr.Target.Type, &defaultValue, expr.Type)
+	if err != nil {
+		return loweredExpr{}, err
+	}
 	defaultExpr := defaultValue.expr
 	if l.isVoidType(expr.Type) || isVoidExpr(defaultExpr) {
 		stmts = l.appendVoidValueEval(stmts, defaultExpr)
@@ -6360,13 +6478,16 @@ func (l *lowerer) lowerMaybeSet(fn air.Function, expr air.Expr) (loweredExpr, er
 		targetStmts = loweredTarget.stmts
 	}
 	target = l.valueThroughReference(expr.Target.Type, target)
-	valueExpr := value.expr
-	stmts := append(append([]ast.Stmt{}, targetStmts...), value.stmts...)
-	if l.isVoidType(maybeInfo.Elem) || isVoidExpr(valueExpr) {
-		stmts = l.appendVoidValueEval(stmts, valueExpr)
-		valueExpr = l.voidValueExpr()
+	if l.isVoidType(maybeInfo.Elem) || isVoidExpr(value.expr) {
+		value = l.materializeVoidValue(value)
 	}
-	some, err := l.maybeSomeExpr(maybeType, valueExpr)
+	ops := [2]operand{placeOperand(loweredExpr{stmts: targetStmts, expr: target}), valueOperand(value, maybeInfo.Elem)}
+	stmts, err := l.sequenceOperands(ops[:])
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	target = ops[0].expr
+	some, err := l.maybeSomeExpr(maybeType, ops[1].expr)
 	if err != nil {
 		return loweredExpr{}, err
 	}
@@ -6458,7 +6579,10 @@ func (l *lowerer) lowerMaybeMap(fn air.Function, expr air.Expr) (loweredExpr, er
 	}
 	resultExpr := l.ident(resultTemp)
 	targetExpr := l.ident(targetTemp)
-	stmts := append(target.stmts, callback.stmts...)
+	stmts, err := l.sequenceOperandPair(&target, expr.Target.Type, &callback, expr.Args[0].Type)
+	if err != nil {
+		return loweredExpr{}, err
+	}
 	stmts = append(stmts, targetDecls...)
 	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{targetExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{target.expr}})
 	stmts = append(stmts, resultDecls...)
@@ -6514,7 +6638,10 @@ func (l *lowerer) lowerMaybeAndThen(fn air.Function, expr air.Expr) (loweredExpr
 	}
 	resultExpr := l.ident(resultTemp)
 	targetExpr := l.ident(targetTemp)
-	stmts := append(target.stmts, callback.stmts...)
+	stmts, err := l.sequenceOperandPair(&target, expr.Target.Type, &callback, expr.Args[0].Type)
+	if err != nil {
+		return loweredExpr{}, err
+	}
 	stmts = append(stmts, targetDecls...)
 	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{targetExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{target.expr}})
 	stmts = append(stmts, resultDecls...)
@@ -6587,7 +6714,10 @@ func (l *lowerer) lowerResultMap(fn air.Function, expr air.Expr) (loweredExpr, e
 	}
 	resultExpr := l.ident(resultTemp)
 	targetExpr := l.ident(targetTemp)
-	stmts := append(target.stmts, callback.stmts...)
+	stmts, err := l.sequenceOperandPair(&target, expr.Target.Type, &callback, expr.Args[0].Type)
+	if err != nil {
+		return loweredExpr{}, err
+	}
 	stmts = append(stmts, targetDecls...)
 	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{targetExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{target.expr}})
 	stmts = append(stmts, resultDecls...)
@@ -6652,7 +6782,10 @@ func (l *lowerer) lowerResultMapErr(fn air.Function, expr air.Expr) (loweredExpr
 	}
 	resultExpr := l.ident(resultTemp)
 	targetExpr := l.ident(targetTemp)
-	stmts := append(target.stmts, callback.stmts...)
+	stmts, err := l.sequenceOperandPair(&target, expr.Target.Type, &callback, expr.Args[0].Type)
+	if err != nil {
+		return loweredExpr{}, err
+	}
 	stmts = append(stmts, targetDecls...)
 	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{targetExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{target.expr}})
 	stmts = append(stmts, resultDecls...)
@@ -6717,7 +6850,10 @@ func (l *lowerer) lowerResultAndThen(fn air.Function, expr air.Expr) (loweredExp
 	}
 	resultExpr := l.ident(resultTemp)
 	targetExpr := l.ident(targetTemp)
-	stmts := append(target.stmts, callback.stmts...)
+	stmts, err := l.sequenceOperandPair(&target, expr.Target.Type, &callback, expr.Args[0].Type)
+	if err != nil {
+		return loweredExpr{}, err
+	}
 	stmts = append(stmts, targetDecls...)
 	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{targetExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{target.expr}})
 	stmts = append(stmts, resultDecls...)
@@ -6833,7 +6969,10 @@ func (l *lowerer) lowerResultExpect(fn air.Function, expr air.Expr) (loweredExpr
 	}
 	resultExpr := l.ident(resultTemp)
 	panicMsg := &ast.BinaryExpr{X: message.expr, Op: token.ADD, Y: &ast.BinaryExpr{X: &ast.BasicLit{Kind: token.STRING, Value: `": "`}, Op: token.ADD, Y: &ast.CallExpr{Fun: l.qualified("fmt", "fmt", "Sprint"), Args: []ast.Expr{&ast.SelectorExpr{X: resultExpr, Sel: l.ident("Err")}}}}}
-	stmts := append(target.stmts, message.stmts...)
+	stmts, err := l.sequenceOperandPair(&target, expr.Target.Type, &message, expr.Args[0].Type)
+	if err != nil {
+		return loweredExpr{}, err
+	}
 	stmts = append(stmts, resultDecls...)
 	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{resultExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{target.expr}})
 	if l.isVoidType(expr.Type) {
@@ -7149,33 +7288,36 @@ func (l *lowerer) lowerMakeList(fn air.Function, expr air.Expr) (loweredExpr, er
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	elts := make([]ast.Expr, 0, len(expr.Args))
-	stmts := []ast.Stmt{}
+	var buf operandBuffer
+	ops := buf.operands(len(expr.Args))
 	elemType := air.NoType
 	if validTypeID(l.program, expr.Type) {
 		if info := l.program.Types[expr.Type-1]; info.Kind == air.TypeList || info.Kind == air.TypeFixedArray {
 			elemType = info.Elem
 		}
 	}
-	for _, arg := range expr.Args {
+	for i, arg := range expr.Args {
 		var loweredArg loweredExpr
+		argType := arg.Type
 		if elemType != air.NoType {
 			loweredArg, err = l.lowerExprWithExpectedType(fn, arg, elemType)
+			argType = elemType
 		} else {
 			loweredArg, err = l.lowerExpr(fn, arg)
 		}
 		if err != nil {
 			return loweredExpr{}, err
 		}
-		stmts = append(stmts, loweredArg.stmts...)
-		argExpr := loweredArg.expr
-		if l.isVoidType(elemType) || isVoidExpr(argExpr) {
-			stmts = l.appendVoidValueEval(stmts, argExpr)
-			argExpr = l.voidValueExpr()
+		if l.isVoidType(elemType) || isVoidExpr(loweredArg.expr) {
+			loweredArg = l.materializeVoidValue(loweredArg)
 		}
-		elts = append(elts, argExpr)
+		ops[i] = valueOperand(loweredArg, argType)
 	}
-	return loweredExpr{stmts: stmts, expr: &ast.CompositeLit{Type: typ, Elts: elts}}, nil
+	stmts, err := l.sequenceOperands(ops)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	return loweredExpr{stmts: stmts, expr: &ast.CompositeLit{Type: typ, Elts: operandExprs(ops)}}, nil
 }
 
 // tupleElems returns the element types of a tuple type.
@@ -7197,50 +7339,23 @@ func (l *lowerer) lowerTupleElements(fn air.Function, expr air.Expr) ([]ast.Stmt
 	if !ok || len(elems) != len(expr.Args) {
 		return nil, nil, fmt.Errorf("tuple constructor does not match its tuple type")
 	}
-	setup := make([][]ast.Stmt, len(expr.Args))
-	values := make([]ast.Expr, len(expr.Args))
-	// lastSetup is the last element whose lowering emits statements. Those
-	// statements run before the tuple is built, so every earlier element is
-	// evaluated into a temporary first to keep source order.
-	lastSetup := -1
+	var buf operandBuffer
+	ops := buf.operands(len(expr.Args))
 	for i, arg := range expr.Args {
 		lowered, err := l.lowerExprWithExpectedType(fn, arg, elems[i])
 		if err != nil {
 			return nil, nil, err
 		}
-		setup[i], values[i] = lowered.stmts, lowered.expr
-		if l.isVoidType(elems[i]) || isVoidExpr(values[i]) {
-			setup[i] = l.appendVoidValueEval(setup[i], values[i])
-			values[i] = l.voidValueExpr()
+		if l.isVoidType(elems[i]) || isVoidExpr(lowered.expr) {
+			lowered = l.materializeVoidValue(lowered)
 		}
-		if len(setup[i]) > 0 {
-			lastSetup = i
-		}
+		ops[i] = valueOperand(lowered, elems[i])
 	}
-	stmts := []ast.Stmt{}
-	for i := range values {
-		stmts = append(stmts, setup[i]...)
-		if i >= lastSetup || l.isVoidType(elems[i]) {
-			continue
-		}
-		if _, literal := values[i].(*ast.BasicLit); literal {
-			continue
-		}
-		// The temporary is declared with the element type so an untyped
-		// constant expression keeps the type the tuple gives it.
-		elemType, err := l.goType(elems[i])
-		if err != nil {
-			return nil, nil, err
-		}
-		temp := l.nextTemp()
-		stmts = append(stmts, &ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{
-			Names:  []*ast.Ident{l.ident(temp)},
-			Type:   elemType,
-			Values: []ast.Expr{values[i]},
-		}}}})
-		values[i] = l.ident(temp)
+	stmts, err := l.sequenceOperands(ops)
+	if err != nil {
+		return nil, nil, err
 	}
-	return stmts, values, nil
+	return stmts, operandExprs(ops), nil
 }
 
 // tupleValueExpr builds the struct value of a tuple type from one Go
@@ -7473,27 +7588,20 @@ func (l *lowerer) lowerCallClosure(fn air.Function, expr air.Expr) (loweredExpr,
 			params[i] = air.Param{Type: targetInfo.Params[paramIndex]}
 		}
 	}
-	callArgs := expr.Args
-	callParams := params
-	calleeStmts := append([]ast.Stmt{}, target.stmts...)
-	calleeExpr := target.expr
-	if spreadCall {
-		callArgs = expr.Args[:len(expr.Args)-1]
-		callParams = params[:len(params)-1]
-		calleeStmts, calleeExpr = l.materializeCallOperand(calleeStmts, calleeExpr)
-	}
+	var calleeExpr ast.Expr
 	var args []ast.Expr
 	var stmts []ast.Stmt
 	var writeback []ast.Stmt
 	if spreadCall {
+		// A spread call evaluates every component into a temporary (ADR 0062).
+		callArgs := expr.Args[:len(expr.Args)-1]
+		callParams := params[:len(params)-1]
+		calleeStmts := append([]ast.Stmt{}, target.stmts...)
+		calleeStmts, calleeExpr = l.materializeCallOperand(calleeStmts, target.expr)
 		args, stmts, writeback, err = l.lowerCallArgsMaterialized(fn, callArgs, callParams)
-	} else {
-		args, stmts, writeback, err = l.lowerCallArgs(fn, callArgs, callParams)
-	}
-	if err != nil {
-		return loweredExpr{}, err
-	}
-	if spreadCall {
+		if err != nil {
+			return loweredExpr{}, err
+		}
 		spread, err := l.lowerSpreadArgument(fn, expr.Args[len(expr.Args)-1])
 		if err != nil {
 			return loweredExpr{}, err
@@ -7502,8 +7610,21 @@ func (l *lowerer) lowerCallClosure(fn air.Function, expr air.Expr) (loweredExpr,
 		var spreadExpr ast.Expr
 		stmts, spreadExpr = l.materializeCallOperand(stmts, spread.expr)
 		args = append(args, spreadExpr)
+		stmts = append(calleeStmts, stmts...)
+	} else {
+		var buf operandBuffer
+		ops := buf.operands(1 + len(expr.Args))
+		ops[0] = valueOperand(target, expr.Target.Type)
+		post, err := l.lowerCallArgOperands(ops[1:], fn, expr.Args, params, nil)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		stmts, err = l.sequenceOperands(ops)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		calleeExpr, args, writeback = ops[0].expr, operandExprs(ops[1:]), post
 	}
-	stmts = append(calleeStmts, stmts...)
 	call := &ast.CallExpr{Fun: calleeExpr, Args: args}
 	if spreadCall {
 		call.Ellipsis = token.Pos(1)
@@ -7742,11 +7863,13 @@ func (l *lowerer) lowerListSwap(fn air.Function, expr air.Expr) (loweredExpr, er
 	if err != nil {
 		return loweredExpr{}, err
 	}
+	stmts, err := l.sequenceOperandTriple(&target, expr.Target.Type, &left, expr.Args[0].Type, &right, expr.Args[1].Type)
+	if err != nil {
+		return loweredExpr{}, err
+	}
 	leftName := l.nextTemp()
 	rightName := l.nextTemp()
 	targetExpr := l.valueThroughReference(expr.Target.Type, target.expr)
-	stmts := append(target.stmts, left.stmts...)
-	stmts = append(stmts, right.stmts...)
 	stmts = append(stmts,
 		&ast.AssignStmt{Lhs: []ast.Expr{l.ident(leftName)}, Tok: token.DEFINE, Rhs: []ast.Expr{left.expr}},
 		&ast.AssignStmt{Lhs: []ast.Expr{l.ident(rightName)}, Tok: token.DEFINE, Rhs: []ast.Expr{right.expr}},
@@ -7818,6 +7941,10 @@ func (l *lowerer) lowerListSort(fn air.Function, expr air.Expr) (loweredExpr, er
 	if err != nil {
 		return loweredExpr{}, err
 	}
+	stmts, err := l.sequenceOperandPair(&target, expr.Target.Type, &cmp, expr.Args[0].Type)
+	if err != nil {
+		return loweredExpr{}, err
+	}
 	sortAlias := l.registerImport("sort", "sort")
 	targetExpr := l.valueThroughReference(expr.Target.Type, target.expr)
 	lessFunc := &ast.FuncLit{
@@ -7835,7 +7962,6 @@ func (l *lowerer) lowerListSort(fn air.Function, expr air.Expr) (loweredExpr, er
 			}}}},
 		}},
 	}
-	stmts := append(target.stmts, cmp.stmts...)
 	stmts = append(stmts, &ast.ExprStmt{X: &ast.CallExpr{Fun: &ast.SelectorExpr{X: l.ident(sortAlias), Sel: l.ident("SliceStable")}, Args: []ast.Expr{targetExpr, lessFunc}}})
 	return loweredExpr{stmts: stmts, expr: l.ident("nil")}, nil
 }
@@ -7877,15 +8003,22 @@ func (l *lowerer) lowerListPush(fn air.Function, expr air.Expr) (loweredExpr, er
 		targetStmts = loweredTarget.stmts
 	}
 	target = l.valueThroughReference(expr.Target.Type, target)
-	valueExpr := value.expr
-	stmts := append(append([]ast.Stmt{}, targetStmts...), value.stmts...)
-	if info, ok := l.typeInfoThroughReference(expr.Target.Type); ok && info.Kind == air.TypeList && l.isVoidType(info.Elem) {
-		stmts = l.appendVoidValueEval(stmts, valueExpr)
-		valueExpr = l.voidValueExpr()
+	valueType := expr.Args[0].Type
+	if info, ok := l.typeInfoThroughReference(expr.Target.Type); ok && info.Kind == air.TypeList {
+		valueType = info.Elem
+		if l.isVoidType(info.Elem) {
+			value = l.materializeVoidValue(value)
+		}
 	}
-	if isVoidExpr(valueExpr) {
-		valueExpr = l.voidValueExpr()
+	if isVoidExpr(value.expr) {
+		value.expr = l.voidValueExpr()
 	}
+	ops := [2]operand{placeOperand(loweredExpr{stmts: targetStmts, expr: target}), valueOperand(value, valueType)}
+	stmts, err := l.sequenceOperands(ops[:])
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	target, valueExpr := ops[0].expr, ops[1].expr
 	assign := &ast.AssignStmt{
 		Lhs: []ast.Expr{target},
 		Tok: token.ASSIGN,
@@ -7905,40 +8038,27 @@ func (l *lowerer) lowerMakeMap(fn air.Function, expr air.Expr) (loweredExpr, err
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	elts := make([]ast.Expr, 0, len(payload.Entries))
-	stmts := []ast.Stmt{}
+	// Keys and values alternate in source order.
+	var buf operandBuffer
+	ops := buf.operands(2 * len(payload.Entries))[:0]
 	for _, entry := range payload.Entries {
-		var key loweredExpr
-		if keyType != air.NoType {
-			key, err = l.lowerExprWithExpectedType(fn, entry.Key, keyType)
-		} else {
-			key, err = l.lowerExpr(fn, entry.Key)
-		}
+		key, err := l.lowerValueOperand(fn, entry.Key, keyType)
 		if err != nil {
 			return loweredExpr{}, err
 		}
-		var value loweredExpr
-		if valueType != air.NoType {
-			value, err = l.lowerExprWithExpectedType(fn, entry.Value, valueType)
-		} else {
-			value, err = l.lowerExpr(fn, entry.Value)
-		}
+		value, err := l.lowerValueOperand(fn, entry.Value, valueType)
 		if err != nil {
 			return loweredExpr{}, err
 		}
-		stmts = append(stmts, key.stmts...)
-		keyExpr := key.expr
-		if l.isVoidType(keyType) || isVoidExpr(keyExpr) {
-			stmts = l.appendVoidValueEval(stmts, keyExpr)
-			keyExpr = l.voidValueExpr()
-		}
-		stmts = append(stmts, value.stmts...)
-		valueExpr := value.expr
-		if l.isVoidType(valueType) || isVoidExpr(valueExpr) {
-			stmts = l.appendVoidValueEval(stmts, valueExpr)
-			valueExpr = l.voidValueExpr()
-		}
-		elts = append(elts, &ast.KeyValueExpr{Key: keyExpr, Value: valueExpr})
+		ops = append(ops, key, value)
+	}
+	stmts, err := l.sequenceOperands(ops)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	elts := make([]ast.Expr, len(payload.Entries))
+	for i := range payload.Entries {
+		elts[i] = &ast.KeyValueExpr{Key: ops[2*i].expr, Value: ops[2*i+1].expr}
 	}
 	return loweredExpr{stmts: stmts, expr: &ast.CompositeLit{Type: typ, Elts: elts}}, nil
 }
@@ -7961,7 +8081,10 @@ func (l *lowerer) lowerMapHas(fn air.Function, expr air.Expr) (loweredExpr, erro
 		return loweredExpr{}, err
 	}
 	okName := l.nextTemp()
-	stmts := append(target.stmts, key.stmts...)
+	stmts, err := l.sequenceOperandPair(&target, expr.Target.Type, &key, l.mapKeyArgType(expr.Target.Type, expr.Args[0]))
+	if err != nil {
+		return loweredExpr{}, err
+	}
 	stmts = append(stmts, decls...)
 	lookup := &ast.IndexExpr{X: l.valueThroughReference(expr.Target.Type, target.expr), Index: key.expr}
 	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{l.ident("_"), l.ident(okName)}, Tok: token.DEFINE, Rhs: []ast.Expr{lookup}})
@@ -8011,7 +8134,10 @@ func (l *lowerer) lowerChannelSend(fn air.Function, expr air.Expr) (loweredExpr,
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	stmts := append(ch.stmts, value.stmts...)
+	stmts, err := l.sequenceOperandPair(&ch, expr.Args[0].Type, &value, expr.Args[1].Type)
+	if err != nil {
+		return loweredExpr{}, err
+	}
 	stmts = append(stmts, &ast.SendStmt{Chan: ch.expr, Value: value.expr})
 	return loweredExpr{stmts: stmts, expr: l.voidValueExpr()}, nil
 }
@@ -8087,6 +8213,15 @@ func (l *lowerer) lowerChannelNarrow(fn air.Function, expr air.Expr) (loweredExp
 // lowerSelect emits a native Go select statement (ADR 0032). Channel and send
 // operands are hoisted before the select so they are evaluated once; recv arms
 // with a binding build the element Maybe from the comma-ok receive.
+// channelOperand is a channel operand read through its reference, if any.
+func (l *lowerer) channelOperand(ch loweredExpr, typeID air.TypeID) operand {
+	if l.isReferenceType(typeID) {
+		ch.expr = l.valueThroughReference(typeID, ch.expr)
+		return valueOperand(ch, air.NoType)
+	}
+	return valueOperand(ch, typeID)
+}
+
 func (l *lowerer) lowerSelect(fn air.Function, expr air.Expr) (loweredExpr, error) {
 	payload := expr.SelectPayload()
 	if payload == nil {
@@ -8106,6 +8241,10 @@ func (l *lowerer) lowerSelect(fn air.Function, expr air.Expr) (loweredExpr, erro
 		resultExpr = l.ident(temp)
 	}
 
+	// Channel operands and sent values are evaluated in source order on entry
+	// to the select. slots[i] is where ops[i] is used in its clause.
+	var ops []operand
+	var slots []*ast.Expr
 	clauses := []ast.Stmt{}
 	for _, arm := range payload.Cases {
 		clause := &ast.CommClause{}
@@ -8129,10 +8268,10 @@ func (l *lowerer) lowerSelect(fn air.Function, expr air.Expr) (loweredExpr, erro
 			if err != nil {
 				return loweredExpr{}, err
 			}
-			preStmts = append(preStmts, ch.stmts...)
-			preStmts = append(preStmts, val.stmts...)
-			channelExpr := l.valueThroughReference(arm.Channel.Type, ch.expr)
-			clause.Comm = &ast.SendStmt{Chan: channelExpr, Value: val.expr}
+			send := &ast.SendStmt{}
+			ops = append(ops, l.channelOperand(ch, arm.Channel.Type), valueOperand(val, arm.Value.Type))
+			slots = append(slots, &send.Chan, &send.Value)
+			clause.Comm = send
 			body, err := l.lowerValueBlock(fn, arm.Body, expr.Type, assignTarget)
 			if err != nil {
 				return loweredExpr{}, err
@@ -8147,9 +8286,10 @@ func (l *lowerer) lowerSelect(fn air.Function, expr air.Expr) (loweredExpr, erro
 			if err != nil {
 				return loweredExpr{}, err
 			}
-			preStmts = append(preStmts, ch.stmts...)
-			channelExpr := l.valueThroughReference(arm.Channel.Type, ch.expr)
-			recv := ast.Expr(&ast.UnaryExpr{Op: token.ARROW, X: channelExpr})
+			receive := &ast.UnaryExpr{Op: token.ARROW}
+			ops = append(ops, l.channelOperand(ch, arm.Channel.Type))
+			slots = append(slots, &receive.X)
+			recv := ast.Expr(receive)
 			if arm.HasBind {
 				valueTemp := l.nextTemp()
 				okTemp := l.nextTemp()
@@ -8199,6 +8339,14 @@ func (l *lowerer) lowerSelect(fn air.Function, expr air.Expr) (loweredExpr, erro
 		clauses = append(clauses, clause)
 	}
 
+	operandStmts, err := l.sequenceOperands(ops)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	for i := range ops {
+		*slots[i] = ops[i].expr
+	}
+	preStmts = append(preStmts, operandStmts...)
 	preStmts = append(preStmts, &ast.SelectStmt{Body: &ast.BlockStmt{List: clauses}})
 	return loweredExpr{stmts: preStmts, expr: resultExpr}, nil
 }
@@ -8222,8 +8370,11 @@ func (l *lowerer) lowerMapGet(fn air.Function, expr air.Expr) (loweredExpr, erro
 	}
 	valueTemp := l.nextTemp()
 	okName := l.nextTemp()
+	stmts, err := l.sequenceOperandPair(&target, expr.Target.Type, &key, l.mapKeyArgType(expr.Target.Type, expr.Args[0]))
+	if err != nil {
+		return loweredExpr{}, err
+	}
 	lookup := ast.Expr(&ast.IndexExpr{X: l.valueThroughReference(expr.Target.Type, target.expr), Index: key.expr})
-	stmts := append(target.stmts, key.stmts...)
 	stmts = append(stmts, decls...)
 	someExpr, err := l.maybeSomeExpr(expr.Type, l.ident(valueTemp))
 	if err != nil {
@@ -8248,37 +8399,20 @@ func (l *lowerer) lowerMapSet(fn air.Function, expr air.Expr) (loweredExpr, erro
 		return loweredExpr{}, err
 	}
 	keyType, valueType := l.mapKeyValueTypes(expr.Target.Type)
-	var key loweredExpr
-	if keyType != air.NoType {
-		key, err = l.lowerExprWithExpectedType(fn, expr.Args[0], keyType)
-	} else {
-		key, err = l.lowerExpr(fn, expr.Args[0])
-	}
+	key, err := l.lowerValueOperand(fn, expr.Args[0], keyType)
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	var value loweredExpr
-	if valueType != air.NoType {
-		value, err = l.lowerExprWithExpectedType(fn, expr.Args[1], valueType)
-	} else {
-		value, err = l.lowerExpr(fn, expr.Args[1])
-	}
+	value, err := l.lowerValueOperand(fn, expr.Args[1], valueType)
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	stmts := append(target.stmts, key.stmts...)
-	keyExpr := key.expr
-	if l.isVoidType(keyType) || isVoidExpr(keyExpr) {
-		stmts = l.appendVoidValueEval(stmts, keyExpr)
-		keyExpr = l.voidValueExpr()
+	ops := [3]operand{valueOperand(target, expr.Target.Type), key, value}
+	stmts, err := l.sequenceOperands(ops[:])
+	if err != nil {
+		return loweredExpr{}, err
 	}
-	stmts = append(stmts, value.stmts...)
-	valueExpr := value.expr
-	if l.isVoidType(valueType) || isVoidExpr(valueExpr) {
-		stmts = l.appendVoidValueEval(stmts, valueExpr)
-		valueExpr = l.voidValueExpr()
-	}
-	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{&ast.IndexExpr{X: l.valueThroughReference(expr.Target.Type, target.expr), Index: keyExpr}}, Tok: token.ASSIGN, Rhs: []ast.Expr{valueExpr}})
+	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{&ast.IndexExpr{X: l.valueThroughReference(expr.Target.Type, ops[0].expr), Index: ops[1].expr}}, Tok: token.ASSIGN, Rhs: []ast.Expr{ops[2].expr}})
 	return loweredExpr{stmts: stmts, expr: l.voidValueExpr()}, nil
 }
 
@@ -8294,7 +8428,10 @@ func (l *lowerer) lowerMapDelete(fn air.Function, expr air.Expr) (loweredExpr, e
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	stmts := append(target.stmts, key.stmts...)
+	stmts, err := l.sequenceOperandPair(&target, expr.Target.Type, &key, l.mapKeyArgType(expr.Target.Type, expr.Args[0]))
+	if err != nil {
+		return loweredExpr{}, err
+	}
 	stmts = append(stmts, &ast.ExprStmt{X: &ast.CallExpr{Fun: l.ident("delete"), Args: []ast.Expr{l.valueThroughReference(expr.Target.Type, target.expr), key.expr}}})
 	return loweredExpr{stmts: stmts, expr: l.ident("nil")}, nil
 }
@@ -8326,7 +8463,10 @@ func (l *lowerer) lowerMapKeyAt(fn air.Function, expr air.Expr) (loweredExpr, er
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	stmts := append(target.stmts, index.stmts...)
+	stmts, err := l.sequenceOperandPair(&target, expr.Target.Type, &index, expr.Args[0].Type)
+	if err != nil {
+		return loweredExpr{}, err
+	}
 	keys, err := l.mapKeysExpr(expr.Target.Type, target.expr)
 	if err != nil {
 		return loweredExpr{}, err
@@ -8346,7 +8486,10 @@ func (l *lowerer) lowerMapValueAt(fn air.Function, expr air.Expr) (loweredExpr, 
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	stmts := append(target.stmts, index.stmts...)
+	stmts, err := l.sequenceOperandPair(&target, expr.Target.Type, &index, expr.Args[0].Type)
+	if err != nil {
+		return loweredExpr{}, err
+	}
 	keys, err := l.mapKeysExpr(expr.Target.Type, target.expr)
 	if err != nil {
 		return loweredExpr{}, err
@@ -8492,13 +8635,18 @@ func (l *lowerer) lowerNativeTraitInterfaceCall(fn air.Function, target loweredE
 			return loweredExpr{}, fmt.Errorf("trait method %s cannot be lowered as a Go method", method.Name)
 		}
 	}
-	args, argStmts, writeback, err := l.lowerCallArgs(fn, expr.Args, method.Signature.Params)
+	var buf operandBuffer
+	ops := buf.operands(1 + len(expr.Args))
+	ops[0] = valueOperand(target, expr.Target.Type)
+	writeback, err := l.lowerCallArgOperands(ops[1:], fn, expr.Args, method.Signature.Params, nil)
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	stmts := append([]ast.Stmt{}, target.stmts...)
-	stmts = append(stmts, argStmts...)
-	call := &ast.CallExpr{Fun: &ast.SelectorExpr{X: target.expr, Sel: l.ident(methodName)}, Args: args}
+	stmts, err := l.sequenceOperands(ops)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	call := &ast.CallExpr{Fun: &ast.SelectorExpr{X: ops[0].expr, Sel: l.ident(methodName)}, Args: operandExprs(ops[1:])}
 	if l.abiReturnShapeAvailable(method.Signature.Return) && len(writeback) == 0 {
 		return l.packABICallResult(expr.Type, method.Signature.Return, stmts, call)
 	}
