@@ -28,11 +28,11 @@ func (p printer) printDocAtColumn(root doc, baseColumn int) string {
 	// trailing whitespace.
 	pendingIndent := 0
 
-	newline := func(indent int) {
-		out.WriteByte('\n')
-		pendingIndent = indent
-		column = baseColumn + indent
-	}
+	// suffixes holds line suffixes, such as trailing comments, until the end
+	// of the current line.
+	var suffixes []string
+	lineHasText := false
+
 	// write is the only path that emits visible content, so indentation is
 	// guaranteed to precede anything else on a line.
 	write := func(value string) {
@@ -41,6 +41,25 @@ func (p printer) printDocAtColumn(root doc, baseColumn int) string {
 			pendingIndent = 0
 		}
 		out.WriteString(value)
+		lineHasText = true
+	}
+	flushSuffixes := func() {
+		for _, suffix := range suffixes {
+			if !lineHasText {
+				// Nothing precedes the suffix on its line, so the space that
+				// separates it from code would only be leading whitespace.
+				suffix = strings.TrimLeft(suffix, " ")
+			}
+			write(suffix)
+		}
+		suffixes = suffixes[:0]
+	}
+	newline := func(indent int) {
+		flushSuffixes()
+		out.WriteByte('\n')
+		pendingIndent = indent
+		column = baseColumn + indent
+		lineHasText = false
 	}
 
 	for len(stack) > 0 {
@@ -61,6 +80,8 @@ func (p printer) printDocAtColumn(root doc, baseColumn int) string {
 			stack = append(stack, printCmd{indent: cmd.indent + indentWidth, mode: cmd.mode, doc: node.content})
 		case docForceBreak:
 			stack = append(stack, printCmd{indent: cmd.indent, mode: modeBreak, doc: node.content})
+		case docLineSuffix:
+			suffixes = append(suffixes, node.value)
 		case docIfBreak:
 			if cmd.mode == modeBreak {
 				stack = append(stack, printCmd{indent: cmd.indent, mode: cmd.mode, doc: node.broken})
@@ -97,6 +118,7 @@ func (p printer) printDocAtColumn(root doc, baseColumn int) string {
 		}
 	}
 
+	flushSuffixes()
 	return out.String()
 }
 
@@ -117,6 +139,8 @@ func fits(remaining int, stack []printCmd) bool {
 		case docForceBreak:
 			// Never fits flat, which makes the enclosing group break.
 			return false
+		case docLineSuffix:
+			// Printed at the end of the line, so it takes no width here.
 		case docIfBreak:
 			if cmd.mode == modeBreak {
 				stack = append(stack, printCmd{indent: cmd.indent, mode: cmd.mode, doc: node.broken})

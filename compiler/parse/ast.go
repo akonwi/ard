@@ -100,6 +100,9 @@ func (b Break) String() string {
 type Comment struct {
 	Location
 	Value string
+	// Trailing reports that the comment follows other code on its line, as
+	// in `1, // one`, rather than sitting on a line of its own.
+	Trailing bool
 }
 
 func (c Comment) String() string {
@@ -449,7 +452,7 @@ type FunctionDeclaration struct {
 	ReturnType DeclaredType
 	Body       []Statement
 	Private    bool
-	Comments   []Comment // Comments found within the function declaration
+	Comments   []Comment // Comments found within the parameter list
 }
 
 func (f FunctionDeclaration) String() string {
@@ -470,6 +473,7 @@ type AnonymousFunction struct {
 	Parameters []Parameter
 	ReturnType DeclaredType
 	Body       []Statement
+	Comments   []Comment // Comments found within the parameter list
 }
 
 func (a AnonymousFunction) String() string {
@@ -553,6 +557,7 @@ type TraitImplementation struct {
 	ForType  Identifier
 	Receiver Identifier
 	Methods  []FunctionDeclaration
+	Comments []Comment // Comments found within the implementation body
 }
 
 func (i ImplBlock) String() string {
@@ -587,6 +592,7 @@ func (s StructInstance) String() string {
 }
 
 type EnumVariant struct {
+	Location
 	Name  string
 	Value Expression // nil means auto-assign (0 or previous+1)
 }

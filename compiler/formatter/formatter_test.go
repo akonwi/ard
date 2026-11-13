@@ -575,18 +575,10 @@ func TestFormatKeepsCommentsWithTheirArms(t *testing.T) {
 `,
 		},
 		{
-			name: "trailing same-line comments move below their arm",
+			name: "trailing same-line comments stay on their arm's line",
 			input: `fn describe(count: Int) Str {
   match count {
     0 => "none", // zero
-    _ => "many",
-  }
-}
-`,
-			want: `fn describe(count: Int) Str {
-  match count {
-    0 => "none",
-    // zero
     _ => "many",
   }
 }

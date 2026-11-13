@@ -23,14 +23,42 @@ func Format(input []byte, fileName string) ([]byte, error) {
 		return nil, fmt.Errorf("cannot format invalid Ard source:\n%s", strings.Join(lines, "\n"))
 	}
 
-	removeUnusedImports(result.Program)
+	removedImports := removeUnusedImports(result.Program)
 
 	printer := newPrinter(100)
-	formatted := []byte(ensureFinalNewline(printer.program(result.Program)))
+	formatted := []byte(ensureFinalNewline(printer.program(result.Program, removedImports)))
 	if err := checkFormattedOutputParses(formatted, fileName); err != nil {
 		return nil, err
 	}
+	if err := checkFormattedOutputKeepsComments([]byte(normalized), formatted, fileName); err != nil {
+		return nil, err
+	}
 	return formatted, nil
+}
+
+// checkFormattedOutputKeepsComments rejects formatter output that lost or
+// duplicated a comment, so a printer bug fails the format instead of
+// silently deleting text. Comments may move, as when imports are sorted, so
+// they are compared as a multiset.
+func checkFormattedOutputKeepsComments(input, formatted []byte, fileName string) error {
+	counts := map[string]int{}
+	for _, text := range parse.CommentTexts(input) {
+		counts[text]++
+	}
+	for _, text := range parse.CommentTexts(formatted) {
+		counts[text]--
+	}
+	for _, text := range parse.CommentTexts(input) {
+		if counts[text] > 0 {
+			return fmt.Errorf("refusing to format %s: formatting would lose the comment %q; the file was left unchanged. This is a formatter bug, please report it", fileName, "// "+text)
+		}
+	}
+	for _, text := range parse.CommentTexts(formatted) {
+		if counts[text] < 0 {
+			return fmt.Errorf("refusing to format %s: formatting would duplicate the comment %q; the file was left unchanged. This is a formatter bug, please report it", fileName, "// "+text)
+		}
+	}
+	return nil
 }
 
 // checkFormattedOutputParses rejects formatter output that no longer parses,

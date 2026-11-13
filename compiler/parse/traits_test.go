@@ -23,6 +23,11 @@ func TestTraitDefinitions(t *testing.T) {
 			wantErrs: []string{"Expected new line after '{'", "Expected a type"},
 		},
 		{
+			name:     "Valid empty trait on one line",
+			input:    "trait MyTrait {}",
+			wantErrs: []string{},
+		},
+		{
 			name:     "Missing fn keyword",
 			input:    "trait MyTrait {\n    test();\n}",
 			wantErrs: []string{"Expected function declaration in trait block"},

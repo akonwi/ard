@@ -41,6 +41,11 @@ type parser struct {
 	// it can't leak through anonymous-function bodies. (#285)
 	structOperandAllowed bool
 	inCallTypeArguments  bool
+	// detachedComments are comments read where the syntax tree has no place
+	// for them, such as inside grouping parentheses. The statement list
+	// being parsed puts them above the statement that contained them, so
+	// they are never lost.
+	detachedComments []Comment
 }
 
 func Parse(source []byte, fileName string) ParseResult {
@@ -180,6 +185,7 @@ func (p *parser) parseComment() *Comment {
 		return nil
 	}
 
+	trailing := p.followsCode()
 	tok := p.advance()
 	line_break := p.advance()
 	return &Comment{
@@ -188,7 +194,16 @@ func (p *parser) parseComment() *Comment {
 			Start: tok.getLocation().Start,
 			End:   line_break.getLocation().Start,
 		},
+		Trailing: trailing,
 	}
+}
+
+// followsCode reports whether the current token shares its line with the
+// token before it. The lexer emits a new_line token for every line break, so
+// the current token starts its line exactly when the previous token is a
+// new_line or there is none.
+func (p *parser) followsCode() bool {
+	return p.index > 0 && p.tokens[p.index-1].kind != new_line
 }
 
 // parseInlineComment parses a comment token and returns a cleaned Comment object.
@@ -198,6 +213,7 @@ func (p *parser) parseInlineComment() *Comment {
 		return nil
 	}
 
+	trailing := p.followsCode()
 	commentToken := p.advance()
 	// Strip "//" and leading whitespace
 	commentText := commentToken.text[2:] // Remove "//"
@@ -212,6 +228,7 @@ func (p *parser) parseInlineComment() *Comment {
 	return &Comment{
 		Location: commentToken.getLocation(),
 		Value:    commentText,
+		Trailing: trailing,
 	}
 }
 
@@ -240,14 +257,19 @@ func (p *parser) parse() (*Program, error) {
 		if p.match(new_line) {
 			continue
 		}
+		mark := len(p.detachedComments)
 		stmt, err := p.parseStatement()
 		if err != nil {
 			return nil, err
 		}
+		program.Statements = p.placeDetachedComments(program.Statements, mark, stmt)
 		if stmt != nil {
 			program.Statements = append(program.Statements, stmt)
 		}
 	}
+	// Keep any comment no statement list placed, such as one read before a
+	// parse error ended a statement early.
+	program.Statements = p.placeDetachedComments(program.Statements, 0, nil)
 
 	return program, nil
 }
@@ -793,10 +815,12 @@ func (p *parser) whileLoop() (Statement, error) {
 
 	statements := []Statement{}
 	for !p.check(right_brace) && !p.isAtEnd() {
+		mark := len(p.detachedComments)
 		stmt, err := p.parseStatement()
 		if err != nil {
 			return nil, err
 		}
+		statements = p.placeDetachedComments(statements, mark, stmt)
 		if stmt != nil {
 			statements = append(statements, stmt)
 		}
@@ -1083,7 +1107,7 @@ func (p *parser) enumDef(private bool) Statement {
 			break
 		}
 		variantToken := p.advance()
-		variant := EnumVariant{Name: variantToken.text}
+		variant := EnumVariant{Name: variantToken.text, Location: variantToken.getLocation()}
 
 		// Check for explicit value assignment
 		if p.match(equal) {
@@ -1093,6 +1117,7 @@ func (p *parser) enumDef(private bool) Statement {
 				p.synchronize()
 				return nil
 			}
+			variant.Location.End = variant.Value.GetLocation().End
 		}
 
 		enum.Variants = append(enum.Variants, variant)
@@ -1473,11 +1498,9 @@ func (p *parser) implBlock() *ImplBlock {
 	}
 	p.advance()
 
-	if !p.check(new_line) {
-		p.addError(p.peek(), "Expected new line after '{'")
-		// Continue parsing - this is not a critical error
-	} else {
-		p.advance()
+	// An empty body is `{}` on one line, as the formatter prints it.
+	if !p.check(right_brace) {
+		p.newLineAfterOpenBrace()
 	}
 
 	for !p.match(right_brace) {
@@ -1543,11 +1566,9 @@ func (p *parser) traitDef(private bool) *TraitDefinition {
 	}
 	p.advance()
 
-	if !p.check(new_line) {
-		p.addError(p.peek(), "Expected new line after '{'")
-		// Continue parsing - non-critical error
-	} else {
-		p.advance()
+	// An empty body is `{}` on one line, as the formatter prints it.
+	if !p.check(right_brace) {
+		p.newLineAfterOpenBrace()
 	}
 
 	for !p.match(right_brace) {
@@ -1770,12 +1791,19 @@ func (p *parser) traitImpl() (*TraitImplementation, error) {
 		return traitImpl, nil
 	}
 
-	if !p.match(new_line) {
+	// A comment may follow the '{'; the loop collects it. An empty body is
+	// `{}` on one line, as the formatter prints it.
+	if !p.check(comment) && !p.check(right_brace) && !p.match(new_line) {
 		p.addError(p.peek(), "Expected new line")
 		// Continue parsing block contents even without newline
 	}
 
 	for !p.match(right_brace) {
+		if c := p.parseInlineComment(); c != nil {
+			traitImpl.Comments = append(traitImpl.Comments, *c)
+			p.match(new_line)
+			continue
+		}
 		if p.match(new_line) {
 			continue
 		}
@@ -1822,10 +1850,12 @@ func (p *parser) blockStatements() ([]Statement, error) {
 			break
 		}
 
+		mark := len(p.detachedComments)
 		stmt, err := p.parseStatement()
 		if err != nil {
 			return nil, err
 		}
+		statements = p.placeDetachedComments(statements, mark, stmt)
 		statements = append(statements, stmt)
 	}
 
@@ -2633,11 +2663,7 @@ func (p *parser) selectExpr() (Expression, error) {
 	}
 	p.advance() // consume '{'
 
-	if p.check(new_line) {
-		p.advance()
-	} else {
-		p.addError(p.peek(), "Expected new line after '{'")
-	}
+	p.newLineAfterOpenBrace()
 
 	for !p.match(right_brace) {
 		// Stop at end of input so a missing '}' cannot loop forever (issue #349).
@@ -2753,12 +2779,7 @@ func (p *parser) matchExpr() (Expression, error) {
 		}
 		p.advance() // consume the '{'
 
-		if !p.check(new_line) {
-			p.addError(p.peek(), "Expected new line after '{'")
-			// Continue parsing - this is not a critical error
-		} else {
-			p.advance()
-		}
+		p.newLineAfterOpenBrace()
 
 		for !p.isAtEnd() && !p.match(right_brace) {
 			// Parse and collect comments
@@ -2835,12 +2856,7 @@ func (p *parser) parseConditionalMatch(keyword token) (Expression, error) {
 	}
 	p.advance() // consume the '{'
 
-	if !p.check(new_line) {
-		p.addError(p.peek(), "Expected new line after '{'")
-		// Continue parsing - this is not a critical error
-	} else {
-		p.advance()
-	}
+	p.newLineAfterOpenBrace()
 
 	for !p.isAtEnd() && !p.match(right_brace) {
 		// Parse and collect comments
@@ -3305,6 +3321,7 @@ func (p *parser) functionDef(asMethod bool, isTest bool) (Statement, error) {
 				Parameters: params,
 				ReturnType: returnType,
 				Body:       statements,
+				Comments:   functionComments,
 				Location: Location{
 					Start: Point{Row: keyword.line, Col: keyword.column},
 					End:   Point{Row: p.previous().line, Col: p.previous().column},
@@ -4379,11 +4396,18 @@ func (p *parser) primary() (Expression, error) {
 
 		openParen := p.previous()
 		leading := p.skipTupleLayout(nil)
+		// Grouping parentheses have no node to hold comments, so detach
+		// them now, before any comments in the expression inside, to keep
+		// their source order.
+		mark := len(p.detachedComments)
+		p.detachedComments = append(p.detachedComments, leading...)
 		expr, err := p.parseExpression()
 		if err != nil {
 			return nil, err
 		}
 		if p.startsTupleRest() {
+			// A tuple holds its own comments; take them back.
+			p.detachedComments = slices.Delete(p.detachedComments, mark, mark+len(leading))
 			return p.finishTupleLiteral(openParen, expr, leading)
 		}
 
@@ -4920,6 +4944,62 @@ func (p *parser) previous() *token {
 	return &p.tokens[p.index-1]
 }
 
+// closesAfterLayout reports whether the next token after any new lines and
+// comments is closer or the end of input, so a comment after the last
+// element of a sequence does not count as another element.
+func (p *parser) closesAfterLayout(closer kind) bool {
+	i := p.index
+	for p.tokens[i].kind == new_line || p.tokens[i].kind == comment {
+		i++
+	}
+	return p.tokens[i].kind == closer || p.tokens[i].kind == eof
+}
+
+// placeDetachedComments appends to statements, as statements of their own,
+// the comments detached while parsing stmt: those from index mark on, since
+// a statement list nested in stmt, such as a closure body, places its own
+// first. They take stmt's start position, so a formatter prints them on the
+// lines directly above it.
+func (p *parser) placeDetachedComments(statements []Statement, mark int, stmt Statement) []Statement {
+	if len(p.detachedComments) <= mark {
+		return statements
+	}
+	var at Point
+	if stmt != nil {
+		at = stmt.GetLocation().Start
+	}
+	for _, comment := range p.detachedComments[mark:] {
+		comment.Trailing = false
+		// A comment statement holds its full source text, marker included.
+		comment.Value = "// " + comment.Value
+		if comment.Value == "// " {
+			comment.Value = "//"
+		}
+		if at.Row > 0 {
+			comment.Location = Location{Start: at, End: at}
+		}
+		statements = append(statements, &comment)
+	}
+	p.detachedComments = p.detachedComments[:mark]
+	return statements
+}
+
+// newLineAfterOpenBrace consumes the new line after the `{` of a construct
+// whose body is one item per line, such as a match or an impl block. A
+// comment may come first, on the brace's line; it is left for the
+// construct's loop to collect along with the new line after it.
+func (p *parser) newLineAfterOpenBrace() {
+	if p.check(comment) {
+		return
+	}
+	if !p.check(new_line) {
+		// Not critical: parsing continues with the construct's body.
+		p.addError(p.peek(), "Expected new line after '{'")
+		return
+	}
+	p.advance()
+}
+
 func (p *parser) isAtEnd() bool {
 	return p.tokens[p.index].kind == eof
 }
@@ -5016,7 +5096,7 @@ func (p *parser) parseFunctionArguments() ([]Argument, []Comment, error) {
 
 		p.expectSeparator(false, true, "Expected ',' between arguments")
 		p.match(new_line)
-		if spread && !p.check(right_paren) && !p.isAtEnd() {
+		if spread && !p.closesAfterLayout(right_paren) {
 			p.addError(p.previous(), "Spread argument must be final")
 		}
 

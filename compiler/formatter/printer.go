@@ -20,25 +20,40 @@ func newPrinter(maxLineWidth int) printer {
 	return printer{maxLineWidth: maxLineWidth}
 }
 
-func (p printer) program(program *parse.Program) string {
+// program prints a whole file. removedImports are the unused imports that
+// were dropped; their comments are kept.
+func (p printer) program(program *parse.Program, removedImports []parse.Import) string {
 	if program == nil {
 		return ""
 	}
 
+	header, imports, statements := p.attachImportComments(program, removedImports)
 	lines := make([]string, 0)
-	importLines := p.renderImports(program.Imports)
-	if len(importLines) > 0 {
-		lines = append(lines, importLines...)
+	for index, comment := range header {
+		if index > 0 && comment.Location.Start.Row-header[index-1].Location.Start.Row > 1 {
+			lines = append(lines, "")
+		}
+		lines = append(lines, p.renderStatementComment(comment.Value))
 	}
+	if len(header) > 0 && len(imports) > 0 && imports[0].firstRow()-header[len(header)-1].Location.Start.Row > 1 {
+		lines = append(lines, "")
+	}
+	lines = append(lines, p.renderImports(imports)...)
 
-	if len(program.Statements) > 0 {
+	if len(statements) > 0 {
 		if len(lines) > 0 {
 			lines = append(lines, "")
 		}
 		var previous parse.Statement
 		haveRendered := false
-		for _, statement := range program.Statements {
+		for _, statement := range statements {
 			if statement == nil {
+				continue
+			}
+			if comment, ok := trailingCommentAfter(previous, statement); ok {
+				// A top-level statement is printed on its own, so the comment
+				// is appended to its last line rather than as a line suffix.
+				lines[len(lines)-1] += " " + p.renderStatementComment(comment.Value)
 				continue
 			}
 			if haveRendered && hasSourceBlankLine(previous, statement) {
@@ -53,18 +68,100 @@ func (p printer) program(program *parse.Program) string {
 	return strings.Join(lines, "\n")
 }
 
-func (p printer) renderImports(imports []parse.Import) []string {
+// importEntry is an import with the comments that travel with it when
+// imports are sorted. A removed import keeps only its comments.
+type importEntry struct {
+	item     parse.Import
+	removed  bool
+	leading  []parse.Comment
+	trailing *parse.Comment
+}
+
+// firstRow is the source row of the entry's first line.
+func (entry importEntry) firstRow() int {
+	if len(entry.leading) > 0 {
+		return entry.leading[0].Location.Start.Row
+	}
+	return entry.item.Location.Start.Row
+}
+
+// attachImportComments splits the comments the parser read among the imports
+// out of the program's statements (#583). Comments above the first import
+// are the file header and stay at the top. A comment on a `use` line stays on
+// it, and a comment between imports goes with the import below it, so each
+// moves with its import when imports are sorted. Comments after the last
+// import stay with the statements that follow.
+func (p printer) attachImportComments(program *parse.Program, removedImports []parse.Import) (header []parse.Comment, imports []importEntry, statements []parse.Statement) {
+	entries := make([]importEntry, 0, len(program.Imports)+len(removedImports))
+	for _, item := range program.Imports {
+		entries = append(entries, importEntry{item: item})
+	}
+	for _, item := range removedImports {
+		entries = append(entries, importEntry{item: item, removed: true})
+	}
+	sort.SliceStable(entries, func(i, j int) bool {
+		return entries[i].item.Location.Start.Row < entries[j].item.Location.Start.Row
+	})
+
+	statements = program.Statements
+	if len(entries) == 0 {
+		return nil, nil, statements
+	}
+	firstRow := entries[0].item.Location.Start.Row
+	lastRow := entries[len(entries)-1].item.Location.Start.Row
+	for len(statements) > 0 {
+		comment, ok := statements[0].(*parse.Comment)
+		if !ok || comment.Location.Start.Row > lastRow {
+			break
+		}
+		row := comment.Location.Start.Row
+		if row < firstRow {
+			header = append(header, *comment)
+			statements = statements[1:]
+			continue
+		}
+		placed := false
+		for index := range entries {
+			entry := &entries[index]
+			if comment.Trailing && entry.item.Location.Start.Row == row && entry.trailing == nil {
+				entry.trailing = comment
+				placed = true
+				break
+			}
+			if entry.item.Location.Start.Row > row {
+				entry.leading = append(entry.leading, *comment)
+				placed = true
+				break
+			}
+		}
+		if !placed {
+			// Leave it, and the comments after it, with the statements.
+			break
+		}
+		statements = statements[1:]
+	}
+
+	for _, entry := range entries {
+		if !entry.removed || len(entry.leading) > 0 || entry.trailing != nil {
+			imports = append(imports, entry)
+		}
+	}
+	return header, imports, statements
+}
+
+func (p printer) renderImports(imports []importEntry) []string {
 	if len(imports) == 0 {
 		return nil
 	}
 
-	groups := map[int][]parse.Import{0: {}, 1: {}, 2: {}}
-	for _, item := range imports {
-		groups[importGroup(item)] = append(groups[importGroup(item)], item)
+	groups := map[int][]importEntry{0: {}, 1: {}, 2: {}}
+	for _, entry := range imports {
+		group := importGroup(entry.item)
+		groups[group] = append(groups[group], entry)
 	}
 	for _, key := range []int{0, 1, 2} {
-		sort.Slice(groups[key], func(i, j int) bool {
-			return groups[key][i].Path < groups[key][j].Path
+		sort.SliceStable(groups[key], func(i, j int) bool {
+			return groups[key][i].item.Path < groups[key][j].item.Path
 		})
 	}
 
@@ -76,8 +173,19 @@ func (p printer) renderImports(imports []parse.Import) []string {
 		if len(lines) > 0 {
 			lines = append(lines, "")
 		}
-		for _, item := range groups[key] {
-			lines = append(lines, p.renderImport(item))
+		for _, entry := range groups[key] {
+			for _, comment := range entry.leading {
+				lines = append(lines, p.renderStatementComment(comment.Value))
+			}
+			switch {
+			case !entry.removed && entry.trailing != nil:
+				lines = append(lines, p.renderImport(entry.item)+" "+p.renderStatementComment(entry.trailing.Value))
+			case !entry.removed:
+				lines = append(lines, p.renderImport(entry.item))
+			case entry.trailing != nil:
+				// The import was unused and removed; its comment stays.
+				lines = append(lines, p.renderStatementComment(entry.trailing.Value))
+			}
 		}
 	}
 
@@ -125,7 +233,7 @@ func (p printer) renderStatementDoc(statement parse.Statement) doc {
 
 	switch node := statement.(type) {
 	case *parse.Comment:
-		return dText(p.renderComment(node.Value))
+		return dText(p.renderStatementComment(node.Value))
 	case *parse.VariableDeclaration:
 		return p.renderVariableDeclarationDoc(node)
 	case *parse.TupleDestructure:
@@ -282,7 +390,7 @@ func (p printer) renderFunctionDeclarationDoc(node *parse.FunctionDeclaration, t
 	}
 	header += node.Name
 	header += p.renderTypeParams(node.TypeParams)
-	header += p.renderParameterList(node.Parameters, 0, header)
+	header += p.renderParameterList(node.Parameters, node.Comments, header)
 	if node.ReturnType != nil {
 		header += " " + p.renderType(node.ReturnType)
 	}
@@ -305,7 +413,7 @@ func (p printer) renderStaticFunctionDeclarationDoc(node *parse.StaticFunctionDe
 	}
 	header += p.renderExpression(&node.Path, 0)
 	header += p.renderTypeParams(node.TypeParams)
-	header += p.renderParameterList(node.Parameters, 0, header)
+	header += p.renderParameterList(node.Parameters, node.Comments, header)
 	if node.ReturnType != nil {
 		header += " " + p.renderType(node.ReturnType)
 	}
@@ -328,6 +436,23 @@ func (p printer) renderStructDefinitionDoc(node *parse.StructDefinition) doc {
 		endRow   int
 	}
 	items := make([]structItem, 0, len(node.Fields)+len(node.Comments))
+	// trailable is the index in items of the field a trailing comment can
+	// follow, or -1 once that field has one or a comment follows it (#583).
+	trailable := -1
+	addComment := func(comment parse.Comment) {
+		text := p.renderComment(comment.Value)
+		if comment.Trailing && trailable >= 0 {
+			items[trailable].doc = dConcat(items[trailable].doc, dTrailingComment(text))
+			trailable = -1
+			return
+		}
+		items = append(items, structItem{
+			doc:      dText(text),
+			startRow: comment.Location.Start.Row,
+			endRow:   comment.Location.End.Row,
+		})
+		trailable = -1
+	}
 	commentIndex := 0
 	for _, field := range node.Fields {
 		fieldRow := field.Name.Location.Start.Row
@@ -335,12 +460,7 @@ func (p printer) renderStructDefinitionDoc(node *parse.StructDefinition) doc {
 			fieldRow = field.Attributes[0].Location.Start.Row
 		}
 		for commentIndex < len(node.Comments) && (fieldRow == 0 || node.Comments[commentIndex].Location.Start.Row < fieldRow) {
-			comment := node.Comments[commentIndex]
-			items = append(items, structItem{
-				doc:      dText(p.renderComment(comment.Value)),
-				startRow: comment.Location.Start.Row,
-				endRow:   comment.Location.End.Row,
-			})
+			addComment(node.Comments[commentIndex])
 			commentIndex++
 		}
 		fieldEnd := field.Type.GetLocation().End.Row
@@ -352,6 +472,9 @@ func (p printer) renderStructDefinitionDoc(node *parse.StructDefinition) doc {
 			type fieldPrefix struct {
 				row int
 				doc doc
+				// trailingText is set for a comment that trails code on
+				// its line.
+				trailingText string
 			}
 			prefixes := make([]fieldPrefix, 0, len(field.Attributes))
 			for _, attribute := range field.Attributes {
@@ -359,12 +482,21 @@ func (p printer) renderStructDefinitionDoc(node *parse.StructDefinition) doc {
 			}
 			for commentIndex < len(node.Comments) && node.Comments[commentIndex].Location.Start.Row < field.Name.Location.Start.Row {
 				comment := node.Comments[commentIndex]
-				prefixes = append(prefixes, fieldPrefix{row: comment.Location.Start.Row, doc: dText(p.renderComment(comment.Value))})
+				prefix := fieldPrefix{row: comment.Location.Start.Row, doc: dText(p.renderComment(comment.Value))}
+				if comment.Trailing {
+					prefix.trailingText = p.renderComment(comment.Value)
+				}
+				prefixes = append(prefixes, prefix)
 				commentIndex++
 			}
 			sort.SliceStable(prefixes, func(i, j int) bool { return prefixes[i].row < prefixes[j].row })
 			prefixDocs := make([]doc, 0, len(prefixes)*2+1)
-			for _, prefix := range prefixes {
+			for index, prefix := range prefixes {
+				if prefix.trailingText != "" && index > 0 && prefixes[index-1].trailingText == "" {
+					// A comment that trails an attribute stays on its line.
+					prefixDocs[len(prefixDocs)-2] = dConcat(prefixDocs[len(prefixDocs)-2], dTrailingComment(prefix.trailingText))
+					continue
+				}
 				prefixDocs = append(prefixDocs, prefix.doc, dHardLine())
 			}
 			prefixDocs = append(prefixDocs, fieldDoc)
@@ -375,14 +507,10 @@ func (p printer) renderStructDefinitionDoc(node *parse.StructDefinition) doc {
 			startRow: fieldRow,
 			endRow:   fieldEnd,
 		})
+		trailable = len(items) - 1
 	}
 	for ; commentIndex < len(node.Comments); commentIndex++ {
-		comment := node.Comments[commentIndex]
-		items = append(items, structItem{
-			doc:      dText(p.renderComment(comment.Value)),
-			startRow: comment.Location.Start.Row,
-			endRow:   comment.Location.End.Row,
-		})
+		addComment(node.Comments[commentIndex])
 	}
 
 	parts := make([]doc, 0, len(items)*3)
@@ -471,18 +599,15 @@ func (p printer) renderEnumDefinitionDoc(node *parse.EnumDefinition) doc {
 		return dText(header + " {}")
 	}
 
-	items := make([]doc, 0, len(node.Variants)+len(node.Comments))
-	for _, comment := range node.Comments {
-		items = append(items, dText(p.renderComment(comment.Value)))
-	}
+	variants := make([]armDoc, 0, len(node.Variants))
 	for _, variant := range node.Variants {
-		if variant.Value == nil {
-			items = append(items, dText(variant.Name+","))
-		} else {
-			items = append(items, dText(fmt.Sprintf("%s = %s,", variant.Name, p.renderExpression(variant.Value, 0))))
+		text := variant.Name + ","
+		if variant.Value != nil {
+			text = fmt.Sprintf("%s = %s,", variant.Name, p.renderExpression(variant.Value, 0))
 		}
+		variants = append(variants, armDoc{doc: dText(text), startRow: variant.Location.Start.Row})
 	}
-	body := dJoin(dHardLine(), items)
+	body := dJoin(dHardLine(), docsOfPlaced(p.placeComments(variants, node.Comments)))
 	return dGroup(dConcat(
 		dText(header+" {"),
 		dIndent(dConcat(dHardLine(), body)),
@@ -535,11 +660,11 @@ func (p printer) renderTraitImplementationDoc(node *parse.TraitImplementation) d
 	if node.Receiver.Name != "" && node.Receiver.Name != "self" {
 		header += " as " + node.Receiver.Name
 	}
-	if len(node.Methods) == 0 {
+	if len(node.Methods) == 0 && len(node.Comments) == 0 {
 		return dText(header + " {}")
 	}
 
-	body := dJoin(dHardLine(), p.interleaveMethodDocs(node.Methods, nil, false))
+	body := dJoin(dHardLine(), p.interleaveMethodDocs(node.Methods, node.Comments, false))
 	return dGroup(dConcat(
 		dText(header+" {"),
 		dIndent(dConcat(dHardLine(), body)),
@@ -548,42 +673,29 @@ func (p printer) renderTraitImplementationDoc(node *parse.TraitImplementation) d
 	))
 }
 
+// interleaveMethodDocs places comments among methods with placeComments and
+// separates each method from what follows it with a blank line. A comment
+// after a method's closing brace or a trait signature stays on that line
+// (#583).
 func (p printer) interleaveMethodDocs(methods []parse.FunctionDeclaration, comments []parse.Comment, traitSignatureOnly bool) []doc {
 	if len(methods) == 0 && len(comments) == 0 {
 		return nil
 	}
 
-	items := make([]doc, 0, len(methods)+len(comments)*2)
-	lastKind := ""
-	commentIndex := 0
-	for _, method := range methods {
-		methodStart := method.Location.Start.Row
-		for commentIndex < len(comments) && (methodStart == 0 || comments[commentIndex].Location.Start.Row < methodStart) {
-			if lastKind == "method" {
-				items = append(items, dText(""))
-			}
-			items = append(items, dText(p.renderComment(comments[commentIndex].Value)))
-			lastKind = "comment"
-			commentIndex++
-		}
-
-		if lastKind == "method" {
-			items = append(items, dText(""))
-		}
-		items = append(items, p.renderFunctionDeclarationDoc(&method, traitSignatureOnly))
-		lastKind = "method"
-
+	items := make([]armDoc, 0, len(methods))
+	for index := range methods {
+		method := &methods[index]
+		items = append(items, armDoc{doc: p.renderFunctionDeclarationDoc(method, traitSignatureOnly), startRow: method.Location.Start.Row})
 	}
-
-	for ; commentIndex < len(comments); commentIndex++ {
-		if lastKind == "method" {
-			items = append(items, dText(""))
+	placed := p.placeComments(items, comments)
+	docs := make([]doc, 0, len(placed)*2)
+	for index, entry := range placed {
+		if index > 0 && !placed[index-1].comment {
+			docs = append(docs, dText(""))
 		}
-		items = append(items, dText(p.renderComment(comments[commentIndex].Value)))
-		lastKind = "comment"
+		docs = append(docs, entry.doc)
 	}
-
-	return items
+	return docs
 }
 
 func (p printer) renderTypeDeclaration(node *parse.TypeDeclaration) string {
@@ -738,6 +850,10 @@ func (p printer) renderStatementsDoc(statements []parse.Statement) doc {
 		if statement == nil {
 			continue
 		}
+		if comment, ok := trailingCommentAfter(previous, statement); ok {
+			parts[len(parts)-1] = dConcat(parts[len(parts)-1], dTrailingComment(p.renderStatementComment(comment.Value)))
+			continue
+		}
 		if haveRendered {
 			parts = append(parts, dHardLine())
 			if hasSourceBlankLine(previous, statement) {
@@ -752,6 +868,21 @@ func (p printer) renderStatementsDoc(statements []parse.Statement) doc {
 		return dText("")
 	}
 	return dConcat(parts...)
+}
+
+// trailingCommentAfter reports whether statement is a comment that trails
+// previous on its last line, as in `let x = 1 // one`, and should stay there
+// (#583). A trailing comment with no statement before it in the list, such
+// as one after a block's `{`, goes on a line of its own.
+func trailingCommentAfter(previous parse.Statement, statement parse.Statement) (*parse.Comment, bool) {
+	comment, ok := statement.(*parse.Comment)
+	if !ok || !comment.Trailing || previous == nil {
+		return nil, false
+	}
+	if _, previousIsComment := previous.(*parse.Comment); previousIsComment {
+		return nil, false
+	}
+	return comment, true
 }
 
 func (p printer) renderDocAtIndent(document doc, indent int) []string {
@@ -782,7 +913,7 @@ func (p printer) renderTypeParams(params []string) string {
 	return "<" + strings.Join(parts, ", ") + ">"
 }
 
-func (p printer) renderParameterList(params []parse.Parameter, indent int, header string) string {
+func (p printer) renderParameterList(params []parse.Parameter, comments []parse.Comment, header string) string {
 	parts := make([]string, 0, len(params))
 	for _, parameter := range params {
 		part := parameter.Name
@@ -791,6 +922,13 @@ func (p printer) renderParameterList(params []parse.Parameter, indent int, heade
 		}
 		parts = append(parts, part)
 	}
+	if len(comments) > 0 {
+		rows := make([]armDoc, 0, len(params))
+		for index, parameter := range params {
+			rows = append(rows, armDoc{doc: dText(parts[index]), startRow: parameter.Location.Start.Row})
+		}
+		return p.printDoc(dGroup(p.renderSequenceDoc("(", rows, comments, ")")))
+	}
 	oneLine := "(" + strings.Join(parts, ", ") + ")"
 	if len(parts) == 0 || len(header)+len(oneLine) <= p.maxLineWidth {
 		return oneLine
@@ -798,9 +936,9 @@ func (p printer) renderParameterList(params []parse.Parameter, indent int, heade
 
 	lines := []string{"("}
 	for _, part := range parts {
-		lines = append(lines, p.indent(indent+1)+part+",")
+		lines = append(lines, p.indent(1)+part+",")
 	}
-	lines = append(lines, p.indent(indent)+")")
+	lines = append(lines, ")")
 	return strings.Join(lines, "\n")
 }
 
@@ -1105,7 +1243,7 @@ func (p printer) renderExpressionDoc(expression parse.Expression, parentPreceden
 }
 
 func (p printer) renderAnonymousFunctionDoc(node *parse.AnonymousFunction) doc {
-	header := "fn" + p.renderParameterList(node.Parameters, 0, "fn")
+	header := "fn" + p.renderParameterList(node.Parameters, node.Comments, "fn")
 	if node.ReturnType != nil {
 		header += " " + p.renderType(node.ReturnType)
 	}
@@ -1312,14 +1450,8 @@ func (p printer) renderListLiteralDoc(list *parse.ListLiteral) doc {
 	for index, item := range list.Items {
 		itemRows = append(itemRows, armDoc{doc: dText(items[index]), startRow: startRowOf(item)})
 	}
-	body := p.renderCommentRows(itemRows, list.Comments, dText(","))
 
-	return dGroup(dConcat(
-		dText("["),
-		dIndent(dConcat(dSoftLine(), body)),
-		dSoftLine(),
-		dText("]"),
-	))
+	return dGroup(p.renderSequenceDoc("[", itemRows, list.Comments, "]"))
 }
 
 // renderTupleLiteralDoc lays a tuple out like a list: on one line when it
@@ -1329,14 +1461,8 @@ func (p printer) renderTupleLiteralDoc(tuple *parse.TupleLiteral) doc {
 	for _, item := range tuple.Items {
 		itemRows = append(itemRows, armDoc{doc: dText(p.renderExpression(item, 0)), startRow: startRowOf(item)})
 	}
-	body := p.renderCommentRows(itemRows, tuple.Comments, dText(","))
 
-	return dGroup(dConcat(
-		dText("("),
-		dIndent(dConcat(dSoftLine(), body)),
-		dSoftLine(),
-		dText(")"),
-	))
+	return dGroup(p.renderSequenceDoc("(", itemRows, tuple.Comments, ")"))
 }
 
 func (p printer) renderMapLiteralDoc(m *parse.MapLiteral) doc {
@@ -1353,14 +1479,8 @@ func (p printer) renderMapLiteralDoc(m *parse.MapLiteral) doc {
 	for index, entry := range m.Entries {
 		partRows = append(partRows, armDoc{doc: dText(parts[index]), startRow: startRowOf(entry.Key)})
 	}
-	body := p.renderCommentRows(partRows, m.Comments, dText(","))
 
-	return dGroup(dConcat(
-		dText("["),
-		dIndent(dConcat(dSoftLine(), body)),
-		dSoftLine(),
-		dText("]"),
-	))
+	return dGroup(p.renderSequenceDoc("[", partRows, m.Comments, "]"))
 }
 
 func (p printer) renderStructInstanceDoc(node *parse.StructInstance) doc {
@@ -1389,10 +1509,15 @@ func (p printer) renderStructInstanceDoc(node *parse.StructInstance) doc {
 		return dText(oneLine)
 	}
 
-	items := make([]doc, 0, len(parts)+len(node.Comments))
-	for _, comment := range node.Comments {
-		items = append(items, dText(p.renderComment(comment.Value)))
+	if len(node.Comments) > 0 {
+		rows := make([]armDoc, 0, len(parts))
+		for index, property := range node.Properties {
+			rows = append(rows, armDoc{doc: dText(parts[index]), startRow: property.Location.Start.Row})
+		}
+		return dGroup(p.renderSequenceDoc(head+"{", rows, node.Comments, "}"))
 	}
+
+	items := make([]doc, 0, len(parts))
 	for _, part := range parts {
 		items = append(items, dText(part+","))
 	}
@@ -1457,15 +1582,7 @@ func (p printer) renderCallHeadDoc(head doc, headText string, typeArgs []parse.D
 	for index, arg := range args {
 		argRows = append(argRows, armDoc{doc: argDocs[index], startRow: arg.Location.Start.Row})
 	}
-	body := p.renderCommentRows(argRows, comments, dText(","))
-
-	fallback := dGroup(dConcat(
-		head,
-		dText("("),
-		dIndent(dConcat(dSoftLine(), body)),
-		dSoftLine(),
-		dText(")"),
-	))
+	fallback := dGroup(dConcat(head, p.renderSequenceDoc("(", argRows, comments, ")")))
 
 	if headText != "" && len(comments) == 0 && len(args) > 0 {
 		last := len(args) - 1
@@ -1517,10 +1634,23 @@ func startRowOf(node any) int {
 	return located.GetLocation().Start.Row
 }
 
-// renderCommentRows interleaves comments with one-line element rows so each
-// comment stays attached to the element that follows it (#548). Each row is
-// joined with a hard line and gets a trailing separator, so the sequence
-// always breaks across lines when comments are present.
+// renderSequenceDoc lays out a bracketed, comma-separated sequence and the
+// comments inside it. Without comments the sequence fits on one line when it
+// can, and otherwise puts one element per line with a trailing comma. The
+// caller wraps the result in a group.
+func (p printer) renderSequenceDoc(open string, rows []armDoc, comments []parse.Comment, close string) doc {
+	return dConcat(
+		dText(open),
+		dIndent(dConcat(dSoftLine(), p.renderCommentRows(rows, comments, dText(",")))),
+		dSoftLine(),
+		dText(close),
+	)
+}
+
+// renderCommentRows joins one-line element rows with their comments, placed
+// by placeComments. Rows are joined with hard lines and get a trailing
+// separator, so the sequence always breaks across lines when comments are
+// present, and a trailing comment follows its element's separator.
 func (p printer) renderCommentRows(rows []armDoc, comments []parse.Comment, separator doc) doc {
 	if len(comments) == 0 {
 		if len(rows) == 0 {
@@ -1530,29 +1660,69 @@ func (p printer) renderCommentRows(rows []armDoc, comments []parse.Comment, sepa
 		return dConcat(joined, dIfBreak(separator, dText("")))
 	}
 
-	withComments := make([]armDoc, 0, len(rows)+len(comments))
-	commentIndex := 0
+	items := make([]armDoc, 0, len(rows))
 	for _, row := range rows {
-		for commentIndex < len(comments) && (row.startRow <= 0 || comments[commentIndex].Location.Start.Row < row.startRow) {
-			withComments = append(withComments, armDoc{doc: dText(p.renderComment(comments[commentIndex].Value))})
-			commentIndex++
-		}
-		withComments = append(withComments, armDoc{
-			doc:      dConcat(row.doc, separator),
-			startRow: row.startRow,
-		})
-	}
-	for ; commentIndex < len(comments); commentIndex++ {
-		withComments = append(withComments, armDoc{doc: dText(p.renderComment(comments[commentIndex].Value))})
-	}
-
-	docs := docsOf(withComments)
-	if len(docs) == 0 {
-		return dText("")
+		items = append(items, armDoc{doc: dConcat(row.doc, separator), startRow: row.startRow})
 	}
 	// Comments are only ever correct across multiple lines, so the enclosing
 	// sequence must break even when the content would fit flat.
-	return dForceBreak(dJoin(dHardLine(), docs))
+	return dForceBreak(dJoin(dHardLine(), docsOfPlaced(p.placeComments(items, comments))))
+}
+
+// placedDoc is an item or a comment on a line of its own, in output order.
+type placedDoc struct {
+	doc     doc
+	comment bool
+	// item is the index of the item in the input, or -1 for a comment.
+	item int
+}
+
+// placeComments merges comments into items, which are in source order, by
+// source position. A comment on a line of its own goes before the first item
+// that starts on a later row, so it stays with the item it describes (#548);
+// an item without a recorded row keeps every pending comment above it. A
+// comment that trails code on its line stays at the end of the item before
+// it (#583), after anything that item's doc already ends with, such as a
+// separator. A trailing comment with no item before it, such as one after an
+// opening bracket, goes on a line of its own, and an item takes at most one
+// trailing comment; a second one goes on the next line.
+func (p printer) placeComments(items []armDoc, comments []parse.Comment) []placedDoc {
+	placed := make([]placedDoc, 0, len(items)+len(comments))
+	// trailable is the index in placed of the item a trailing comment can
+	// follow, or -1 once that item has one or a comment follows it.
+	trailable := -1
+	place := func(comment parse.Comment) {
+		text := p.renderComment(comment.Value)
+		if comment.Trailing && trailable >= 0 {
+			placed[trailable].doc = dConcat(placed[trailable].doc, dTrailingComment(text))
+			trailable = -1
+			return
+		}
+		placed = append(placed, placedDoc{doc: dText(text), comment: true, item: -1})
+		trailable = -1
+	}
+
+	commentIndex := 0
+	for index, item := range items {
+		for commentIndex < len(comments) && (item.startRow <= 0 || comments[commentIndex].Location.Start.Row < item.startRow) {
+			place(comments[commentIndex])
+			commentIndex++
+		}
+		placed = append(placed, placedDoc{doc: item.doc, item: index})
+		trailable = len(placed) - 1
+	}
+	for ; commentIndex < len(comments); commentIndex++ {
+		place(comments[commentIndex])
+	}
+	return placed
+}
+
+func docsOfPlaced(placed []placedDoc) []doc {
+	docs := make([]doc, 0, len(placed))
+	for _, entry := range placed {
+		docs = append(docs, entry.doc)
+	}
+	return docs
 }
 
 func docsOf(rows []armDoc) []doc {
@@ -1563,28 +1733,16 @@ func docsOf(rows []armDoc) []doc {
 	return docs
 }
 
-// renderArmsWithComments joins arms one per line, placing each comment before
-// the first arm that starts after it, so a comment stays attached to the arm
-// it describes (#543). A comment that shares a row with an arm, or follows
-// the last arm, comes after that arm. An arm without a recorded position
-// keeps every pending comment above it.
+// renderArmsWithComments joins arms one per line with their comments,
+// placed by placeComments: a comment on a line of its own stays with the arm
+// that follows it (#543), and a trailing comment stays on its arm's line
+// (#583).
 func (p printer) renderArmsWithComments(arms []armDoc, comments []parse.Comment) doc {
-	docs := make([]doc, 0, len(arms)+len(comments))
-	commentIndex := 0
-	for _, arm := range arms {
-		for commentIndex < len(comments) && (arm.startRow <= 0 || comments[commentIndex].Location.Start.Row < arm.startRow) {
-			docs = append(docs, dText(p.renderComment(comments[commentIndex].Value)))
-			commentIndex++
-		}
-		docs = append(docs, arm.doc)
-	}
-	for ; commentIndex < len(comments); commentIndex++ {
-		docs = append(docs, dText(p.renderComment(comments[commentIndex].Value)))
-	}
-	if len(docs) == 0 {
+	placed := p.placeComments(arms, comments)
+	if len(placed) == 0 {
 		return dText("")
 	}
-	return dJoin(dHardLine(), docs)
+	return dJoin(dHardLine(), docsOfPlaced(placed))
 }
 
 func (p printer) renderMatchExpressionDoc(node *parse.MatchExpression) doc {
@@ -1904,17 +2062,27 @@ func (p printer) operatorString(operator parse.Operator) string {
 	}
 }
 
+// renderComment renders a comment held in a construct's Comments, whose
+// value is the comment's text without the `//` marker. The text is printed
+// as is, even when it starts with `//` itself.
 func (p printer) renderComment(value string) string {
 	trimmed := strings.TrimSpace(value)
-	if strings.HasPrefix(trimmed, "//") {
-		return trimmed
-	}
 	if trimmed == "" {
 		// An empty comment is `//` with nothing after it. Adding the usual
 		// separating space would leave trailing whitespace (#548).
 		return "//"
 	}
 	return "// " + trimmed
+}
+
+// renderStatementComment renders a comment that is a statement of its own,
+// whose value is the comment's full source text, `//` marker included.
+func (p printer) renderStatementComment(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if !strings.HasPrefix(trimmed, "//") {
+		return p.renderComment(trimmed)
+	}
+	return trimmed
 }
 
 func (p printer) indent(level int) string {

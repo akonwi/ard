@@ -22,6 +22,17 @@ type docForceBreak struct {
 
 func (docForceBreak) isDoc() {}
 
+// docLineSuffix is text, such as a trailing comment, that is held back until
+// the end of the line it is placed on. Code printed after it on the same line
+// still comes first, so a `//` comment can never swallow that code. It takes
+// no width when deciding whether a group fits, so a long comment does not
+// break the code before it.
+type docLineSuffix struct {
+	value string
+}
+
+func (docLineSuffix) isDoc() {}
+
 type docIfBreak struct {
 	broken doc
 	flat   doc
@@ -89,6 +100,16 @@ func dIfBreak(broken doc, flat doc) doc { return docIfBreak{broken: broken, flat
 // dForceBreak forces the enclosing group to break. Use it for content that is
 // only ever valid across several lines, such as a comment-only sequence.
 func dForceBreak(content doc) doc { return docForceBreak{content: content} }
+
+// dLineSuffix prints value at the end of the current line. Use it for a
+// trailing comment, and only where a line break always follows in the same
+// document: printing stops at the end of a document, so a suffix pending
+// there would come after any code a caller later appends to that line.
+func dLineSuffix(value string) doc { return docLineSuffix{value: value} }
+
+// dTrailingComment is a trailing comment rendered as a line suffix, set off
+// from the code before it by one space.
+func dTrailingComment(text string) doc { return dLineSuffix(" " + text) }
 func dIfFits(firstLineWidth int, preferred doc, fallback doc) doc {
 	return docIfFits{firstLineWidth: firstLineWidth, preferred: preferred, fallback: fallback}
 }
