@@ -186,10 +186,19 @@ same contract:
 - A tuple that reaches Go as a value, for example through `Any` or a generic
   type argument, is the anonymous struct, not multiple values. Only return
   position spreads.
-- Lists, maps, and generic type arguments holding a function typed with a
-  type parameter (`[fn() $T]`, `Box<fn() $T>`) are not adapted yet. Their
-  concrete and declared Go types differ, and converting them is not O(1)
-  (#588).
+- Lists, maps, fixed arrays, channels, pointers, and generic type arguments
+  holding a function typed with a type parameter (`[fn() $T]`,
+  `Box<fn() $T>`) are not adapted yet, because converting them is not O(1).
+  Such a value keeps the Go type of the code that built it, so `[fn() Int?]`
+  is `[]func() (int, bool)` when built in concrete code and
+  `[]func() ard.Maybe[int]` when built in generic code as `[fn() $T]`.
+  Concrete code can hold a generic-built value, measure it, and pass it back
+  to generic code. The checker follows where a value was built through
+  literals, field reads, calls, parameters, and bindings, and reports a use
+  that needs the other Go type with the
+  `unconvertible_generic_function_layout` diagnostic. A use whose origin the
+  checker does not follow is let through and can still fail in the Go
+  compiler (#588).
 - The tree-sitter grammar needs the tuple type, literal, and destructuring
   forms for editor highlighting.
 

@@ -4395,6 +4395,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				__type:  __type,
 			}
 			bound := c.scope.add(v.Name, v.__type, v.Mutable)
+			bound.layoutOrigin = layoutOrigin(val)
 			_, bindingIsReference := mutableRefBase(v.__type)
 			bound.foreignDescriptor = bindingIsReference && expressionUsesForeignDescriptor(val)
 			c.recordBindingWithSpan(s.NameLocation, s.GetLocation(), bound)
@@ -4490,6 +4491,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					return nil
 				}
 
+				c.rejectFunctionLayout(target.layoutOrigin, value, s.Value.GetLocation())
 				return &Statement{
 					Stmt: &Reassignment{Target: &Variable{*target}, Value: value},
 				}
@@ -4592,6 +4594,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					return nil
 				}
 
+				c.rejectFunctionLayout(layoutOrigin(subject), value, s.Value.GetLocation())
 				return &Statement{
 					Stmt: &Reassignment{Target: subject, Value: value},
 				}
@@ -4791,6 +4794,9 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 			if iterValue == nil {
 				return nil
 			}
+			// A loop that never uses its elements does not depend on how the
+			// collection was built, so the report waits for the first use.
+			elementLayout := c.elementLayoutDiagnostic(iterValue, s.Iterable.GetLocation())
 
 			// Handle strings specifically
 			if iterValue.Type() == Str {
@@ -4847,7 +4853,9 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 
 				body := c.checkBlock(s.Body, c.markLoopScope(func() {
 					// Add the cursor variable to the scope
-					c.recordBinding(s.Cursor.GetLocation(), c.scope.add(s.Cursor.Name, listType.of, cursorMutable))
+					cursor := c.scope.add(s.Cursor.Name, listType.of, cursorMutable)
+					cursor.deferredLayout = elementLayout
+					c.recordBinding(s.Cursor.GetLocation(), cursor)
 					if loop.Index != "" {
 						c.recordBinding(s.Cursor2.GetLocation(), c.scope.add(loop.Index, Int, false))
 					}
@@ -4925,7 +4933,9 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				body := c.checkBlock(s.Body, c.markLoopScope(func() {
 					// Add the cursors to the scope
 					c.recordBinding(s.Cursor.GetLocation(), c.scope.add(loop.Key, mapType.Key(), false))
-					c.recordBinding(s.Cursor2.GetLocation(), c.scope.add(loop.Val, mapType.Value(), valueMutable))
+					value := c.scope.add(loop.Val, mapType.Value(), valueMutable)
+					value.deferredLayout = elementLayout
+					c.recordBinding(s.Cursor2.GetLocation(), value)
 				}))
 
 				loop.Body = body
@@ -7609,6 +7619,11 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 		instance._type = definition
 	}
 	instance.StructType = instance._type
+	for _, property := range properties {
+		if c.rejectFunctionLayout(definition.Fields[property.Name.Name], fields[property.Name.Name], property.Value.GetLocation()) {
+			break
+		}
+	}
 	if firstUnresolvedCallTypeVar(instance._type) != nil {
 		// A provided field whose value failed to check gave no evidence for
 		// its generics. The literal's type is then unknowable, which is a
@@ -7764,10 +7779,10 @@ func (c *Checker) createPrimitiveMethodNode(subject Expression, methodName strin
 		return c.createListMethod(subject, methodName, args, fnDef, loc)
 	}
 	if _, isMap := subjectType.(*Map); isMap {
-		return c.createMapMethod(subject, methodName, args, fnDef)
+		return c.createMapMethod(subject, methodName, args, fnDef, loc)
 	}
 	if foreign, isForeign := subjectType.(*ForeignType); isForeign && foreign.MapKey != nil && foreign.MapValue != nil {
-		return c.createMapMethod(subject, methodName, args, fnDef)
+		return c.createMapMethod(subject, methodName, args, fnDef, loc)
 	}
 	if foreign, isForeign := subjectType.(*ForeignType); isForeign && foreign.Elem != nil {
 		return c.createListMethod(subject, methodName, args, fnDef, loc)
@@ -8184,6 +8199,10 @@ func (c *Checker) createListMethod(subject Expression, methodName string, args [
 			}.build())
 		}
 	}
+	switch kind {
+	case ListAt, ListPrepend, ListPush, ListSet:
+		c.rejectElementLayout(subject, loc)
+	}
 	return &ListMethod{
 		Subject:    subject,
 		Kind:       kind,
@@ -8210,7 +8229,7 @@ func isMapMethodName(name string) bool {
 	}
 }
 
-func (c *Checker) createMapMethod(subject Expression, methodName string, args []Expression, fnDef *FunctionDef) Expression {
+func (c *Checker) createMapMethod(subject Expression, methodName string, args []Expression, fnDef *FunctionDef, loc parse.Location) Expression {
 	var kind MapMethodKind
 	switch methodName {
 	case "keys":
@@ -8227,6 +8246,10 @@ func (c *Checker) createMapMethod(subject Expression, methodName string, args []
 		kind = MapHas
 	default:
 		panic(fmt.Sprintf("Unknown Map method: %s", methodName))
+	}
+	switch kind {
+	case MapGet, MapSet:
+		c.rejectElementLayout(subject, loc)
 	}
 	return &MapMethod{
 		Subject:    subject,
@@ -9266,10 +9289,11 @@ func (c *Checker) checkFunctionValueCall(callee Expression, callArgs []parse.Arg
 		fnDef = expandFunctionDefForRepeatedVariadic(fnDef, len(resolvedExprs))
 		fnDefCopy = expandFunctionDefForRepeatedVariadic(fnDefCopy, len(resolvedExprs))
 	}
-	args, fnToUse := c.checkAndProcessArguments(fnDef, resolvedExprs, fnDefCopy, genericScope, numOmittedArgs, contextualGenericReturn(expectedReturn, callTypeArgs), location, tailSpread)
+	args, fnToUse := c.checkAndProcessValueArguments(fnDef, resolvedExprs, fnDefCopy, genericScope, numOmittedArgs, contextualGenericReturn(expectedReturn, callTypeArgs), location, tailSpread)
 	if args == nil {
 		return nil
 	}
+	c.rejectValueArgumentLayouts(layoutOrigin(callee), args, resolvedExprs, location)
 
 	return &FunctionValueCall{
 		Callee:       callee,
@@ -9545,6 +9569,7 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 				return nil
 			}
 			c.recordSymbolUse(s, sym, nil)
+			c.reportDeferredLayout(sym)
 			return &Variable{*sym}
 		}
 		c.addDiagnostic(undefinedNameDiagnostic{
@@ -9621,6 +9646,7 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 				c.addNonCallable(s.Name, s.GetLocation(), sourceSpanIfPresent(fnSym.declaredAt), nonCallablePrefix)
 				return nil
 			}
+			c.reportDeferredLayout(fnSym)
 			declaration := fnSym.callableDeclaration
 			call := &FunctionCall{
 				Name:        s.Name,
@@ -9665,7 +9691,15 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 				fnDef = expandFunctionDefForRepeatedVariadic(fnDef, len(resolvedExprs))
 				fnDefCopy = expandFunctionDefForRepeatedVariadic(fnDefCopy, len(resolvedExprs))
 			}
-			args, fnToUse := c.checkAndProcessArguments(fnDef, resolvedExprs, fnDefCopy, genericScope, numOmittedArgs, contextualGenericReturn(expectedReturn, callTypeArgs), s.GetLocation(), tailSpread)
+			var args []Expression
+			var fnToUse *FunctionDef
+			if declaration != nil {
+				args, fnToUse = c.checkAndProcessArguments(fnDef, resolvedExprs, fnDefCopy, genericScope, numOmittedArgs, contextualGenericReturn(expectedReturn, callTypeArgs), s.GetLocation(), tailSpread)
+			} else {
+				// The name is a binding that holds a function value.
+				args, fnToUse = c.checkAndProcessValueArguments(fnDef, resolvedExprs, fnDefCopy, genericScope, numOmittedArgs, contextualGenericReturn(expectedReturn, callTypeArgs), s.GetLocation(), tailSpread)
+				c.rejectValueArgumentLayouts(fnSym.layoutOrigin, args, resolvedExprs, s.GetLocation())
+			}
 			if args == nil {
 				return nil
 			}
@@ -10753,6 +10787,7 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 				for _, param := range params {
 					sym := c.scope.add(param.Name, param.Type, false)
 					sym.reference = param.Mutable
+					sym.layoutOrigin = param.Type
 					c.recordBinding(param.Loc, sym)
 				}
 			}
@@ -10788,6 +10823,7 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 				c.addBodyReturnMismatch(s.Body, returnType, body.Type(), s.GetLocation(), s.ReturnType)
 				return nil
 			}
+			c.rejectReturnLayout(fn.ReturnType, body, bodyResultLocation(s.Body, s.GetLocation()))
 
 			fn.Body = body
 			return fn
@@ -13099,6 +13135,7 @@ func (c *Checker) checkExprAsInner(expr parse.Expression, expectedType Type, exp
 				for _, param := range params {
 					sym := c.scope.add(param.Name, param.Type, false)
 					sym.reference = param.Mutable
+					sym.layoutOrigin = param.Type
 					c.recordBinding(param.Loc, sym)
 				}
 			}, returnType, true)
@@ -13130,6 +13167,7 @@ func (c *Checker) checkExprAsInner(expr parse.Expression, expectedType Type, exp
 				c.addBodyReturnMismatch(s.Body, returnType, body.Type(), s.GetLocation(), s.ReturnType)
 				return nil
 			}
+			c.rejectReturnLayout(fn.ReturnType, body, bodyResultLocation(s.Body, s.GetLocation()))
 
 			fn.Body = body
 			return fn
@@ -13408,6 +13446,7 @@ func (c *Checker) checkFunctionBody(fn *FunctionDef, bodyStmts []parse.Statement
 		for _, param := range params {
 			sym := c.scope.add(param.Name, param.Type, false)
 			sym.reference = param.Mutable
+			sym.layoutOrigin = param.Type
 			c.recordBinding(param.Loc, sym)
 		}
 	}, returnType, true)
@@ -13417,6 +13456,8 @@ func (c *Checker) checkFunctionBody(fn *FunctionDef, bodyStmts []parse.Statement
 	// Check that the function's return type matches its body's type
 	if returnType != Void && !c.areCompatible(returnType, body.Type()) {
 		c.addBodyReturnMismatch(bodyStmts, returnType, body.Type(), location, nil)
+	} else {
+		c.rejectReturnLayout(returnType, body, bodyResultLocation(bodyStmts, location))
 	}
 
 	return body
@@ -13633,6 +13674,7 @@ func (c *Checker) checkFunctionWithSignature(def *parse.FunctionDeclaration, ini
 		for _, param := range params {
 			sym := c.scope.add(param.Name, param.Type, false)
 			sym.reference = param.Mutable
+			sym.layoutOrigin = param.Type
 			sym.foreignDescriptor = param.ForeignABI == ForeignParameterDescriptorValue
 			c.recordBinding(param.Loc, sym)
 		}
@@ -13650,6 +13692,8 @@ func (c *Checker) checkFunctionWithSignature(def *parse.FunctionDeclaration, ini
 		if bodyReturnMismatch(def.Body, returnType, body.Type()) != "if used as a value must have an else branch" || !alreadyReportedNonExhaustive {
 			c.addBodyReturnMismatch(def.Body, returnType, body.Type(), def.GetLocation(), def.ReturnType)
 		}
+	} else {
+		c.rejectReturnLayout(returnType, body, bodyResultLocation(def.Body, def.GetLocation()))
 	}
 
 	fn.Body = body
@@ -14397,6 +14441,17 @@ func (c *Checker) checkVariadicSpreadArgument(expr parse.Expression, expectedEle
 }
 
 func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []parse.Expression, fnDefCopy *FunctionDef, genericScope *SymbolTable, numOmittedArgs int, expectedReturn Type, callLocation parse.Location, tailSpread bool) ([]Expression, *FunctionDef) {
+	args, signature := c.checkAndProcessValueArguments(fnDef, resolvedExprs, fnDefCopy, genericScope, numOmittedArgs, expectedReturn, callLocation, tailSpread)
+	if args != nil {
+		c.rejectArgumentLayouts(fnDef.Parameters, args, resolvedExprs, callLocation)
+	}
+	return args, signature
+}
+
+// checkAndProcessValueArguments is checkAndProcessArguments for a callee that
+// is a function value. fnDef is then the value's type, not a declaration, so
+// the caller checks the arguments' Go layouts against the value's own origin.
+func (c *Checker) checkAndProcessValueArguments(fnDef *FunctionDef, resolvedExprs []parse.Expression, fnDefCopy *FunctionDef, genericScope *SymbolTable, numOmittedArgs int, expectedReturn Type, callLocation parse.Location, tailSpread bool) ([]Expression, *FunctionDef) {
 	// Create the full argument list including synthesized Maybe::new() calls for omitted arguments
 	// Need to maintain parameter order, so use indexed assignment instead of appending
 	totalArgs := len(fnDefCopy.Parameters)
@@ -15468,6 +15523,8 @@ func (c *Checker) checkAccessorChainWithMaybes(parseExpr parse.Expression) Expre
 	}
 
 	projection := c.wrapAccessorInMatch(target, innerType, property.Property.Name, fieldType)
+	// The projection rebuilds the field as a Maybe of its own type.
+	c.rejectLayoutOrigin(fieldType, declaredFieldLayout(innerType, property.Property.Name), property.Property.GetLocation())
 	c.recordMember(property.Property.GetLocation(), TargetField, structType, property.Property.Name, projection)
 	return projection
 }

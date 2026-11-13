@@ -1204,6 +1204,20 @@ func (b *Block) Type() Type {
 	return Void
 }
 
+// finalExpression returns the expression whose value the block produces, or
+// nil when it produces none.
+func (b *Block) finalExpression() Expression {
+	if b.DiscardFinalValue || b.failedFinal {
+		return nil
+	}
+	for i := len(b.Stmts) - 1; i >= 0; i-- {
+		if b.Stmts[i].Expr != nil {
+			return b.Stmts[i].Expr
+		}
+	}
+	return nil
+}
+
 type UnsafeBlock struct {
 	Body       *Block
 	ValueType  Type

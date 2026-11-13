@@ -50,6 +50,12 @@ type Symbol struct {
 	foreignDescriptor   bool
 	typeDeclaration     bool
 	callableDeclaration *FunctionDef
+	// layoutOrigin is the type that gives the binding's value its Go layout,
+	// when the checker follows it (see layoutOrigin).
+	layoutOrigin Type
+	// deferredLayout is a layout diagnostic for a loop cursor, reported at
+	// the cursor's first use (see elementLayoutDiagnostic).
+	deferredLayout *unconvertibleFunctionLayoutDiagnostic
 }
 
 func (s Symbol) IsZero() bool {

@@ -55,6 +55,7 @@ const (
 	DiagnosticCodeUnresolvedGeneric             DiagnosticCode = "unresolved_generic"
 	DiagnosticCodeUnboundGenericTypeArg         DiagnosticCode = "unbound_generic_type_argument"
 	DiagnosticCodeUnsupportedLocalGeneric       DiagnosticCode = "unsupported_local_generic_function"
+	DiagnosticCodeUnconvertibleFunctionLayout   DiagnosticCode = "unconvertible_generic_function_layout"
 	DiagnosticCodeNonGenericSpecialization      DiagnosticCode = "non_generic_type_specialization"
 	DiagnosticCodeIncorrectTypeArgCount         DiagnosticCode = "incorrect_type_argument_count"
 	DiagnosticCodeMissingTypeArguments          DiagnosticCode = "missing_type_arguments"

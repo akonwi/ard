@@ -240,3 +240,78 @@ fn main() {
 		t.Fatalf("stdout = %q, want %q", got, want)
 	}
 }
+
+// A list or map of `fn() $T` built in generic code keeps the Go type generic
+// code gave it. Concrete code can hold it, measure it, and hand it back to
+// generic code, as long as it does not read or write the elements itself,
+// which the checker rejects (#588).
+func TestGoTargetGenericBuiltFunctionCollectionsPassThroughConcreteCode(t *testing.T) {
+	got := runGoTargetSourceStdout(t, `use go:fmt
+
+struct Registry {
+  handlers: [fn() $T],
+}
+
+impl Registry {
+  fn run() [$T] {
+    mut out: [$T] = []
+    let sink = &mut out
+    for handler in self.handlers {
+      sink.push(handler())
+    }
+    out
+  }
+
+  fn all() [fn() $T] {
+    self.handlers
+  }
+}
+
+fn register(f: fn() $T, g: fn() $T) Registry<$T> {
+  Registry{handlers: [f, g]}
+}
+
+fn first(fs: [fn() $T]) $T {
+  fs.at(0).expect("empty")()
+}
+
+fn named(f: fn() $T) [Str: fn() $T] {
+  ["only": f]
+}
+
+fn call_named(fs: [Str: fn() $T], name: Str) $T {
+  fs.get(name).expect("missing")()
+}
+
+fn main() {
+  let registry = register(fn() Int? { Maybe::new(4) }, fn() Int? { Maybe::new() })
+  fmt::Println(registry.handlers.size(), first(registry.handlers).or(0))
+
+  let handlers = registry.handlers
+  let annotated: [fn() Int?] = registry.all()
+  fmt::Println(first(handlers).or(0), first(annotated).or(0), handlers.size())
+
+  let copy = Registry<Int?>{handlers: registry.handlers}
+  for value in copy.run() {
+    fmt::Println(value.or(-1))
+  }
+
+  mut count = 0
+  for handler in registry.handlers {
+    count = count + 1
+  }
+  fmt::Println(count)
+
+  let by_name = named(fn() Int!Str { Result::ok(7) })
+  mut names: [Str] = []
+  for name, handler in by_name {
+    names = [name]
+  }
+  fmt::Println(by_name.size(), names.at(0).or(""), call_named(by_name, "only").or(0))
+}
+`)
+	want := "2 4\n4 4 2\n4\n-1\n2\n1 only 7\n"
+	if got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+}
