@@ -4509,12 +4509,11 @@ func (p *parser) finishTupleLiteral(openParen *token, first Expression, comments
 func (p *parser) list() (Expression, error) {
 	startToken := p.previous()
 	if p.check(colon) {
-		return p.map_()
+		return p.emptyMap(startToken)
 	}
 
 	p.match(new_line)
 
-	start := p.index
 	items := []Expression{}
 	comments := []Comment{}
 	for !p.match(right_bracket) {
@@ -4540,8 +4539,18 @@ func (p *parser) list() (Expression, error) {
 			return nil, err
 		}
 		if p.check(colon) {
-			p.index = start
-			return p.map_()
+			// A ':' after the first element makes this a map literal. The
+			// element is already parsed as a full expression, so it becomes
+			// the first key instead of being parsed again (#581).
+			if len(items) == 0 {
+				return p.finishMap(startToken, item, comments)
+			}
+			p.addError(p.peek(), "Unexpected ':' in list literal")
+			p.advance() // consume the ':'
+			// Skip the would-be value so the list can continue.
+			if _, err := p.functionDef(false, false); err != nil {
+				return nil, err
+			}
 		}
 
 		items = append(items, item)
@@ -4568,19 +4577,31 @@ func (p *parser) list() (Expression, error) {
 	return result, nil
 }
 
-func (p *parser) map_() (Expression, error) {
-	startToken := p.previous()
+// emptyMap parses the `:]` of an empty map literal `[:]`.
+func (p *parser) emptyMap(startToken *token) (Expression, error) {
 	node := &MapLiteral{
 		Location: startToken.getLocation(),
 		Entries:  []MapEntry{},
 	}
-	if p.match(colon) {
-		if !p.match(right_bracket) {
-			p.addError(p.peek(), "Expected ']' after ':' in empty map")
-			p.synchronizeToTokens(equal, new_line, comma, right_paren)
-		}
-		node.Location.End = p.previous().getLocation().End
-		return node, nil
+	p.advance() // consume the ':'
+	if !p.match(right_bracket) {
+		p.addError(p.peek(), "Expected ']' after ':' in empty map")
+		p.synchronizeToTokens(equal, new_line, comma, right_paren)
+	}
+	node.Location.End = p.previous().getLocation().End
+	return node, nil
+}
+
+// finishMap parses the rest of a map literal once list() has parsed its first
+// key and seen the ':' after it. Keys are full expressions, like values.
+func (p *parser) finishMap(startToken *token, firstKey Expression, comments []Comment) (Expression, error) {
+	node := &MapLiteral{
+		Location: startToken.getLocation(),
+		Entries:  []MapEntry{},
+		Comments: comments,
+	}
+	if err := p.mapEntry(node, firstKey); err != nil {
+		return nil, err
 	}
 
 	for !p.match(right_bracket) {
@@ -4601,35 +4622,13 @@ func (p *parser) map_() (Expression, error) {
 			continue
 		}
 
-		key, err := p.primary()
+		key, err := p.functionDef(false, false)
 		if err != nil {
 			return nil, err
 		}
-		if !p.check(colon) {
-			p.addError(p.peek(), "Expected ':' after map key")
-			p.synchronizeToTokens(colon, comma, right_bracket)
-			if !p.check(colon) {
-				// Could not find ':', skip this map entry
-				continue
-			}
-		}
-		p.advance() // consume the ':'
-		val, err := p.functionDef(false, false)
-		if err != nil {
+		if err := p.mapEntry(node, key); err != nil {
 			return nil, err
 		}
-		node.Entries = append(node.Entries, MapEntry{
-			Key:   key,
-			Value: val,
-		})
-
-		// Check for inline comment after map entry
-		if c := p.parseInlineComment(); c != nil {
-			node.Comments = append(node.Comments, *c)
-		}
-
-		p.expectSeparator(false, true, "Expected ',' between map entries")
-		p.match(new_line)
 	}
 
 	if len(node.Comments) == 0 {
@@ -4637,6 +4636,37 @@ func (p *parser) map_() (Expression, error) {
 	}
 	node.Location.End = p.previous().getLocation().End
 	return node, nil
+}
+
+// mapEntry parses the ':' and value that follow a parsed map key, then the
+// separator after the entry.
+func (p *parser) mapEntry(node *MapLiteral, key Expression) error {
+	if !p.check(colon) {
+		p.addError(p.peek(), "Expected ':' after map key")
+		p.synchronizeToTokens(colon, comma, right_bracket)
+		if !p.check(colon) {
+			// Could not find ':', skip this map entry
+			return nil
+		}
+	}
+	p.advance() // consume the ':'
+	val, err := p.functionDef(false, false)
+	if err != nil {
+		return err
+	}
+	node.Entries = append(node.Entries, MapEntry{
+		Key:   key,
+		Value: val,
+	})
+
+	// Check for inline comment after map entry
+	if c := p.parseInlineComment(); c != nil {
+		node.Comments = append(node.Comments, *c)
+	}
+
+	p.expectSeparator(false, true, "Expected ',' between map entries")
+	p.match(new_line)
+	return nil
 }
 
 func (p *parser) string() (Expression, error) {

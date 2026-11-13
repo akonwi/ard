@@ -1878,6 +1878,15 @@ func TestInvalidMapKeyTypeHasStructuredDiagnostic(t *testing.T) {
 				return declaration.Value.(*parse.MapLiteral).Entries[0].Key.GetLocation()
 			},
 		},
+		{
+			// A call key is checked like any other key expression (#581).
+			name:   "inferred call map key",
+			source: "fn key() [Int] {\n  [1]\n}\nlet values = [key(): \"one\"]\n",
+			span: func(program *parse.Program) parse.Location {
+				declaration := program.Statements[1].(*parse.VariableDeclaration)
+				return declaration.Value.(*parse.MapLiteral).Entries[0].Key.GetLocation()
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -1899,6 +1899,25 @@ func TestMapKeyTypeConstraint(t *testing.T) {
 			name:  "primitive and enum keys are allowed",
 			input: `let ages: [Str: Int] = ["ard": 0]`,
 		},
+		{
+			// Keys are full expressions, checked like any other (#581).
+			name: "call, member access, and operator keys are checked",
+			input: `
+				struct User { id: Int }
+				fn key() Int { 1 }
+				let user = User{id: 2}
+				let inferred = [key(): "one", user.id: "two", user.id + 1: "three"]
+				let declared: [Int: Str] = [key(): "one", user.id: "two", user.id + 1: "three"]`,
+		},
+		{
+			name: "a mismatched call key is reported",
+			input: `
+				fn key() Str { "k" }
+				let m: [Int: Str] = [1: "one", key(): "two"]`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Type mismatch: Expected Int, got Str"},
+			},
+		},
 	})
 }
 func TestMaps(t *testing.T) {
