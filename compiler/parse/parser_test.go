@@ -24,6 +24,7 @@ var compareOptions = cmp.Options{
 		VoidType{},
 		List{},
 		FixedArray{},
+		TupleType{},
 		Map{},
 		CustomType{},
 		GenericType{},

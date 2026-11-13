@@ -281,7 +281,7 @@ func extractGenericNamesSeen(t Type, names map[string]bool, seen map[Type]struct
 	// Only pointer-backed types supported by this traversal reach the map lookup.
 	// Other Type implementations may be non-comparable values and cannot be keys.
 	switch t.(type) {
-	case *TypeVar, *List, *Slice, *Map, *Maybe, *Result, *MutableRef, *Union, *StructDef, *FunctionDef:
+	case *TypeVar, *List, *Slice, *Map, *Maybe, *Result, *Tuple, *MutableRef, *Union, *StructDef, *FunctionDef:
 	default:
 		return
 	}
@@ -305,6 +305,10 @@ func extractGenericNamesSeen(t Type, names map[string]bool, seen map[Type]struct
 	case *Result:
 		extractGenericNamesSeen(t.val, names, seen)
 		extractGenericNamesSeen(t.err, names, seen)
+	case *Tuple:
+		for _, element := range t.elements {
+			extractGenericNamesSeen(element, names, seen)
+		}
 	case *MutableRef:
 		extractGenericNamesSeen(t.of, names, seen)
 	case *Union:
@@ -369,6 +373,10 @@ func genericAppearsUnderMutableRepresentationSeen(t Type, name string, mutable b
 	case *Result:
 		return genericAppearsUnderMutableRepresentationSeen(typ.Val(), name, false, seen) ||
 			genericAppearsUnderMutableRepresentationSeen(typ.Err(), name, false, seen)
+	case *Tuple:
+		return typ.anyElement(func(element Type) bool {
+			return genericAppearsUnderMutableRepresentationSeen(element, name, false, seen)
+		})
 	case *FunctionDef:
 		for _, parameter := range typ.Parameters {
 			if genericAppearsUnderMutableRepresentationSeen(parameter.Type, name, parameter.Mutable, seen) {
@@ -439,7 +447,7 @@ func releaseTypeTraversalSeen(seen map[Type]struct{}) {
 // type is a leaf whose walk result does not depend on the cycle guard.
 func typeWalkRecurses(t Type) bool {
 	switch t.(type) {
-	case *TypeVar, *List, *Slice, *FixedArray, *Chan, *Receiver, *Sender, *Map, *Maybe, *Result, *MutableRef, *Union, *ForeignType, *StructDef, *FunctionDef:
+	case *TypeVar, *List, *Slice, *FixedArray, *Chan, *Receiver, *Sender, *Map, *Maybe, *Result, *Tuple, *MutableRef, *Union, *ForeignType, *StructDef, *FunctionDef:
 		return true
 	default:
 		return false
@@ -491,6 +499,8 @@ func hasGenericsInTypeSeen(t Type, seen map[Type]struct{}) bool {
 		return hasGenericsInTypeSeen(t.of, seen)
 	case *Result:
 		return hasGenericsInTypeSeen(t.val, seen) || hasGenericsInTypeSeen(t.err, seen)
+	case *Tuple:
+		return t.anyElement(func(element Type) bool { return hasGenericsInTypeSeen(element, seen) })
 	case *MutableRef:
 		return hasGenericsInTypeSeen(t.of, seen)
 	case *Union:
@@ -562,6 +572,8 @@ func hasUnresolvedGenericsFrom(t Type, context *GenericContext) bool {
 			return visit(current.of, seen)
 		case *Result:
 			return visit(current.val, seen) || visit(current.err, seen)
+		case *Tuple:
+			return current.anyElement(func(element Type) bool { return visit(element, seen) })
 		case *MutableRef:
 			return visit(current.of, seen)
 		case *Chan:
@@ -644,6 +656,8 @@ func maskUnresolvedGenericsFrom(t Type, context *GenericContext) Type {
 			return MakeMaybe(visit(current.of, seen))
 		case *Result:
 			return MakeResult(visit(current.val, seen), visit(current.err, seen))
+		case *Tuple:
+			return current.mapElements(func(element Type) Type { return visit(element, seen) })
 		case *MutableRef:
 			return current.withOf(visit(current.of, seen))
 		case *Chan:
@@ -718,6 +732,8 @@ func typeContainsTypeVar(t Type, target *TypeVar) bool {
 			return visit(current.of, seen)
 		case *Result:
 			return visit(current.val, seen) || visit(current.err, seen)
+		case *Tuple:
+			return current.anyElement(func(element Type) bool { return visit(element, seen) })
 		case *MutableRef:
 			return visit(current.of, seen)
 		case *Chan:
@@ -798,6 +814,10 @@ func bindUnresolvedCallTypeVars(t Type, fallback Type) {
 		case *Result:
 			visit(current.val)
 			visit(current.err)
+		case *Tuple:
+			for _, element := range current.elements {
+				visit(element)
+			}
 		case *MutableRef:
 			visit(current.of)
 		case *Chan:
@@ -861,6 +881,12 @@ func firstUnresolvedCallTypeVar(t Type) *TypeVar {
 				return found
 			}
 			return visit(current.err, seen)
+		case *Tuple:
+			for _, element := range current.elements {
+				if found := visit(element, seen); found != nil {
+					return found
+				}
+			}
 		case *MutableRef:
 			return visit(current.of, seen)
 		case *Chan:
@@ -973,6 +999,10 @@ func replaceGenericSeen(t Type, genericName string, concreteType Type, seen map[
 			val: newVal,
 			err: newErr,
 		}
+	case *Tuple:
+		return t.mapElements(func(element Type) Type {
+			return replaceGenericSeen(element, genericName, concreteType, seen)
+		})
 	case *MutableRef:
 		newOf := replaceGenericSeen(t.of, genericName, concreteType, seen)
 		if newOf == t.of {
@@ -1076,6 +1106,8 @@ func hasGenericSeen(t Type, genericName string, seen map[*StructDef]bool) bool {
 		return hasGenericSeen(t.of, genericName, seen)
 	case *Result:
 		return hasGenericSeen(t.val, genericName, seen) || hasGenericSeen(t.err, genericName, seen)
+	case *Tuple:
+		return t.anyElement(func(element Type) bool { return hasGenericSeen(element, genericName, seen) })
 	case *MutableRef:
 		return hasGenericSeen(t.of, genericName, seen)
 	case *Chan:
@@ -1345,6 +1377,8 @@ func substituteInstantiatedGoTypeArgsSeen(t Type, goArgs []gotypes.Type, ardArgs
 		return MakeMaybe(substitute(typ.Of()))
 	case *Result:
 		return MakeResult(substitute(typ.Val()), substitute(typ.Err()))
+	case *Tuple:
+		return typ.mapElements(substitute)
 	case *Chan:
 		return MakeChan(substitute(typ.Of()))
 	case *Receiver:
@@ -1441,6 +1475,8 @@ func substituteTypeBindings(t Type, bindings map[string]Type) Type {
 		return MakeMaybe(substituteTypeBindings(typ.of, bindings))
 	case *Result:
 		return MakeResult(substituteTypeBindings(typ.val, bindings), substituteTypeBindings(typ.err, bindings))
+	case *Tuple:
+		return typ.mapElements(func(element Type) Type { return substituteTypeBindings(element, bindings) })
 	case *MutableRef:
 		return typ.withOf(substituteTypeBindings(typ.of, bindings))
 	case *Union:
@@ -1616,6 +1652,10 @@ func collectUnboundGenericsFromType(t Type, params *[]string, seenGenerics map[s
 	case *Result:
 		collectUnboundGenericsFromType(typ.val, params, seenGenerics, seenTypes)
 		collectUnboundGenericsFromType(typ.err, params, seenGenerics, seenTypes)
+	case *Tuple:
+		for _, element := range typ.elements {
+			collectUnboundGenericsFromType(element, params, seenGenerics, seenTypes)
+		}
 	case *MutableRef:
 		collectUnboundGenericsFromType(typ.of, params, seenGenerics, seenTypes)
 	case *Union:
@@ -1677,6 +1717,12 @@ func copyTypeWithTypeVarMapSeen(t Type, typeVarMap map[string]*TypeVar, seenStru
 			val: copyTypeWithTypeVarMapSeen(typ.val, typeVarMap, seenStructs),
 			err: copyTypeWithTypeVarMapSeen(typ.err, typeVarMap, seenStructs),
 		}
+	case *Tuple:
+		elements := make([]Type, len(typ.elements))
+		for i, element := range typ.elements {
+			elements[i] = copyTypeWithTypeVarMapSeen(element, typeVarMap, seenStructs)
+		}
+		return &Tuple{elements: elements}
 	case *MutableRef:
 		return typ.withOf(copyTypeWithTypeVarMapSeen(typ.of, typeVarMap, seenStructs))
 	case *Union:

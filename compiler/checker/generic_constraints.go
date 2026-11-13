@@ -95,6 +95,10 @@ func collectComparableGenericNames(t Type, requireComparable bool, seen map[comp
 	case *Result:
 		collectComparableGenericNames(typ.Val(), false, seen, result, analyzeForeignStructure)
 		collectComparableGenericNames(typ.Err(), false, seen, result, analyzeForeignStructure)
+	case *Tuple:
+		for _, element := range typ.Elements() {
+			collectComparableGenericNames(element, false, seen, result, analyzeForeignStructure)
+		}
 	case *MutableRef:
 		collectComparableGenericNames(typ.Of(), false, seen, result, analyzeForeignStructure)
 	case *FunctionDef:
@@ -185,7 +189,9 @@ func collectComparableBindingRequirements(t Type, seen map[string]bool, result *
 		for _, member := range typ.Types {
 			collectComparableBindingRequirements(member, seen, result)
 		}
-	case *List, *Slice, *Map, Map, *FunctionDef, FunctionDef:
+	case *List, *Slice, *Map, Map, *FunctionDef, FunctionDef, *Tuple:
+		// Tuples are not comparable in Ard, so a tuple can never satisfy a
+		// comparable requirement regardless of its elements (ADR 0077).
 		result.impossible = true
 	default:
 		if !isValidMapKeyType(typ) {

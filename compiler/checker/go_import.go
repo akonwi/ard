@@ -97,16 +97,59 @@ func functionDefFromGoSignature(name string, sig *types.Signature) (*FunctionDef
 }
 
 func foreignResultShape(results *types.Tuple) ForeignResultShape {
-	switch {
-	case results.Len() == 1 && isGoError(results.At(0).Type()):
-		return ForeignResultErrorOnly
-	case results.Len() == 2 && isGoError(results.At(1).Type()):
-		return ForeignResultValueError
-	case results.Len() == 2 && isGoBool(results.At(1).Type()):
-		return ForeignResultValueBool
-	default:
-		return ForeignResultDirect
+	return foreignResultShapeFromMethodSignatures(results, results)
+}
+
+// goTupleResultShape classifies a Go result list that maps to an Ard tuple
+// (ADR 0077). It applies after the established adaptations, so it never
+// claims a lone result, `(T, error)`, or `(T, bool)`:
+//
+//   - three or more results ending in `error` are a tuple of the leading
+//     results inside a Result (trailingError);
+//   - any other two or more results are a tuple of all of them. A trailing
+//     bool after two or more values stays an element, because Go does not
+//     reserve it for "the other results are valid" the way it does `error`.
+//
+// The error convention is read from the declared results and the comma-ok
+// pair from the instantiated ones, matching the single-value adaptations.
+func goTupleResultShape(declared, instantiated *types.Tuple) (elements int, trailingError bool, ok bool) {
+	count := declared.Len()
+	if count < 2 || count != instantiated.Len() {
+		return 0, false, false
 	}
+	if isGoError(declared.At(count - 1).Type()) {
+		if count == 2 {
+			return 0, false, false
+		}
+		return count - 1, true, true
+	}
+	if count == 2 && isGoBool(instantiated.At(1).Type()) {
+		return 0, false, false
+	}
+	return count, false, true
+}
+
+// tupleReturnTypeFromGo maps a multi-result Go signature to its Ard tuple
+// return type, converting each element with elementType (indexed by result
+// position). ok is false when the results are not a tuple shape.
+func tupleReturnTypeFromGo(declared, instantiated *types.Tuple, elementType func(index int) (Type, string)) (result Type, reason string, ok bool) {
+	count, trailingError, ok := goTupleResultShape(declared, instantiated)
+	if !ok {
+		return nil, "", false
+	}
+	elements := make([]Type, count)
+	for i := range elements {
+		element, reason := elementType(i)
+		if reason != "" {
+			return nil, fmt.Sprintf("result %d has unsupported type %s: %s", i+1, instantiated.At(i).Type().String(), reason), true
+		}
+		elements[i] = element
+	}
+	tuple := MakeTuple(elements)
+	if trailingError {
+		return MakeResult(tuple, BuiltinError), "", true
+	}
+	return tuple, "", true
 }
 
 func functionDefFromGoSignatureWithMethods(name string, sig *types.Signature, includeMethods bool) (*FunctionDef, string) {
@@ -238,10 +281,19 @@ func callbackReturnTypeFromGo(results *types.Tuple) (Type, string) {
 			}
 			return MakeMaybe(value), ""
 		}
-		return nil, fmt.Sprintf("callback multi-result shape %s is not supported yet", results.String())
-	default:
-		return nil, fmt.Sprintf("callback multi-result shape %s is not supported yet", results.String())
 	}
+	// Remaining multi-result shapes are tuples. An Ard closure returning a
+	// tuple (or a tuple Result) already lowers to these Go results, so the
+	// callback stays conversion-free (ADR 0077).
+	if tuple, reason, ok := tupleReturnTypeFromGo(results, results, func(i int) (Type, string) {
+		return typeFromGoWithMethods(results.At(i).Type(), false)
+	}); ok {
+		if reason != "" {
+			return nil, "callback " + reason
+		}
+		return tuple, ""
+	}
+	return nil, fmt.Sprintf("callback multi-result shape %s is not supported yet", results.String())
 }
 
 func returnTypeFromGo(results *types.Tuple) (Type, string) {
@@ -272,6 +324,11 @@ func returnTypeFromGoWithMethods(results *types.Tuple, includeMethods bool) (Typ
 			}
 			return MakeMaybe(val), ""
 		}
+	}
+	if tuple, reason, ok := tupleReturnTypeFromGo(results, results, func(i int) (Type, string) {
+		return typeFromGoWithMethods(results.At(i).Type(), includeMethods)
+	}); ok {
+		return tuple, reason
 	}
 	return nil, fmt.Sprintf("unsupported result shape %s", results.String())
 }
@@ -754,6 +811,15 @@ func returnTypeFromGoMethodSignatures(declared, instantiated *types.Tuple) (Type
 			return MakeMaybe(value), ""
 		}
 	}
+	if tuple, reason, ok := tupleReturnTypeFromGo(declared, instantiated, func(i int) (Type, string) {
+		value, reason := typeFromGoWithMethods(instantiated.At(i).Type(), false)
+		if reason != "" {
+			return nil, reason
+		}
+		return remapDeclaredGoCallbackType(declared.At(i).Type(), instantiated.At(i).Type(), value)
+	}); ok {
+		return tuple, reason
+	}
 	return nil, fmt.Sprintf("unsupported result shape %s", instantiated.String())
 }
 
@@ -991,9 +1057,14 @@ func foreignResultShapeFromMethodSignatures(declared, instantiated *types.Tuple)
 		return ForeignResultValueError
 	case instantiated.Len() == 2 && isGoBool(instantiated.At(1).Type()):
 		return ForeignResultValueBool
-	default:
-		return ForeignResultDirect
 	}
+	if _, trailingError, ok := goTupleResultShape(declared, instantiated); ok {
+		if trailingError {
+			return ForeignResultTupleError
+		}
+		return ForeignResultTuple
+	}
+	return ForeignResultDirect
 }
 
 func primitiveTypeFromGo(t types.Type) (Type, string) {

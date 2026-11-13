@@ -129,6 +129,22 @@ func equalTypesSeen(left Type, right Type, context *typeEqualContext) bool {
 			return equalTypesSeen(r, l, context)
 		}
 		return false
+	case *Tuple:
+		if r, ok := right.(*Tuple); ok {
+			if len(l.elements) != len(r.elements) {
+				return false
+			}
+			for i := range l.elements {
+				if !equalTypesSeen(l.elements[i], r.elements[i], context) {
+					return false
+				}
+			}
+			return true
+		}
+		if r, ok := right.(*Union); ok {
+			return equalTypesSeen(r, l, context)
+		}
+		return false
 	case *Chan:
 		if r, ok := right.(*Chan); ok {
 			return equalTypesSeen(l.of, r.of, context)
@@ -333,6 +349,8 @@ func typeEqualID(t Type) string {
 		return fmt.Sprintf("Slice:%p", v)
 	case *FixedArray:
 		return fmt.Sprintf("FixedArray:%p", v)
+	case *Tuple:
+		return fmt.Sprintf("Tuple:%p", v)
 	case *Chan:
 		return fmt.Sprintf("Chan:%p", v)
 	case *Receiver:

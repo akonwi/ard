@@ -313,6 +313,18 @@ func boundReturnTypeFromGo(results *types.Tuple, tparams *types.TypeParamList, b
 			return MakeMaybe(normalizeGoSliceResultType(val)), ""
 		}
 	}
+	if tuple, reason, ok := tupleReturnTypeFromGo(results, results, func(i int) (Type, string) {
+		element, reason := boundTypeFromGo(results.At(i).Type(), tparams, bindings)
+		if reason != "" {
+			return nil, reason
+		}
+		if _, ok := element.(*MutableRef); ok {
+			return nil, "mut results inside a tuple are not supported yet"
+		}
+		return normalizeGoSliceResultType(element), ""
+	}); ok {
+		return tuple, reason
+	}
 	return nil, fmt.Sprintf("unsupported result shape %s", results.String())
 }
 
@@ -334,6 +346,8 @@ func containsArdSlice(t Type) bool {
 		return containsArdSlice(value.Of())
 	case *Result:
 		return containsArdSlice(value.Val()) || containsArdSlice(value.Err())
+	case *Tuple:
+		return value.anyElement(containsArdSlice)
 	case *Chan:
 		return containsArdSlice(value.Of())
 	case *Receiver:
@@ -371,6 +385,8 @@ func normalizeGoSliceResultType(t Type) Type {
 		return MakeMaybe(normalizeGoSliceResultType(value.Of()))
 	case *Result:
 		return MakeResult(normalizeGoSliceResultType(value.Val()), normalizeGoSliceResultType(value.Err()))
+	case *Tuple:
+		return value.mapElements(normalizeGoSliceResultType)
 	case *Chan:
 		return MakeChan(normalizeGoSliceResultType(value.Of()))
 	case *Receiver:
@@ -580,7 +596,7 @@ func boundCallbackReturnTypeFromGo(results, instantiated *types.Tuple, tparams *
 		// Error convention adaptation is declaration-sensitive. Preserve the
 		// existing instantiated-bool comma-ok behavior for generic callbacks.
 		if !isGoError(declaredSecond) && !isGoBool(instantiatedSecond) {
-			return nil, fmt.Sprintf("callback multi-result shape %s is not supported yet", results.String())
+			break
 		}
 		first := results.At(0).Type()
 		if isGoEmptyStruct(types.Unalias(instantiated.At(0).Type())) {
@@ -594,9 +610,17 @@ func boundCallbackReturnTypeFromGo(results, instantiated *types.Tuple, tparams *
 			return MakeResult(value, BuiltinError), ""
 		}
 		return MakeMaybe(value), ""
-	default:
-		return nil, fmt.Sprintf("callback multi-result shape %s is not supported yet", results.String())
 	}
+	// Remaining multi-result shapes are tuples (ADR 0077).
+	if tuple, reason, ok := tupleReturnTypeFromGo(results, instantiated, func(i int) (Type, string) {
+		return boundTypeFromGo(results.At(i).Type(), tparams, bindings)
+	}); ok {
+		if reason != "" {
+			return nil, "callback " + reason
+		}
+		return tuple, ""
+	}
+	return nil, fmt.Sprintf("callback multi-result shape %s is not supported yet", results.String())
 }
 
 // isDescriptorBoundaryArdType reports whether an instantiated parameter type

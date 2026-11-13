@@ -16,6 +16,8 @@ func TestLowerForeignResultShapeUsesExplicitAIRValues(t *testing.T) {
 		{checker: checker.ForeignResultValueError, want: ForeignResultValueError},
 		{checker: checker.ForeignResultErrorOnly, want: ForeignResultErrorOnly},
 		{checker: checker.ForeignResultValueBool, want: ForeignResultValueBool},
+		{checker: checker.ForeignResultTuple, want: ForeignResultTuple},
+		{checker: checker.ForeignResultTupleError, want: ForeignResultTupleError},
 	}
 
 	for _, tt := range tests {

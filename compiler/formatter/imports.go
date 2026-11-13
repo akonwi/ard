@@ -59,6 +59,10 @@ func collectImportUsesInType(t parse.DeclaredType, used map[string]bool) {
 		collectImportUsesInType(v.Element, used)
 	case parse.FixedArray:
 		collectImportUsesInType(v.Element, used)
+	case *parse.TupleType:
+		for _, element := range v.Elements {
+			collectImportUsesInType(element, used)
+		}
 	case *parse.Map:
 		collectImportUsesInType(v.Key, used)
 		collectImportUsesInType(v.Value, used)
@@ -90,6 +94,8 @@ func collectImportUsesInStatement(stmt parse.Statement, used map[string]bool) {
 		if s.Type != nil {
 			collectImportUsesInType(s.Type, used)
 		}
+		collectImportUsesInExpression(s.Value, used)
+	case *parse.TupleDestructure:
 		collectImportUsesInExpression(s.Value, used)
 	case *parse.VariableAssignment:
 		collectImportUsesInExpression(s.Target, used)
@@ -273,6 +279,10 @@ func collectImportUsesInExpression(expr parse.Expression, used map[string]bool) 
 			collectImportUsesInExpression(chunk, used)
 		}
 	case *parse.ListLiteral:
+		for _, item := range e.Items {
+			collectImportUsesInExpression(item, used)
+		}
+	case *parse.TupleLiteral:
 		for _, item := range e.Items {
 			collectImportUsesInExpression(item, used)
 		}

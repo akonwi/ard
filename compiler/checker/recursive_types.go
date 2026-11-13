@@ -129,6 +129,13 @@ func inlineStructReferencesWithNullable(t Type, seen map[Type]bool, seenStructs 
 		refs := inlineStructReferencesWithNullable(typ.Val(), seen, seenStructs)
 		refs = append(refs, inlineStructReferencesWithNullable(typ.Err(), seen, seenStructs)...)
 		return refs
+	case *Tuple:
+		// A tuple stores its elements inline, like struct fields.
+		refs := []*StructDef{}
+		for _, element := range typ.Elements() {
+			refs = append(refs, inlineStructReferencesWithNullable(element, seen, seenStructs)...)
+		}
+		return refs
 	case *Union:
 		refs := []*StructDef{}
 		for _, member := range typ.Types {

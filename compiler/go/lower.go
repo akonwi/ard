@@ -347,6 +347,10 @@ func (l *lowerer) collectExternalTypeOwnerModules(typeID air.TypeID, self air.Mo
 	case air.TypeResult:
 		l.collectExternalTypeOwnerModules(info.Value, self, out)
 		l.collectExternalTypeOwnerModules(info.Error, self, out)
+	case air.TypeTuple:
+		for _, elem := range info.Elems {
+			l.collectExternalTypeOwnerModules(elem, self, out)
+		}
 	case air.TypeFunction:
 		for _, param := range info.Params {
 			l.collectExternalTypeOwnerModules(param, self, out)
@@ -996,6 +1000,11 @@ func (l *lowerer) traitHasMutableTraitUse(traitID air.TraitID) bool {
 				return true
 			}
 		}
+		for _, elemTypeID := range typ.Elems {
+			if l.referenceTypeIsTrait(elemTypeID, traitID) {
+				return true
+			}
+		}
 	}
 	return false
 }
@@ -1445,6 +1454,9 @@ func (l *lowerer) comparableTypeParams(signature air.Signature, locals []air.Loc
 		for _, p := range info.Params {
 			walk(p, false)
 		}
+		for _, e := range info.Elems {
+			walk(e, false)
+		}
 		for _, f := range info.Fields {
 			walk(f.Type, structural)
 		}
@@ -1804,7 +1816,7 @@ func (l *lowerer) lowerABIReturn(fn air.Function, expr air.Expr, returnType air.
 		return nil, fmt.Errorf("invalid ABI return type %d", returnType)
 	}
 	info := l.program.Types[returnType-1]
-	if expr.Type == returnType && expr.Kind == air.ExprCall {
+	if expr.Type == returnType && expr.Kind == air.ExprCall && l.callReturnsABIShape(expr, returnType) {
 		call, err := l.lowerRawCall(fn, expr)
 		if err == nil {
 			stmts := append([]ast.Stmt{}, call.stmts...)
@@ -1813,6 +1825,12 @@ func (l *lowerer) lowerABIReturn(fn air.Function, expr air.Expr, returnType air.
 		}
 	}
 	switch info.Kind {
+	case air.TypeTuple:
+		stmts, results, err := l.lowerABISuccessValue(fn, expr, returnType)
+		if err != nil {
+			return nil, err
+		}
+		return append(stmts, &ast.ReturnStmt{Results: results}), nil
 	case air.TypeResult:
 		switch expr.Kind {
 		case air.ExprMakeResultOk:
@@ -1826,11 +1844,11 @@ func (l *lowerer) lowerABIReturn(fn air.Function, expr air.Expr, returnType air.
 				}
 				return append(l.appendVoidValueEval(value.stmts, value.expr), &ast.ReturnStmt{Results: []ast.Expr{l.ident("nil")}}), nil
 			}
-			value, err := l.lowerExprWithExpectedType(fn, *expr.Target, info.Value)
+			stmts, results, err := l.lowerABISuccessValue(fn, *expr.Target, info.Value)
 			if err != nil {
 				return nil, err
 			}
-			return append(value.stmts, &ast.ReturnStmt{Results: []ast.Expr{value.expr, l.ident("nil")}}), nil
+			return append(stmts, &ast.ReturnStmt{Results: append(results, l.ident("nil"))}), nil
 		case air.ExprMakeResultErr:
 			if expr.Target == nil {
 				return nil, fmt.Errorf("result err missing target")
@@ -1840,14 +1858,11 @@ func (l *lowerer) lowerABIReturn(fn air.Function, expr air.Expr, returnType air.
 				return nil, err
 			}
 			errExpr := l.goErrorValueExpr(info.Error, errValue.expr)
-			if l.isVoidType(info.Value) {
-				return append(errValue.stmts, &ast.ReturnStmt{Results: []ast.Expr{errExpr}}), nil
-			}
-			zero, err := l.zeroValueExpr(info.Value)
+			zeros, err := l.abiZeroValues(info.Value)
 			if err != nil {
 				return nil, err
 			}
-			return append(errValue.stmts, &ast.ReturnStmt{Results: []ast.Expr{zero, errExpr}}), nil
+			return append(errValue.stmts, &ast.ReturnStmt{Results: append(zeros, errExpr)}), nil
 		}
 	case air.TypeMaybe:
 		switch expr.Kind {
@@ -1922,7 +1937,24 @@ func (l *lowerer) goErrorValueExpr(errorType air.TypeID, expr ast.Expr) ast.Expr
 func (l *lowerer) returnPackedABIValue(typeID air.TypeID, expr ast.Expr) ([]ast.Stmt, error) {
 	info := l.program.Types[typeID-1]
 	switch info.Kind {
+	case air.TypeTuple:
+		// Each element is read from the packed value, so it is evaluated once.
+		stmts, value := l.bindTemp(nil, expr)
+		return append(stmts, &ast.ReturnStmt{Results: l.abiSpreadValue(typeID, value)}), nil
 	case air.TypeResult:
+		if _, spread := l.abiSpreadTuple(info.Value); spread {
+			var stmts []ast.Stmt
+			stmts, expr = l.bindTemp(nil, expr)
+			zeros, err := l.abiZeroValues(info.Value)
+			if err != nil {
+				return nil, err
+			}
+			errExpr := l.goErrorValueExpr(info.Error, selectorExpr(expr, "Err"))
+			return append(stmts,
+				&ast.IfStmt{Cond: &ast.UnaryExpr{Op: token.NOT, X: selectorExpr(expr, "Ok")}, Body: &ast.BlockStmt{List: []ast.Stmt{&ast.ReturnStmt{Results: append(zeros, errExpr)}}}},
+				&ast.ReturnStmt{Results: append(l.abiSpreadValue(info.Value, selectorExpr(expr, "Value")), l.ident("nil"))},
+			), nil
+		}
 		errSel := selectorExpr(expr, "Err")
 		errExpr := l.goErrorValueExpr(info.Error, errSel)
 		if l.isVoidType(info.Value) {
@@ -1980,9 +2012,14 @@ func (l *lowerer) packABICallResult(exprType, returnType air.TypeID, stmts []ast
 	}
 	info := l.program.Types[returnType-1]
 	switch info.Kind {
+	case air.TypeTuple:
+		return l.lowerGoTupleCall(exprType, stmts, call)
 	case air.TypeResult:
 		if l.isVoidType(info.Value) {
 			return l.lowerGoErrorOnlyResultCall(air.Expr{Type: exprType}, stmts, call)
+		}
+		if _, spread := l.abiSpreadTuple(info.Value); spread {
+			return l.lowerGoTupleErrorResultCall(exprType, stmts, call)
 		}
 		return l.lowerGoValueErrorResultCall(air.Expr{Type: exprType}, stmts, call, info)
 	case air.TypeMaybe:
@@ -2027,13 +2064,121 @@ func concreteCallParams(expr air.Expr, target air.Function) []air.Param {
 	return params
 }
 
+// lowerDeclaredCallArgs lowers the arguments of a call to an Ard function and
+// adapts each function-valued argument to the Go signature its declared
+// parameter type has.
+func (l *lowerer) lowerDeclaredCallArgs(fn air.Function, expr air.Expr, target air.Function) ([]ast.Expr, []ast.Stmt, []ast.Stmt, error) {
+	args, stmts, writeback, err := l.lowerCallArgs(fn, expr.Args, concreteCallParams(expr, target))
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	for i := range args {
+		if i >= len(target.Signature.Params) {
+			break
+		}
+		stmts, args[i], err = l.adaptCallableReturnABI(stmts, args[i], expr.Args[i].Type, target.Signature.Params[i].Type)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+	}
+	return args, stmts, writeback, nil
+}
+
+// adaptCallableReturnABI converts a function value of concreteType to the Go
+// signature of declaredType when the two differ only in how the return is laid
+// out. Return layout follows the declared type (ADRs 0038 and 0077), so a
+// generic parameter such as `fn($A) $B` is a Go function returning one value
+// even when `$B` is a Result, a Maybe, or a tuple, whose own function types
+// return their ABI results. The adapter calls the value with its own layout
+// and returns the layout the declaration expects.
+func (l *lowerer) adaptCallableReturnABI(stmts []ast.Stmt, value ast.Expr, concreteType, declaredType air.TypeID) ([]ast.Stmt, ast.Expr, error) {
+	concrete, ok := l.functionTypeInfo(concreteType)
+	if !ok {
+		return stmts, value, nil
+	}
+	declared, ok := l.functionTypeInfo(declaredType)
+	if !ok || len(declared.Params) != len(concrete.Params) || !l.abiReturnShapeAvailable(concrete.Return) {
+		return stmts, value, nil
+	}
+	// packValue: the declaration returns the whole value. Otherwise the only
+	// remaining difference is a fallible tuple declared through a type
+	// parameter, whose success value is one struct rather than its elements.
+	packValue := !l.abiReturnShapeAvailable(declared.Return)
+	if !packValue {
+		concreteReturn := l.program.Types[concrete.Return-1]
+		declaredReturn := l.program.Types[declared.Return-1]
+		if concreteReturn.Kind != air.TypeResult || declaredReturn.Kind != air.TypeResult {
+			return stmts, value, nil
+		}
+		_, concreteSpreads := l.abiSpreadTuple(concreteReturn.Value)
+		_, declaredSpreads := l.abiSpreadTuple(declaredReturn.Value)
+		if !concreteSpreads || declaredSpreads {
+			return stmts, value, nil
+		}
+	}
+
+	stmts, callee := l.bindTemp(stmts, value)
+	params := make([]*ast.Field, len(concrete.Params))
+	args := make([]ast.Expr, len(concrete.Params))
+	for i, paramType := range concrete.Params {
+		typ, err := l.goType(paramType)
+		if err != nil {
+			return nil, nil, err
+		}
+		if concrete.Variadic && i == len(concrete.Params)-1 {
+			typ = &ast.Ellipsis{Elt: typ}
+		}
+		name := fmt.Sprintf("arg%d", i+1)
+		params[i] = &ast.Field{Names: []*ast.Ident{l.ident(name)}, Type: typ}
+		args[i] = l.ident(name)
+	}
+	call := &ast.CallExpr{Fun: callee, Args: args}
+	if concrete.Variadic {
+		call.Ellipsis = token.Pos(1)
+	}
+
+	var results []*ast.Field
+	var body []ast.Stmt
+	if packValue {
+		resultType, err := l.goType(concrete.Return)
+		if err != nil {
+			return nil, nil, err
+		}
+		packed, err := l.packABICallResult(concrete.Return, concrete.Return, nil, call)
+		if err != nil {
+			return nil, nil, err
+		}
+		results = []*ast.Field{{Type: resultType}}
+		body = append(packed.stmts, &ast.ReturnStmt{Results: []ast.Expr{packed.expr}})
+	} else {
+		tupleType := l.program.Types[concrete.Return-1].Value
+		tupleGoType, err := l.goType(tupleType)
+		if err != nil {
+			return nil, nil, err
+		}
+		decls, temps, tuple, err := l.declareTupleCallTemps(tupleType)
+		if err != nil {
+			return nil, nil, err
+		}
+		errTemp := l.nextTemp()
+		results = []*ast.Field{{Type: tupleGoType}, {Type: l.ident("error")}}
+		body = append(decls,
+			&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{l.ident(errTemp)}, Type: l.ident("error")}}}},
+			&ast.AssignStmt{Lhs: append(temps, l.ident(errTemp)), Tok: token.ASSIGN, Rhs: []ast.Expr{call}},
+			&ast.ReturnStmt{Results: []ast.Expr{tuple, l.ident(errTemp)}},
+		)
+	}
+	funcType := &ast.FuncType{Params: &ast.FieldList{List: params}, Results: &ast.FieldList{List: results}}
+	return stmts, &ast.FuncLit{Type: funcType, Body: &ast.BlockStmt{List: body}}, nil
+}
+
 func (l *lowerer) lowerRawCall(fn air.Function, expr air.Expr) (loweredExpr, error) {
 	payload := expr.CallPayload()
 	if expr.Kind != air.ExprCall || payload == nil || !validFunctionID(l.program, payload.Function) {
 		return loweredExpr{}, fmt.Errorf("not a valid call")
 	}
 	target := l.program.Functions[payload.Function]
-	args, stmts, writeback, err := l.lowerCallArgs(fn, expr.Args, concreteCallParams(expr, target))
+	args, stmts, writeback, err := l.lowerDeclaredCallArgs(fn, expr, target)
 	if err != nil {
 		return loweredExpr{}, err
 	}
@@ -3173,6 +3318,21 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 			elts = append(elts, &ast.KeyValueExpr{Key: l.ident(l.goFieldName(typ, field.Name)), Value: fieldValue})
 		}
 		return loweredExpr{stmts: stmts, expr: &ast.CompositeLit{Type: l.compositeTypeExpr(typ), Elts: elts}}, nil
+	case air.ExprMakeTuple:
+		return l.lowerMakeTuple(fn, expr)
+	case air.ExprTupleElem:
+		if expr.Target == nil {
+			return loweredExpr{}, fmt.Errorf("tuple element access missing target")
+		}
+		payload := expr.FieldPayload()
+		if payload == nil {
+			return loweredExpr{}, fmt.Errorf("tuple element access is missing its payload")
+		}
+		target, err := l.lowerExpr(fn, *expr.Target)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		return loweredExpr{stmts: target.stmts, expr: selectorExpr(target.expr, air.TupleGoFieldName(payload.Field))}, nil
 	case air.ExprGetField:
 		if expr.Target == nil {
 			return loweredExpr{}, fmt.Errorf("get field missing target")
@@ -3277,7 +3437,7 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 			return loweredExpr{}, fmt.Errorf("call has invalid function payload")
 		}
 		target := l.program.Functions[payload.Function]
-		args, stmts, writeback, err := l.lowerCallArgs(fn, expr.Args, concreteCallParams(expr, target))
+		args, stmts, writeback, err := l.lowerDeclaredCallArgs(fn, expr, target)
 		if err != nil {
 			return loweredExpr{}, err
 		}
@@ -3902,6 +4062,9 @@ func (l *lowerer) lowerForeignCall(fn air.Function, expr air.Expr) (loweredExpr,
 	if spread {
 		call.Ellipsis = token.Pos(1)
 	}
+	if packed, handled, err := l.lowerGoMultiResultForeignCall(payload.ResultShape, expr.Type, stmts, call); handled {
+		return packed, err
+	}
 	if validTypeID(l.program, expr.Type) {
 		info := l.program.Types[expr.Type-1]
 		switch info.Kind {
@@ -3958,6 +4121,128 @@ func (l *lowerer) lowerGoValueBoolMaybeCall(expr air.Expr, stmts []ast.Stmt, cal
 		Else: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{l.ident(maybeTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{noneExpr}}}},
 	})
 	return loweredExpr{stmts: stmts, expr: l.ident(maybeTemp)}, nil
+}
+
+// callReturnsABIShape reports whether an Ard call's Go results already are the
+// ABI results of returnType, so its results can be returned as they are. A
+// generic callee whose declared return is a bare type parameter returns one
+// value even when that parameter is instantiated with an ABI-shaped type.
+func (l *lowerer) callReturnsABIShape(expr air.Expr, returnType air.TypeID) bool {
+	payload := expr.CallPayload()
+	if payload == nil || !validFunctionID(l.program, payload.Function) {
+		return false
+	}
+	declared := l.program.Functions[payload.Function].Signature.Return
+	if !l.abiReturnShapeAvailable(declared) {
+		return false
+	}
+	return l.abiResultCount(declared) == l.abiResultCount(returnType)
+}
+
+// abiResultCount returns how many Go results a function returning typeID has.
+func (l *lowerer) abiResultCount(typeID air.TypeID) int {
+	fields, err := l.goReturnFields(typeID)
+	if err != nil {
+		return -1
+	}
+	return len(fields)
+}
+
+// declareTupleCallTemps declares one temp per element of the tuple type and
+// returns the statements, the temps as assignment targets, and the tuple value
+// built from them.
+func (l *lowerer) declareTupleCallTemps(tupleType air.TypeID) ([]ast.Stmt, []ast.Expr, ast.Expr, error) {
+	elems, ok := l.tupleElems(tupleType)
+	if !ok {
+		return nil, nil, nil, fmt.Errorf("multi-result call does not produce a tuple type")
+	}
+	stmts := make([]ast.Stmt, 0, len(elems))
+	temps := make([]ast.Expr, len(elems))
+	for i, elemID := range elems {
+		elem, err := l.goType(elemID)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		temp := l.nextTemp()
+		stmts = append(stmts, &ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{l.ident(temp)}, Type: elem}}}})
+		temps[i] = l.ident(temp)
+	}
+	value, err := l.tupleValueExpr(tupleType, append([]ast.Expr(nil), temps...))
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return stmts, temps, value, nil
+}
+
+// lowerGoTupleCall packs a call with one Go result per tuple element into the
+// tuple value named by exprType (ADR 0077).
+func (l *lowerer) lowerGoTupleCall(exprType air.TypeID, stmts []ast.Stmt, call ast.Expr) (loweredExpr, error) {
+	decls, temps, value, err := l.declareTupleCallTemps(exprType)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	stmts = append(stmts, decls...)
+	stmts = append(stmts, &ast.AssignStmt{Lhs: temps, Tok: token.ASSIGN, Rhs: []ast.Expr{call}})
+	return loweredExpr{stmts: stmts, expr: value}, nil
+}
+
+// lowerGoTupleErrorResultCall packs a call whose Go results are the tuple
+// elements followed by an error into the Result named by exprType (ADR 0077).
+func (l *lowerer) lowerGoTupleErrorResultCall(exprType air.TypeID, stmts []ast.Stmt, call ast.Expr) (loweredExpr, error) {
+	resultInfo, ok := l.typeInfo(exprType)
+	if !ok || resultInfo.Kind != air.TypeResult {
+		return loweredExpr{}, fmt.Errorf("multi-result fallible call does not produce a Result type")
+	}
+	resultTemp := l.nextTemp()
+	resultDecls, err := l.declareTemp(exprType, resultTemp)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	decls, temps, value, err := l.declareTupleCallTemps(resultInfo.Value)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	errTemp := l.nextTemp()
+	stmts = append(stmts, resultDecls...)
+	stmts = append(stmts, decls...)
+	stmts = append(stmts, &ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{l.ident(errTemp)}, Type: l.ident("error")}}}})
+	stmts = append(stmts, &ast.AssignStmt{Lhs: append(temps, l.ident(errTemp)), Tok: token.ASSIGN, Rhs: []ast.Expr{call}})
+	resultType, err := l.goType(exprType)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	okLit := &ast.CompositeLit{Type: resultType, Elts: []ast.Expr{
+		&ast.KeyValueExpr{Key: l.ident("Value"), Value: value},
+		&ast.KeyValueExpr{Key: l.ident("Ok"), Value: l.ident("true")},
+	}}
+	errResult := ast.Expr(&ast.CallExpr{Fun: &ast.SelectorExpr{X: l.ident(errTemp), Sel: l.ident("Error")}})
+	if l.isBuiltinErrorType(resultInfo.Error) {
+		errResult = l.ident(errTemp)
+	}
+	errLit := &ast.CompositeLit{Type: resultType, Elts: []ast.Expr{
+		&ast.KeyValueExpr{Key: l.ident("Err"), Value: errResult},
+	}}
+	stmts = append(stmts, &ast.IfStmt{
+		Cond: &ast.BinaryExpr{X: l.ident(errTemp), Op: token.NEQ, Y: l.ident("nil")},
+		Body: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{l.ident(resultTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{errLit}}}},
+		Else: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{l.ident(resultTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{okLit}}}},
+	})
+	return loweredExpr{stmts: stmts, expr: l.ident(resultTemp)}, nil
+}
+
+// lowerGoMultiResultForeignCall packs a foreign call whose result shape is a
+// tuple. handled is false for every other shape.
+func (l *lowerer) lowerGoMultiResultForeignCall(shape air.ForeignResultShape, exprType air.TypeID, stmts []ast.Stmt, call ast.Expr) (lowered loweredExpr, handled bool, err error) {
+	switch shape {
+	case air.ForeignResultTuple:
+		lowered, err = l.lowerGoTupleCall(exprType, stmts, call)
+		return lowered, true, err
+	case air.ForeignResultTupleError:
+		lowered, err = l.lowerGoTupleErrorResultCall(exprType, stmts, call)
+		return lowered, true, err
+	default:
+		return loweredExpr{}, false, nil
+	}
 }
 
 func (l *lowerer) lowerGoErrorOnlyResultCall(expr air.Expr, stmts []ast.Stmt, call *ast.CallExpr) (loweredExpr, error) {
@@ -4180,6 +4465,9 @@ func (l *lowerer) lowerForeignMethodCall(fn air.Function, expr air.Expr) (lowere
 	call := &ast.CallExpr{Fun: &ast.SelectorExpr{X: receiverExpr, Sel: l.ident(payload.Symbol)}, Args: args}
 	if spread {
 		call.Ellipsis = token.Pos(1)
+	}
+	if packed, handled, err := l.lowerGoMultiResultForeignCall(payload.ResultShape, expr.Type, stmts, call); handled {
+		return packed, err
 	}
 	if validTypeID(l.program, expr.Type) {
 		if info := l.program.Types[expr.Type-1]; info.Kind == air.TypeResult {
@@ -4663,14 +4951,13 @@ func (l *lowerer) goReturnFields(typeID air.TypeID) ([]*ast.Field, error) {
 			}
 			return []*ast.Field{{Type: typ}}, nil
 		}
-		if l.isVoidType(info.Value) {
-			return []*ast.Field{{Type: l.ident("error")}}, nil
-		}
-		valueType, err := l.goType(info.Value)
+		fields, err := l.abiValueFields(info.Value)
 		if err != nil {
 			return nil, err
 		}
-		return []*ast.Field{{Type: valueType}, {Type: l.ident("error")}}, nil
+		return append(fields, &ast.Field{Type: l.ident("error")}), nil
+	case air.TypeTuple:
+		return l.abiValueFields(typeID)
 	case air.TypeMaybe:
 		if l.isVoidType(info.Elem) {
 			return []*ast.Field{{Type: l.ident("bool")}}, nil
@@ -4698,7 +4985,104 @@ func (l *lowerer) abiReturnShapeAvailable(typeID air.TypeID) bool {
 		return false
 	}
 	info := l.program.Types[typeID-1]
-	return (info.Kind == air.TypeResult && l.resultUsesGoErrorABI(typeID)) || info.Kind == air.TypeMaybe
+	return (info.Kind == air.TypeResult && l.resultUsesGoErrorABI(typeID)) || info.Kind == air.TypeMaybe || info.Kind == air.TypeTuple
+}
+
+// abiSpreadTuple reports whether a value of typeID occupies one Go result per
+// tuple element in ABI return position, returning those element types. This is
+// the case for a tuple return and for the success value of a fallible tuple
+// return (ADR 0077). The decision reads the declared type: a type parameter
+// that is later instantiated with a tuple stays a single struct-valued result.
+func (l *lowerer) abiSpreadTuple(typeID air.TypeID) ([]air.TypeID, bool) {
+	return l.tupleElems(typeID)
+}
+
+// abiValueFields returns the Go result fields a success value of typeID
+// contributes in ABI return position: none for Void, one per element for a
+// tuple, and otherwise the value itself.
+func (l *lowerer) abiValueFields(typeID air.TypeID) ([]*ast.Field, error) {
+	if l.isVoidType(typeID) {
+		return nil, nil
+	}
+	types := []air.TypeID{typeID}
+	if elems, ok := l.abiSpreadTuple(typeID); ok {
+		types = elems
+	}
+	fields := make([]*ast.Field, len(types))
+	for i, elemID := range types {
+		elem, err := l.goType(elemID)
+		if err != nil {
+			return nil, err
+		}
+		fields[i] = &ast.Field{Type: elem}
+	}
+	return fields, nil
+}
+
+// abiZeroValues returns the zero expressions for the results abiValueFields
+// describes, used when a failing return leaves the success results unset.
+func (l *lowerer) abiZeroValues(typeID air.TypeID) ([]ast.Expr, error) {
+	if l.isVoidType(typeID) {
+		return nil, nil
+	}
+	types := []air.TypeID{typeID}
+	if elems, ok := l.abiSpreadTuple(typeID); ok {
+		types = elems
+	}
+	zeros := make([]ast.Expr, len(types))
+	for i, elemID := range types {
+		zero, err := l.zeroValueExpr(elemID)
+		if err != nil {
+			return nil, err
+		}
+		zeros[i] = zero
+	}
+	return zeros, nil
+}
+
+// abiSpreadValue returns the Go results a success value of typeID contributes
+// in ABI return position, reading a tuple's elements out of value. value must
+// be cheap and free of side effects, because a tuple reads it once per
+// element.
+func (l *lowerer) abiSpreadValue(typeID air.TypeID, value ast.Expr) []ast.Expr {
+	elems, ok := l.abiSpreadTuple(typeID)
+	if !ok {
+		return []ast.Expr{value}
+	}
+	results := make([]ast.Expr, len(elems))
+	for i := range elems {
+		results[i] = selectorExpr(value, air.TupleGoFieldName(i))
+	}
+	return results
+}
+
+// lowerABISuccessValue lowers the success value of an ABI return into its Go
+// results. A tuple literal contributes its elements directly; any other tuple
+// expression is evaluated once into a temp and read element by element.
+func (l *lowerer) lowerABISuccessValue(fn air.Function, value air.Expr, typeID air.TypeID) ([]ast.Stmt, []ast.Expr, error) {
+	if _, ok := l.abiSpreadTuple(typeID); ok && value.Kind == air.ExprMakeTuple && value.Type == typeID {
+		return l.lowerTupleElements(fn, value)
+	}
+	lowered, err := l.lowerExprWithExpectedType(fn, value, typeID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if _, ok := l.abiSpreadTuple(typeID); !ok {
+		return lowered.stmts, []ast.Expr{lowered.expr}, nil
+	}
+	stmts, temp := l.bindTemp(lowered.stmts, lowered.expr)
+	return stmts, l.abiSpreadValue(typeID, temp), nil
+}
+
+// bindTemp evaluates expr once into a fresh temp, unless it already is a plain
+// identifier, and returns the expression to read it through.
+func (l *lowerer) bindTemp(stmts []ast.Stmt, expr ast.Expr) ([]ast.Stmt, ast.Expr) {
+	if ident, ok := expr.(*ast.Ident); ok {
+		return stmts, ident
+	}
+	temp := l.nextTemp()
+	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{l.ident(temp)}, Tok: token.DEFINE, Rhs: []ast.Expr{expr}})
+	return stmts, l.ident(temp)
 }
 
 func (l *lowerer) isBuiltinErrorType(typeID air.TypeID) bool {
@@ -4920,6 +5304,19 @@ func (l *lowerer) buildGoType(typeID air.TypeID) (ast.Expr, error) {
 			return nil, err
 		}
 		return &ast.IndexListExpr{X: l.runtimeQualified("Result"), Indices: []ast.Expr{value, errType}}, nil
+	case air.TypeTuple:
+		// A tuple value is an anonymous struct with one exported field per
+		// element, so the same tuple type is identical in every generated
+		// package (ADR 0077).
+		fields := make([]*ast.Field, len(info.Elems))
+		for i, elemID := range info.Elems {
+			elem, err := l.goType(elemID)
+			if err != nil {
+				return nil, err
+			}
+			fields[i] = &ast.Field{Names: []*ast.Ident{l.ident(air.TupleGoFieldName(i))}, Type: elem}
+		}
+		return &ast.StructType{Fields: &ast.FieldList{List: fields}}, nil
 	case air.TypeList, air.TypeSlice:
 		elem, err := l.goType(info.Elem)
 		if err != nil {
@@ -6021,6 +6418,22 @@ func (l *lowerer) lowerMaybeClear(fn air.Function, expr air.Expr) (loweredExpr, 
 	return loweredExpr{stmts: stmts, expr: l.voidValueExpr()}, nil
 }
 
+// callbackValueCall returns a callback call as one value. A callback whose
+// function type returns ABI results (a Result, a Maybe, or a tuple) is packed
+// into its value representation; the statements that do so are returned for
+// the caller to place before it reads the value.
+func (l *lowerer) callbackValueCall(callbackType air.TypeID, call *ast.CallExpr) ([]ast.Stmt, ast.Expr, error) {
+	cbInfo, ok := l.functionTypeInfo(callbackType)
+	if !ok || !l.usesABIResultReturn(cbInfo.Return) {
+		return nil, call, nil
+	}
+	packed, err := l.packABICallResult(cbInfo.Return, cbInfo.Return, nil, call)
+	if err != nil {
+		return nil, nil, err
+	}
+	return packed.stmts, packed.expr, nil
+}
+
 func (l *lowerer) lowerMaybeMap(fn air.Function, expr air.Expr) (loweredExpr, error) {
 	if expr.Target == nil || len(expr.Args) != 1 {
 		return loweredExpr{}, fmt.Errorf("maybe map expects target and callback")
@@ -6050,8 +6463,10 @@ func (l *lowerer) lowerMaybeMap(fn air.Function, expr air.Expr) (loweredExpr, er
 	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{targetExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{target.expr}})
 	stmts = append(stmts, resultDecls...)
 	call := &ast.CallExpr{Fun: callback.expr, Args: []ast.Expr{l.maybeValueExpr(targetExpr)}}
-	var valueExpr ast.Expr = call
-	var someBody []ast.Stmt
+	someBody, valueExpr, err := l.callbackValueCall(expr.Args[0].Type, call)
+	if err != nil {
+		return loweredExpr{}, err
+	}
 	if l.maybeElemIsVoid(expr.Type) || isVoidExpr(call) {
 		valueExpr = l.voidValueExpr()
 		someBody = l.appendVoidValueEval(someBody, call)
@@ -6181,8 +6596,10 @@ func (l *lowerer) lowerResultMap(fn air.Function, expr air.Expr) (loweredExpr, e
 		return loweredExpr{}, err
 	}
 	call := &ast.CallExpr{Fun: callback.expr, Args: []ast.Expr{&ast.SelectorExpr{X: targetExpr, Sel: l.ident("Value")}}}
-	var valueExpr ast.Expr = call
-	var okBody []ast.Stmt
+	okBody, valueExpr, err := l.callbackValueCall(expr.Args[0].Type, call)
+	if err != nil {
+		return loweredExpr{}, err
+	}
 	if l.resultValueIsVoid(expr.Type) || isVoidExpr(call) {
 		valueExpr = l.voidValueExpr()
 		okBody = l.appendVoidValueEval(okBody, call)
@@ -6244,8 +6661,10 @@ func (l *lowerer) lowerResultMapErr(fn air.Function, expr air.Expr) (loweredExpr
 		return loweredExpr{}, err
 	}
 	call := &ast.CallExpr{Fun: callback.expr, Args: []ast.Expr{&ast.SelectorExpr{X: targetExpr, Sel: l.ident("Err")}}}
-	var errExpr ast.Expr = call
-	var errBody []ast.Stmt
+	errBody, errExpr, err := l.callbackValueCall(expr.Args[0].Type, call)
+	if err != nil {
+		return loweredExpr{}, err
+	}
 	if l.resultErrorIsVoid(expr.Type) || isVoidExpr(call) {
 		errExpr = l.voidValueExpr()
 		errBody = l.appendVoidValueEval(errBody, call)
@@ -6520,15 +6939,11 @@ func (l *lowerer) lowerTryResult(fn air.Function, expr air.Expr) (loweredExpr, e
 				return loweredExpr{}, fmt.Errorf("cannot propagate Result try through non-Result ABI return")
 			}
 			errExpr := l.goErrorValueExpr(retInfo.Error, &ast.SelectorExpr{X: targetExpr, Sel: l.ident("Err")})
-			if l.isVoidType(retInfo.Value) {
-				elseBody = []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{errExpr}}}
-			} else {
-				zero, err := l.zeroValueExpr(retInfo.Value)
-				if err != nil {
-					return loweredExpr{}, err
-				}
-				elseBody = []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{zero, errExpr}}}
+			zeros, err := l.abiZeroValues(retInfo.Value)
+			if err != nil {
+				return loweredExpr{}, err
 			}
+			elseBody = []ast.Stmt{&ast.ReturnStmt{Results: append(zeros, errExpr)}}
 		} else {
 			returnExpr := ast.Expr(targetExpr)
 			if fn.Signature.Return != expr.Target.Type {
@@ -6761,6 +7176,93 @@ func (l *lowerer) lowerMakeList(fn air.Function, expr air.Expr) (loweredExpr, er
 		elts = append(elts, argExpr)
 	}
 	return loweredExpr{stmts: stmts, expr: &ast.CompositeLit{Type: typ, Elts: elts}}, nil
+}
+
+// tupleElems returns the element types of a tuple type.
+func (l *lowerer) tupleElems(typeID air.TypeID) ([]air.TypeID, bool) {
+	if !validTypeID(l.program, typeID) {
+		return nil, false
+	}
+	info := l.program.Types[typeID-1]
+	if info.Kind != air.TypeTuple {
+		return nil, false
+	}
+	return info.Elems, true
+}
+
+// lowerTupleElements lowers a tuple constructor's elements in order, each in
+// value position, and returns their Go expressions.
+func (l *lowerer) lowerTupleElements(fn air.Function, expr air.Expr) ([]ast.Stmt, []ast.Expr, error) {
+	elems, ok := l.tupleElems(expr.Type)
+	if !ok || len(elems) != len(expr.Args) {
+		return nil, nil, fmt.Errorf("tuple constructor does not match its tuple type")
+	}
+	setup := make([][]ast.Stmt, len(expr.Args))
+	values := make([]ast.Expr, len(expr.Args))
+	// lastSetup is the last element whose lowering emits statements. Those
+	// statements run before the tuple is built, so every earlier element is
+	// evaluated into a temporary first to keep source order.
+	lastSetup := -1
+	for i, arg := range expr.Args {
+		lowered, err := l.lowerExprWithExpectedType(fn, arg, elems[i])
+		if err != nil {
+			return nil, nil, err
+		}
+		setup[i], values[i] = lowered.stmts, lowered.expr
+		if l.isVoidType(elems[i]) || isVoidExpr(values[i]) {
+			setup[i] = l.appendVoidValueEval(setup[i], values[i])
+			values[i] = l.voidValueExpr()
+		}
+		if len(setup[i]) > 0 {
+			lastSetup = i
+		}
+	}
+	stmts := []ast.Stmt{}
+	for i := range values {
+		stmts = append(stmts, setup[i]...)
+		if i >= lastSetup || l.isVoidType(elems[i]) {
+			continue
+		}
+		if _, literal := values[i].(*ast.BasicLit); literal {
+			continue
+		}
+		// The temporary is declared with the element type so an untyped
+		// constant expression keeps the type the tuple gives it.
+		elemType, err := l.goType(elems[i])
+		if err != nil {
+			return nil, nil, err
+		}
+		temp := l.nextTemp()
+		stmts = append(stmts, &ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{
+			Names:  []*ast.Ident{l.ident(temp)},
+			Type:   elemType,
+			Values: []ast.Expr{values[i]},
+		}}}})
+		values[i] = l.ident(temp)
+	}
+	return stmts, values, nil
+}
+
+// tupleValueExpr builds the struct value of a tuple type from one Go
+// expression per element.
+func (l *lowerer) tupleValueExpr(typeID air.TypeID, values []ast.Expr) (ast.Expr, error) {
+	typ, err := l.goType(typeID)
+	if err != nil {
+		return nil, err
+	}
+	return &ast.CompositeLit{Type: typ, Elts: values}, nil
+}
+
+func (l *lowerer) lowerMakeTuple(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	stmts, values, err := l.lowerTupleElements(fn, expr)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	value, err := l.tupleValueExpr(expr.Type, values)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	return loweredExpr{stmts: stmts, expr: value}, nil
 }
 
 func (l *lowerer) lowerMakeClosure(fn air.Function, expr air.Expr) (loweredExpr, error) {

@@ -90,6 +90,10 @@ func (c *Checker) validateNestedStructMapKeys(t Type, loc parse.Location, seen m
 	case *Result:
 		c.validateNestedStructMapKeys(typ.Val(), loc, seen, context)
 		c.validateNestedStructMapKeys(typ.Err(), loc, seen, context)
+	case *Tuple:
+		for _, element := range typ.Elements() {
+			c.validateNestedStructMapKeys(element, loc, seen, context)
+		}
 	case *MutableRef:
 		c.validateNestedStructMapKeys(typ.Of(), loc, seen, context)
 	case *Union:

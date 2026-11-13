@@ -837,6 +837,10 @@ func lowerForeignResultShape(shape checker.ForeignResultShape) ForeignResultShap
 		return ForeignResultErrorOnly
 	case checker.ForeignResultValueBool:
 		return ForeignResultValueBool
+	case checker.ForeignResultTuple:
+		return ForeignResultTuple
+	case checker.ForeignResultTupleError:
+		return ForeignResultTupleError
 	default:
 		return ForeignResultUnknown
 	}
@@ -1007,6 +1011,14 @@ func (fl *functionLowerer) bindTypeVarsSeen(pattern checker.Type, actual TypeID,
 			fl.bindTypeVarsSeen(typ.Val(), actualInfo.Value, seen)
 			fl.bindTypeVarsSeen(typ.Err(), actualInfo.Error, seen)
 		}
+	case *checker.Tuple:
+		if actualInfo.Kind == TypeTuple {
+			for i, element := range typ.Elements() {
+				if i < len(actualInfo.Elems) {
+					fl.bindTypeVarsSeen(element, actualInfo.Elems[i], seen)
+				}
+			}
+		}
 	case *checker.FunctionDef:
 		if actualInfo.Kind == TypeFunction {
 			for i, param := range typ.Parameters {
@@ -1153,6 +1165,10 @@ func (l *lowerer) internGenericArgument(t checker.Type, intern func(checker.Type
 		}
 		name := l.typeName(value) + "!" + l.typeName(errType)
 		return l.internSyntheticType(name, TypeInfo{Kind: TypeResult, Value: value, Error: errType})
+	case *checker.Tuple:
+		return l.internTupleType(typ, func(element checker.Type) (TypeID, error) {
+			return l.internGenericArgument(element, intern)
+		})
 	default:
 		return intern(t)
 	}
@@ -1418,6 +1434,8 @@ func (fl *functionLowerer) internResolvedCompositeType(t checker.Type) (TypeID, 
 			return NoType, err
 		}
 		return fl.l.internSyntheticType(fl.l.typeName(value)+"!"+fl.l.typeName(errType), TypeInfo{Kind: TypeResult, Value: value, Error: errType})
+	case *checker.Tuple:
+		return fl.l.internTupleType(typ, fl.internResolvedType)
 	case *checker.FunctionDef:
 		params := make([]TypeID, len(typ.Parameters))
 		for i, param := range typ.Parameters {
@@ -1522,6 +1540,8 @@ func (fl *functionLowerer) internCompositeType(t checker.Type) (TypeID, error) {
 			return NoType, err
 		}
 		return fl.l.internSyntheticType(fl.l.typeName(value)+"!"+fl.l.typeName(errType), TypeInfo{Kind: TypeResult, Value: value, Error: errType})
+	case *checker.Tuple:
+		return fl.l.internTupleType(typ, fl.internType)
 	case *checker.FunctionDef:
 		params := make([]TypeID, len(typ.Parameters))
 		for i, param := range typ.Parameters {
@@ -2545,6 +2565,20 @@ func (l *lowerer) internSyntheticType(_ string, info TypeInfo) (TypeID, error) {
 	return l.typeInterner.internStructural(info)
 }
 
+// internTupleType interns a tuple's elements with intern, then the canonical
+// tuple type over them.
+func (l *lowerer) internTupleType(tuple *checker.Tuple, intern func(checker.Type) (TypeID, error)) (TypeID, error) {
+	elems := make([]TypeID, len(tuple.Elements()))
+	for index, element := range tuple.Elements() {
+		elem, err := intern(element)
+		if err != nil {
+			return NoType, err
+		}
+		elems[index] = elem
+	}
+	return l.internSyntheticType("", TypeInfo{Kind: TypeTuple, Elems: elems})
+}
+
 func (l *lowerer) typeName(id TypeID) string {
 	if l.typeInterner == nil {
 		// Some isolated package tests construct finalized lowerer fixtures without
@@ -2704,6 +2738,13 @@ func typeContainsTypeVarSeen(t checker.Type, seen map[checker.Type]struct{}) boo
 		return typeContainsTypeVarSeen(typ.Of(), seen)
 	case *checker.Result:
 		return typeContainsTypeVarSeen(typ.Val(), seen) || typeContainsTypeVarSeen(typ.Err(), seen)
+	case *checker.Tuple:
+		for _, element := range typ.Elements() {
+			if typeContainsTypeVarSeen(element, seen) {
+				return true
+			}
+		}
+		return false
 	case *checker.MutableRef:
 		return typeContainsTypeVarSeen(typ.Of(), seen)
 	case *checker.Union:
@@ -2782,6 +2823,13 @@ func typeHasUnresolvedTypeVarSeen(t checker.Type, seen map[checker.Type]struct{}
 		return typeHasUnresolvedTypeVarSeen(typ.Of(), seen)
 	case *checker.Result:
 		return typeHasUnresolvedTypeVarSeen(typ.Val(), seen) || typeHasUnresolvedTypeVarSeen(typ.Err(), seen)
+	case *checker.Tuple:
+		for _, element := range typ.Elements() {
+			if typeHasUnresolvedTypeVarSeen(element, seen) {
+				return true
+			}
+		}
+		return false
 	case *checker.MutableRef:
 		return typeHasUnresolvedTypeVarSeen(typ.Of(), seen)
 	case *checker.Union:
@@ -2819,7 +2867,7 @@ func typeHasUnresolvedTypeVarSeen(t checker.Type, seen map[checker.Type]struct{}
 
 func canWrapAsAny(kind TypeKind) bool {
 	switch kind {
-	case TypeVoid, TypeInt, TypeScalar, TypeForeignType, TypeFloat64, TypeBool, TypeByte, TypeRune, TypeStr, TypeList, TypeSlice, TypeFixedArray, TypeMap, TypeStruct, TypeEnum, TypeMaybe, TypeResult, TypeUnion, TypeChannel, TypeReceiver, TypeSender, TypeAny, TypeReference:
+	case TypeVoid, TypeInt, TypeScalar, TypeForeignType, TypeFloat64, TypeBool, TypeByte, TypeRune, TypeStr, TypeList, TypeSlice, TypeFixedArray, TypeMap, TypeStruct, TypeEnum, TypeMaybe, TypeResult, TypeTuple, TypeUnion, TypeChannel, TypeReceiver, TypeSender, TypeAny, TypeReference:
 		return true
 	default:
 		return false
@@ -2963,6 +3011,11 @@ func (fl *functionLowerer) lowerExprWithExpectedRaw(expr checker.Expression, exp
 					return fl.lowerListLiteral(expected, list, underlyingInfo.Elem)
 				}
 			}
+		}
+	}
+	if tuple, ok := expr.(*checker.TupleLiteral); ok {
+		if expectedInfo, hasInfo := fl.l.typeInfo(expected); hasInfo && expectedInfo.Kind == TypeTuple && len(expectedInfo.Elems) == len(tuple.Elements) {
+			return fl.lowerTupleLiteral(expected, tuple)
 		}
 	}
 	if m, ok := expr.(*checker.MapLiteral); ok {
@@ -3471,6 +3524,9 @@ func (fl *functionLowerer) lowerStmts(stmt checker.Statement) ([]Stmt, error) {
 	case *checker.ForLoop:
 		defer fl.scopeLocals()()
 		return fl.lowerForLoop(loop)
+	}
+	if destructure, ok := stmt.Stmt.(*checker.TupleDestructure); ok {
+		return fl.lowerTupleDestructure(destructure)
 	}
 	lowered, err := fl.lowerStmt(stmt)
 	if err != nil || lowered == nil {
@@ -4354,6 +4410,8 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		return fl.lowerListLiteral(typeID, e, NoType)
 	case *checker.MapLiteral:
 		return fl.lowerMapLiteral(typeID, e, NoType, NoType)
+	case *checker.TupleLiteral:
+		return fl.lowerTupleLiteral(typeID, e)
 	case *checker.StructInstance:
 		return fl.lowerStructInstance(typeID, e)
 	case *checker.ModuleStructInstance:
@@ -4734,6 +4792,67 @@ func (fl *functionLowerer) lowerListLiteral(typeID TypeID, list *checker.ListLit
 		kind = ExprMakeFixedArray
 	}
 	return &Expr{Kind: kind, Type: typeID, Args: args}, nil
+}
+
+// lowerTupleLiteral lowers each element against the tuple type's element at
+// its position, so element conversions (such as a struct to a trait object)
+// happen where the value enters the tuple.
+func (fl *functionLowerer) lowerTupleLiteral(typeID TypeID, tuple *checker.TupleLiteral) (*Expr, error) {
+	info, ok := fl.l.typeInfo(typeID)
+	if !ok || info.Kind != TypeTuple || len(info.Elems) != len(tuple.Elements) {
+		return nil, fmt.Errorf("tuple literal lowered with non-matching AIR type %s", tuple.Type().String())
+	}
+	args := make([]Expr, len(tuple.Elements))
+	for i, item := range tuple.Elements {
+		lowered, err := fl.lowerExprWithExpected(item, info.Elems[i])
+		if err != nil {
+			return nil, err
+		}
+		args[i] = *lowered
+	}
+	return &Expr{Kind: ExprMakeTuple, Type: typeID, Args: args}, nil
+}
+
+// lowerTupleDestructure evaluates the tuple once into a hidden local, then
+// binds each named element from it. Discarded positions bind nothing.
+func (fl *functionLowerer) lowerTupleDestructure(s *checker.TupleDestructure) ([]Stmt, error) {
+	tupleType, err := fl.internResolvedType(s.TupleType())
+	if err != nil {
+		return nil, err
+	}
+	value, actualType, err := fl.lowerContextualExpr(s.Value, tupleType)
+	if err != nil {
+		return nil, err
+	}
+	info, ok := fl.l.typeInfo(actualType)
+	if !ok || info.Kind != TypeTuple || len(info.Elems) != len(s.Names) {
+		return nil, fmt.Errorf("tuple destructuring lowered with non-matching AIR type %s", s.TupleType().String())
+	}
+	sourceName := "$tuple"
+	for _, name := range s.Names {
+		if name != "" {
+			sourceName = name + "$tuple"
+			break
+		}
+	}
+	source := fl.defineLocal(sourceName, actualType, false)
+	stmts := []Stmt{{Kind: StmtLet, Local: source, Name: sourceName, Type: actualType, Value: value}}
+	for index, name := range s.Names {
+		if name == "" {
+			continue
+		}
+		elemType := info.Elems[index]
+		local := fl.defineLocal(name, elemType, s.Mutable)
+		stmts = append(stmts, Stmt{
+			Kind:    StmtLet,
+			Local:   local,
+			Name:    name,
+			Type:    elemType,
+			Mutable: s.Mutable,
+			Value:   &Expr{Kind: ExprTupleElem, Type: elemType, Target: loadLocal(actualType, source), Payload: &FieldExprPayload{Field: index}},
+		})
+	}
+	return stmts, nil
 }
 
 func (fl *functionLowerer) lowerMapLiteral(typeID TypeID, m *checker.MapLiteral, keyType, valueType TypeID) (*Expr, error) {

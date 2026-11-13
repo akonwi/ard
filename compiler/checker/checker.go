@@ -148,6 +148,8 @@ func derefTypeSeen(t Type, seen map[Type]struct{}) Type {
 			val: derefVal,
 			err: derefErr,
 		}
+	case *Tuple:
+		return typ.mapElements(func(element Type) Type { return derefTypeSeen(element, seen) })
 	case *MutableRef:
 		derefInner := derefTypeSeen(typ.of, seen)
 		if derefInner == typ.of {
@@ -1374,7 +1376,8 @@ func (c *Checker) Check() {
 			continue
 		}
 		if !IsTopLevelDeclaration(c.input.Statements[i]) {
-			c.addDiagnostic(topLevelStatementDiagnostic{Span: c.sourceSpan(c.input.Statements[i].GetLocation())}.build())
+			_, destructuring := c.input.Statements[i].(*parse.TupleDestructure)
+			c.addDiagnostic(topLevelStatementDiagnostic{Span: c.sourceSpan(c.input.Statements[i].GetLocation()), Destructuring: destructuring}.build())
 			continue
 		}
 		if stmt := c.checkStmt(&c.input.Statements[i]); stmt != nil {
@@ -1766,6 +1769,10 @@ func collectGenericsFromType(t Type, params *[]string, seen map[string]bool) {
 	case *Result:
 		collectGenericsFromType(t.val, params, seen)
 		collectGenericsFromType(t.err, params, seen)
+	case *Tuple:
+		for _, element := range t.elements {
+			collectGenericsFromType(element, params, seen)
+		}
 	case *ForeignType:
 		for _, typeArg := range t.TypeArgs {
 			collectGenericsFromType(typeArg, params, seen)
@@ -2013,7 +2020,7 @@ func isValidMapKeyTypeSeen(t Type, context *mapKeyTypeContext) bool {
 			return true
 		}
 		return ty.GoType == nil || gotypes.Comparable(ty.GoType)
-	case *Maybe, *List, *Slice, *Map, *Result, *Union, *FunctionDef, *Trait, *anyType, *embeddedFSType:
+	case *Maybe, *List, *Slice, *Map, *Result, *Tuple, *Union, *FunctionDef, *Trait, *anyType, *embeddedFSType:
 		return false
 	default:
 		return true
@@ -2049,6 +2056,12 @@ func mapKeyTypeComplexity(t Type, seen map[Type]bool) int {
 		return 1 + mapKeyTypeComplexity(typ.Of(), seen)
 	case *Result:
 		return 1 + mapKeyTypeComplexity(typ.Val(), seen) + mapKeyTypeComplexity(typ.Err(), seen)
+	case *Tuple:
+		total := 1
+		for _, element := range typ.Elements() {
+			total += mapKeyTypeComplexity(element, seen)
+		}
+		return total
 	case *MutableRef:
 		return 1 + mapKeyTypeComplexity(typ.Of(), seen)
 	case *Union:
@@ -2196,6 +2209,21 @@ func (c *Checker) resolveType(t parse.DeclaredType) Type {
 	case *parse.FixedArray:
 		of := c.resolveType(ty.Element)
 		baseType = MakeFixedArray(of, ty.Length)
+	case *parse.TupleType:
+		elements := make([]Type, len(ty.Elements))
+		for i, element := range ty.Elements {
+			elements[i] = c.resolveType(element)
+		}
+		if len(elements) < 2 {
+			// The parser already reported the missing elements; keep checking
+			// with the lone element rather than building a malformed tuple.
+			if len(elements) == 0 {
+				return &TypeVar{name: "unknown"}
+			}
+			baseType = elements[0]
+		} else {
+			baseType = MakeTuple(elements)
+		}
 	case *parse.Map:
 		key := c.resolveType(ty.Key)
 		value := c.resolveType(ty.Value)
@@ -2763,6 +2791,8 @@ func collectGenericsFromBlock(block *Block, params *[]string, seen map[string]bo
 		switch s := stmt.Stmt.(type) {
 		case *VariableDef:
 			collectGenericsFromType(s.Type(), params, seen)
+		case *TupleDestructure:
+			collectGenericsFromType(s.TupleType(), params, seen)
 		case *Reassignment:
 			if s.Target != nil {
 				collectGenericsFromType(s.Target.Type(), params, seen)
@@ -4381,6 +4411,8 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				Stmt: v,
 			}
 		}
+	case *parse.TupleDestructure:
+		return c.checkTupleDestructure(s)
 	case *parse.VariableAssignment:
 		{
 			if id, ok := s.Target.(*parse.Identifier); ok {
@@ -5117,6 +5149,134 @@ func (c *Checker) withCollectionBinding(name string, location parse.Location, ch
 	check()
 }
 
+// checkTuple checks a tuple literal. With an expected tuple of the same arity,
+// each element is checked against its expected element type, so literals and
+// conversions inside the tuple are typed by their destination.
+func (c *Checker) checkTuple(expected *Tuple, expr *parse.TupleLiteral) *TupleLiteral {
+	elements := make([]Expression, len(expr.Items))
+	types := make([]Type, len(expr.Items))
+	hasError := false
+	for i, item := range expr.Items {
+		var element Expression
+		if expected != nil {
+			element = c.checkExprAs(item, expected.elements[i])
+		} else {
+			element = c.checkExpr(item)
+		}
+		if element == nil {
+			hasError = true
+			continue
+		}
+		elementType := element.Type()
+		if expected != nil && !hasGenericsInType(expected.elements[i]) {
+			// A resolved expectation is the element's representation: the
+			// value converts to it (for example a struct to a trait object).
+			elementType = derefType(expected.elements[i])
+		}
+		if IsNever(elementType) {
+			// A non-returning element never produces a value; give its
+			// unreachable slot the unit representation, as lists do.
+			elementType = Void
+		}
+		elements[i] = element
+		types[i] = elementType
+	}
+	// A malformed literal was already reported by the parser.
+	if hasError || len(elements) < 2 {
+		return nil
+	}
+	return &TupleLiteral{Elements: elements, _type: MakeTuple(types)}
+}
+
+// checkTupleDestructure checks `let (a, b) = value`: the value must be a
+// tuple with one element per name, and each name other than `_` is bound to
+// its element.
+func (c *Checker) checkTupleDestructure(s *parse.TupleDestructure) *Statement {
+	bindAll := func(types []Type) {
+		for i, name := range s.Names {
+			if name.Name == "_" {
+				continue
+			}
+			var bindingType Type = invalidType
+			if types != nil {
+				bindingType = types[i]
+			}
+			c.recordBinding(name.Location, c.scope.add(name.Name, bindingType, s.Mutable))
+		}
+	}
+
+	firstUse := map[string]parse.Location{}
+	duplicate := false
+	for _, name := range s.Names {
+		if name.Name == "_" {
+			continue
+		}
+		if first, exists := firstUse[name.Name]; exists {
+			c.addDiagnostic(tupleDestructureDuplicateNameDiagnostic{
+				Name:      name.Name,
+				Span:      c.sourceSpan(name.Location),
+				FirstSpan: c.sourceSpan(first),
+			}.build())
+			duplicate = true
+			continue
+		}
+		firstUse[name.Name] = name.Location
+	}
+
+	var val Expression
+	c.withValueExprContext(func() {
+		val = c.checkExpr(s.Value)
+	})
+	if val == nil || duplicate {
+		bindAll(nil)
+		return nil
+	}
+	if expressionContainsNever(val) {
+		finalizeErasedResultExpression(val)
+	}
+	tuple, ok := deref(val.Type()).(*Tuple)
+	if !ok {
+		if !IsNever(val.Type()) {
+			c.addDiagnostic(tupleDestructureNonTupleDiagnostic{
+				Actual: val.Type(),
+				Span:   c.sourceSpan(s.Value.GetLocation()),
+			}.build())
+		}
+		bindAll(nil)
+		return nil
+	}
+	if len(tuple.elements) != len(s.Names) {
+		namesSpan := parse.Location{Start: s.Names[0].Location.Start, End: s.Names[len(s.Names)-1].Location.End}
+		c.addDiagnostic(tupleDestructureArityDiagnostic{
+			Tuple:     tuple,
+			Names:     len(s.Names),
+			NamesSpan: c.sourceSpan(namesSpan),
+			ValueSpan: c.sourceSpan(s.Value.GetLocation()),
+		}.build())
+		bindAll(nil)
+		return nil
+	}
+	c.markFunctionComparableRequirements(c.currentConstraintFunction(), tuple, false, c.sourceSpan(s.GetLocation()))
+	if c.rejectUnresolvedCallType(tuple, s.Value.GetLocation()) {
+		bindAll(nil)
+		return nil
+	}
+
+	names := make([]string, len(s.Names))
+	for i, name := range s.Names {
+		if name.Name != "_" {
+			names[i] = name.Name
+		}
+	}
+	bindAll(tuple.elements)
+	return &Statement{Stmt: &TupleDestructure{
+		Mutable: s.Mutable,
+		Names:   names,
+		Value:   val,
+		__type:  tuple,
+	}}
+}
+
 func (c *Checker) checkList(declaredType Type, expr *parse.ListLiteral) *ListLiteral {
 	// A named Go slice or array type accepts an Ard list-like literal: Go assignability
 	// allows an unnamed composite value where the named type is expected.
@@ -5321,7 +5481,7 @@ func (c *Checker) canCheckStatementAsExpectedExpression(stmt parse.Statement, ex
 		switch s := stmt.(type) {
 		case *parse.MatchExpression, *parse.ConditionalMatchExpression, *parse.SelectExpression, *parse.IfStatement,
 			*parse.FunctionCall, *parse.FunctionValueCall, *parse.InstanceMethod, *parse.StaticFunction,
-			*parse.StaticProperty, *parse.StructInstance, *parse.Try, *parse.UnsafeBlock:
+			*parse.StaticProperty, *parse.StructInstance, *parse.TupleLiteral, *parse.Try, *parse.UnsafeBlock:
 			return true
 		case *parse.MutRef:
 			// `mut <container literal>` needs the reference destination's
@@ -5346,7 +5506,7 @@ func (c *Checker) canCheckStatementAsExpectedExpression(stmt parse.Statement, ex
 		case *parse.StrLiteral, *parse.RuneLiteral, *parse.BoolLiteral, *parse.VoidLiteral, *parse.NumLiteral, *parse.InterpolatedStr,
 			*parse.Identifier, *parse.FunctionCall, *parse.FunctionValueCall, *parse.InstanceProperty, *parse.InstanceMethod,
 			*parse.UnaryExpression, *parse.BinaryExpression, *parse.ChainedComparison, *parse.StaticFunction,
-			*parse.IfStatement, *parse.AnonymousFunction, *parse.ListLiteral, *parse.MapLiteral,
+			*parse.IfStatement, *parse.AnonymousFunction, *parse.ListLiteral, *parse.MapLiteral, *parse.TupleLiteral,
 			*parse.MatchExpression, *parse.ConditionalMatchExpression, *parse.SelectExpression, *parse.StaticProperty,
 			*parse.StructInstance, *parse.Try, *parse.BlockExpression, *parse.UnsafeBlock:
 			return true
@@ -5358,7 +5518,7 @@ func (c *Checker) canCheckStatementAsExpectedExpression(stmt parse.Statement, ex
 	switch stmt.(type) {
 	case *parse.MatchExpression, *parse.ConditionalMatchExpression, *parse.SelectExpression, *parse.IfStatement,
 		*parse.FunctionCall, *parse.FunctionValueCall, *parse.InstanceMethod, *parse.StaticFunction,
-		*parse.ListLiteral, *parse.MapLiteral, *parse.AnonymousFunction, *parse.StaticProperty, *parse.StructInstance, *parse.UnsafeBlock, *parse.MutRef:
+		*parse.ListLiteral, *parse.MapLiteral, *parse.TupleLiteral, *parse.AnonymousFunction, *parse.StaticProperty, *parse.StructInstance, *parse.UnsafeBlock, *parse.MutRef:
 		return true
 	default:
 		return false
@@ -5465,6 +5625,12 @@ func parseExpressionContainsBreak(expr parse.Expression) bool {
 				return true
 			}
 		}
+	case *parse.TupleLiteral:
+		for _, item := range e.Items {
+			if parseExpressionContainsBreak(item) {
+				return true
+			}
+		}
 	case *parse.MapLiteral:
 		for _, entry := range e.Entries {
 			if parseExpressionContainsBreak(entry.Key) || parseExpressionContainsBreak(entry.Value) {
@@ -5512,6 +5678,8 @@ func parseExpressionContainsBreak(expr parse.Expression) bool {
 	case *parse.VariableAssignment:
 		return parseExpressionContainsBreak(e.Target) || parseExpressionContainsBreak(e.Value)
 	case *parse.VariableDeclaration:
+		return parseExpressionContainsBreak(e.Value)
+	case *parse.TupleDestructure:
 		return parseExpressionContainsBreak(e.Value)
 	}
 	return false
@@ -5734,6 +5902,17 @@ func unsafeResultOkValueCompatible(expected Type, actual Type) bool {
 	case *Result:
 		actualType, ok := actual.(*Result)
 		return ok && unsafeResultOkValueCompatible(expectedType.val, actualType.val) && unsafeResultOkValueCompatible(expectedType.err, actualType.err)
+	case *Tuple:
+		actualType, ok := actual.(*Tuple)
+		if !ok || len(expectedType.elements) != len(actualType.elements) {
+			return false
+		}
+		for i := range expectedType.elements {
+			if !unsafeResultOkValueCompatible(expectedType.elements[i], actualType.elements[i]) {
+				return false
+			}
+		}
+		return true
 	case *MutableRef:
 		actualType, ok := actual.(*MutableRef)
 		return ok && unsafeResultOkValueCompatible(expectedType.of, actualType.of)
@@ -5787,6 +5966,8 @@ func (c *Checker) validateUnsafeCatchResultsInStatement(stmt Statement, resultTy
 	}
 	switch s := stmt.Stmt.(type) {
 	case *VariableDef:
+		c.validateUnsafeCatchResultsInExpression(s.Value, resultType, loc)
+	case *TupleDestructure:
 		c.validateUnsafeCatchResultsInExpression(s.Value, resultType, loc)
 	case *Reassignment:
 		c.validateUnsafeCatchResultsInExpression(s.Target, resultType, loc)
@@ -6016,6 +6197,10 @@ func (c *Checker) validateUnsafeCatchResultsInExpression(expr Expression, result
 			c.validateUnsafeCatchResultsInExpression(arg, resultType, loc)
 		}
 	case *ListLiteral:
+		for _, item := range e.Elements {
+			c.validateUnsafeCatchResultsInExpression(item, resultType, loc)
+		}
+	case *TupleLiteral:
 		for _, item := range e.Elements {
 			c.validateUnsafeCatchResultsInExpression(item, resultType, loc)
 		}
@@ -6250,7 +6435,7 @@ func finalValueStatementIndex(stmts []parse.Statement) int {
 		switch stmts[i].(type) {
 		case nil, *parse.Comment:
 			continue
-		case *parse.VariableDeclaration, *parse.VariableAssignment, *parse.Break, *parse.Defer,
+		case *parse.VariableDeclaration, *parse.TupleDestructure, *parse.VariableAssignment, *parse.Break, *parse.Defer,
 			*parse.WhileLoop, *parse.ForLoop, *parse.RangeLoop, *parse.ForInLoop,
 			*parse.TraitDefinition, *parse.TraitImplementation, *parse.TypeDeclaration,
 			*parse.EnumDefinition, *parse.StructDefinition, *parse.ImplBlock:
@@ -6947,10 +7132,33 @@ func checkerTraitInterfaceGoResults(result Type, context *checkerGoTypeContext) 
 			gotypes.NewVar(0, nil, "", gotypes.Typ[gotypes.Bool]),
 		}, true
 	}
+	// A tuple return spreads into one Go result per element, and a fallible
+	// tuple return adds the trailing error (ADR 0077).
+	tupleResults := func(tuple *Tuple) ([]*gotypes.Var, bool) {
+		results := make([]*gotypes.Var, 0, len(tuple.elements)+1)
+		for _, element := range tuple.elements {
+			elementType, ok := checkerTypeToGoTypeWithContext(element, context)
+			if !ok {
+				return nil, false
+			}
+			results = append(results, gotypes.NewVar(0, nil, "", elementType))
+		}
+		return results, true
+	}
+	if tuple, ok := result.(*Tuple); ok {
+		return tupleResults(tuple)
+	}
 	if resultValue, ok := result.(*Result); ok && (resultValue.Err() == Str || IsBuiltinError(resultValue.Err())) {
 		errorType := gotypes.Universe.Lookup("error").Type()
 		if resultValue.Val() == Void {
 			return []*gotypes.Var{gotypes.NewVar(0, nil, "", errorType)}, true
+		}
+		if tuple, ok := resultValue.Val().(*Tuple); ok {
+			results, ok := tupleResults(tuple)
+			if !ok {
+				return nil, false
+			}
+			return append(results, gotypes.NewVar(0, nil, "", errorType)), true
 		}
 		value, ok := checkerTypeToGoTypeWithContext(resultValue.Val(), context)
 		if !ok {
@@ -8301,6 +8509,12 @@ func expressionContainsNever(expr Expression) bool {
 					return true
 				}
 			}
+		case *TupleLiteral:
+			for _, element := range current.Elements {
+				if contains(element) {
+					return true
+				}
+			}
 		case *MapLiteral:
 			for _, value := range current.Values {
 				if contains(value) {
@@ -8819,6 +9033,12 @@ func bindGenericTypes(original Type, specialized Type, bindings map[string]Type)
 		if spec, ok := specialized.(*Result); ok {
 			bindGenericTypes(orig.val, spec.val, bindings)
 			bindGenericTypes(orig.err, spec.err, bindings)
+		}
+	case *Tuple:
+		if spec, ok := specialized.(*Tuple); ok && len(orig.elements) == len(spec.elements) {
+			for i := range orig.elements {
+				bindGenericTypes(orig.elements[i], spec.elements[i], bindings)
+			}
 		}
 	case *ForeignType:
 		if spec, ok := specialized.(*ForeignType); ok && orig.Target == spec.Target && orig.Namespace == spec.Namespace && orig.Name == spec.Name {
@@ -10600,6 +10820,11 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 			return result
 		}
 		return nil
+	case *parse.TupleLiteral:
+		if result := c.checkTuple(nil, s); result != nil {
+			return result
+		}
+		return nil
 	case *parse.SelectExpression:
 		allowMixedVoid := discardThisExpr || c.expectedExpr == Void
 		previousArmDiscard := c.matchArmDiscardContext
@@ -12166,6 +12391,12 @@ func bindInferredTypeVarsSeen(expected Type, actual Type, seen map[inferredTypeB
 			bindInferredTypeVarsSeen(exp.Val(), act.Val(), seen)
 			bindInferredTypeVarsSeen(exp.Err(), act.Err(), seen)
 		}
+	case *Tuple:
+		if act, ok := actual.(*Tuple); ok && len(exp.elements) == len(act.elements) {
+			for i := range exp.elements {
+				bindInferredTypeVarsSeen(exp.elements[i], act.elements[i], seen)
+			}
+		}
 	case *List:
 		if act, ok := actual.(*List); ok {
 			bindInferredTypeVarsSeen(exp.Of(), act.Of(), seen)
@@ -12798,6 +13029,16 @@ func (c *Checker) checkExprAsInner(expr parse.Expression, expectedType Type, exp
 			}
 			return nil
 		}
+	case *parse.TupleLiteral:
+		// An expected tuple of the same arity contextually types each element.
+		// Any other expectation checks the literal on its own and reports the
+		// mismatch against its inferred type.
+		if expected, ok := derefType(expectedType).(*Tuple); ok && len(expected.elements) == len(s.Items) {
+			if result := c.checkTuple(expected, s); result != nil {
+				return c.finishCheckExprAs(expr, expectedType, expectation, argumentParameter, result)
+			}
+			return nil
+		}
 	case *parse.MapLiteral:
 		// Only use collection-specific inference when the expected type is a
 		// map, including named Go map types (mirroring the list-literal case).
@@ -13425,6 +13666,8 @@ func substituteType(t Type, typeMap map[string]Type) Type {
 			substituteType(typ.val, typeMap),
 			substituteType(typ.err, typeMap),
 		)
+	case *Tuple:
+		return typ.mapElements(func(element Type) Type { return substituteType(element, typeMap) })
 	case *List:
 		return &List{of: substituteType(typ.of, typeMap)}
 	case *Slice:
@@ -13538,6 +13781,12 @@ func inferGenericBindingsFromTypes(original, specialized Type, bindings map[stri
 		if spec, ok := specialized.(*Result); ok {
 			inferGenericBindingsFromTypes(orig.Val(), spec.Val(), bindings)
 			inferGenericBindingsFromTypes(orig.Err(), spec.Err(), bindings)
+		}
+	case *Tuple:
+		if spec, ok := specialized.(*Tuple); ok && len(orig.elements) == len(spec.elements) {
+			for i := range orig.elements {
+				inferGenericBindingsFromTypes(orig.elements[i], spec.elements[i], bindings)
+			}
 		}
 	case *Chan:
 		if spec, ok := specialized.(*Chan); ok {
@@ -13930,6 +14179,17 @@ func (c *Checker) inferBindingsFromExpectedReturn(pattern Type, expected Type, g
 			return err
 		}
 		return c.inferBindingsFromExpectedReturn(p.err, e.err, genericScope)
+	case *Tuple:
+		e, ok := expected.(*Tuple)
+		if !ok || len(p.elements) != len(e.elements) {
+			return newUnificationError(pattern, expected, fmt.Sprintf("expected %s, got %s", pattern, expected))
+		}
+		for i := range p.elements {
+			if err := c.inferBindingsFromExpectedReturn(p.elements[i], e.elements[i], genericScope); err != nil {
+				return err
+			}
+		}
+		return nil
 	case *List:
 		e, ok := expected.(*List)
 		if !ok {
@@ -14740,6 +15000,17 @@ func (c *Checker) unifyTypes(expected Type, actual Type, genericScope *SymbolTab
 			return c.unifyTypes(expectedType.err, actualResult.err, genericScope)
 		}
 		return newUnificationError(expected, actual, fmt.Sprintf("expected result type, got %T", actual))
+	case *Tuple:
+		actualTuple, ok := actual.(*Tuple)
+		if !ok || len(expectedType.elements) != len(actualTuple.elements) {
+			return newUnificationError(expected, actual, fmt.Sprintf("expected %s, got %s", expected, actual))
+		}
+		for i := range expectedType.elements {
+			if err := c.unifyTypes(expectedType.elements[i], actualTuple.elements[i], genericScope); err != nil {
+				return err
+			}
+		}
+		return nil
 	case *Maybe:
 		if actualMaybe, ok := actual.(*Maybe); ok {
 			return c.unifyTypes(expectedType.of, actualMaybe.of, genericScope)

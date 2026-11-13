@@ -935,6 +935,9 @@ func TestStructuralTypeInterningIsOriginIndependent(t *testing.T) {
 		{name: "function", checker: &checker.FunctionDef{Parameters: []checker.Parameter{{Type: checker.Int}}, ReturnType: checker.Str}, synthetic: func(l *lowerer) TypeInfo {
 			return TypeInfo{Kind: TypeFunction, Params: []TypeID{l.mustIntern(checker.Int)}, Return: l.mustIntern(checker.Str)}
 		}},
+		{name: "tuple", checker: checker.MakeTuple([]checker.Type{checker.Int, checker.Str}), synthetic: func(l *lowerer) TypeInfo {
+			return TypeInfo{Kind: TypeTuple, Elems: []TypeID{l.mustIntern(checker.Int), l.mustIntern(checker.Str)}}
+		}},
 	}
 	for _, typ := range types {
 		for _, checkerFirst := range []bool{true, false} {
@@ -1007,6 +1010,24 @@ func TestStructuralTypeIdentityIncludesEverySemanticComponent(t *testing.T) {
 		assertDifferent(t,
 			TypeInfo{Kind: TypeResult, Value: intID, Error: strID},
 			TypeInfo{Kind: TypeResult, Value: strID, Error: intID},
+		)
+	})
+	t.Run("tuple element order", func(t *testing.T) {
+		assertDifferent(t,
+			TypeInfo{Kind: TypeTuple, Elems: []TypeID{intID, strID}},
+			TypeInfo{Kind: TypeTuple, Elems: []TypeID{strID, intID}},
+		)
+	})
+	t.Run("tuple arity", func(t *testing.T) {
+		assertDifferent(t,
+			TypeInfo{Kind: TypeTuple, Elems: []TypeID{intID, intID}},
+			TypeInfo{Kind: TypeTuple, Elems: []TypeID{intID, intID, intID}},
+		)
+	})
+	t.Run("tuple and function with the same child types", func(t *testing.T) {
+		assertDifferent(t,
+			TypeInfo{Kind: TypeTuple, Elems: []TypeID{intID, strID}},
+			TypeInfo{Kind: TypeFunction, Params: []TypeID{intID, strID}, Return: intID},
 		)
 	})
 	t.Run("function parameter order", func(t *testing.T) {

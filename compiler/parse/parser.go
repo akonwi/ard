@@ -386,6 +386,10 @@ func (p *parser) parseStatementEndingAt(terminators ...kind) (Statement, error) 
 		return p.deferStatement()
 	}
 	if p.match(let, mut) {
+		if p.check(left_paren) {
+			stmt, err := p.parseTupleDestructure(p.previous(), terminators)
+			return p.endStatement(stmt, err, terminators)
+		}
 		stmt, err := p.parseVariableDef()
 		return p.endStatement(stmt, err, terminators)
 	}
@@ -620,6 +624,56 @@ func (p *parser) parseVariableDef() (Statement, error) {
 		Location: Location{
 			Start: Point{Row: start.line, Col: start.column},
 			End:   end,
+		},
+	}, nil
+}
+
+// parseTupleDestructure parses `let (a, b) = value` after the `let` or `mut`
+// keyword. Each position takes a plain name or `_`; nested patterns and type
+// annotations are not part of the syntax. A malformed header is reported once
+// and the rest of the statement is skipped.
+func (p *parser) parseTupleDestructure(start *token, terminators []kind) (Statement, error) {
+	fail := func(at *token, message string) (Statement, error) {
+		p.addError(at, message)
+		p.skipRestOfStatement(terminators)
+		return nil, nil
+	}
+	p.advance() // consume the '('
+	names := []TupleBinding{}
+	for !p.check(right_paren) {
+		current := p.peek()
+		if current.kind != identifier && !p.isAllowedIdentifierKeyword(current.kind) {
+			return fail(current, "Expected a name in tuple destructuring")
+		}
+		name := p.consumeVariableName("Expected a name in tuple destructuring")
+		names = append(names, TupleBinding{Name: name.text, Location: name.getLocation()})
+		if !p.match(comma) {
+			break
+		}
+	}
+	if !p.match(right_paren) {
+		return fail(p.peek(), "Expected ')' after tuple destructuring names")
+	}
+	if len(names) < 2 {
+		return fail(p.previous(), "Tuple destructuring needs at least two names")
+	}
+	if p.check(colon) {
+		return fail(p.peek(), "Tuple destructuring cannot have a type annotation")
+	}
+	if !p.match(equal) {
+		return fail(p.peek(), "Expected '=' after tuple destructuring names")
+	}
+	value, err := p.parseExpression()
+	if err != nil {
+		return nil, err
+	}
+	return &TupleDestructure{
+		Mutable: start.kind == mut,
+		Names:   names,
+		Value:   value,
+		Location: Location{
+			Start: Point{Row: start.line, Col: start.column},
+			End:   value.GetLocation().End,
 		},
 	}, nil
 }
@@ -1886,6 +1940,7 @@ func (p *parser) tryParseType() DeclaredType {
 	}
 
 	if p.match(left_paren) {
+		openParen := p.previous()
 		inner := p.parseType()
 		if inner == nil {
 			if p.match(right_paren) {
@@ -1898,7 +1953,9 @@ func (p *parser) tryParseType() DeclaredType {
 			}
 			return nil
 		}
-		if !p.match(right_paren) {
+		if p.check(comma) {
+			inner = p.finishTupleType(openParen, inner)
+		} else if !p.match(right_paren) {
 			p.addError(p.peek(), "Expected ')' after grouped type")
 			p.synchronizeToTokens(equal, new_line, right_paren)
 			if p.match(right_paren) {
@@ -2222,6 +2279,38 @@ func (p *parser) tryParseType() DeclaredType {
 	return nil
 }
 
+// finishTupleType parses the rest of a tuple type after its first element,
+// with the parser positioned at the comma that distinguishes `(A, B)` from the
+// grouped type `(A)`. It always returns a TupleType so the surrounding `!` and
+// `?` suffix handling applies to the tuple as a whole.
+func (p *parser) finishTupleType(openParen *token, first DeclaredType) DeclaredType {
+	elements := []DeclaredType{first}
+	for p.match(comma) {
+		p.match(new_line)
+		if p.check(right_paren) {
+			break
+		}
+		element := p.parseType()
+		if element == nil {
+			p.recoverFromBadType()
+			continue
+		}
+		elements = append(elements, element)
+		p.match(new_line)
+	}
+	if !p.match(right_paren) {
+		p.addError(p.peek(), "Expected ')' after tuple type")
+		p.synchronizeToTokens(equal, new_line, right_paren)
+		p.match(right_paren)
+	} else if len(elements) < 2 {
+		p.addError(p.previous(), "A tuple type needs at least two elements")
+	}
+	return &TupleType{
+		Location: Location{Start: openParen.getLocation().Start, End: p.previous().getLocation().End},
+		Elements: elements,
+	}
+}
+
 func (p *parser) startsAdjacentCallArgsAfterFunctionType(paramClose token, hasRightParen bool) bool {
 	if !p.inCallTypeArguments || !hasRightParen || !p.check(left_paren) || !adjacent(paramClose.getLocation(), p.peek()) {
 		return false
@@ -2274,6 +2363,8 @@ func nullableDeclaredType(t DeclaredType) DeclaredType {
 	case *FunctionType:
 		ty.Nullable = true
 	case *MutableType:
+		ty.nullable = true
+	case *TupleType:
 		ty.nullable = true
 	}
 	return t
@@ -4244,9 +4335,14 @@ func (p *parser) primary() (Expression, error) {
 			}, nil
 		}
 
+		openParen := p.previous()
+		leading := p.skipTupleLayout(nil)
 		expr, err := p.parseExpression()
 		if err != nil {
 			return nil, err
+		}
+		if p.startsTupleRest() {
+			return p.finishTupleLiteral(openParen, expr, leading)
 		}
 
 		if !p.check(right_paren) {
@@ -4301,6 +4397,71 @@ func (p *parser) primary() (Expression, error) {
 			Location: peek.getLocation(),
 		}, nil
 	}
+}
+
+// skipTupleLayout consumes the new lines and comments that may sit between
+// the elements of a parenthesized expression, collecting the comments.
+func (p *parser) skipTupleLayout(comments []Comment) []Comment {
+	for {
+		if c := p.parseInlineComment(); c != nil {
+			comments = append(comments, *c)
+			continue
+		}
+		if !p.match(new_line) {
+			return comments
+		}
+	}
+}
+
+// startsTupleRest reports whether the parenthesized expression just parsed is
+// the first element of a tuple literal: a comma follows it, possibly after a
+// trailing comment. A lone expression before `)` stays a grouping.
+func (p *parser) startsTupleRest() bool {
+	i := p.index
+	for p.tokens[i].kind == comment {
+		i++
+	}
+	return p.tokens[i].kind == comma
+}
+
+// finishTupleLiteral parses the rest of a tuple literal after its first
+// element. Elements are comma separated and may span lines; a trailing comma
+// is allowed.
+func (p *parser) finishTupleLiteral(openParen *token, first Expression, comments []Comment) (Expression, error) {
+	items := []Expression{first}
+	for {
+		if c := p.parseInlineComment(); c != nil {
+			comments = append(comments, *c)
+		}
+		p.expectSeparator(false, true, "Expected ',' between tuple elements")
+		comments = p.skipTupleLayout(comments)
+		if p.match(right_paren) {
+			break
+		}
+		if p.isAtEnd() {
+			p.addError(p.peek(), "Expected ')' to close tuple")
+			break
+		}
+		item, err := p.parseExpression()
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	if len(items) < 2 {
+		p.addError(p.previous(), "A tuple needs at least two elements")
+	}
+	result := &TupleLiteral{
+		Items: items,
+		Location: Location{
+			Start: openParen.getLocation().Start,
+			End:   p.previous().getLocation().End,
+		},
+	}
+	if len(comments) > 0 {
+		result.Comments = comments
+	}
+	return result, nil
 }
 
 func (p *parser) list() (Expression, error) {

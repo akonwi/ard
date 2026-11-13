@@ -128,6 +128,8 @@ func (p printer) renderStatementDoc(statement parse.Statement) doc {
 		return dText(p.renderComment(node.Value))
 	case *parse.VariableDeclaration:
 		return p.renderVariableDeclarationDoc(node)
+	case *parse.TupleDestructure:
+		return p.renderTupleDestructureDoc(node)
 	case *parse.VariableAssignment:
 		return p.renderVariableAssignmentDoc(node)
 	case *parse.Defer:
@@ -194,6 +196,19 @@ func (p printer) renderVariableDeclarationDoc(node *parse.VariableDeclaration) d
 		prefix += ": " + p.renderType(node.Type)
 	}
 	prefix += " = "
+	return dConcat(dText(prefix), p.renderExpressionValueDoc(node.Value, 0))
+}
+
+func (p printer) renderTupleDestructureDoc(node *parse.TupleDestructure) doc {
+	binding := "let"
+	if node.Mutable {
+		binding = "mut"
+	}
+	names := make([]string, len(node.Names))
+	for i, name := range node.Names {
+		names[i] = name.Name
+	}
+	prefix := binding + " (" + strings.Join(names, ", ") + ") = "
 	return dConcat(dText(prefix), p.renderExpressionValueDoc(node.Value, 0))
 }
 
@@ -833,6 +848,12 @@ func (p printer) renderType(declared parse.DeclaredType) string {
 		return maybeNullable("["+p.renderType(node.Element)+"]", node.IsNullable())
 	case *parse.FixedArray:
 		return maybeNullable(fmt.Sprintf("[%s; %d]", p.renderType(node.Element), node.Length), node.IsNullable())
+	case *parse.TupleType:
+		elements := make([]string, 0, len(node.Elements))
+		for _, element := range node.Elements {
+			elements = append(elements, p.renderType(element))
+		}
+		return maybeNullable("("+strings.Join(elements, ", ")+")", node.IsNullable())
 	case *parse.Map:
 		return maybeNullable("["+p.renderType(node.Key)+": "+p.renderType(node.Value)+"]", node.IsNullable())
 	case *parse.ResultType:
@@ -898,6 +919,7 @@ func renderableExpressionStatement(statement parse.Statement) (parse.Expression,
 		*parse.ChainedComparison,
 		*parse.RangeExpression, parse.RangeExpression,
 		*parse.ListLiteral, parse.ListLiteral,
+		*parse.TupleLiteral,
 		*parse.MapLiteral, parse.MapLiteral,
 		*parse.StructInstance, parse.StructInstance,
 		*parse.FunctionCall, parse.FunctionCall,
@@ -1008,6 +1030,8 @@ func (p printer) renderExpressionDoc(expression parse.Expression, parentPreceden
 	case parse.ListLiteral:
 		copy := node
 		return p.renderListLiteralDoc(&copy)
+	case *parse.TupleLiteral:
+		return p.renderTupleLiteralDoc(node)
 	case *parse.MapLiteral:
 		return p.renderMapLiteralDoc(node)
 	case parse.MapLiteral:
@@ -1295,6 +1319,23 @@ func (p printer) renderListLiteralDoc(list *parse.ListLiteral) doc {
 		dIndent(dConcat(dSoftLine(), body)),
 		dSoftLine(),
 		dText("]"),
+	))
+}
+
+// renderTupleLiteralDoc lays a tuple out like a list: on one line when it
+// fits, otherwise one element per line with a trailing comma.
+func (p printer) renderTupleLiteralDoc(tuple *parse.TupleLiteral) doc {
+	itemRows := make([]armDoc, 0, len(tuple.Items))
+	for _, item := range tuple.Items {
+		itemRows = append(itemRows, armDoc{doc: dText(p.renderExpression(item, 0)), startRow: startRowOf(item)})
+	}
+	body := p.renderCommentRows(itemRows, tuple.Comments, dText(","))
+
+	return dGroup(dConcat(
+		dText("("),
+		dIndent(dConcat(dSoftLine(), body)),
+		dSoftLine(),
+		dText(")"),
 	))
 }
 

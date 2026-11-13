@@ -2,6 +2,7 @@ package checker
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -616,6 +617,8 @@ func containsInvalidType(t Type) bool {
 			return visit(current.key, seen) || visit(current.value, seen)
 		case *Maybe:
 			return visit(current.of, seen)
+		case *Tuple:
+			return current.anyElement(func(element Type) bool { return visit(element, seen) })
 		case *Result:
 			return visit(current.val, seen) || visit(current.err, seen)
 		case *MutableRef:
@@ -885,6 +888,68 @@ func (a *FixedArray) Of() Type {
 
 func (a *FixedArray) Len() int {
 	return a.length
+}
+
+// Tuple is an anonymous product type written `(A, B)`: a fixed-length ordered
+// group of values whose elements may have different types. A tuple always has
+// at least two elements. It has no members; its elements are read by
+// destructuring (ADR 0077).
+type Tuple struct {
+	elements []Type
+}
+
+func MakeTuple(elements []Type) *Tuple {
+	return &Tuple{elements: elements}
+}
+
+func (t *Tuple) String() string {
+	parts := make([]string, len(t.elements))
+	for i, element := range t.elements {
+		parts[i] = typeSyntaxString(element)
+	}
+	return "(" + strings.Join(parts, ", ") + ")"
+}
+
+func (t *Tuple) get(name string) Type {
+	return nil
+}
+
+func (t *Tuple) equal(other Type) bool {
+	return equalTypes(t, other)
+}
+
+func (t *Tuple) hasTrait(trait *Trait) bool {
+	return false
+}
+
+// Elements returns the tuple's element types in order. The slice must not be
+// modified.
+func (t *Tuple) Elements() []Type {
+	return t.elements
+}
+
+// mapElements returns a tuple whose elements are f applied to each element of
+// t, or t itself when f changes none of them.
+func (t *Tuple) mapElements(f func(Type) Type) *Tuple {
+	var mapped []Type
+	for i, element := range t.elements {
+		next := f(element)
+		if next != element && mapped == nil {
+			mapped = append(make([]Type, 0, len(t.elements)), t.elements[:i]...)
+		}
+		if mapped != nil {
+			mapped = append(mapped, next)
+		}
+	}
+	if mapped == nil {
+		return t
+	}
+	return &Tuple{elements: mapped}
+}
+
+// anyElement reports whether f holds for at least one element of t.
+func (t *Tuple) anyElement(f func(Type) bool) bool {
+	return slices.ContainsFunc(t.elements, f)
 }
 
 // Chan is a typed channel for communicating between concurrent tasks. It

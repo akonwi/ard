@@ -156,6 +156,12 @@ const (
 	ExprMapValueAt
 	ExprMakeStruct
 	ExprGetField
+	// ExprMakeTuple constructs the tuple named by Type from Args, one per
+	// element in order (ADR 0077).
+	ExprMakeTuple
+	// ExprTupleElem reads one element of the tuple-valued Target. The
+	// FieldExprPayload carries the element index.
+	ExprTupleElem
 	ExprIntAdd
 	ExprIntSub
 	ExprIntMul
@@ -234,6 +240,11 @@ const (
 	ForeignResultValueError
 	ForeignResultErrorOnly
 	ForeignResultValueBool
+	// ForeignResultTuple is two or more Go results packed into one tuple.
+	ForeignResultTuple
+	// ForeignResultTupleError is three or more Go results whose last is an
+	// error: the leading results are the tuple of a Result.
+	ForeignResultTupleError
 )
 
 type InterfaceConversionMode uint8

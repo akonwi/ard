@@ -155,6 +155,7 @@ const (
 	DiagnosticCodeNumericLiteralOverflow        DiagnosticCode = "numeric_literal_overflow"
 	DiagnosticCodeInvalidConversion             DiagnosticCode = "invalid_conversion"
 	DiagnosticCodeRedundantNullableVoid         DiagnosticCode = "redundant_nullable_void"
+	DiagnosticCodeInvalidTupleDestructuring     DiagnosticCode = "invalid_tuple_destructuring"
 )
 
 type SourceSpan struct {
@@ -1749,9 +1750,21 @@ func (d invalidGoFunctionValueDiagnostic) build() Diagnostic {
 
 type topLevelStatementDiagnostic struct {
 	Span SourceSpan
+	// Destructuring marks `let (a, b) = value`, which reads like the allowed
+	// module-level `let` but binds several names from one evaluation.
+	Destructuring bool
 }
 
 func (d topLevelStatementDiagnostic) build() Diagnostic {
+	if d.Destructuring {
+		diagnostic := newLabeledDiagnostic(Error,
+			"tuple destructuring is not allowed at the top level of a module",
+			"Top-level tuple destructuring",
+			"Module-level `let` and `mut` bind a single name. Bind the tuple to one name here and destructure it where it is used.",
+			DiagnosticLabel{Span: d.Span, Message: "destructure this inside a function"})
+		diagnostic.Code = DiagnosticCodeTopLevelStatement
+		return diagnostic
+	}
 	diagnostic := newLabeledDiagnostic(Error,
 		"executable statements are not allowed at the top level of a module",
 		"Top-level statement",
@@ -2776,6 +2789,78 @@ func (d fixedArrayLengthMismatchDiagnostic) build() Diagnostic {
 		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("expected %d elements, but found %d", d.Expected, d.Actual)},
 	)
 	diagnostic.Code = DiagnosticCodeTypeMismatch
+	return diagnostic
+}
+
+// tupleDestructureNonTupleDiagnostic reports `let (a, b) = value` where value
+// is not a tuple.
+type tupleDestructureNonTupleDiagnostic struct {
+	Actual Type
+	Span   SourceSpan
+}
+
+func (d tupleDestructureNonTupleDiagnostic) build() Diagnostic {
+	text := ""
+	label := fmt.Sprintf("this is %s, not a tuple", d.Actual)
+	switch d.Actual.(type) {
+	case *Maybe:
+		text = "Unwrap the Maybe first, for example with `try`, `match`, or `.or(...)`."
+	case *Result:
+		text = "Unwrap the Result first, for example with `try` or `match`."
+	case *MutableRef:
+		text = "Read the tuple through the pointer first with `.*`."
+	}
+	diagnostic := newLabeledDiagnostic(
+		Error,
+		fmt.Sprintf("Cannot destructure %s: expected a tuple", d.Actual),
+		"Cannot destructure a non-tuple value",
+		text,
+		DiagnosticLabel{Span: d.Span, Message: label},
+	)
+	diagnostic.Code = DiagnosticCodeInvalidTupleDestructuring
+	return diagnostic
+}
+
+// tupleDestructureArityDiagnostic reports a destructuring whose name count
+// differs from the tuple's element count.
+type tupleDestructureArityDiagnostic struct {
+	Tuple     *Tuple
+	Names     int
+	NamesSpan SourceSpan
+	ValueSpan SourceSpan
+}
+
+func (d tupleDestructureArityDiagnostic) build() Diagnostic {
+	diagnostic := newLabeledDiagnostic(
+		Error,
+		fmt.Sprintf("Cannot destructure %s into %d names", d.Tuple, d.Names),
+		"Tuple destructuring name count mismatch",
+		"Bind every element, using `_` for the ones to discard.",
+		DiagnosticLabel{Span: d.NamesSpan, Message: fmt.Sprintf("%d names", d.Names)},
+		DiagnosticLabel{Span: d.ValueSpan, Message: fmt.Sprintf("this tuple has %d elements", len(d.Tuple.Elements()))},
+	)
+	diagnostic.Code = DiagnosticCodeInvalidTupleDestructuring
+	return diagnostic
+}
+
+// tupleDestructureDuplicateNameDiagnostic reports a name bound twice by one
+// destructuring.
+type tupleDestructureDuplicateNameDiagnostic struct {
+	Name      string
+	Span      SourceSpan
+	FirstSpan SourceSpan
+}
+
+func (d tupleDestructureDuplicateNameDiagnostic) build() Diagnostic {
+	diagnostic := newLabeledDiagnostic(
+		Error,
+		fmt.Sprintf("Duplicate name in tuple destructuring: %s", d.Name),
+		"Duplicate name in tuple destructuring",
+		"",
+		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("`%s` is already bound by this destructuring", d.Name)},
+		DiagnosticLabel{Span: d.FirstSpan, Message: "first bound here"},
+	)
+	diagnostic.Code = DiagnosticCodeInvalidTupleDestructuring
 	return diagnostic
 }
 
