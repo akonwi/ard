@@ -1101,7 +1101,7 @@ func TestRenderTestRunnerUsesStructForVoidResult(t *testing.T) {
 	if err != nil {
 		t.Fatalf("lower with tests: %v", err)
 	}
-	runner := renderTestRunner(program, []TestCase{{Name: "check", DisplayName: "check", Function: program.Tests[0].Function}}, false, nil)
+	runner := renderTestRunner(program, []TestCase{{Name: "check", DisplayName: "check", Function: program.Tests[0].Function}}, TestOptions{}, nil)
 	if !strings.Contains(runner, "fn func() error") {
 		t.Fatalf("test runner missing error-returning test function ABI:\n%s", runner)
 	}
@@ -5458,7 +5458,7 @@ func TestRenderTestRunnerAliasesTestModuleAroundStandardImport(t *testing.T) {
 		Modules:   []air.Module{{ID: 0, Path: "os.ard", Functions: []air.FunctionID{0}}},
 		Functions: []air.Function{{ID: 0, Module: 0, Name: "enum_test", IsTest: true}},
 	}
-	runner := renderTestRunner(program, []TestCase{{Function: 0}}, false, nil)
+	runner := renderTestRunner(program, []TestCase{{Function: 0}}, TestOptions{}, nil)
 	if !strings.Contains(runner, "os_1 \"generated/os\"") {
 		t.Fatalf("test runner did not alias a test module that conflicts with a standard import:\n%s", runner)
 	}
@@ -5484,7 +5484,7 @@ func TestTestRunnerImportAliasIgnoresImportedEnumVariants(t *testing.T) {
 		Functions: []air.Function{{ID: 0, Module: 1, Name: "enum_test", IsTest: true}},
 	}
 
-	imports := testRunnerImportAliases(program, []TestCase{{Function: 0}})
+	imports := testRunnerImportAliases(program, []TestCase{{Function: 0}}, false)
 	if got := imports.modules[1]; got != "fmT" {
 		t.Fatalf("test module alias = %q, want fmT; declarations in imported packages cannot collide with runner imports", got)
 	}
@@ -5497,7 +5497,7 @@ func TestTestRunnerImportAliasesAvoidRunnerUsedNames(t *testing.T) {
 				Modules:   []air.Module{{ID: 0, Path: name + ".ard", Functions: []air.FunctionID{0}}},
 				Functions: []air.Function{{ID: 0, Module: 0, Name: "enum_test", IsTest: true}},
 			}
-			imports := testRunnerImportAliases(program, []TestCase{{Function: 0}})
+			imports := testRunnerImportAliases(program, []TestCase{{Function: 0}}, false)
 			if got, want := imports.modules[0], name+"_1"; got != want {
 				t.Fatalf("test module alias = %q, want %q", got, want)
 			}
@@ -5520,7 +5520,7 @@ func TestTestRunnerImportAliasAvoidsRunnerLocalNames(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "outcomes", "outcomes.go"), []byte("package outcomes\n\nfunc EnumTest() error { return nil }\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	runner := renderTestRunner(program, []TestCase{{Function: 0}}, false, nil)
+	runner := renderTestRunner(program, []TestCase{{Function: 0}}, TestOptions{}, nil)
 	if err := os.WriteFile(filepath.Join(dir, "ard_tests.go"), []byte(runner), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -6777,6 +6777,18 @@ func TestGoBuildArgsStripDebugInfoUnlessRelease(t *testing.T) {
 			name: "release builds leave GOFLAGS to the go tool",
 			opts: goBuildOptions{release: true, goflags: "-ldflags=-X main.stamp=v1"},
 			want: []string{"build", "-mod=mod", "-o", "out/app", "."},
+		},
+		{
+			// The race runtime symbolises Go frames from pclntab, so race reports
+			// keep file:line positions without DWARF and the strip policy stays.
+			name: "race builds enable the race detector and still strip debug sections",
+			opts: goBuildOptions{race: true},
+			want: []string{"build", "-mod=mod", "-o", "out/app", "-race", "-ldflags=-s -w", "."},
+		},
+		{
+			name: "race release builds keep debug sections",
+			opts: goBuildOptions{race: true, release: true, tags: []string{"foo"}},
+			want: []string{"build", "-mod=mod", "-o", "out/app", "-race", "-tags=foo", "."},
 		},
 	}
 	for _, tt := range tests {

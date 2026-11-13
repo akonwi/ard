@@ -68,11 +68,12 @@ func main() {
 		}
 	case "run":
 		{
-			inputPath, err := parseRunArgs(os.Args[2:])
+			args, err := parseRunArgs(os.Args[2:])
 			if err != nil {
 				reportCLIError(os.Stderr, err)
 				os.Exit(1)
 			}
+			inputPath := args.Input
 			profile := newPipelineProfile("run go")
 			defer profile.Print()
 			var loaded *frontend.LoadResult
@@ -97,7 +98,14 @@ func main() {
 				reportCLIError(os.Stderr, err)
 				os.Exit(1)
 			}
-			if err := gotarget.RunProgram(program, os.Args, loaded.ProjectInfo); err != nil {
+			runCommand := append([]string{os.Args[0], os.Args[1], inputPath}, args.ProgramArgs...)
+			if err := gotarget.RunProgramWithOptions(program, runCommand, gotarget.RunOptions{Race: args.Race}, loaded.ProjectInfo); err != nil {
+				// The program ran and failed: exit with its status and add nothing
+				// to the output it already wrote.
+				var exitErr *gotarget.ProgramExitError
+				if errors.As(err, &exitErr) {
+					os.Exit(exitErr.Code)
+				}
 				reportCLIError(os.Stderr, err)
 				os.Exit(1)
 			}
@@ -109,19 +117,19 @@ func main() {
 				reportCLIError(os.Stderr, err)
 				os.Exit(1)
 			}
-			if _, err := buildGoBinaryWithOptions(args.Input, args.Output, checker.BuildOptions{Release: args.Release, Overrides: args.Overrides}); err != nil {
+			if _, err := buildGoBinaryWithOptions(args.Input, args.Output, checker.BuildOptions{Release: args.Release, Overrides: args.Overrides}, args.Race); err != nil {
 				reportCLIError(os.Stderr, err)
 				os.Exit(1)
 			}
 		}
 	case "test":
 		{
-			inputPath, filter, failFast, err := parseTestArgs(os.Args[2:])
+			args, err := parseTestArgs(os.Args[2:])
 			if err != nil {
 				reportCLIError(os.Stderr, err)
 				os.Exit(1)
 			}
-			if !runTests(inputPath, filter, failFast) {
+			if !runGoTests(args) {
 				os.Exit(1)
 			}
 			os.Exit(0)
@@ -282,10 +290,11 @@ func printUsage(w io.Writer) {
 
 Commands:
   check <file.ard>                  Type-check a program
-  run <file.ard>                    Run a program
-  build <file.ard> [--out <path>] [--release] [--define <name=value>]
+  run [--race] <file.ard> [args...]  Run a program
+  build <file.ard> [--out <path>] [--release] [--race] [--define <name=value>]
                                       Build a program (--release keeps Go debug sections)
-  test [path] [--filter <pattern>]   Run Ard tests
+  test [path] [--filter <pattern>] [--fail-fast] [--race]
+                                      Run Ard tests
   add <git-source@ref> [as alias]    Add or update a Git dependency and lock it
   update [alias...]                  Update Git dependencies to their latest commit
   remove <alias>                     Remove a direct dependency
@@ -294,6 +303,9 @@ Commands:
   format [--check] <path>            Format Ard source
   lsp                                Start the language server
   version                            Print compiler version
+
+Flags:
+  --race                             Build with Go's race detector (run, build, test)
 `)
 }
 
@@ -934,26 +946,40 @@ func loadModule(inputPath string) (checker.Module, error) {
 	return result.Module, nil
 }
 
-func parseRunArgs(args []string) (string, error) {
-	// `ard run <file.ard> [program args...]` forwards everything after the input
-	// file to the program verbatim, so only the input path is parsed here.
+type runArgs struct {
+	Input       string
+	Race        bool
+	ProgramArgs []string
+}
+
+func parseRunArgs(args []string) (runArgs, error) {
+	// `ard run [--race] <file.ard> [program args...]` forwards everything after
+	// the input file to the program verbatim, so run flags must precede it.
+	result := runArgs{}
+	for len(args) > 0 && args[0] == "--race" {
+		result.Race = true
+		args = args[1:]
+	}
 	if len(args) == 0 {
-		return "", fmt.Errorf("expected filepath argument")
+		return runArgs{}, fmt.Errorf("expected filepath argument")
 	}
 	inputPath := args[0]
 	if strings.HasPrefix(inputPath, "-") {
-		return "", fmt.Errorf("unknown flag: %s", inputPath)
+		return runArgs{}, fmt.Errorf("unknown flag: %s", inputPath)
 	}
 	if inputPath == "" {
-		return "", fmt.Errorf("expected filepath argument")
+		return runArgs{}, fmt.Errorf("expected filepath argument")
 	}
-	return inputPath, nil
+	result.Input = inputPath
+	result.ProgramArgs = args[1:]
+	return result, nil
 }
 
 type buildArgs struct {
 	Input     string
 	Output    string
 	Release   bool
+	Race      bool
 	Overrides []checker.BuildOverride
 }
 
@@ -961,6 +987,7 @@ func parseBuildArgs(args []string) (buildArgs, error) {
 	result := buildArgs{}
 	seenOutput := false
 	seenRelease := false
+	seenRace := false
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		switch arg {
@@ -980,6 +1007,12 @@ func parseBuildArgs(args []string) (buildArgs, error) {
 			}
 			seenRelease = true
 			result.Release = true
+		case "--race":
+			if seenRace {
+				return buildArgs{}, fmt.Errorf("--race may be provided only once")
+			}
+			seenRace = true
+			result.Race = true
 		case "--define":
 			if i+1 >= len(args) {
 				return buildArgs{}, fmt.Errorf("--define requires name=value")
@@ -1038,36 +1071,43 @@ func parseFormatArgs(args []string) (string, bool, error) {
 	return inputPath, checkOnly, nil
 }
 
-func parseTestArgs(args []string) (string, string, bool, error) {
-	inputPath := "."
-	filter := ""
-	failFast := false
+type testArgs struct {
+	Input    string
+	Filter   string
+	FailFast bool
+	Race     bool
+}
+
+func parseTestArgs(args []string) (testArgs, error) {
+	result := testArgs{Input: "."}
 	seenPath := false
 
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		switch arg {
 		case "--fail-fast":
-			failFast = true
+			result.FailFast = true
+		case "--race":
+			result.Race = true
 		case "--filter":
 			if i+1 >= len(args) {
-				return "", "", false, fmt.Errorf("--filter requires a value")
+				return testArgs{}, fmt.Errorf("--filter requires a value")
 			}
-			filter = args[i+1]
+			result.Filter = args[i+1]
 			i++
 		default:
 			if strings.HasPrefix(arg, "-") {
-				return "", "", false, fmt.Errorf("unknown flag: %s", arg)
+				return testArgs{}, fmt.Errorf("unknown flag: %s", arg)
 			}
 			if seenPath {
-				return "", "", false, fmt.Errorf("unexpected argument: %s", arg)
+				return testArgs{}, fmt.Errorf("unexpected argument: %s", arg)
 			}
-			inputPath = arg
+			result.Input = arg
 			seenPath = true
 		}
 	}
 
-	return inputPath, filter, failFast, nil
+	return result, nil
 }
 
 func formatPath(inputPath string, checkOnly bool) ([]string, error) {
@@ -1186,10 +1226,11 @@ type testOutcome struct {
 }
 
 func runTests(inputPath, filter string, failFast bool) bool {
-	return runGoTests(inputPath, filter, failFast)
+	return runGoTests(testArgs{Input: inputPath, Filter: filter, FailFast: failFast})
 }
 
-func runGoTests(inputPath, filter string, failFast bool) bool {
+func runGoTests(args testArgs) bool {
+	inputPath, filter, failFast := args.Input, args.Filter, args.FailFast
 	profile := newPipelineProfile("test go")
 	defer profile.Print()
 
@@ -1251,8 +1292,11 @@ func runGoTests(inputPath, filter string, failFast bool) bool {
 	if profile != nil {
 		stageObserver = profile.Observe
 	}
-	goOutcomes, err := gotarget.RunTestsWithStageObserver(program, []string{"ard", "test", inputPath}, goTests, failFast, stageObserver, projectInfo)
-	if err != nil {
+	goOutcomes, err := gotarget.RunTestsWithOptions(program, []string{"ard", "test", inputPath}, goTests, gotarget.TestOptions{FailFast: failFast, Race: args.Race, Observer: stageObserver}, projectInfo)
+	// A detected race fails the run as a whole; report the outcomes first so the
+	// race does not hide which tests passed or failed.
+	raceDetected := errors.Is(err, gotarget.ErrDataRaceDetected)
+	if err != nil && !raceDetected {
 		reportCLIError(os.Stderr, err)
 		return false
 	}
@@ -1281,10 +1325,7 @@ func runGoTests(inputPath, filter string, failFast bool) bool {
 			outcomes = append(outcomes, outcome)
 			reportTestOutcome(outcome)
 			if failFast && outcome.status != testPass {
-				reportTestSummary(outcomes)
-				reportCLIError(os.Stderr, fmt.Errorf("tests failed"))
-				testsPassed = false
-				return nil
+				break
 			}
 		}
 
@@ -1293,8 +1334,12 @@ func runGoTests(inputPath, filter string, failFast bool) bool {
 			if outcome.status != testPass {
 				reportCLIError(os.Stderr, fmt.Errorf("tests failed"))
 				testsPassed = false
-				return nil
+				break
 			}
+		}
+		if unattributedRace(raceDetected, goOutcomes) {
+			reportCLIError(os.Stderr, gotarget.ErrDataRaceDetected)
+			testsPassed = false
 		}
 		return nil
 	}); err != nil {
@@ -1582,6 +1627,21 @@ func (t discoveredTest) displayName() string {
 	return fmt.Sprintf("%s::%s", t.displayPath, t.name)
 }
 
+// unattributedRace reports whether the race detector failed the test run
+// without any test being marked as racing, so the outcomes alone would not
+// show the race.
+func unattributedRace(raceDetected bool, outcomes []gotarget.TestOutcome) bool {
+	if !raceDetected {
+		return false
+	}
+	for _, outcome := range outcomes {
+		if outcome.Race {
+			return false
+		}
+	}
+	return true
+}
+
 func reportTestOutcome(outcome testOutcome) {
 	fmt.Printf("%s  %s\n", outcome.status.symbol(), outcome.test.displayName())
 	if outcome.message != "" && outcome.status != testPass {
@@ -1607,10 +1667,10 @@ func reportTestSummary(outcomes []testOutcome) {
 }
 
 func buildGoBinary(inputPath string, outputPath string) (string, error) {
-	return buildGoBinaryWithOptions(inputPath, outputPath, checker.BuildOptions{})
+	return buildGoBinaryWithOptions(inputPath, outputPath, checker.BuildOptions{}, false)
 }
 
-func buildGoBinaryWithOptions(inputPath string, outputPath string, buildOptions checker.BuildOptions) (string, error) {
+func buildGoBinaryWithOptions(inputPath string, outputPath string, buildOptions checker.BuildOptions, race bool) (string, error) {
 	profile := newPipelineProfile("build go")
 	defer profile.Print()
 	var loaded *frontend.LoadResult
@@ -1650,7 +1710,7 @@ func buildGoBinaryWithOptions(inputPath string, outputPath string, buildOptions 
 	}
 	if err := profile.Time("go.build", func() error {
 		var buildErr error
-		builtPath, buildErr = gotarget.BuildProgramWithOptions(program, outputPath, gotarget.BuildOptions{Release: buildOptions.Release}, stageObserver, loaded.ProjectInfo)
+		builtPath, buildErr = gotarget.BuildProgramWithOptions(program, outputPath, gotarget.BuildOptions{Release: buildOptions.Release, Race: race}, stageObserver, loaded.ProjectInfo)
 		return buildErr
 	}); err != nil {
 		return "", err

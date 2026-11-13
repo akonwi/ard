@@ -23,6 +23,9 @@ Run a program with:
 ard run main.ard
 ```
 
+Arguments after the file are passed to the program. `ard run` exits with the
+program's own exit status.
+
 ## Import Syntax
 
 Use `use` at the top of a file:

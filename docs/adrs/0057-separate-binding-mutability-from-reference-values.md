@@ -1370,9 +1370,10 @@ Superseded or clarified:
   deep copies construct them explicitly.
 - Consider whether temporary selectors should materialize fresh projected
   storage.
-- Consider optional concurrency diagnostics or race-tooling integration without
-  restricting legal Go-style reference sharing. Plumbing Go's race detector
-  through the CLI is backlogged as issue #351.
+- Consider optional concurrency diagnostics without restricting legal Go-style
+  reference sharing. Go's race detector is exposed through the advisory, opt-in
+  `--race` flag on `ard run`, `ard test`, and `ard build` (issue #351); its
+  reports name generated Go positions rather than Ard source.
 - Auto-deref at ordinary value destinations was considered and rejected
   (issue #348): Go never dereferences implicitly where a value is expected,
   and the explicit `.@` keeps mutation-contract changes visible at every

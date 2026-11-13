@@ -71,6 +71,34 @@ with at least one write must be ordered through a channel, mutex, atomic
 operation, or another Go-compatible synchronization mechanism. Unsynchronized
 conflicting access is a data race, just as it is in Go.
 
+### Detecting data races
+
+Pass `--race` to `ard run`, `ard test`, or `ard build` to compile with
+[Go's race detector](https://go.dev/doc/articles/race_detector):
+
+```bash
+ard run --race main.ard   # flags for run go before the file
+ard test --race
+ard build main.ard --race
+```
+
+The detector reports races that actually happen while the program runs, so it
+only finds races on the code paths that a run exercises. A report names the
+accessing goroutines with file and line positions in the generated Go under
+`ard-out/go/`, which stays on disk after the run. A program that raced exits
+with status 66, and `ard run --race` exits with that status too. Under
+`ard test --race`, a test that triggers a race fails with `data race detected`.
+A race counts against the test running when the detector reports it, so a
+test should wait for the goroutines it starts; otherwise a race from one test
+can fail a later one. Go's `GORACE` environment variable passes through, for
+example `GORACE=halt_on_error=1` to stop at the first race.
+
+Race-enabled programs run several times slower and use more memory, so `--race`
+is for development and CI rather than release builds. Builds without the flag
+are unchanged. The race detector supports only some platforms and, outside
+macOS, needs cgo (`CGO_ENABLED=1` and a C compiler); Ard reports when it is
+unavailable.
+
 ## Coordinating with channels
 
 A channel is a typed conduit between goroutines. `send` blocks until a value is
