@@ -23,10 +23,10 @@ func Format(input []byte, fileName string) ([]byte, error) {
 		return nil, fmt.Errorf("cannot format invalid Ard source:\n%s", strings.Join(lines, "\n"))
 	}
 
-	removeUnusedImports(result.Program)
+	removedImports := removeUnusedImports(result.Program)
 
 	printer := newPrinter(100)
-	formatted := []byte(ensureFinalNewline(printer.program(result.Program)))
+	formatted := []byte(ensureFinalNewline(printer.program(result.Program, removedImports)))
 	if err := checkFormattedOutputParses(formatted, fileName); err != nil {
 		return nil, err
 	}

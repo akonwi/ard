@@ -20,24 +20,33 @@ func newPrinter(maxLineWidth int) printer {
 	return printer{maxLineWidth: maxLineWidth}
 }
 
-func (p printer) program(program *parse.Program) string {
+// program prints a whole file. removedImports are the unused imports that
+// were dropped; their comments are kept.
+func (p printer) program(program *parse.Program, removedImports []parse.Import) string {
 	if program == nil {
 		return ""
 	}
 
+	header, imports, statements := p.attachImportComments(program, removedImports)
 	lines := make([]string, 0)
-	importLines := p.renderImports(program.Imports)
-	if len(importLines) > 0 {
-		lines = append(lines, importLines...)
+	for index, comment := range header {
+		if index > 0 && comment.Location.Start.Row-header[index-1].Location.Start.Row > 1 {
+			lines = append(lines, "")
+		}
+		lines = append(lines, p.renderComment(comment.Value))
 	}
+	if len(header) > 0 && len(imports) > 0 && imports[0].firstRow()-header[len(header)-1].Location.Start.Row > 1 {
+		lines = append(lines, "")
+	}
+	lines = append(lines, p.renderImports(imports)...)
 
-	if len(program.Statements) > 0 {
+	if len(statements) > 0 {
 		if len(lines) > 0 {
 			lines = append(lines, "")
 		}
 		var previous parse.Statement
 		haveRendered := false
-		for _, statement := range program.Statements {
+		for _, statement := range statements {
 			if statement == nil {
 				continue
 			}
@@ -59,18 +68,100 @@ func (p printer) program(program *parse.Program) string {
 	return strings.Join(lines, "\n")
 }
 
-func (p printer) renderImports(imports []parse.Import) []string {
+// importEntry is an import with the comments that travel with it when
+// imports are sorted. A removed import keeps only its comments.
+type importEntry struct {
+	item     parse.Import
+	removed  bool
+	leading  []parse.Comment
+	trailing *parse.Comment
+}
+
+// firstRow is the source row of the entry's first line.
+func (entry importEntry) firstRow() int {
+	if len(entry.leading) > 0 {
+		return entry.leading[0].Location.Start.Row
+	}
+	return entry.item.Location.Start.Row
+}
+
+// attachImportComments splits the comments the parser read among the imports
+// out of the program's statements (#583). Comments above the first import
+// are the file header and stay at the top. A comment on a `use` line stays on
+// it, and a comment between imports goes with the import below it, so each
+// moves with its import when imports are sorted. Comments after the last
+// import stay with the statements that follow.
+func (p printer) attachImportComments(program *parse.Program, removedImports []parse.Import) (header []parse.Comment, imports []importEntry, statements []parse.Statement) {
+	entries := make([]importEntry, 0, len(program.Imports)+len(removedImports))
+	for _, item := range program.Imports {
+		entries = append(entries, importEntry{item: item})
+	}
+	for _, item := range removedImports {
+		entries = append(entries, importEntry{item: item, removed: true})
+	}
+	sort.SliceStable(entries, func(i, j int) bool {
+		return entries[i].item.Location.Start.Row < entries[j].item.Location.Start.Row
+	})
+
+	statements = program.Statements
+	if len(entries) == 0 {
+		return nil, nil, statements
+	}
+	firstRow := entries[0].item.Location.Start.Row
+	lastRow := entries[len(entries)-1].item.Location.Start.Row
+	for len(statements) > 0 {
+		comment, ok := statements[0].(*parse.Comment)
+		if !ok || comment.Location.Start.Row > lastRow {
+			break
+		}
+		row := comment.Location.Start.Row
+		if row < firstRow {
+			header = append(header, *comment)
+			statements = statements[1:]
+			continue
+		}
+		placed := false
+		for index := range entries {
+			entry := &entries[index]
+			if comment.Trailing && entry.item.Location.Start.Row == row && entry.trailing == nil {
+				entry.trailing = comment
+				placed = true
+				break
+			}
+			if entry.item.Location.Start.Row > row {
+				entry.leading = append(entry.leading, *comment)
+				placed = true
+				break
+			}
+		}
+		if !placed {
+			// Leave it, and the comments after it, with the statements.
+			break
+		}
+		statements = statements[1:]
+	}
+
+	for _, entry := range entries {
+		if !entry.removed || len(entry.leading) > 0 || entry.trailing != nil {
+			imports = append(imports, entry)
+		}
+	}
+	return header, imports, statements
+}
+
+func (p printer) renderImports(imports []importEntry) []string {
 	if len(imports) == 0 {
 		return nil
 	}
 
-	groups := map[int][]parse.Import{0: {}, 1: {}, 2: {}}
-	for _, item := range imports {
-		groups[importGroup(item)] = append(groups[importGroup(item)], item)
+	groups := map[int][]importEntry{0: {}, 1: {}, 2: {}}
+	for _, entry := range imports {
+		group := importGroup(entry.item)
+		groups[group] = append(groups[group], entry)
 	}
 	for _, key := range []int{0, 1, 2} {
-		sort.Slice(groups[key], func(i, j int) bool {
-			return groups[key][i].Path < groups[key][j].Path
+		sort.SliceStable(groups[key], func(i, j int) bool {
+			return groups[key][i].item.Path < groups[key][j].item.Path
 		})
 	}
 
@@ -82,8 +173,19 @@ func (p printer) renderImports(imports []parse.Import) []string {
 		if len(lines) > 0 {
 			lines = append(lines, "")
 		}
-		for _, item := range groups[key] {
-			lines = append(lines, p.renderImport(item))
+		for _, entry := range groups[key] {
+			for _, comment := range entry.leading {
+				lines = append(lines, p.renderComment(comment.Value))
+			}
+			switch {
+			case !entry.removed && entry.trailing != nil:
+				lines = append(lines, p.renderImport(entry.item)+" "+p.renderComment(entry.trailing.Value))
+			case !entry.removed:
+				lines = append(lines, p.renderImport(entry.item))
+			case entry.trailing != nil:
+				// The import was unused and removed; its comment stays.
+				lines = append(lines, p.renderComment(entry.trailing.Value))
+			}
 		}
 	}
 

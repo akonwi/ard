@@ -6,15 +6,17 @@ import (
 	"github.com/akonwi/ard/parse"
 )
 
-func removeUnusedImports(program *parse.Program) {
+// removeUnusedImports drops the imports the program does not use and
+// returns them, so the printer can keep their comments.
+func removeUnusedImports(program *parse.Program) []parse.Import {
 	if program == nil || len(program.Imports) == 0 {
-		return
+		return nil
 	}
 	used := map[string]bool{}
 	for _, stmt := range program.Statements {
 		collectImportUsesInStatement(stmt, used)
 	}
-	imports := program.Imports[:0]
+	var imports, removed []parse.Import
 	for _, imp := range program.Imports {
 		name := imp.Name
 		if name == "" {
@@ -22,9 +24,12 @@ func removeUnusedImports(program *parse.Program) {
 		}
 		if used[name] {
 			imports = append(imports, imp)
+		} else {
+			removed = append(removed, imp)
 		}
 	}
 	program.Imports = imports
+	return removed
 }
 
 func collectImportUsesInType(t parse.DeclaredType, used map[string]bool) {
