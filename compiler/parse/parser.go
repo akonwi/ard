@@ -1498,7 +1498,10 @@ func (p *parser) implBlock() *ImplBlock {
 	}
 	p.advance()
 
-	p.newLineAfterOpenBrace()
+	// An empty body is `{}` on one line, as the formatter prints it.
+	if !p.check(right_brace) {
+		p.newLineAfterOpenBrace()
+	}
 
 	for !p.match(right_brace) {
 		// Parse and collect comments
@@ -1563,7 +1566,10 @@ func (p *parser) traitDef(private bool) *TraitDefinition {
 	}
 	p.advance()
 
-	p.newLineAfterOpenBrace()
+	// An empty body is `{}` on one line, as the formatter prints it.
+	if !p.check(right_brace) {
+		p.newLineAfterOpenBrace()
+	}
 
 	for !p.match(right_brace) {
 		// Parse and collect comments
@@ -1785,8 +1791,9 @@ func (p *parser) traitImpl() (*TraitImplementation, error) {
 		return traitImpl, nil
 	}
 
-	// A comment may follow the '{'; the loop collects it.
-	if !p.check(comment) && !p.match(new_line) {
+	// A comment may follow the '{'; the loop collects it. An empty body is
+	// `{}` on one line, as the formatter prints it.
+	if !p.check(comment) && !p.check(right_brace) && !p.match(new_line) {
 		p.addError(p.peek(), "Expected new line")
 		// Continue parsing block contents even without newline
 	}

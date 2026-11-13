@@ -28,6 +28,11 @@ func TestImplBlocks(t *testing.T) {
 			wantErrs: []string{},
 		},
 		{
+			name:     "Valid empty impl block on one line",
+			input:    "impl Person {}",
+			wantErrs: []string{},
+		},
+		{
 			name:     "Valid impl block with receiver alias",
 			input:    "impl Person as p {\n}",
 			wantErrs: []string{},
@@ -66,6 +71,11 @@ func TestImplBlocks(t *testing.T) {
 		{
 			name:     "Valid trait implementation",
 			input:    "impl Display for Person {\n}",
+			wantErrs: []string{},
+		},
+		{
+			name:     "Valid empty trait implementation on one line",
+			input:    "impl Display for Person {}",
 			wantErrs: []string{},
 		},
 		{
