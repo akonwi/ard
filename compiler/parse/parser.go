@@ -41,6 +41,11 @@ type parser struct {
 	// it can't leak through anonymous-function bodies. (#285)
 	structOperandAllowed bool
 	inCallTypeArguments  bool
+	// detachedComments are comments read where the syntax tree has no place
+	// for them, such as inside grouping parentheses. The statement list
+	// being parsed puts them above the statement that contained them, so
+	// they are never lost.
+	detachedComments []Comment
 }
 
 func Parse(source []byte, fileName string) ParseResult {
@@ -252,14 +257,19 @@ func (p *parser) parse() (*Program, error) {
 		if p.match(new_line) {
 			continue
 		}
+		mark := len(p.detachedComments)
 		stmt, err := p.parseStatement()
 		if err != nil {
 			return nil, err
 		}
+		program.Statements = p.placeDetachedComments(program.Statements, mark, stmt)
 		if stmt != nil {
 			program.Statements = append(program.Statements, stmt)
 		}
 	}
+	// Keep any comment no statement list placed, such as one read before a
+	// parse error ended a statement early.
+	program.Statements = p.placeDetachedComments(program.Statements, 0, nil)
 
 	return program, nil
 }
@@ -805,10 +815,12 @@ func (p *parser) whileLoop() (Statement, error) {
 
 	statements := []Statement{}
 	for !p.check(right_brace) && !p.isAtEnd() {
+		mark := len(p.detachedComments)
 		stmt, err := p.parseStatement()
 		if err != nil {
 			return nil, err
 		}
+		statements = p.placeDetachedComments(statements, mark, stmt)
 		if stmt != nil {
 			statements = append(statements, stmt)
 		}
@@ -1831,10 +1843,12 @@ func (p *parser) blockStatements() ([]Statement, error) {
 			break
 		}
 
+		mark := len(p.detachedComments)
 		stmt, err := p.parseStatement()
 		if err != nil {
 			return nil, err
 		}
+		statements = p.placeDetachedComments(statements, mark, stmt)
 		statements = append(statements, stmt)
 	}
 
@@ -4382,6 +4396,8 @@ func (p *parser) primary() (Expression, error) {
 		if p.startsTupleRest() {
 			return p.finishTupleLiteral(openParen, expr, leading)
 		}
+		// Grouping parentheses have no node to hold comments.
+		p.detachedComments = append(p.detachedComments, leading...)
 
 		if !p.check(right_paren) {
 			p.addError(p.peek(), "Expected ')' after expression")
@@ -4925,6 +4941,30 @@ func (p *parser) closesAfterLayout(closer kind) bool {
 		i++
 	}
 	return p.tokens[i].kind == closer || p.tokens[i].kind == eof
+}
+
+// placeDetachedComments appends to statements, as statements of their own,
+// the comments detached while parsing stmt: those from index mark on, since
+// a statement list nested in stmt, such as a closure body, places its own
+// first. They take stmt's start position, so a formatter prints them on the
+// lines directly above it.
+func (p *parser) placeDetachedComments(statements []Statement, mark int, stmt Statement) []Statement {
+	if len(p.detachedComments) <= mark {
+		return statements
+	}
+	var at Point
+	if stmt != nil {
+		at = stmt.GetLocation().Start
+	}
+	for _, comment := range p.detachedComments[mark:] {
+		comment.Trailing = false
+		if at.Row > 0 {
+			comment.Location = Location{Start: at, End: at}
+		}
+		statements = append(statements, &comment)
+	}
+	p.detachedComments = p.detachedComments[:mark]
+	return statements
 }
 
 // newLineAfterOpenBrace consumes the new line after the `{` of a construct

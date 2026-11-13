@@ -124,3 +124,72 @@ let z = 3 // three
 		},
 	})
 }
+
+// A comment inside grouping parentheses has no place in the expression once
+// the parentheses are reformatted, so it moves above the statement that
+// contains it. It used to be deleted (#583).
+func TestFormatMovesCommentsInGroupingParenthesesAboveTheStatement(t *testing.T) {
+	assertTrailingCommentCases(t, []trailingCommentCase{
+		{
+			name: "top-level statement",
+			input: `let a = 1
+let x = ( // why
+  1 + 2) * 3
+`,
+			want: `let a = 1
+// why
+let x = (1 + 2) * 3
+`,
+		},
+		{
+			name: "statement in a block",
+			input: `fn main() {
+  let a = 1
+  let x = (
+    // why
+    1 + 2) * 3
+}
+`,
+			want: `fn main() {
+  let a = 1
+  // why
+  let x = (1 + 2) * 3
+}
+`,
+		},
+		{
+			name: "if condition stays above the if, not inside its body",
+			input: `fn main() {
+  if ( // why
+    true) {
+    print("yes")
+  }
+}
+`,
+			want: `fn main() {
+  // why
+  if true {
+    print("yes")
+  }
+}
+`,
+		},
+		{
+			name: "statement in a closure body",
+			input: `fn main() {
+  list.each(fn(item) {
+    print(( // why
+      item))
+  })
+}
+`,
+			want: `fn main() {
+  list.each(fn(item) {
+    // why
+    print(item)
+  })
+}
+`,
+		},
+	})
+}
