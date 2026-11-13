@@ -4133,7 +4133,7 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		if functionDef, ok := e.Type().(*checker.FunctionDef); ok {
 			argABI = lowerABIParamModes(functionDef.Parameters, len(functionDef.Parameters))
 		}
-		return &Expr{Kind: ExprForeignValue, Type: typeID, Payload: &ForeignExprPayload{Target: e.Target, Namespace: e.Namespace, Qualifier: e.Qualifier, Symbol: e.Symbol, ResultShape: lowerForeignResultShape(e.ForeignResultShape), ArgABI: argABI}}, nil
+		return &Expr{Kind: ExprForeignValue, Type: typeID, Payload: &ForeignExprPayload{Target: e.Target, Namespace: e.Namespace, Qualifier: e.Qualifier, Symbol: e.Symbol, ResultShape: lowerForeignResultShape(e.ForeignResultShape), ArgABI: argABI, Variable: e.Assignable}}, nil
 	case *checker.InterfaceConversion:
 		value, err := fl.lowerExpr(e.Value)
 		if err != nil {

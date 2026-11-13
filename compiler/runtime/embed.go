@@ -5,7 +5,7 @@ import "embed"
 // SourceFiles embeds the runtime support files copied into generated programs.
 // Keep SourceFileNames in sync with this directive.
 //
-//go:embed maybe.go result.go unsafe.go convert.go
+//go:embed maybe.go result.go unsafe.go convert.go order.go
 var SourceFiles embed.FS
 
 var SourceFileNames = []string{
@@ -13,4 +13,5 @@ var SourceFileNames = []string{
 	"result.go",
 	"unsafe.go",
 	"convert.go",
+	"order.go",
 }
