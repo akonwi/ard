@@ -127,7 +127,8 @@ and is treated as a read unless it is a call.
 
 This decision orders the operands that are evaluated. It does not change
 which operands are evaluated: the right side of `and` and `or` is still
-evaluated only when needed.
+evaluated only when needed, as is the argument of `or` and `expect` on Maybe
+and Result (ADR 0079).
 
 New lowering code that combines operands must use `sequenceOperands` (or
 `sequenceOperandPair` and `sequenceOperandTriple` for two or three value

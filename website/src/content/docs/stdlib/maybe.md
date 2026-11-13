@@ -80,6 +80,12 @@ let val: Int? = Maybe::new()
 let result = val.or(0)  // 0
 ```
 
+The default is evaluated only when the Maybe is empty. When a value is present, the default expression does not run, so an expensive or side-effecting default costs nothing on that path:
+
+```ard
+let name = cached_name.or(load_name_from_disk()) // reads the disk only when cached_name is empty
+```
+
 ### `fn expect(message: Str) $T`
 
 Get the value from the Maybe, or panic with a message if it's empty.
@@ -89,6 +95,8 @@ Get the value from the Maybe, or panic with a message if it's empty.
 let val: Int? = Maybe::new(42)
 let result = val.expect("expected a value")  // 42
 ```
+
+Like the default of `or`, the message is evaluated only when the Maybe is empty.
 
 ### `fn map(with: fn($T) $U) $U?`
 
