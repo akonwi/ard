@@ -74,8 +74,12 @@ mut count, _ = totals()
 ```
 
 - The names are a comma-separated list with no parentheses, matching
-  `for key, value in map` and Go's `a, b := f()`. `let (a, b) = value` is a
-  parse error that shows the form to write.
+  `for key, value in map` and Go's `a, b := f()`.
+- Parentheses around the names (`let (a, b) = value`) and a comma after the
+  last name (`let a, b, = value`) are accepted as redundant syntax. The
+  checker reports each with a `redundant_destructuring_syntax` warning and
+  `ard format` removes them, so there is one canonical form without
+  rejecting a spelling the formatter can fix.
 - The right side is one tuple value. Go's `a, b := 1, 2` has no counterpart;
   `let a, b = 1, 2` is a parse error that says to write `(1, 2)`.
 - The number of names must match the tuple's element count. `_` discards an

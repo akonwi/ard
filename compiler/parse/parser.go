@@ -639,33 +639,66 @@ func (p *parser) parseVariableDef(terminators []kind) (Statement, error) {
 	}, nil
 }
 
+// punctuationLocation is the one-column span of a single-character token,
+// which carries no text for getLocation to measure.
+func punctuationLocation(t *token) Location {
+	at := Point{Row: t.line, Col: t.column}
+	return Location{Start: at, End: at}
+}
+
 // parseTupleDestructure parses `let a, b = value` after the `let` or `mut`
 // keyword. Each position takes a plain name or `_`; nested patterns and type
-// annotations are not part of the syntax. A malformed header is reported once
-// and the rest of the statement is skipped.
+// annotations are not part of the syntax. Parentheses around the names and a
+// comma after the last name are accepted and recorded as redundant. A
+// malformed header is reported once and the rest of the statement is skipped.
 func (p *parser) parseTupleDestructure(start *token, terminators []kind) (Statement, error) {
 	fail := func(at *token, message string) (Statement, error) {
 		p.addError(at, message)
 		p.skipRestOfStatement(terminators)
 		return nil, nil
 	}
-	if p.check(left_paren) {
-		return fail(p.peek(), fmt.Sprintf("Tuple destructuring does not use parentheses: write `%s a, b = value`", string(start.kind)))
+	stmt := &TupleDestructure{Mutable: start.kind == mut}
+	var open *token
+	if p.match(left_paren) {
+		open = p.previous()
 	}
-	names := []TupleBinding{}
+	endsNames := func() bool {
+		if open != nil {
+			return p.check(right_paren)
+		}
+		return p.check(equal)
+	}
 	for {
 		current := p.peek()
 		if current.kind != identifier && !p.isAllowedIdentifierKeyword(current.kind) {
 			return fail(current, "Expected a name in tuple destructuring")
 		}
 		name := p.consumeVariableName("Expected a name in tuple destructuring")
-		names = append(names, TupleBinding{Name: name.text, Location: name.getLocation()})
+		stmt.Names = append(stmt.Names, TupleBinding{Name: name.text, Location: name.getLocation()})
 		if p.check(colon) {
 			return fail(p.peek(), tupleDestructureAnnotationError)
 		}
 		if !p.match(comma) {
 			break
 		}
+		if endsNames() {
+			stmt.TrailingComma = true
+			stmt.TrailingCommaLocation = punctuationLocation(p.previous())
+			break
+		}
+	}
+	if open != nil {
+		if !p.match(right_paren) {
+			return fail(p.peek(), "Expected ')' after tuple destructuring names")
+		}
+		stmt.Parenthesized = true
+		stmt.ParensLocation = Location{Start: punctuationLocation(open).Start, End: punctuationLocation(p.previous()).End}
+	}
+	if len(stmt.Names) < 2 {
+		return fail(p.previous(), "Tuple destructuring needs at least two names")
+	}
+	if p.check(colon) {
+		return fail(p.peek(), tupleDestructureAnnotationError)
 	}
 	if !p.match(equal) {
 		return fail(p.peek(), "Expected '=' after tuple destructuring names")
@@ -679,15 +712,12 @@ func (p *parser) parseTupleDestructure(start *token, terminators []kind) (Statem
 		// tuple value.
 		return fail(p.peek(), fmt.Sprintf("Tuple destructuring takes one tuple value: wrap the values in parentheses, as in `%s a, b = (1, 2)`", string(start.kind)))
 	}
-	return &TupleDestructure{
-		Mutable: start.kind == mut,
-		Names:   names,
-		Value:   value,
-		Location: Location{
-			Start: Point{Row: start.line, Col: start.column},
-			End:   value.GetLocation().End,
-		},
-	}, nil
+	stmt.Value = value
+	stmt.Location = Location{
+		Start: Point{Row: start.line, Col: start.column},
+		End:   value.GetLocation().End,
+	}
+	return stmt, nil
 }
 
 func (p *parser) ifStatement() (Statement, error) {

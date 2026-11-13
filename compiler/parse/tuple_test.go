@@ -194,23 +194,70 @@ func TestTupleDestructuring(t *testing.T) {
 			}},
 		},
 		{
-			name:     "parenthesized names",
-			input:    `let (a, b) = pair`,
-			wantErrs: []string{"Tuple destructuring does not use parentheses: write `let a, b = value`"},
+			// Redundant syntax parses and is recorded so the checker can warn
+			// and the formatter can remove it.
+			name:  "parenthesized names are recorded",
+			input: `mut (a, b) = pair`,
+			output: Program{Imports: []Import{}, Statements: []Statement{
+				&TupleDestructure{
+					Mutable:       true,
+					Parenthesized: true,
+					Names:         []TupleBinding{{Name: "a"}, {Name: "b"}},
+					Value:         &Identifier{Name: "pair"},
+				},
+			}},
 		},
 		{
-			name:     "parenthesized names after mut",
-			input:    `mut (a, b) = pair`,
-			wantErrs: []string{"Tuple destructuring does not use parentheses: write `mut a, b = value`"},
+			name:  "trailing comma is recorded",
+			input: `let a, b, = pair`,
+			output: Program{Imports: []Import{}, Statements: []Statement{
+				&TupleDestructure{
+					TrailingComma: true,
+					Names:         []TupleBinding{{Name: "a"}, {Name: "b"}},
+					Value:         &Identifier{Name: "pair"},
+				},
+			}},
 		},
 		{
-			name:     "trailing comma",
-			input:    `let a, b, = pair`,
-			wantErrs: []string{"Expected a name in tuple destructuring"},
+			name:  "parenthesized names with a trailing comma",
+			input: `let (a, _,) = pair`,
+			output: Program{Imports: []Import{}, Statements: []Statement{
+				&TupleDestructure{
+					Parenthesized: true,
+					TrailingComma: true,
+					Names:         []TupleBinding{{Name: "a"}, {Name: "_"}},
+					Value:         &Identifier{Name: "pair"},
+				},
+			}},
+		},
+		{
+			name:     "unclosed parenthesized names",
+			input:    `let (a, b = pair`,
+			wantErrs: []string{"Expected ')' after tuple destructuring names"},
+		},
+		{
+			name:     "single parenthesized name",
+			input:    `let (a) = pair`,
+			wantErrs: []string{"Tuple destructuring needs at least two names"},
+		},
+		{
+			name:     "single name with a trailing comma",
+			input:    `let a, = pair`,
+			wantErrs: []string{"Tuple destructuring needs at least two names"},
+		},
+		{
+			name:     "type annotation after parenthesized names",
+			input:    `let (a, b): (Int, Str) = pair`,
+			wantErrs: []string{"Tuple destructuring cannot have a type annotation"},
 		},
 		{
 			name:     "nested pattern",
 			input:    `let a, (b, c) = nested`,
+			wantErrs: []string{"Expected a name in tuple destructuring"},
+		},
+		{
+			name:     "nested pattern in parentheses",
+			input:    `let ((a, b), c) = nested`,
 			wantErrs: []string{"Expected a name in tuple destructuring"},
 		},
 		{

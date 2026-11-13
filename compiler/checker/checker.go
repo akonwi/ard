@@ -5192,6 +5192,12 @@ func (c *Checker) checkTuple(expected *Tuple, expr *parse.TupleLiteral) *TupleLi
 // tuple with one element per name, and each name other than `_` is bound to
 // its element.
 func (c *Checker) checkTupleDestructure(s *parse.TupleDestructure) *Statement {
+	if s.Parenthesized {
+		c.addDiagnostic(redundantDestructuringSyntaxDiagnostic{Span: c.sourceSpan(s.ParensLocation)}.build())
+	}
+	if s.TrailingComma {
+		c.addDiagnostic(redundantDestructuringSyntaxDiagnostic{Span: c.sourceSpan(s.TrailingCommaLocation), TrailingComma: true}.build())
+	}
 	bindAll := func(types []Type) {
 		for i, name := range s.Names {
 			if name.Name == "_" {

@@ -372,11 +372,24 @@ type TupleBinding struct {
 
 // TupleDestructure binds each element of a tuple value to its own name:
 // `let a, b = pair`. Every name shares the statement's `let` or `mut`.
+//
+// The names may be wrapped in parentheses or followed by a comma. Both are
+// redundant: they parse so the checker can warn and the formatter can remove
+// them.
 type TupleDestructure struct {
 	Location
 	Names   []TupleBinding
 	Mutable bool
 	Value   Expression
+
+	// Parenthesized records `let (a, b) = pair`; ParensLocation spans the
+	// parentheses.
+	Parenthesized  bool
+	ParensLocation Location
+	// TrailingComma records a comma after the last name;
+	// TrailingCommaLocation is that comma.
+	TrailingComma         bool
+	TrailingCommaLocation Location
 }
 
 func (t TupleDestructure) String() string {

@@ -156,6 +156,7 @@ const (
 	DiagnosticCodeInvalidConversion             DiagnosticCode = "invalid_conversion"
 	DiagnosticCodeRedundantNullableVoid         DiagnosticCode = "redundant_nullable_void"
 	DiagnosticCodeInvalidTupleDestructuring     DiagnosticCode = "invalid_tuple_destructuring"
+	DiagnosticCodeRedundantDestructuringSyntax  DiagnosticCode = "redundant_destructuring_syntax"
 )
 
 type SourceSpan struct {
@@ -2840,6 +2841,26 @@ func (d tupleDestructureArityDiagnostic) build() Diagnostic {
 		DiagnosticLabel{Span: d.ValueSpan, Message: fmt.Sprintf("this tuple has %d elements", len(d.Tuple.Elements()))},
 	)
 	diagnostic.Code = DiagnosticCodeInvalidTupleDestructuring
+	return diagnostic
+}
+
+// redundantDestructuringSyntaxDiagnostic reports syntax that tuple
+// destructuring accepts but does not need: parentheses around the names, or a
+// comma after the last one. `ard format` removes both.
+type redundantDestructuringSyntaxDiagnostic struct {
+	Span          SourceSpan
+	TrailingComma bool
+}
+
+func (d redundantDestructuringSyntaxDiagnostic) build() Diagnostic {
+	legacy, title, label := "Redundant parentheses in tuple destructuring", "Redundant parentheses", "write the names without parentheses"
+	if d.TrailingComma {
+		legacy, title, label = "Redundant trailing comma in tuple destructuring", "Redundant trailing comma", "remove this comma"
+	}
+	diagnostic := newLabeledDiagnostic(Warn, legacy, title,
+		"Tuple destructuring is written `let a, b = value`. `ard format` rewrites it.",
+		DiagnosticLabel{Span: d.Span, Message: label})
+	diagnostic.Code = DiagnosticCodeRedundantDestructuringSyntax
 	return diagnostic
 }
 

@@ -396,3 +396,72 @@ func TestTupleDestructuringDiagnosticsAreStructured(t *testing.T) {
 		})
 	}
 }
+
+// Parentheses around destructured names and a comma after the last name are
+// accepted, since the formatter removes them, but each is reported.
+func TestRedundantTupleDestructuringSyntaxWarns(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		titles []string
+	}{
+		{
+			name:   "parentheses",
+			source: "fn main() {\n  let (a, b) = (1, 2)\n}\n",
+			titles: []string{"Redundant parentheses"},
+		},
+		{
+			name:   "trailing comma",
+			source: "fn main() {\n  mut a, b, = (1, 2)\n}\n",
+			titles: []string{"Redundant trailing comma"},
+		},
+		{
+			name:   "both",
+			source: "fn main() {\n  let (a, b,) = (1, 2)\n}\n",
+			titles: []string{"Redundant parentheses", "Redundant trailing comma"},
+		},
+		{
+			name:   "canonical form",
+			source: "fn main() {\n  let a, b = (1, 2)\n}\n",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := parse.Parse([]byte(tt.source), "main.ard")
+			if len(result.Errors) > 0 {
+				t.Fatalf("parse errors: %v", result.Errors)
+			}
+			c := checker.New("main.ard", result.Program, nil)
+			c.Check()
+			if c.HasErrors() {
+				t.Fatalf("warning made checker fail: %#v", c.Diagnostics())
+			}
+			diagnostics := c.Diagnostics()
+			if len(diagnostics) != len(tt.titles) {
+				t.Fatalf("diagnostics = %#v, want %d warnings", diagnostics, len(tt.titles))
+			}
+			for i, diagnostic := range diagnostics {
+				if diagnostic.Kind != checker.Warn || diagnostic.Code != checker.DiagnosticCodeRedundantDestructuringSyntax || diagnostic.Title != tt.titles[i] {
+					t.Fatalf("diagnostic %d = %#v, want warning %q", i, diagnostic, tt.titles[i])
+				}
+			}
+		})
+	}
+}
+
+func TestRedundantTupleDestructuringSyntaxWarningSpans(t *testing.T) {
+	result := parse.Parse([]byte("fn main() {\n  let (a, b,) = (1, 2)\n}\n"), "main.ard")
+	c := checker.New("main.ard", result.Program, nil)
+	c.Check()
+	diagnostics := c.Diagnostics()
+	if len(diagnostics) != 2 {
+		t.Fatalf("diagnostics = %#v, want two warnings", diagnostics)
+	}
+	parens, comma := diagnostics[0].Primary.Span.Location, diagnostics[1].Primary.Span.Location
+	if parens.Start != (parse.Point{Row: 2, Col: 7}) || parens.End != (parse.Point{Row: 2, Col: 13}) {
+		t.Fatalf("parentheses span = %v", parens)
+	}
+	if comma.Start != (parse.Point{Row: 2, Col: 12}) || comma.End != comma.Start {
+		t.Fatalf("trailing comma span = %v", comma)
+	}
+}

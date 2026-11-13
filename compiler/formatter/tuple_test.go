@@ -58,6 +58,25 @@ use_pair((1,"a"))
 	assertDerefFormat(t, input, want)
 }
 
+// Parentheses around destructured names and a comma after the last name parse
+// with a warning; formatting removes them.
+func TestFormatRemovesRedundantDestructuringSyntax(t *testing.T) {
+	input := `fn main() {
+  let (number, text) = pair
+  mut (count, _, rest,) = triple()
+  let low, high, = bounds()
+}
+`
+	want := `fn main() {
+  let number, text = pair
+  mut count, _, rest = triple()
+  let low, high = bounds()
+}
+`
+
+	assertDerefFormat(t, input, want)
+}
+
 func TestFormatBreaksLongTupleLiterals(t *testing.T) {
 	input := `fn main() {
   let value = (first_long_identifier_name, second_long_identifier_name, third_long_identifier_name, fourth_long_identifier_name)
