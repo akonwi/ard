@@ -6267,17 +6267,17 @@ func (l *lowerer) lowerMaybeExpect(fn air.Function, expr air.Expr) (loweredExpr,
 		return loweredExpr{}, err
 	}
 	resultExpr := l.ident(resultTemp)
-	stmts, err := l.sequenceOperandPair(&target, expr.Target, &message, expr.Args[0].Type)
-	if err != nil {
-		return loweredExpr{}, err
-	}
+	// The target is evaluated into resultTemp before the branch; the message
+	// is evaluated only when the value is absent (ADR 0079).
+	stmts := target.stmts
 	stmts = append(stmts, resultDecls...)
 	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{resultExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{target.expr}})
+	panicBody := lazyOperandBody(message, &ast.ExprStmt{X: &ast.CallExpr{Fun: l.ident("panic"), Args: []ast.Expr{message.expr}}})
 	if l.isVoidType(expr.Type) {
 		stmts = append(stmts, &ast.IfStmt{
 			Cond: l.maybeIsSomeExpr(resultExpr),
 			Body: &ast.BlockStmt{},
-			Else: &ast.BlockStmt{List: []ast.Stmt{&ast.ExprStmt{X: &ast.CallExpr{Fun: l.ident("panic"), Args: []ast.Expr{message.expr}}}}},
+			Else: &ast.BlockStmt{List: panicBody},
 		})
 		return loweredExpr{stmts: stmts, expr: l.ident("nil")}, nil
 	}
@@ -6291,7 +6291,7 @@ func (l *lowerer) lowerMaybeExpect(fn air.Function, expr air.Expr) (loweredExpr,
 	stmts = append(stmts, &ast.IfStmt{
 		Cond: l.maybeIsSomeExpr(resultExpr),
 		Body: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{l.ident(temp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{l.maybeValueExpr(resultExpr)}}}},
-		Else: &ast.BlockStmt{List: []ast.Stmt{&ast.ExprStmt{X: &ast.CallExpr{Fun: l.ident("panic"), Args: []ast.Expr{message.expr}}}}},
+		Else: &ast.BlockStmt{List: panicBody},
 	})
 	return loweredExpr{stmts: stmts, expr: l.ident(temp)}, nil
 }
@@ -6343,22 +6343,20 @@ func (l *lowerer) lowerMaybeOr(fn air.Function, expr air.Expr) (loweredExpr, err
 		return loweredExpr{}, err
 	}
 	resultExpr := l.ident(resultTemp)
-	stmts, err := l.sequenceOperandPair(&target, expr.Target, &defaultValue, expr.Type)
-	if err != nil {
-		return loweredExpr{}, err
+	// The target is evaluated into targetTemp before the branch; the default
+	// is evaluated only when the value is absent (ADR 0079).
+	if l.isVoidType(expr.Type) || isVoidExpr(defaultValue.expr) {
+		defaultValue = l.materializeVoidValue(defaultValue)
 	}
-	defaultExpr := defaultValue.expr
-	if l.isVoidType(expr.Type) || isVoidExpr(defaultExpr) {
-		stmts = l.appendVoidValueEval(stmts, defaultExpr)
-		defaultExpr = l.voidValueExpr()
-	}
+	defaultBody := lazyOperandBody(defaultValue, &ast.AssignStmt{Lhs: []ast.Expr{resultExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{defaultValue.expr}})
+	stmts := target.stmts
 	stmts = append(stmts, targetDecls...)
 	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{targetExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{target.expr}})
 	stmts = append(stmts, resultDecls...)
 	stmts = append(stmts, &ast.IfStmt{
 		Cond: l.maybeIsSomeExpr(targetExpr),
 		Body: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{resultExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{l.maybeValueExpr(targetExpr)}}}},
-		Else: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{resultExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{defaultExpr}}}},
+		Else: &ast.BlockStmt{List: defaultBody},
 	})
 	return loweredExpr{stmts: stmts, expr: resultExpr}, nil
 }
@@ -6387,22 +6385,20 @@ func (l *lowerer) lowerResultOr(fn air.Function, expr air.Expr) (loweredExpr, er
 		return loweredExpr{}, err
 	}
 	resultExpr := l.ident(resultTemp)
-	stmts, err := l.sequenceOperandPair(&target, expr.Target, &defaultValue, expr.Type)
-	if err != nil {
-		return loweredExpr{}, err
+	// The target is evaluated into targetTemp before the branch; the default
+	// is evaluated only when the value is absent (ADR 0079).
+	if l.isVoidType(expr.Type) || isVoidExpr(defaultValue.expr) {
+		defaultValue = l.materializeVoidValue(defaultValue)
 	}
-	defaultExpr := defaultValue.expr
-	if l.isVoidType(expr.Type) || isVoidExpr(defaultExpr) {
-		stmts = l.appendVoidValueEval(stmts, defaultExpr)
-		defaultExpr = l.voidValueExpr()
-	}
+	defaultBody := lazyOperandBody(defaultValue, &ast.AssignStmt{Lhs: []ast.Expr{resultExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{defaultValue.expr}})
+	stmts := target.stmts
 	stmts = append(stmts, targetDecls...)
 	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{targetExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{target.expr}})
 	stmts = append(stmts, resultDecls...)
 	stmts = append(stmts, &ast.IfStmt{
 		Cond: &ast.SelectorExpr{X: targetExpr, Sel: l.ident("Ok")},
 		Body: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{resultExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.SelectorExpr{X: targetExpr, Sel: l.ident("Value")}}}}},
-		Else: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{resultExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{defaultExpr}}}},
+		Else: &ast.BlockStmt{List: defaultBody},
 	})
 	return loweredExpr{stmts: stmts, expr: resultExpr}, nil
 }
@@ -6937,17 +6933,17 @@ func (l *lowerer) lowerResultExpect(fn air.Function, expr air.Expr) (loweredExpr
 	}
 	resultExpr := l.ident(resultTemp)
 	panicMsg := &ast.BinaryExpr{X: message.expr, Op: token.ADD, Y: &ast.BinaryExpr{X: &ast.BasicLit{Kind: token.STRING, Value: `": "`}, Op: token.ADD, Y: &ast.CallExpr{Fun: l.qualified("fmt", "fmt", "Sprint"), Args: []ast.Expr{&ast.SelectorExpr{X: resultExpr, Sel: l.ident("Err")}}}}}
-	stmts, err := l.sequenceOperandPair(&target, expr.Target, &message, expr.Args[0].Type)
-	if err != nil {
-		return loweredExpr{}, err
-	}
+	// The target is evaluated into resultTemp before the branch; the message
+	// is evaluated only when the value is an error (ADR 0079).
+	panicBody := lazyOperandBody(message, &ast.ExprStmt{X: &ast.CallExpr{Fun: l.ident("panic"), Args: []ast.Expr{panicMsg}}})
+	stmts := target.stmts
 	stmts = append(stmts, resultDecls...)
 	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{resultExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{target.expr}})
 	if l.isVoidType(expr.Type) {
 		stmts = append(stmts, &ast.IfStmt{
 			Cond: &ast.SelectorExpr{X: resultExpr, Sel: l.ident("Ok")},
 			Body: &ast.BlockStmt{},
-			Else: &ast.BlockStmt{List: []ast.Stmt{&ast.ExprStmt{X: &ast.CallExpr{Fun: l.ident("panic"), Args: []ast.Expr{panicMsg}}}}},
+			Else: &ast.BlockStmt{List: panicBody},
 		})
 		return loweredExpr{stmts: stmts, expr: l.ident("nil")}, nil
 	}
@@ -6960,7 +6956,7 @@ func (l *lowerer) lowerResultExpect(fn air.Function, expr air.Expr) (loweredExpr
 	stmts = append(stmts, &ast.IfStmt{
 		Cond: &ast.SelectorExpr{X: resultExpr, Sel: l.ident("Ok")},
 		Body: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{l.ident(temp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.SelectorExpr{X: resultExpr, Sel: l.ident("Value")}}}}},
-		Else: &ast.BlockStmt{List: []ast.Stmt{&ast.ExprStmt{X: &ast.CallExpr{Fun: l.ident("panic"), Args: []ast.Expr{panicMsg}}}}},
+		Else: &ast.BlockStmt{List: panicBody},
 	})
 	return loweredExpr{stmts: stmts, expr: l.ident(temp)}, nil
 }

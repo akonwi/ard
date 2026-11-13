@@ -244,6 +244,18 @@ func (l *lowerer) lowerValueOperand(fn air.Function, expr *air.Expr, expected ai
 	return sourcedOperand(lowered, typ, expr), nil
 }
 
+// lazyOperandBody returns the body of the branch that evaluates an operand
+// only when it is needed: the operand's setup statements followed by use, the
+// statement that uses its expression. The right side of `and` and `or`, and
+// the argument of `or` and `expect` on Maybe and Result (ADR 0079), are such
+// operands. The caller evaluates every earlier operand before the branch, so
+// they are not passed through sequenceOperands.
+func lazyOperandBody(lazy loweredExpr, use ast.Stmt) []ast.Stmt {
+	body := make([]ast.Stmt, 0, len(lazy.stmts)+1)
+	body = append(body, lazy.stmts...)
+	return append(body, use)
+}
+
 // sequenceOperandPair is sequenceOperands for two value operands lowered
 // separately, the first from firstSource. It updates first.expr and
 // second.expr in place and returns the statements that evaluate both in order.

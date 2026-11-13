@@ -254,6 +254,7 @@ fn main() {
   let has = dict("map has target", entries).has(later("map has key", 2).or(0))
   dict("map set target", entries).set(now("map set key", 3), later("map set value", 30).or(0))
   dict("map delete target", entries).delete(later("map delete key", 2).or(0))
+  // The value is present, so the message is not evaluated (ADR 0079).
   let expected = Maybe::new(now("expect target", 7)).expect(later_str("expect message", "missing").or(""))
   let ch = Chan::new<Int>(1)
   channel("send channel", ch).send(later("send value", 9).or(0))
@@ -293,7 +294,6 @@ map set value
 map delete target
 map delete key
 expect target
-expect message
 send channel
 send value
 select recv channel
