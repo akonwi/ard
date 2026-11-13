@@ -93,6 +93,16 @@ fn get_status(code: Int) Str {
 }
 ```
 
+To return several values, return a [tuple](/guide/types/#tuples) and destructure it at the call site:
+
+```ard
+fn divide(a: Int, b: Int) (Int, Int) {
+  (a / b, a % b)
+}
+
+let (quotient, remainder) = divide(17, 5)
+```
+
 ## Nullable Parameters
 
 Function parameters can be marked as nullable using the `?` modifier, allowing callers to omit them:
