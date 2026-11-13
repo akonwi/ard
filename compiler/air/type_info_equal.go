@@ -20,6 +20,7 @@ func typeInfoEqual(a, b TypeInfo) bool {
 		a.Key == b.Key &&
 		a.Value == b.Value &&
 		a.Error == b.Error &&
+		comparableSlicesEqual(a.Elems, b.Elems) &&
 		a.ForeignTarget == b.ForeignTarget &&
 		a.ForeignNamespace == b.ForeignNamespace &&
 		a.ForeignQualifier == b.ForeignQualifier &&

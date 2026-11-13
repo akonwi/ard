@@ -419,5 +419,9 @@ func collectCheckerTypeGoConstraints(t Type, context *checkerGoTypeContext, seen
 	case *Result:
 		collectCheckerTypeGoConstraints(typ.Val(), context, seen)
 		collectCheckerTypeGoConstraints(typ.Err(), context, seen)
+	case *Tuple:
+		for _, element := range typ.Elements() {
+			collectCheckerTypeGoConstraints(element, context, seen)
+		}
 	}
 }

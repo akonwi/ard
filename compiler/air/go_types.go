@@ -104,6 +104,13 @@ func goStructTagLiteral(field FieldInfo) *ast.BasicLit {
 	return &ast.BasicLit{Kind: token.STRING, Value: literal}
 }
 
+// TupleGoFieldName names the Go struct field that stores the tuple element at
+// index. A tuple value is the anonymous struct `struct{ V0 A; V1 B }`; every
+// field is exported so the type is identical across generated packages.
+func TupleGoFieldName(index int) string {
+	return "V" + strconv.Itoa(index)
+}
+
 func goTypeExpr(program *Program, typeID TypeID, runtimeQualifier string) (ast.Expr, error) {
 	typ, err := goTypeInfo(program, typeID)
 	if err != nil {
@@ -192,6 +199,16 @@ func goTypeExpr(program *Program, typeID TypeID, runtimeQualifier string) (ast.E
 			return nil, err
 		}
 		return goRuntimeGeneric(runtimeQualifier, "Result", value, errType), nil
+	case TypeTuple:
+		fields := make([]*ast.Field, len(typ.Elems))
+		for index, elem := range typ.Elems {
+			elemType, err := goTypeExpr(program, elem, runtimeQualifier)
+			if err != nil {
+				return nil, err
+			}
+			fields[index] = &ast.Field{Names: []*ast.Ident{ast.NewIdent(TupleGoFieldName(index))}, Type: elemType}
+		}
+		return &ast.StructType{Fields: &ast.FieldList{List: fields}}, nil
 	case TypeAny:
 		return ast.NewIdent("any"), nil
 	case TypeFunction:
@@ -258,6 +275,12 @@ func goTypeContainsMaybe(program *Program, id TypeID, seen map[TypeID]bool) bool
 		}
 	case TypeResult:
 		return goTypeContainsMaybe(program, typ.Value, seen) || goTypeContainsMaybe(program, typ.Error, seen)
+	case TypeTuple:
+		for _, elem := range typ.Elems {
+			if goTypeContainsMaybe(program, elem, seen) {
+				return true
+			}
+		}
 	case TypeUnion:
 		for _, member := range typ.Members {
 			if goTypeContainsMaybe(program, member.Type, seen) {

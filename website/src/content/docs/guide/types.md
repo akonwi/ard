@@ -133,6 +133,39 @@ let config: [Int:Str] = [0: "zero", 1: "one", 2: "two"]
 
 Lists and maps behave like Go slices and maps, with methods like `.size()`, `.push()`, and `.at()` in place of Go's built-in functions. `Slice<T>` is a fixed-length shared view created by a list or another slice's checked `.slice()` method. Use `.to_list()` when independent growable storage is required. Fixed-size arrays behave like Go arrays: the length is part of the type, so `[Byte; 3]` and `[Byte; 4]` are distinct types. Lists, slices, and arrays support `.at()`, which returns a `Maybe` instead of panicking or returning a zero value.
 
+### Tuples
+
+A tuple groups two or more values of possibly different types. Its type is written as the element types in parentheses:
+
+```ard
+fn min_max(values: [Int]) (Int, Int) {
+  mut low = values.at(0).or(0)
+  mut high = low
+  for value in values {
+    if value < low {
+      low = value
+    }
+    if value > high {
+      high = value
+    }
+  }
+  (low, high)
+}
+```
+
+Read a tuple by destructuring it into a comma-separated list of names, without parentheses. Use `_` for an element to ignore:
+
+```ard
+let low, high = min_max([3, 1, 4])
+let _, largest = min_max([3, 1, 4])
+```
+
+`let` makes every name immutable and `mut` makes every name mutable. The number of names must match the number of elements, and destructuring is a statement inside a function, not a module-level declaration.
+
+Tuples are for passing a few values together, most often the results of a Go function (see [Multiple Results](/advanced/go-interop/#multiple-results)). They are deliberately minimal: there is no `pair.0` access, no `==`, no `match` on a tuple, and a tuple cannot be a map key or be interpolated into a string. Destructure first, or define a struct when the values need names or behavior.
+
+A tuple always has at least two elements. `()` is the `Void` value and `(value)` is a parenthesized expression.
+
 ### Any
 
 `Any` is an opaque boxed value, corresponding to Go's `any`. Any Ard value can be assigned to it, but unlike Go there is no type assertion syntax: an `Any` cannot be inspected, called, or unboxed without an explicit API such as [`unsafe::cast`](/stdlib/unsafe/).

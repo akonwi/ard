@@ -1,6 +1,7 @@
 package checker_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/akonwi/ard/checker"
@@ -35,6 +36,7 @@ func TestTopLevelExecutableStatementsAreRejected(t *testing.T) {
 		{name: "for loop", source: "for i in 0..3 {\n  i\n}\n", row: 1},
 		{name: "defer", source: "defer {\n  42\n}\n", row: 1},
 		{name: "break", source: "break\n", row: 1},
+		{name: "tuple destructuring", source: "let pair = (1, 2)\nlet a, b = pair\n", row: 2},
 	}
 	for _, tt := range rejected {
 		t.Run("rejects "+tt.name, func(t *testing.T) {
@@ -59,6 +61,14 @@ func TestTopLevelExecutableStatementsAreRejected(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("tuple destructuring explains that module bindings take one name", func(t *testing.T) {
+		c := check(t, "let pair = (1, 2)\nlet a, b = pair\n")
+		diagnostic := c.Diagnostics()[0]
+		if !strings.Contains(diagnostic.Text, "bind a single name") || !strings.Contains(diagnostic.Primary.Message, "inside a function") {
+			t.Fatalf("diagnostic = %#v, want guidance to destructure inside a function", diagnostic)
+		}
+	})
 
 	t.Run("allows declarations", func(t *testing.T) {
 		c := check(t, `use ard/testing

@@ -11,6 +11,7 @@ func fullTypeInfo() TypeInfo {
 	return TypeInfo{
 		ID: 7, Kind: TypeStruct, Name: "User", ModulePath: "app/users", Private: true,
 		Elem: 1, Length: 3, Key: 2, Value: 3, Error: 4,
+		Elems:         []TypeID{5, 6},
 		ForeignTarget: "go", ForeignNamespace: "net/http", ForeignQualifier: "http", ForeignSymbol: "Client",
 		ForeignPointer: true, ForeignInterface: true,
 		Fields: []FieldInfo{{
@@ -34,7 +35,7 @@ func fullTypeInfo() TypeInfo {
 // drift from TypeInfo: it fails when a field is added without updating
 // typeInfoEqual, and it checks that mutating any single field is detected.
 func TestTypeInfoEqualMatchesDeepEqual(t *testing.T) {
-	const knownFields = 30
+	const knownFields = 31
 	if n := reflect.TypeOf(TypeInfo{}).NumField(); n != knownFields {
 		t.Fatalf("TypeInfo has %d fields, test knows %d: update typeInfoEqual and this test", n, knownFields)
 	}
@@ -95,6 +96,7 @@ func TestTypeInfoEqualDetectsNestedFieldChanges(t *testing.T) {
 		"variant":      func(ti *TypeInfo) { ti.Variants[0].Discriminant = 2 },
 		"member":       func(ti *TypeInfo) { ti.Members[0].Tag = 2 },
 		"param":        func(ti *TypeInfo) { ti.Params[1] = 7 },
+		"tuple elem":   func(ti *TypeInfo) { ti.Elems[1] = 7 },
 		"generic arg":  func(ti *TypeInfo) { ti.GenericArgs[0] = 1 },
 		"generic cmp":  func(ti *TypeInfo) { ti.GenericComparable[0] = false },
 		"type param":   func(ti *TypeInfo) { ti.TypeParams[0] = "U" },

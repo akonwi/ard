@@ -386,7 +386,12 @@ func (p *parser) parseStatementEndingAt(terminators ...kind) (Statement, error) 
 		return p.deferStatement()
 	}
 	if p.match(let, mut) {
-		stmt, err := p.parseVariableDef()
+		// A comma after the first name makes this `let a, b = value`.
+		if p.check(left_paren) || p.peek2().kind == comma {
+			stmt, err := p.parseTupleDestructure(p.previous(), terminators)
+			return p.endStatement(stmt, err, terminators)
+		}
+		stmt, err := p.parseVariableDef(terminators)
 		return p.endStatement(stmt, err, terminators)
 	}
 	if p.match(if_) {
@@ -588,7 +593,11 @@ func (p *parser) deferStatement() (Statement, error) {
 	return &Defer{Expr: expr, Location: Location{Start: start.getLocation().Start, End: expr.GetLocation().End}}, nil
 }
 
-func (p *parser) parseVariableDef() (Statement, error) {
+const tupleDestructureAnnotationError = "Tuple destructuring cannot have a type annotation"
+
+// parseVariableDef parses `name[: Type] = value` after `let` or `mut`.
+// terminators are the tokens that end the statement in the current context.
+func (p *parser) parseVariableDef(terminators []kind) (Statement, error) {
 	start := p.previous()
 	kind := start.kind
 	name := p.consumeVariableName(fmt.Sprintf("Expected identifier after '%s'", string(kind)))
@@ -598,6 +607,12 @@ func (p *parser) parseVariableDef() (Statement, error) {
 		if declaredType == nil {
 			p.recoverFromBadType()
 		}
+	}
+	if declaredType != nil && p.check(comma) {
+		// `let a: Int, b = pair` annotates the first name of a destructuring.
+		p.addError(p.peek(), tupleDestructureAnnotationError)
+		p.skipRestOfStatement(terminators)
+		return nil, nil
 	}
 	if !p.check(equal) {
 		p.addError(p.peek(), "Expected '=' after variable name")
@@ -622,6 +637,87 @@ func (p *parser) parseVariableDef() (Statement, error) {
 			End:   end,
 		},
 	}, nil
+}
+
+// punctuationLocation is the one-column span of a single-character token,
+// which carries no text for getLocation to measure.
+func punctuationLocation(t *token) Location {
+	at := Point{Row: t.line, Col: t.column}
+	return Location{Start: at, End: at}
+}
+
+// parseTupleDestructure parses `let a, b = value` after the `let` or `mut`
+// keyword. Each position takes a plain name or `_`; nested patterns and type
+// annotations are not part of the syntax. Parentheses around the names and a
+// comma after the last name are accepted and recorded as redundant. A
+// malformed header is reported once and the rest of the statement is skipped.
+func (p *parser) parseTupleDestructure(start *token, terminators []kind) (Statement, error) {
+	fail := func(at *token, message string) (Statement, error) {
+		p.addError(at, message)
+		p.skipRestOfStatement(terminators)
+		return nil, nil
+	}
+	stmt := &TupleDestructure{Mutable: start.kind == mut}
+	var open *token
+	if p.match(left_paren) {
+		open = p.previous()
+	}
+	endsNames := func() bool {
+		if open != nil {
+			return p.check(right_paren)
+		}
+		return p.check(equal)
+	}
+	for {
+		current := p.peek()
+		if current.kind != identifier && !p.isAllowedIdentifierKeyword(current.kind) {
+			return fail(current, "Expected a name in tuple destructuring")
+		}
+		name := p.consumeVariableName("Expected a name in tuple destructuring")
+		stmt.Names = append(stmt.Names, TupleBinding{Name: name.text, Location: name.getLocation()})
+		if p.check(colon) {
+			return fail(p.peek(), tupleDestructureAnnotationError)
+		}
+		if !p.match(comma) {
+			break
+		}
+		if endsNames() {
+			stmt.TrailingComma = true
+			stmt.TrailingCommaLocation = punctuationLocation(p.previous())
+			break
+		}
+	}
+	if open != nil {
+		if !p.match(right_paren) {
+			return fail(p.peek(), "Expected ')' after tuple destructuring names")
+		}
+		stmt.Parenthesized = true
+		stmt.ParensLocation = Location{Start: punctuationLocation(open).Start, End: punctuationLocation(p.previous()).End}
+	}
+	if len(stmt.Names) < 2 {
+		return fail(p.previous(), "Tuple destructuring needs at least two names")
+	}
+	if p.check(colon) {
+		return fail(p.peek(), tupleDestructureAnnotationError)
+	}
+	if !p.match(equal) {
+		return fail(p.peek(), "Expected '=' after tuple destructuring names")
+	}
+	value, err := p.parseExpression()
+	if err != nil {
+		return nil, err
+	}
+	if p.check(comma) && !slices.Contains(terminators, comma) {
+		// Go's `a, b := 1, 2` has no Ard counterpart: the right side is one
+		// tuple value.
+		return fail(p.peek(), fmt.Sprintf("Tuple destructuring takes one tuple value: wrap the values in parentheses, as in `%s a, b = (1, 2)`", string(start.kind)))
+	}
+	stmt.Value = value
+	stmt.Location = Location{
+		Start: Point{Row: start.line, Col: start.column},
+		End:   value.GetLocation().End,
+	}
+	return stmt, nil
 }
 
 func (p *parser) ifStatement() (Statement, error) {
@@ -801,7 +897,7 @@ func (p *parser) forLoop() (Statement, error) {
 
 	// Parse C-style for loop: for [let|mut] variable = ...; condition; update
 	p.match(let, mut)
-	initial, err := p.parseVariableDef()
+	initial, err := p.parseVariableDef([]kind{semicolon})
 	if err != nil {
 		return nil, err
 	}
@@ -1886,6 +1982,7 @@ func (p *parser) tryParseType() DeclaredType {
 	}
 
 	if p.match(left_paren) {
+		openParen := p.previous()
 		inner := p.parseType()
 		if inner == nil {
 			if p.match(right_paren) {
@@ -1898,7 +1995,9 @@ func (p *parser) tryParseType() DeclaredType {
 			}
 			return nil
 		}
-		if !p.match(right_paren) {
+		if p.check(comma) {
+			inner = p.finishTupleType(openParen, inner)
+		} else if !p.match(right_paren) {
 			p.addError(p.peek(), "Expected ')' after grouped type")
 			p.synchronizeToTokens(equal, new_line, right_paren)
 			if p.match(right_paren) {
@@ -2222,6 +2321,38 @@ func (p *parser) tryParseType() DeclaredType {
 	return nil
 }
 
+// finishTupleType parses the rest of a tuple type after its first element,
+// with the parser positioned at the comma that distinguishes `(A, B)` from the
+// grouped type `(A)`. It always returns a TupleType so the surrounding `!` and
+// `?` suffix handling applies to the tuple as a whole.
+func (p *parser) finishTupleType(openParen *token, first DeclaredType) DeclaredType {
+	elements := []DeclaredType{first}
+	for p.match(comma) {
+		p.match(new_line)
+		if p.check(right_paren) {
+			break
+		}
+		element := p.parseType()
+		if element == nil {
+			p.recoverFromBadType()
+			continue
+		}
+		elements = append(elements, element)
+		p.match(new_line)
+	}
+	if !p.match(right_paren) {
+		p.addError(p.peek(), "Expected ')' after tuple type")
+		p.synchronizeToTokens(equal, new_line, right_paren)
+		p.match(right_paren)
+	} else if len(elements) < 2 {
+		p.addError(p.previous(), "A tuple type needs at least two elements")
+	}
+	return &TupleType{
+		Location: Location{Start: openParen.getLocation().Start, End: p.previous().getLocation().End},
+		Elements: elements,
+	}
+}
+
 func (p *parser) startsAdjacentCallArgsAfterFunctionType(paramClose token, hasRightParen bool) bool {
 	if !p.inCallTypeArguments || !hasRightParen || !p.check(left_paren) || !adjacent(paramClose.getLocation(), p.peek()) {
 		return false
@@ -2274,6 +2405,8 @@ func nullableDeclaredType(t DeclaredType) DeclaredType {
 	case *FunctionType:
 		ty.Nullable = true
 	case *MutableType:
+		ty.nullable = true
+	case *TupleType:
 		ty.nullable = true
 	}
 	return t
@@ -4244,9 +4377,14 @@ func (p *parser) primary() (Expression, error) {
 			}, nil
 		}
 
+		openParen := p.previous()
+		leading := p.skipTupleLayout(nil)
 		expr, err := p.parseExpression()
 		if err != nil {
 			return nil, err
+		}
+		if p.startsTupleRest() {
+			return p.finishTupleLiteral(openParen, expr, leading)
 		}
 
 		if !p.check(right_paren) {
@@ -4301,6 +4439,71 @@ func (p *parser) primary() (Expression, error) {
 			Location: peek.getLocation(),
 		}, nil
 	}
+}
+
+// skipTupleLayout consumes the new lines and comments that may sit between
+// the elements of a parenthesized expression, collecting the comments.
+func (p *parser) skipTupleLayout(comments []Comment) []Comment {
+	for {
+		if c := p.parseInlineComment(); c != nil {
+			comments = append(comments, *c)
+			continue
+		}
+		if !p.match(new_line) {
+			return comments
+		}
+	}
+}
+
+// startsTupleRest reports whether the parenthesized expression just parsed is
+// the first element of a tuple literal: a comma follows it, possibly after a
+// trailing comment. A lone expression before `)` stays a grouping.
+func (p *parser) startsTupleRest() bool {
+	i := p.index
+	for p.tokens[i].kind == comment {
+		i++
+	}
+	return p.tokens[i].kind == comma
+}
+
+// finishTupleLiteral parses the rest of a tuple literal after its first
+// element. Elements are comma separated and may span lines; a trailing comma
+// is allowed.
+func (p *parser) finishTupleLiteral(openParen *token, first Expression, comments []Comment) (Expression, error) {
+	items := []Expression{first}
+	for {
+		if c := p.parseInlineComment(); c != nil {
+			comments = append(comments, *c)
+		}
+		p.expectSeparator(false, true, "Expected ',' between tuple elements")
+		comments = p.skipTupleLayout(comments)
+		if p.match(right_paren) {
+			break
+		}
+		if p.isAtEnd() {
+			p.addError(p.peek(), "Expected ')' to close tuple")
+			break
+		}
+		item, err := p.parseExpression()
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	if len(items) < 2 {
+		p.addError(p.previous(), "A tuple needs at least two elements")
+	}
+	result := &TupleLiteral{
+		Items: items,
+		Location: Location{
+			Start: openParen.getLocation().Start,
+			End:   p.previous().getLocation().End,
+		},
+	}
+	if len(comments) > 0 {
+		result.Comments = comments
+	}
+	return result, nil
 }
 
 func (p *parser) list() (Expression, error) {

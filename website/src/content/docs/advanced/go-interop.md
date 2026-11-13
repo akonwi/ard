@@ -421,6 +421,59 @@ Go's sole-`error` signature is inherently ambiguous. Ard consistently treats it 
 
 Pure Ard functions returning ordinary `Error` still return an ordinary value; only an explicit `T!Error` has Result semantics. Use `error.error()` or `Result.map_err` when a message value is specifically required. String interpolation observes `Error` automatically without making it assignable to `Str`.
 
+## Multiple Results
+
+Go functions can return several results. Ard maps them by shape:
+
+| Go results | Ard return type |
+| --- | --- |
+| `T` | `T` |
+| `(T, error)` | `T!Error` |
+| `(T, bool)` | `T?` |
+| `(A, B, ..., error)` | `(A, B, ...)!Error` |
+| any other two or more results | `(A, B, ...)` |
+
+Everything beyond the first three rows is a [tuple](/guide/types/#tuples), which is read by destructuring:
+
+```ard
+use go:path/filepath
+use go:strings
+
+let dir, file = filepath::Split("/var/log/app.log")
+let key, value, found = strings::Cut("name=ard", "=")
+```
+
+A trailing `error` is always the failure channel, so the remaining results arrive as a tuple inside a `Result`:
+
+```ard
+use go:net
+
+fn host_of(address: Str) Str!Error {
+  let host, _ = try net::SplitHostPort(address)
+  Result::ok(host)
+}
+```
+
+A trailing `bool` is treated as "found" only in the two-result `(T, bool)` shape. After two or more values it stays an ordinary `Bool` element, as in `strings::Cut` above, because Go does not reserve it to mean that the other results are valid.
+
+The same mapping applies to Go methods, callbacks, and interface methods. An Ard function that returns a tuple is a Go function with multiple results, so an Ard closure can be passed where Go expects a multi-result callback, and an Ard type can implement an interface such as `io.RuneReader`:
+
+```ard
+use go:io
+
+struct Letters {
+  text: Str,
+}
+
+impl io::RuneReader for Letters {
+  fn read_rune() (Int32, Int)!Error {
+    Result::ok((65, 1))
+  }
+}
+```
+
+A tuple stored in a variable, field, or collection is a Go anonymous struct with fields `V0`, `V1`, and so on. Only a function's return spreads it into separate Go results.
+
 ## Struct Field Reads
 
 Exported Go struct fields use ordinary dot syntax. Field names match Go exactly, including casing.

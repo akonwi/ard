@@ -19,6 +19,7 @@ type structuralTypeKey struct {
 	Key      TypeID
 	Value    TypeID
 	Error    TypeID
+	Elems    string
 	Params   string
 	Return   TypeID
 	Variadic bool
@@ -231,6 +232,8 @@ func structuralIdentity(info TypeInfo) (structuralTypeKey, bool) {
 	case TypeResult:
 		key.Value = info.Value
 		key.Error = info.Error
+	case TypeTuple:
+		key.Elems = typeIDsKey(info.Elems)
 	case TypeFunction:
 		key.Params = typeIDsKey(info.Params)
 		key.Return = info.Return
@@ -308,6 +311,16 @@ func (i *typeInterner) canonicalStructuralTypeName(info TypeInfo) (string, error
 		}
 		errType, err := typeName(info.Error)
 		return value + "!" + errType, err
+	case TypeTuple:
+		elems := make([]string, len(info.Elems))
+		for index, elem := range info.Elems {
+			name, err := typeName(elem)
+			if err != nil {
+				return "", err
+			}
+			elems[index] = name
+		}
+		return "(" + strings.Join(elems, ",") + ")", nil
 	case TypeFunction:
 		params := make([]string, len(info.Params))
 		for index, param := range info.Params {
@@ -382,6 +395,9 @@ func (l *lowerer) internCheckerStructuralType(t checker.Type) (TypeID, bool, err
 			return NoType, true, err
 		}
 		id, err := l.typeInterner.internStructural(TypeInfo{Kind: TypeResult, Value: value, Error: errType})
+		return id, true, err
+	case *checker.Tuple:
+		id, err := l.internTupleType(typ, l.internType)
 		return id, true, err
 	case *checker.FunctionDef:
 		params := make([]TypeID, len(typ.Parameters))

@@ -376,6 +376,15 @@ func substitutedGenericType(program *Program, id TypeID, owner string, args []Ty
 			if err == nil {
 				key.Error, err = substitute(info.Error)
 			}
+		case TypeTuple:
+			elems := make([]TypeID, len(info.Elems))
+			for index, elem := range info.Elems {
+				elems[index], err = substitute(elem)
+				if err != nil {
+					break
+				}
+			}
+			key.Elems = typeIDsKey(elems)
 		case TypeFunction:
 			params := make([]TypeID, len(info.Params))
 			for index, param := range info.Params {
@@ -481,6 +490,15 @@ func validateTypeInfo(program *Program, typ TypeInfo) error {
 		}
 		if !validTypeID(program, typ.Error) {
 			return fmt.Errorf("type %s has invalid err type %d", typ.Name, typ.Error)
+		}
+	case TypeTuple:
+		if len(typ.Elems) < 2 {
+			return fmt.Errorf("type %s is a tuple with %d elements, want at least 2", typ.Name, len(typ.Elems))
+		}
+		for index, elem := range typ.Elems {
+			if !validTypeID(program, elem) {
+				return fmt.Errorf("type %s has invalid tuple element %d type %d", typ.Name, index, elem)
+			}
 		}
 	case TypeStruct:
 		jsonNames := make(map[string]bool, len(typ.Fields))
@@ -917,6 +935,11 @@ func spreadTypeContainsParam(program *Program, typeID TypeID, seen map[TypeID]bo
 			return true
 		}
 	}
+	for _, nested := range typ.Elems {
+		if spreadTypeContainsParam(program, nested, seen) {
+			return true
+		}
+	}
 	for _, nested := range typ.GenericArgs {
 		if spreadTypeContainsParam(program, nested, seen) {
 			return true
@@ -1071,7 +1094,7 @@ func validateExprPayload(expr Expr) error {
 	case *ReferenceExprPayload:
 		compatible = expr.Kind == ExprMutRef || expr.Kind == ExprDeref
 	case *FieldExprPayload:
-		compatible = expr.Kind == ExprGetField
+		compatible = expr.Kind == ExprGetField || expr.Kind == ExprTupleElem
 	case *TagExprPayload:
 		compatible = expr.Kind == ExprUnionWrap
 	case *TraitExprPayload:
@@ -1164,7 +1187,7 @@ func exprPayloadRequired(kind ExprKind) bool {
 		ExprInterfaceConversion, ExprUnsafeCast, ExprMutRef, ExprDeref,
 		ExprTraitRefProject, ExprMatchForeignType, ExprMakeClosure, ExprCallClosure,
 		ExprUnionWrap, ExprMatchUnion, ExprTraitUpcast, ExprCallTrait,
-		ExprMakeMap, ExprSelect, ExprMakeStruct, ExprGetField,
+		ExprMakeMap, ExprSelect, ExprMakeStruct, ExprGetField, ExprTupleElem,
 		ExprBlock, ExprUnsafeBlock, ExprIf, ExprEnumVariant,
 		ExprMatchEnum, ExprMatchInt, ExprMatchStr, ExprMatchMaybe, ExprMatchResult:
 		return true
@@ -1345,6 +1368,36 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 			if err := validateABIParamMode(program, argTypes[i], mode); err != nil {
 				return fmt.Errorf("foreign expression arg %d: %w", i, err)
 			}
+		}
+	}
+	if expr.Kind == ExprMakeTuple {
+		tupleType := program.Types[expr.Type-1]
+		if tupleType.Kind != TypeTuple {
+			return fmt.Errorf("tuple constructor has non-tuple type %d", expr.Type)
+		}
+		if len(expr.Args) != len(tupleType.Elems) {
+			return fmt.Errorf("tuple constructor has %d elements, want %d", len(expr.Args), len(tupleType.Elems))
+		}
+		for index, arg := range expr.Args {
+			if arg.Type != tupleType.Elems[index] {
+				return fmt.Errorf("tuple constructor element %d has type %d, want %d", index, arg.Type, tupleType.Elems[index])
+			}
+		}
+	}
+	if expr.Kind == ExprTupleElem {
+		if expr.Target == nil || !validTypeID(program, expr.Target.Type) {
+			return fmt.Errorf("tuple element access is missing its target")
+		}
+		tupleType := program.Types[expr.Target.Type-1]
+		if tupleType.Kind != TypeTuple {
+			return fmt.Errorf("tuple element access has non-tuple target type %d", expr.Target.Type)
+		}
+		payload := exprPayloadAs[*FieldExprPayload](&expr)
+		if payload.Field < 0 || payload.Field >= len(tupleType.Elems) {
+			return fmt.Errorf("tuple element access has invalid index %d", payload.Field)
+		}
+		if expr.Type != tupleType.Elems[payload.Field] {
+			return fmt.Errorf("tuple element access has type %d, want element type %d", expr.Type, tupleType.Elems[payload.Field])
 		}
 	}
 	if expr.Kind == ExprLoadGlobal {
@@ -2083,6 +2136,16 @@ func typesStructurallyEquivalent(program *Program, leftID TypeID, rightID TypeID
 		return equivalent(left.Key, right.Key) && equivalent(left.Value, right.Value)
 	case TypeResult:
 		return equivalent(left.Value, right.Value) && equivalent(left.Error, right.Error)
+	case TypeTuple:
+		if len(left.Elems) != len(right.Elems) {
+			return false
+		}
+		for i := range left.Elems {
+			if !equivalent(left.Elems[i], right.Elems[i]) {
+				return false
+			}
+		}
+		return true
 	case TypeFunction:
 		if left.Variadic != right.Variadic || len(left.Params) != len(right.Params) {
 			return false

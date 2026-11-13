@@ -234,13 +234,8 @@ func TestFunctionTypes(t *testing.T) {
 			wantErrs: []string{"Expected ')' after grouped type"},
 		},
 		{
-			name:     "Malformed grouped type recovers past comma",
-			input:    "let f: (Int, String) = test",
-			wantErrs: []string{"Expected ')' after grouped type"},
-		},
-		{
 			name:     "Malformed grouped nullable type consumes question mark during recovery",
-			input:    "let f: (Int, String)? = test",
+			input:    "let f: (Int String)? = test",
 			wantErrs: []string{"Expected ')' after grouped type"},
 		},
 		{

@@ -189,6 +189,12 @@ func structApplicationsInType(t Type, seen map[Type]bool) []*StructDef {
 	case *Result:
 		applications := structApplicationsInType(typ.Val(), seen)
 		return append(applications, structApplicationsInType(typ.Err(), seen)...)
+	case *Tuple:
+		applications := []*StructDef{}
+		for _, element := range typ.Elements() {
+			applications = append(applications, structApplicationsInType(element, seen)...)
+		}
+		return applications
 	case *MutableRef:
 		return structApplicationsInType(typ.Of(), seen)
 	case *Union:
@@ -256,6 +262,10 @@ func collectGenericVarOccurrences(t Type, wrapped bool, params map[string]bool, 
 	case *Result:
 		collectGenericVarOccurrences(typ.Val(), true, params, out, seen)
 		collectGenericVarOccurrences(typ.Err(), true, params, out, seen)
+	case *Tuple:
+		for _, element := range typ.Elements() {
+			collectGenericVarOccurrences(element, true, params, out, seen)
+		}
 	case *MutableRef:
 		collectGenericVarOccurrences(typ.Of(), true, params, out, seen)
 	case *Union:

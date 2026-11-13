@@ -151,6 +151,12 @@ func typeDeclString(t parse.DeclaredType) string {
 		s = "[" + typeDeclString(tt.Element) + "]"
 	case *parse.Map:
 		s = "[" + typeDeclString(tt.Key) + ": " + typeDeclString(tt.Value) + "]"
+	case *parse.TupleType:
+		elements := make([]string, len(tt.Elements))
+		for i, element := range tt.Elements {
+			elements[i] = typeDeclString(element)
+		}
+		s = "(" + strings.Join(elements, ", ") + ")"
 	case *parse.FunctionType:
 		params := make([]string, 0, len(tt.Params))
 		for i, p := range tt.Params {

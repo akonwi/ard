@@ -273,6 +273,22 @@ func (v FixedArray) IsNullable() bool {
 	return v.nullable
 }
 
+// TupleType is an anonymous product type written `(A, B)`. It always has at
+// least two elements; `(A)` is a grouped type and `()` is not a type.
+type TupleType struct {
+	Location
+	Elements []DeclaredType
+	nullable bool
+}
+
+func (t TupleType) GetName() string {
+	return "Tuple"
+}
+
+func (t TupleType) IsNullable() bool {
+	return t.nullable
+}
+
 type Map struct {
 	Location
 	Key      DeclaredType
@@ -345,6 +361,47 @@ func (v VariableDeclaration) String() string {
 		binding = "mut"
 	}
 	return fmt.Sprintf("%s %s: %s", binding, v.Name, v.Type)
+}
+
+// TupleBinding is one name in a tuple destructuring. The name `_` discards
+// the element at that position.
+type TupleBinding struct {
+	Name     string
+	Location Location
+}
+
+// TupleDestructure binds each element of a tuple value to its own name:
+// `let a, b = pair`. Every name shares the statement's `let` or `mut`.
+//
+// The names may be wrapped in parentheses or followed by a comma. Both are
+// redundant: they parse so the checker can warn and the formatter can remove
+// them.
+type TupleDestructure struct {
+	Location
+	Names   []TupleBinding
+	Mutable bool
+	Value   Expression
+
+	// Parenthesized records `let (a, b) = pair`; ParensLocation spans the
+	// parentheses.
+	Parenthesized  bool
+	ParensLocation Location
+	// TrailingComma records a comma after the last name;
+	// TrailingCommaLocation is that comma.
+	TrailingComma         bool
+	TrailingCommaLocation Location
+}
+
+func (t TupleDestructure) String() string {
+	binding := "let"
+	if t.Mutable {
+		binding = "mut"
+	}
+	names := make([]string, len(t.Names))
+	for i, name := range t.Names {
+		names[i] = name.Name
+	}
+	return fmt.Sprintf("%s %s", binding, strings.Join(names, ", "))
 }
 
 type VariableAssignment struct {
@@ -874,6 +931,18 @@ type ListLiteral struct {
 
 func (l ListLiteral) String() string {
 	return "ListLiteral"
+}
+
+// TupleLiteral is a parenthesized, comma-separated list of at least two
+// expressions: `(a, b)`.
+type TupleLiteral struct {
+	Location
+	Items    []Expression
+	Comments []Comment // Comments found within the tuple literal
+}
+
+func (t TupleLiteral) String() string {
+	return "TupleLiteral"
 }
 
 type MapEntry struct {

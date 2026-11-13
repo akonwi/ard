@@ -71,6 +71,7 @@
 
 ; Variables and properties
 (variable_declaration name: (identifier) @variable)
+(tuple_pattern (identifier) @variable)
 (struct_field name: (identifier) @property)
 (struct_literal_field name: (identifier) @property)
 (self_expression) @variable.builtin

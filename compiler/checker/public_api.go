@@ -146,6 +146,13 @@ func privateNominalType(current Type, seen map[uintptr]bool) string {
 			return name
 		}
 		return privateNominalType(value.err, seen)
+	case *Tuple:
+		for _, element := range value.elements {
+			if name := privateNominalType(element, seen); name != "" {
+				return name
+			}
+		}
+		return ""
 	case *List:
 		return privateNominalType(value.of, seen)
 	case *Slice:

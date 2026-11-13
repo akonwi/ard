@@ -165,6 +165,22 @@ func (l *ListLiteral) Type() Type {
 	return l._type
 }
 
+// TupleLiteral constructs a tuple value from its elements in order.
+type TupleLiteral struct {
+	Elements []Expression
+	_type    *Tuple
+}
+
+func (t *TupleLiteral) Type() Type {
+	return t._type
+}
+
+// TupleType returns the literal's tuple type; its elements are the expected
+// types the element expressions are lowered against.
+func (t *TupleLiteral) TupleType() *Tuple {
+	return t._type
+}
+
 type MapLiteral struct {
 	Keys      []Expression
 	Values    []Expression
@@ -188,6 +204,22 @@ func (v *VariableDef) NonProducing() {}
 
 func (v *VariableDef) Type() Type {
 	return v.__type
+}
+
+// TupleDestructure binds the elements of a tuple value to names in order
+// (`let a, b = pair`). An empty name discards the element at that position.
+type TupleDestructure struct {
+	Mutable bool
+	Names   []string
+	Value   Expression
+	__type  *Tuple
+}
+
+func (t *TupleDestructure) NonProducing() {}
+
+// TupleType returns the type of the destructured value.
+func (t *TupleDestructure) TupleType() *Tuple {
+	return t.__type
 }
 
 type Reassignment struct {
@@ -1317,6 +1349,12 @@ const (
 	ForeignResultValueError
 	ForeignResultErrorOnly
 	ForeignResultValueBool
+	// ForeignResultTuple is two or more Go results returned as one Ard tuple
+	// with an element per result (ADR 0077).
+	ForeignResultTuple
+	// ForeignResultTupleError is three or more Go results whose last is an
+	// error: the leading results form the tuple of a Result (ADR 0077).
+	ForeignResultTupleError
 )
 
 type FunctionDef struct {

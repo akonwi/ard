@@ -180,6 +180,9 @@ const (
 	TypeEnum
 	TypeMaybe
 	TypeResult
+	// TypeTuple is an anonymous product of at least two element types, listed
+	// in Elems (ADR 0077).
+	TypeTuple
 	TypeUnion
 	TypeAny
 	TypeFunction
@@ -208,6 +211,8 @@ type TypeInfo struct {
 	Key    TypeID
 	Value  TypeID
 	Error  TypeID
+	// Elems lists a TypeTuple's element types in order.
+	Elems []TypeID
 
 	ForeignTarget    string
 	ForeignNamespace string
