@@ -452,7 +452,7 @@ type FunctionDeclaration struct {
 	ReturnType DeclaredType
 	Body       []Statement
 	Private    bool
-	Comments   []Comment // Comments found within the function declaration
+	Comments   []Comment // Comments found within the parameter list
 }
 
 func (f FunctionDeclaration) String() string {
@@ -473,6 +473,7 @@ type AnonymousFunction struct {
 	Parameters []Parameter
 	ReturnType DeclaredType
 	Body       []Statement
+	Comments   []Comment // Comments found within the parameter list
 }
 
 func (a AnonymousFunction) String() string {

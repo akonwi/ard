@@ -282,7 +282,7 @@ func (p printer) renderFunctionDeclarationDoc(node *parse.FunctionDeclaration, t
 	}
 	header += node.Name
 	header += p.renderTypeParams(node.TypeParams)
-	header += p.renderParameterList(node.Parameters, 0, header)
+	header += p.renderParameterList(node.Parameters, node.Comments, header)
 	if node.ReturnType != nil {
 		header += " " + p.renderType(node.ReturnType)
 	}
@@ -305,7 +305,7 @@ func (p printer) renderStaticFunctionDeclarationDoc(node *parse.StaticFunctionDe
 	}
 	header += p.renderExpression(&node.Path, 0)
 	header += p.renderTypeParams(node.TypeParams)
-	header += p.renderParameterList(node.Parameters, 0, header)
+	header += p.renderParameterList(node.Parameters, node.Comments, header)
 	if node.ReturnType != nil {
 		header += " " + p.renderType(node.ReturnType)
 	}
@@ -782,7 +782,7 @@ func (p printer) renderTypeParams(params []string) string {
 	return "<" + strings.Join(parts, ", ") + ">"
 }
 
-func (p printer) renderParameterList(params []parse.Parameter, indent int, header string) string {
+func (p printer) renderParameterList(params []parse.Parameter, comments []parse.Comment, header string) string {
 	parts := make([]string, 0, len(params))
 	for _, parameter := range params {
 		part := parameter.Name
@@ -791,6 +791,13 @@ func (p printer) renderParameterList(params []parse.Parameter, indent int, heade
 		}
 		parts = append(parts, part)
 	}
+	if len(comments) > 0 {
+		rows := make([]armDoc, 0, len(params))
+		for index, parameter := range params {
+			rows = append(rows, armDoc{doc: dText(parts[index]), startRow: parameter.Location.Start.Row})
+		}
+		return p.printDoc(dGroup(p.renderSequenceDoc("(", rows, comments, ")")))
+	}
 	oneLine := "(" + strings.Join(parts, ", ") + ")"
 	if len(parts) == 0 || len(header)+len(oneLine) <= p.maxLineWidth {
 		return oneLine
@@ -798,9 +805,9 @@ func (p printer) renderParameterList(params []parse.Parameter, indent int, heade
 
 	lines := []string{"("}
 	for _, part := range parts {
-		lines = append(lines, p.indent(indent+1)+part+",")
+		lines = append(lines, p.indent(1)+part+",")
 	}
-	lines = append(lines, p.indent(indent)+")")
+	lines = append(lines, ")")
 	return strings.Join(lines, "\n")
 }
 
@@ -1105,7 +1112,7 @@ func (p printer) renderExpressionDoc(expression parse.Expression, parentPreceden
 }
 
 func (p printer) renderAnonymousFunctionDoc(node *parse.AnonymousFunction) doc {
-	header := "fn" + p.renderParameterList(node.Parameters, 0, "fn")
+	header := "fn" + p.renderParameterList(node.Parameters, node.Comments, "fn")
 	if node.ReturnType != nil {
 		header += " " + p.renderType(node.ReturnType)
 	}

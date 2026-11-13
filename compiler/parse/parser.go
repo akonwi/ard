@@ -3317,6 +3317,7 @@ func (p *parser) functionDef(asMethod bool, isTest bool) (Statement, error) {
 				Parameters: params,
 				ReturnType: returnType,
 				Body:       statements,
+				Comments:   functionComments,
 				Location: Location{
 					Start: Point{Row: keyword.line, Col: keyword.column},
 					End:   Point{Row: p.previous().line, Col: p.previous().column},

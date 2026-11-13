@@ -267,6 +267,14 @@ func TestCommentsRecordWhetherTheyTrailCode(t *testing.T) {
 			want: []mark{{"first", true}, {"own", false}},
 		},
 		{
+			name:  "anonymous function parameters",
+			input: "let f = fn(\n  a: Int, // first\n  // own\n  b: Int,\n) Int {\n  a + b\n}\n",
+			comments: func(program *Program) []Comment {
+				return program.Statements[0].(*VariableDeclaration).Value.(*AnonymousFunction).Comments
+			},
+			want: []mark{{"first", true}, {"own", false}},
+		},
+		{
 			name:  "statements",
 			input: "// own\nlet x = 1 // trailing\n",
 			comments: func(program *Program) []Comment {
