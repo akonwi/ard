@@ -41,6 +41,12 @@ func (p printer) program(program *parse.Program) string {
 			if statement == nil {
 				continue
 			}
+			if comment, ok := trailingCommentAfter(previous, statement); ok {
+				// A top-level statement is printed on its own, so the comment
+				// is appended to its last line rather than as a line suffix.
+				lines[len(lines)-1] += " " + p.renderComment(comment.Value)
+				continue
+			}
 			if haveRendered && hasSourceBlankLine(previous, statement) {
 				lines = append(lines, "")
 			}
@@ -738,6 +744,10 @@ func (p printer) renderStatementsDoc(statements []parse.Statement) doc {
 		if statement == nil {
 			continue
 		}
+		if comment, ok := trailingCommentAfter(previous, statement); ok {
+			parts[len(parts)-1] = dConcat(parts[len(parts)-1], dTrailingComment(p.renderComment(comment.Value)))
+			continue
+		}
 		if haveRendered {
 			parts = append(parts, dHardLine())
 			if hasSourceBlankLine(previous, statement) {
@@ -752,6 +762,21 @@ func (p printer) renderStatementsDoc(statements []parse.Statement) doc {
 		return dText("")
 	}
 	return dConcat(parts...)
+}
+
+// trailingCommentAfter reports whether statement is a comment that trails
+// previous on its last line, as in `let x = 1 // one`, and should stay there
+// (#583). A trailing comment with no statement before it in the list, such
+// as one after a block's `{`, goes on a line of its own.
+func trailingCommentAfter(previous parse.Statement, statement parse.Statement) (*parse.Comment, bool) {
+	comment, ok := statement.(*parse.Comment)
+	if !ok || !comment.Trailing || previous == nil {
+		return nil, false
+	}
+	if _, previousIsComment := previous.(*parse.Comment); previousIsComment {
+		return nil, false
+	}
+	return comment, true
 }
 
 func (p printer) renderDocAtIndent(document doc, indent int) []string {
