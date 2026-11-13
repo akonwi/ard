@@ -180,6 +180,7 @@ func (p *parser) parseComment() *Comment {
 		return nil
 	}
 
+	trailing := p.followsCode()
 	tok := p.advance()
 	line_break := p.advance()
 	return &Comment{
@@ -188,7 +189,16 @@ func (p *parser) parseComment() *Comment {
 			Start: tok.getLocation().Start,
 			End:   line_break.getLocation().Start,
 		},
+		Trailing: trailing,
 	}
+}
+
+// followsCode reports whether the current token shares its line with the
+// token before it. The lexer emits a new_line token for every line break, so
+// the current token starts its line exactly when the previous token is a
+// new_line or there is none.
+func (p *parser) followsCode() bool {
+	return p.index > 0 && p.tokens[p.index-1].kind != new_line
 }
 
 // parseInlineComment parses a comment token and returns a cleaned Comment object.
@@ -198,6 +208,7 @@ func (p *parser) parseInlineComment() *Comment {
 		return nil
 	}
 
+	trailing := p.followsCode()
 	commentToken := p.advance()
 	// Strip "//" and leading whitespace
 	commentText := commentToken.text[2:] // Remove "//"
@@ -212,6 +223,7 @@ func (p *parser) parseInlineComment() *Comment {
 	return &Comment{
 		Location: commentToken.getLocation(),
 		Value:    commentText,
+		Trailing: trailing,
 	}
 }
 

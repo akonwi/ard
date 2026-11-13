@@ -420,7 +420,7 @@ func TestFunctionCalls(t *testing.T) {
 			input: "print(\n  values..., // rest\n  // done\n)",
 			output: Program{Imports: []Import{}, Statements: []Statement{
 				&FunctionCall{Name: "print", Args: []Argument{{Value: &Identifier{Name: "values"}, Spread: true}}, Comments: []Comment{
-					{Value: "rest"},
+					{Value: "rest", Trailing: true},
 					{Value: "done"},
 				}},
 			}},

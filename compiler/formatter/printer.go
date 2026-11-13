@@ -1312,14 +1312,8 @@ func (p printer) renderListLiteralDoc(list *parse.ListLiteral) doc {
 	for index, item := range list.Items {
 		itemRows = append(itemRows, armDoc{doc: dText(items[index]), startRow: startRowOf(item)})
 	}
-	body := p.renderCommentRows(itemRows, list.Comments, dText(","))
 
-	return dGroup(dConcat(
-		dText("["),
-		dIndent(dConcat(dSoftLine(), body)),
-		dSoftLine(),
-		dText("]"),
-	))
+	return dGroup(p.renderSequenceDoc("[", itemRows, list.Comments, "]"))
 }
 
 // renderTupleLiteralDoc lays a tuple out like a list: on one line when it
@@ -1329,14 +1323,8 @@ func (p printer) renderTupleLiteralDoc(tuple *parse.TupleLiteral) doc {
 	for _, item := range tuple.Items {
 		itemRows = append(itemRows, armDoc{doc: dText(p.renderExpression(item, 0)), startRow: startRowOf(item)})
 	}
-	body := p.renderCommentRows(itemRows, tuple.Comments, dText(","))
 
-	return dGroup(dConcat(
-		dText("("),
-		dIndent(dConcat(dSoftLine(), body)),
-		dSoftLine(),
-		dText(")"),
-	))
+	return dGroup(p.renderSequenceDoc("(", itemRows, tuple.Comments, ")"))
 }
 
 func (p printer) renderMapLiteralDoc(m *parse.MapLiteral) doc {
@@ -1353,14 +1341,8 @@ func (p printer) renderMapLiteralDoc(m *parse.MapLiteral) doc {
 	for index, entry := range m.Entries {
 		partRows = append(partRows, armDoc{doc: dText(parts[index]), startRow: startRowOf(entry.Key)})
 	}
-	body := p.renderCommentRows(partRows, m.Comments, dText(","))
 
-	return dGroup(dConcat(
-		dText("["),
-		dIndent(dConcat(dSoftLine(), body)),
-		dSoftLine(),
-		dText("]"),
-	))
+	return dGroup(p.renderSequenceDoc("[", partRows, m.Comments, "]"))
 }
 
 func (p printer) renderStructInstanceDoc(node *parse.StructInstance) doc {
@@ -1389,10 +1371,15 @@ func (p printer) renderStructInstanceDoc(node *parse.StructInstance) doc {
 		return dText(oneLine)
 	}
 
-	items := make([]doc, 0, len(parts)+len(node.Comments))
-	for _, comment := range node.Comments {
-		items = append(items, dText(p.renderComment(comment.Value)))
+	if len(node.Comments) > 0 {
+		rows := make([]armDoc, 0, len(parts))
+		for index, property := range node.Properties {
+			rows = append(rows, armDoc{doc: dText(parts[index]), startRow: property.Location.Start.Row})
+		}
+		return dGroup(p.renderSequenceDoc(head+"{", rows, node.Comments, "}"))
 	}
+
+	items := make([]doc, 0, len(parts))
 	for _, part := range parts {
 		items = append(items, dText(part+","))
 	}
@@ -1457,15 +1444,7 @@ func (p printer) renderCallHeadDoc(head doc, headText string, typeArgs []parse.D
 	for index, arg := range args {
 		argRows = append(argRows, armDoc{doc: argDocs[index], startRow: arg.Location.Start.Row})
 	}
-	body := p.renderCommentRows(argRows, comments, dText(","))
-
-	fallback := dGroup(dConcat(
-		head,
-		dText("("),
-		dIndent(dConcat(dSoftLine(), body)),
-		dSoftLine(),
-		dText(")"),
-	))
+	fallback := dGroup(dConcat(head, p.renderSequenceDoc("(", argRows, comments, ")")))
 
 	if headText != "" && len(comments) == 0 && len(args) > 0 {
 		last := len(args) - 1
@@ -1517,42 +1496,83 @@ func startRowOf(node any) int {
 	return located.GetLocation().Start.Row
 }
 
-// renderCommentRows interleaves comments with one-line element rows so each
-// comment stays attached to the element that follows it (#548). Each row is
-// joined with a hard line and gets a trailing separator, so the sequence
-// always breaks across lines when comments are present.
-func (p printer) renderCommentRows(rows []armDoc, comments []parse.Comment, separator doc) doc {
+// renderSequenceDoc lays out a bracketed, comma-separated sequence and the
+// comments inside it. Without comments the sequence fits on one line when it
+// can, and otherwise puts one element per line with a trailing comma. The
+// caller wraps the result in a group.
+func (p printer) renderSequenceDoc(open string, rows []armDoc, comments []parse.Comment, close string) doc {
+	opening, body := p.renderCommentRows(rows, comments, dText(","))
+	if body == nil {
+		// Only a comment after the opening bracket: the closing bracket must
+		// go on the next line, or the comment would swallow it.
+		return dConcat(dText(open), opening, dHardLine(), dText(close))
+	}
+	return dConcat(
+		dText(open),
+		opening,
+		dIndent(dConcat(dSoftLine(), body)),
+		dSoftLine(),
+		dText(close),
+	)
+}
+
+// renderCommentRows interleaves comments with one-line element rows. A
+// comment on a line of its own stays attached to the element that follows it
+// (#548). A comment that trails code on its line stays on that line: after
+// the separator of the element before it (#583), or, before any element,
+// after the opening bracket, which it returns as opening. Rows are joined
+// with hard lines and get a trailing separator, so the sequence always
+// breaks across lines when comments are present. Every comment is followed
+// by a line break, so none can swallow the code after it.
+func (p printer) renderCommentRows(rows []armDoc, comments []parse.Comment, separator doc) (opening doc, body doc) {
 	if len(comments) == 0 {
 		if len(rows) == 0 {
-			return dText("")
+			return nil, dText("")
 		}
 		joined := dJoin(dConcat(separator, dLine()), docsOf(rows))
-		return dConcat(joined, dIfBreak(separator, dText("")))
+		return nil, dConcat(joined, dIfBreak(separator, dText("")))
 	}
 
-	withComments := make([]armDoc, 0, len(rows)+len(comments))
+	docs := make([]doc, 0, len(rows)+len(comments))
+	// trailable is the index in docs of the element row a trailing comment
+	// can follow, or -1 once that row has a comment or a comment follows it.
+	trailable := -1
+	emit := func(comment parse.Comment) {
+		text := p.renderComment(comment.Value)
+		if comment.Trailing {
+			if trailable >= 0 {
+				docs[trailable] = dConcat(docs[trailable], dText(" "+text))
+				trailable = -1
+				return
+			}
+			if len(docs) == 0 && opening == nil {
+				opening = dText(" " + text)
+				return
+			}
+		}
+		docs = append(docs, dText(text))
+		trailable = -1
+	}
+
 	commentIndex := 0
 	for _, row := range rows {
 		for commentIndex < len(comments) && (row.startRow <= 0 || comments[commentIndex].Location.Start.Row < row.startRow) {
-			withComments = append(withComments, armDoc{doc: dText(p.renderComment(comments[commentIndex].Value))})
+			emit(comments[commentIndex])
 			commentIndex++
 		}
-		withComments = append(withComments, armDoc{
-			doc:      dConcat(row.doc, separator),
-			startRow: row.startRow,
-		})
+		docs = append(docs, dConcat(row.doc, separator))
+		trailable = len(docs) - 1
 	}
 	for ; commentIndex < len(comments); commentIndex++ {
-		withComments = append(withComments, armDoc{doc: dText(p.renderComment(comments[commentIndex].Value))})
+		emit(comments[commentIndex])
 	}
 
-	docs := docsOf(withComments)
 	if len(docs) == 0 {
-		return dText("")
+		return opening, nil
 	}
 	// Comments are only ever correct across multiple lines, so the enclosing
 	// sequence must break even when the content would fit flat.
-	return dForceBreak(dJoin(dHardLine(), docs))
+	return opening, dForceBreak(dJoin(dHardLine(), docs))
 }
 
 func docsOf(rows []armDoc) []doc {

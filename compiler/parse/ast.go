@@ -100,6 +100,9 @@ func (b Break) String() string {
 type Comment struct {
 	Location
 	Value string
+	// Trailing reports that the comment follows other code on its line, as
+	// in `1, // one`, rather than sitting on a line of its own.
+	Trailing bool
 }
 
 func (c Comment) String() string {
