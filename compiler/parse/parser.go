@@ -4958,6 +4958,11 @@ func (p *parser) placeDetachedComments(statements []Statement, mark int, stmt St
 	}
 	for _, comment := range p.detachedComments[mark:] {
 		comment.Trailing = false
+		// A comment statement holds its full source text, marker included.
+		comment.Value = "// " + comment.Value
+		if comment.Value == "// " {
+			comment.Value = "//"
+		}
 		if at.Row > 0 {
 			comment.Location = Location{Start: at, End: at}
 		}

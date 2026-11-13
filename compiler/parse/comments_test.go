@@ -427,14 +427,14 @@ func TestCommentsInGroupingParenthesesArePlacedAboveTheStatement(t *testing.T) {
 		t.Fatalf("statements = %d, want 4: %v", len(statements), statements)
 	}
 	why, ok := statements[1].(*Comment)
-	if !ok || why.Value != "why" || why.Trailing || why.Location.Start != (Point{Row: 2, Col: 1}) {
+	if !ok || why.Value != "// why" || why.Trailing || why.Location.Start != (Point{Row: 2, Col: 1}) {
 		t.Fatalf("statement 1 = %#v, want the comment, placed at the start of the let", statements[1])
 	}
 	if _, ok := statements[2].(*VariableDeclaration); !ok {
 		t.Fatalf("statement 2 = %#v, want the let", statements[2])
 	}
 	body := statements[3].(*FunctionDeclaration).Body
-	if inner, ok := body[0].(*Comment); !ok || inner.Value != "inner" {
+	if inner, ok := body[0].(*Comment); !ok || inner.Value != "// inner" {
 		t.Fatalf("body = %v, want the inner comment first", body)
 	}
 }

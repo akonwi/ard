@@ -33,7 +33,7 @@ func (p printer) program(program *parse.Program, removedImports []parse.Import) 
 		if index > 0 && comment.Location.Start.Row-header[index-1].Location.Start.Row > 1 {
 			lines = append(lines, "")
 		}
-		lines = append(lines, p.renderComment(comment.Value))
+		lines = append(lines, p.renderStatementComment(comment.Value))
 	}
 	if len(header) > 0 && len(imports) > 0 && imports[0].firstRow()-header[len(header)-1].Location.Start.Row > 1 {
 		lines = append(lines, "")
@@ -53,7 +53,7 @@ func (p printer) program(program *parse.Program, removedImports []parse.Import) 
 			if comment, ok := trailingCommentAfter(previous, statement); ok {
 				// A top-level statement is printed on its own, so the comment
 				// is appended to its last line rather than as a line suffix.
-				lines[len(lines)-1] += " " + p.renderComment(comment.Value)
+				lines[len(lines)-1] += " " + p.renderStatementComment(comment.Value)
 				continue
 			}
 			if haveRendered && hasSourceBlankLine(previous, statement) {
@@ -175,16 +175,16 @@ func (p printer) renderImports(imports []importEntry) []string {
 		}
 		for _, entry := range groups[key] {
 			for _, comment := range entry.leading {
-				lines = append(lines, p.renderComment(comment.Value))
+				lines = append(lines, p.renderStatementComment(comment.Value))
 			}
 			switch {
 			case !entry.removed && entry.trailing != nil:
-				lines = append(lines, p.renderImport(entry.item)+" "+p.renderComment(entry.trailing.Value))
+				lines = append(lines, p.renderImport(entry.item)+" "+p.renderStatementComment(entry.trailing.Value))
 			case !entry.removed:
 				lines = append(lines, p.renderImport(entry.item))
 			case entry.trailing != nil:
 				// The import was unused and removed; its comment stays.
-				lines = append(lines, p.renderComment(entry.trailing.Value))
+				lines = append(lines, p.renderStatementComment(entry.trailing.Value))
 			}
 		}
 	}
@@ -233,7 +233,7 @@ func (p printer) renderStatementDoc(statement parse.Statement) doc {
 
 	switch node := statement.(type) {
 	case *parse.Comment:
-		return dText(p.renderComment(node.Value))
+		return dText(p.renderStatementComment(node.Value))
 	case *parse.VariableDeclaration:
 		return p.renderVariableDeclarationDoc(node)
 	case *parse.TupleDestructure:
@@ -851,7 +851,7 @@ func (p printer) renderStatementsDoc(statements []parse.Statement) doc {
 			continue
 		}
 		if comment, ok := trailingCommentAfter(previous, statement); ok {
-			parts[len(parts)-1] = dConcat(parts[len(parts)-1], dTrailingComment(p.renderComment(comment.Value)))
+			parts[len(parts)-1] = dConcat(parts[len(parts)-1], dTrailingComment(p.renderStatementComment(comment.Value)))
 			continue
 		}
 		if haveRendered {
@@ -2062,17 +2062,27 @@ func (p printer) operatorString(operator parse.Operator) string {
 	}
 }
 
+// renderComment renders a comment held in a construct's Comments, whose
+// value is the comment's text without the `//` marker. The text is printed
+// as is, even when it starts with `//` itself.
 func (p printer) renderComment(value string) string {
 	trimmed := strings.TrimSpace(value)
-	if strings.HasPrefix(trimmed, "//") {
-		return trimmed
-	}
 	if trimmed == "" {
 		// An empty comment is `//` with nothing after it. Adding the usual
 		// separating space would leave trailing whitespace (#548).
 		return "//"
 	}
 	return "// " + trimmed
+}
+
+// renderStatementComment renders a comment that is a statement of its own,
+// whose value is the comment's full source text, `//` marker included.
+func (p printer) renderStatementComment(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if !strings.HasPrefix(trimmed, "//") {
+		return p.renderComment(trimmed)
+	}
+	return trimmed
 }
 
 func (p printer) indent(level int) string {
