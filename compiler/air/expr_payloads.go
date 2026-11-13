@@ -106,6 +106,10 @@ type ForeignExprPayload struct {
 	TypeArgs    []TypeID
 	Fields      []StructFieldValue
 	Spread      *SpreadExprPayload
+	// Variable marks an ExprForeignValue naming a Go package variable, which
+	// code outside the expression can change, rather than a constant or a
+	// function.
+	Variable bool
 }
 
 func (*ForeignExprPayload) exprPayload() {}

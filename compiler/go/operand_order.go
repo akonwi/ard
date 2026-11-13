@@ -26,6 +26,12 @@ type operand struct {
 	// rather than a value. A place is materialized by address so later
 	// writes still reach the original storage.
 	place bool
+	// source is the AIR expression the operand was lowered from, when expr is
+	// that lowering without adaptation. For a place it is the base the place
+	// lies in: the place is the base's own storage, a field of it, or, when
+	// the base is a pointer, inside its pointee. nil when unknown; an operand
+	// without a source is treated as a read a call could change.
+	source *air.Expr
 }
 
 // operandBuffer holds the operands of a typical composite expression so that
@@ -44,19 +50,26 @@ func valueOperand(lowered loweredExpr, typ air.TypeID) operand {
 	return operand{stmts: lowered.stmts, expr: lowered.expr, typ: typ}
 }
 
-func placeOperand(lowered loweredExpr) operand {
-	return operand{stmts: lowered.stmts, expr: lowered.expr, place: true}
+// sourcedOperand is valueOperand for an expression lowered from source.
+func sourcedOperand(lowered loweredExpr, typ air.TypeID, source *air.Expr) operand {
+	return operand{stmts: lowered.stmts, expr: lowered.expr, typ: typ, source: source}
+}
+
+// placeOperand is a place lying in base (see operand.source).
+func placeOperand(lowered loweredExpr, base *air.Expr) operand {
+	return operand{stmts: lowered.stmts, expr: lowered.expr, place: true, source: base}
 }
 
 // sequenceOperands returns the statements that evaluate ops in source order
 // and leaves in each ops[i].expr an expression to use in its place.
 //
-// When no operand after the first emits statements, the operands' own
-// statements are returned unchanged and every expression stays inline: Go
-// evaluates the calls in a composite expression left to right, so nothing is
-// added. Otherwise each operand to the left of the last one that emits
-// statements is evaluated into a temporary right after its own statements,
-// unless its expression cannot observe or cause side effects.
+// When an operand emits setup statements, each operand to its left is
+// evaluated into a temporary right after its own statements, unless its
+// expression cannot observe or cause side effects. Go orders only the calls
+// in an expression, so each operand at or after the last one with statements
+// whose value is a read that a later operand's call could change is also read
+// in order (readOperandsInOrder). Otherwise every expression stays inline and
+// the operands' own statements are returned unchanged.
 func (l *lowerer) sequenceOperands(ops []operand) ([]ast.Stmt, error) {
 	last := -1
 	for i := range ops {
@@ -64,7 +77,8 @@ func (l *lowerer) sequenceOperands(ops []operand) ([]ast.Stmt, error) {
 			last = i
 		}
 	}
-	if last <= 0 {
+	placeBound := l.readOperandsInOrder(ops, last)
+	if last <= 0 && placeBound < 0 {
 		if last == 0 {
 			return ops[0].stmts, nil
 		}
@@ -74,10 +88,10 @@ func (l *lowerer) sequenceOperands(ops []operand) ([]ast.Stmt, error) {
 	for i := range ops {
 		size += len(ops[i].stmts)
 	}
-	stmts := make([]ast.Stmt, 0, size+last)
+	stmts := make([]ast.Stmt, 0, size+max(last, placeBound))
 	for i := range ops {
 		stmts = append(stmts, ops[i].stmts...)
-		if i >= last {
+		if i >= last && (i >= placeBound || !ops[i].place || !l.operandMayChange(&ops[i])) {
 			continue
 		}
 		var err error
@@ -87,6 +101,53 @@ func (l *lowerer) sequenceOperands(ops []operand) ([]ast.Stmt, error) {
 		}
 	}
 	return stmts, nil
+}
+
+// readOperandsInOrder finds the operands at or after last whose value a call
+// in a later operand could change. It wraps each such value in readInOrder,
+// which adds no statements, so contexts that cannot take statements, such as
+// a while condition, still lower. A place cannot be wrapped and reused, so it
+// is left to sequenceOperands to fix with a statement; every place belongs to
+// an assignment that emits statements of its own. It returns the index of the
+// last operand with a call when a place needs fixing, and -1 otherwise.
+func (l *lowerer) readOperandsInOrder(ops []operand, last int) int {
+	first := -1
+	for i := max(last, 0); i < len(ops)-1; i++ {
+		if l.operandMayChange(&ops[i]) {
+			first = i
+			break
+		}
+	}
+	if first < 0 {
+		return -1
+	}
+	bound := -1
+	for j := len(ops) - 1; j > first; j-- {
+		if l.exprContainsCall(ops[j].expr) {
+			bound = j
+			break
+		}
+	}
+	placeBound := -1
+	for i := first; i < bound; i++ {
+		if i > first && !l.operandMayChange(&ops[i]) {
+			continue
+		}
+		if ops[i].place {
+			placeBound = bound
+			continue
+		}
+		l.readInOrder(&ops[i])
+	}
+	return placeBound
+}
+
+// readInOrder wraps a value operand in a call to the runtime's identity
+// function, Read. Go evaluates a call's arguments before the call, and the
+// calls of an expression in source order, so the read happens before any call
+// to its right.
+func (l *lowerer) readInOrder(op *operand) {
+	op.expr = &ast.CallExpr{Fun: l.runtimeQualified("Read"), Args: []ast.Expr{op.expr}}
 }
 
 func (l *lowerer) materializeOperand(stmts []ast.Stmt, op *operand) ([]ast.Stmt, error) {
@@ -164,14 +225,14 @@ func operandExprs(ops []operand) []ast.Expr {
 // lowerValueOperand lowers expr as an operand in value position. With an
 // expected type it is lowered to that type; a Void value is evaluated as a
 // statement and replaced by the Void literal.
-func (l *lowerer) lowerValueOperand(fn air.Function, expr air.Expr, expected air.TypeID) (operand, error) {
+func (l *lowerer) lowerValueOperand(fn air.Function, expr *air.Expr, expected air.TypeID) (operand, error) {
 	var lowered loweredExpr
 	var err error
 	typ := expected
 	if expected != air.NoType {
-		lowered, err = l.lowerExprWithExpectedType(fn, expr, expected)
+		lowered, err = l.lowerExprWithExpectedType(fn, *expr, expected)
 	} else {
-		lowered, err = l.lowerExpr(fn, expr)
+		lowered, err = l.lowerExpr(fn, *expr)
 		typ = expr.Type
 	}
 	if err != nil {
@@ -180,17 +241,17 @@ func (l *lowerer) lowerValueOperand(fn air.Function, expr air.Expr, expected air
 	if l.isVoidType(expected) || isVoidExpr(lowered.expr) {
 		lowered = l.materializeVoidValue(lowered)
 	}
-	return valueOperand(lowered, typ), nil
+	return sourcedOperand(lowered, typ, expr), nil
 }
 
 // sequenceOperandPair is sequenceOperands for two value operands lowered
-// separately. It updates first.expr and second.expr in place and returns the
-// statements that evaluate both in order.
-func (l *lowerer) sequenceOperandPair(first *loweredExpr, firstType air.TypeID, second *loweredExpr, secondType air.TypeID) ([]ast.Stmt, error) {
-	if len(second.stmts) == 0 {
+// separately, the first from firstSource. It updates first.expr and
+// second.expr in place and returns the statements that evaluate both in order.
+func (l *lowerer) sequenceOperandPair(first *loweredExpr, firstSource *air.Expr, second *loweredExpr, secondType air.TypeID) ([]ast.Stmt, error) {
+	ops := [2]operand{sourcedOperand(*first, firstSource.Type, firstSource), valueOperand(*second, secondType)}
+	if len(second.stmts) == 0 && !l.readBeforeCall(&ops[0], second.expr) {
 		return first.stmts, nil
 	}
-	ops := [2]operand{valueOperand(*first, firstType), valueOperand(*second, secondType)}
 	stmts, err := l.sequenceOperands(ops[:])
 	if err != nil {
 		return nil, err
@@ -199,16 +260,36 @@ func (l *lowerer) sequenceOperandPair(first *loweredExpr, firstType air.TypeID, 
 	return stmts, nil
 }
 
-// sequenceOperandTriple is sequenceOperandPair for three value operands.
-func (l *lowerer) sequenceOperandTriple(first *loweredExpr, firstType air.TypeID, second *loweredExpr, secondType air.TypeID, third *loweredExpr, thirdType air.TypeID) ([]ast.Stmt, error) {
-	if len(second.stmts) == 0 && len(third.stmts) == 0 {
+// sequenceOperandTriple is sequenceOperandPair for three value operands, the
+// first two lowered from firstSource and secondSource.
+func (l *lowerer) sequenceOperandTriple(first *loweredExpr, firstSource *air.Expr, second *loweredExpr, secondSource *air.Expr, third *loweredExpr, thirdType air.TypeID) ([]ast.Stmt, error) {
+	ops := [3]operand{
+		sourcedOperand(*first, firstSource.Type, firstSource),
+		sourcedOperand(*second, secondSource.Type, secondSource),
+		valueOperand(*third, thirdType),
+	}
+	if len(second.stmts) == 0 && len(third.stmts) == 0 &&
+		!l.readBeforeCall(&ops[0], second.expr, third.expr) && !l.readBeforeCall(&ops[1], third.expr) {
 		return first.stmts, nil
 	}
-	ops := [3]operand{valueOperand(*first, firstType), valueOperand(*second, secondType), valueOperand(*third, thirdType)}
 	stmts, err := l.sequenceOperands(ops[:])
 	if err != nil {
 		return nil, err
 	}
 	first.expr, second.expr, third.expr = ops[0].expr, ops[1].expr, ops[2].expr
 	return stmts, nil
+}
+
+// readBeforeCall reports whether op is a read that a call in one of later
+// could change.
+func (l *lowerer) readBeforeCall(op *operand, later ...ast.Expr) bool {
+	if !l.operandMayChange(op) {
+		return false
+	}
+	for _, expr := range later {
+		if l.exprContainsCall(expr) {
+			return true
+		}
+	}
+	return false
 }
