@@ -505,16 +505,39 @@ func assertTestPipelineProfile(t *testing.T, stderr string) {
 
 func TestParseRunArgs(t *testing.T) {
 	tests := []struct {
-		name       string
-		args       []string
-		path       string
-		expectErr  bool
-		errMessage string
+		name        string
+		args        []string
+		path        string
+		race        bool
+		programArgs []string
+		expectErr   bool
+		errMessage  string
 	}{
 		{
 			name: "input only",
 			args: []string{"samples/main.ard"},
 			path: "samples/main.ard",
+		},
+		{
+			name:        "race flag before input",
+			args:        []string{"--race", "samples/main.ard", "extra"},
+			path:        "samples/main.ard",
+			race:        true,
+			programArgs: []string{"extra"},
+		},
+		{
+			// Like every argument after the input, --race there belongs to the
+			// program.
+			name:        "race flag after input is forwarded to the program",
+			args:        []string{"samples/main.ard", "--race"},
+			path:        "samples/main.ard",
+			programArgs: []string{"--race"},
+		},
+		{
+			name:       "race flag without input",
+			args:       []string{"--race"},
+			expectErr:  true,
+			errMessage: "expected filepath argument",
 		},
 		{
 			name:       "removed target flag",
@@ -529,22 +552,24 @@ func TestParseRunArgs(t *testing.T) {
 			errMessage: "unknown flag: --watch",
 		},
 		{
-			name: "program args after input",
-			args: []string{"samples/main.ard", "extra"},
-			path: "samples/main.ard",
+			name:        "program args after input",
+			args:        []string{"samples/main.ard", "extra"},
+			path:        "samples/main.ard",
+			programArgs: []string{"extra"},
 		},
 		{
 			// Flags after the input file belong to the program and are forwarded
 			// verbatim, not parsed as run flags.
-			name: "program flags after input are forwarded",
-			args: []string{"samples/main.ard", "create", "x", "--dir", "y"},
-			path: "samples/main.ard",
+			name:        "program flags after input are forwarded",
+			args:        []string{"samples/main.ard", "create", "x", "--dir", "y"},
+			path:        "samples/main.ard",
+			programArgs: []string{"create", "x", "--dir", "y"},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			path, err := parseRunArgs(tt.args)
+			got, err := parseRunArgs(tt.args)
 			if tt.expectErr {
 				if err == nil {
 					t.Fatalf("expected error %q, got nil", tt.errMessage)
@@ -558,8 +583,14 @@ func TestParseRunArgs(t *testing.T) {
 			if err != nil {
 				t.Fatalf("did not expect error: %v", err)
 			}
-			if path != tt.path {
-				t.Fatalf("expected path %q, got %q", tt.path, path)
+			if got.Input != tt.path {
+				t.Fatalf("expected path %q, got %q", tt.path, got.Input)
+			}
+			if got.Race != tt.race {
+				t.Fatalf("expected race %t, got %t", tt.race, got.Race)
+			}
+			if fmt.Sprint(got.ProgramArgs) != fmt.Sprint(tt.programArgs) {
+				t.Fatalf("expected program args %q, got %q", tt.programArgs, got.ProgramArgs)
 			}
 		})
 	}
@@ -969,7 +1000,7 @@ fn main() {
 			{Name: "build_number", Value: "42"},
 			{Name: "experimental", Value: "true"},
 		},
-	})
+	}, false)
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
@@ -989,6 +1020,7 @@ func TestParseTestArgs(t *testing.T) {
 		path       string
 		filter     string
 		failFast   bool
+		race       bool
 		expectErr  bool
 		errMessage string
 	}{
@@ -1005,6 +1037,13 @@ func TestParseTestArgs(t *testing.T) {
 			path:     "samples",
 			filter:   "math",
 			failFast: true,
+		},
+		{
+			name:   "race flag in any position",
+			args:   []string{"--race", "samples", "--filter", "math"},
+			path:   "samples",
+			filter: "math",
+			race:   true,
 		},
 		{
 			name:       "missing filter value",
@@ -1028,7 +1067,7 @@ func TestParseTestArgs(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			path, filter, failFast, err := parseTestArgs(tt.args)
+			got, err := parseTestArgs(tt.args)
 			if tt.expectErr {
 				if err == nil {
 					t.Fatalf("expected error %q, got nil", tt.errMessage)
@@ -1042,14 +1081,17 @@ func TestParseTestArgs(t *testing.T) {
 			if err != nil {
 				t.Fatalf("did not expect error: %v", err)
 			}
-			if path != tt.path {
-				t.Fatalf("expected path %q, got %q", tt.path, path)
+			if got.Input != tt.path {
+				t.Fatalf("expected path %q, got %q", tt.path, got.Input)
 			}
-			if filter != tt.filter {
-				t.Fatalf("expected filter %q, got %q", tt.filter, filter)
+			if got.Filter != tt.filter {
+				t.Fatalf("expected filter %q, got %q", tt.filter, got.Filter)
 			}
-			if failFast != tt.failFast {
-				t.Fatalf("expected failFast %t, got %t", tt.failFast, failFast)
+			if got.FailFast != tt.failFast {
+				t.Fatalf("expected failFast %t, got %t", tt.failFast, got.FailFast)
+			}
+			if got.Race != tt.race {
+				t.Fatalf("expected race %t, got %t", tt.race, got.Race)
 			}
 		})
 	}
@@ -1061,6 +1103,7 @@ func TestParseBuildArgs(t *testing.T) {
 		path       string
 		out        string
 		release    bool
+		race       bool
 		overrides  []checker.BuildOverride
 		expectErr  bool
 		errMessage string
@@ -1076,6 +1119,9 @@ func TestParseBuildArgs(t *testing.T) {
 			release:   true,
 			overrides: []checker.BuildOverride{{Name: "version", Value: "v1=final"}, {Name: "channel", Value: ""}},
 		},
+		{name: "race", args: []string{"--race", "samples/main.ard"}, path: "samples/main.ard", out: "main", race: true},
+		{name: "race with release", args: []string{"samples/main.ard", "--release", "--race"}, path: "samples/main.ard", out: "main", release: true, race: true},
+		{name: "duplicate race", args: []string{"samples/main.ard", "--race", "--race"}, expectErr: true, errMessage: "--race may be provided only once"},
 		{name: "missing output before flag", args: []string{"samples/main.ard", "--out", "--release"}, expectErr: true, errMessage: "--out requires a path"},
 		{name: "removed target flag", args: []string{"samples/main.ard", "--target", "go"}, expectErr: true, errMessage: "unknown flag: --target"},
 		{name: "unknown flag", args: []string{"samples/main.ard", "--wat"}, expectErr: true, errMessage: "unknown flag: --wat"},
@@ -1099,8 +1145,8 @@ func TestParseBuildArgs(t *testing.T) {
 			if got.Input != tt.path || got.Output != tt.out {
 				t.Fatalf("paths = input %q output %q, want input %q output %q", got.Input, got.Output, tt.path, tt.out)
 			}
-			if got.Release != tt.release || fmt.Sprint(got.Overrides) != fmt.Sprint(tt.overrides) {
-				t.Fatalf("build options = %#v, want release=%t overrides=%#v", got, tt.release, tt.overrides)
+			if got.Release != tt.release || got.Race != tt.race || fmt.Sprint(got.Overrides) != fmt.Sprint(tt.overrides) {
+				t.Fatalf("build options = %#v, want release=%t race=%t overrides=%#v", got, tt.release, tt.race, tt.overrides)
 			}
 		})
 	}

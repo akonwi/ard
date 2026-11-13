@@ -6778,6 +6778,18 @@ func TestGoBuildArgsStripDebugInfoUnlessRelease(t *testing.T) {
 			opts: goBuildOptions{release: true, goflags: "-ldflags=-X main.stamp=v1"},
 			want: []string{"build", "-mod=mod", "-o", "out/app", "."},
 		},
+		{
+			// The race runtime symbolises Go frames from pclntab, so race reports
+			// keep file:line positions without DWARF and the strip policy stays.
+			name: "race builds enable the race detector and still strip debug sections",
+			opts: goBuildOptions{race: true},
+			want: []string{"build", "-mod=mod", "-o", "out/app", "-race", "-ldflags=-s -w", "."},
+		},
+		{
+			name: "race release builds keep debug sections",
+			opts: goBuildOptions{race: true, release: true, tags: []string{"foo"}},
+			want: []string{"build", "-mod=mod", "-o", "out/app", "-race", "-tags=foo", "."},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

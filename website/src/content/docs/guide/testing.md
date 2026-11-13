@@ -98,7 +98,13 @@ ard test --filter math
 
 # Stop on first failure
 ard test --fail-fast
+
+# Run with Go's race detector
+ard test --race
 ```
+
+`--race` fails the run when a test triggers a data race; see
+[Detecting data races](/advanced/async/#detecting-data-races).
 
 ## Test Output
 

@@ -3,6 +3,7 @@ package gotarget
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"go/format"
 	"go/token"
@@ -145,6 +146,19 @@ func Sub(root fs.FS, path string) (fs.FS, error) {
 }
 
 func RunProgram(program *air.Program, args []string, projectInfo ...*checker.ProjectInfo) error {
+	return RunProgramWithOptions(program, args, RunOptions{}, projectInfo...)
+}
+
+// RunOptions controls how RunProgramWithOptions compiles the generated Go
+// program before running it.
+type RunOptions struct {
+	// Race builds the program with Go's race detector.
+	Race bool
+}
+
+// RunProgramWithOptions is RunProgram honouring options. args has the shape
+// `ard run <input> [program args...]`.
+func RunProgramWithOptions(program *air.Program, args []string, options RunOptions, projectInfo ...*checker.ProjectInfo) error {
 	info := optionalProjectInfo(projectInfo)
 	pathHint := artifactPathHint(info, inputPathFromCLIArgs(args))
 	workspaceDir, err := artifactWorkspace(pathHint, artifactPurposeRun)
@@ -158,7 +172,7 @@ func RunProgram(program *air.Program, args []string, projectInfo ...*checker.Pro
 	if err := os.MkdirAll(filepath.Dir(binaryPath), 0o755); err != nil {
 		return err
 	}
-	if err := buildGeneratedProgram(workspaceDir, binaryPath, goBuildOptionsFor(info, false)); err != nil {
+	if err := buildGeneratedProgram(workspaceDir, binaryPath, goBuildOptionsFor(info, BuildOptions{Race: options.Race})); err != nil {
 		return err
 	}
 	cmd := exec.Command(binaryPath, programArgs(args)...)
@@ -184,6 +198,9 @@ type BuildOptions struct {
 	// Release keeps DWARF and the symbol table in the output binary so external
 	// tools can symbolise it. Development builds strip both for faster linking.
 	Release bool
+	// Race builds with Go's race detector. It is independent of Release: race
+	// reports symbolise frames from pclntab, so stripped builds keep file:line.
+	Race bool
 }
 
 // BuildProgramWithOptions is BuildProgram honouring options and reporting each
@@ -209,7 +226,7 @@ func BuildProgramWithOptions(program *air.Program, outputPath string, options Bu
 		return "", err
 	}
 	if err := observeStage(observer, "go.compile_link", func() error {
-		return buildGeneratedProgram(workspaceDir, absOutput, goBuildOptionsFor(info, options.Release))
+		return buildGeneratedProgram(workspaceDir, absOutput, goBuildOptionsFor(info, options))
 	}); err != nil {
 		return "", err
 	}
@@ -221,7 +238,29 @@ func RunTests(program *air.Program, args []string, tests []TestCase, failFast bo
 }
 
 func RunTestsWithStageObserver(program *air.Program, args []string, tests []TestCase, failFast bool, observer StageObserver, projectInfo ...*checker.ProjectInfo) ([]TestOutcome, error) {
+	return RunTestsWithOptions(program, args, tests, TestOptions{FailFast: failFast, Observer: observer}, projectInfo...)
+}
+
+// TestOptions controls how RunTestsWithOptions builds and runs the generated
+// test binary.
+type TestOptions struct {
+	FailFast bool
+	// Race builds the test binary with Go's race detector.
+	Race bool
+	// Observer, when non-nil, receives each backend stage's duration.
+	Observer StageObserver
+}
+
+// ErrDataRaceDetected reports that the race detector found a data race while
+// the tests ran. RunTestsWithOptions returns it together with the outcomes of
+// every test that ran, because the detector fails the run as a whole rather
+// than the test that raced.
+var ErrDataRaceDetected = errors.New("data race detected")
+
+func RunTestsWithOptions(program *air.Program, args []string, tests []TestCase, options TestOptions, projectInfo ...*checker.ProjectInfo) ([]TestOutcome, error) {
 	info := optionalProjectInfo(projectInfo)
+	failFast := options.FailFast
+	observer := options.Observer
 	pathHint := artifactPathHint(info, inputPathFromCLIArgs(args))
 	var workspaceDir string
 	if err := observeStage(observer, "go.prepare_workspace", func() error {
@@ -241,18 +280,27 @@ func RunTestsWithStageObserver(program *air.Program, args []string, tests []Test
 	}
 	binaryPath := filepath.Join(workspaceDir, "ard-tests")
 	if err := observeStage(observer, "go.compile_link", func() error {
-		return buildGeneratedProgram(workspaceDir, binaryPath, goBuildOptionsFor(info, false))
+		return buildGeneratedProgram(workspaceDir, binaryPath, goBuildOptionsFor(info, BuildOptions{Race: options.Race}))
 	}); err != nil {
 		return nil, err
 	}
 	resultPath := filepath.Join(workspaceDir, "test-results.json")
+	if err := os.Remove(resultPath); err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
 	cmd := exec.Command(binaryPath, programArgs(args)...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
 	cmd.Env = append(os.Environ(), "ARD_TEST_RESULTS="+resultPath)
-	if err := observeStage(observer, "test.execute", cmd.Run); err != nil {
-		return nil, err
+	runErr := observeStage(observer, "test.execute", cmd.Run)
+	// The runner writes its results as the last step of main. A race build that
+	// still exits non-zero after that has been failed by the race detector
+	// (status 66 unless GORACE sets exitcode), so the outcomes stay meaningful.
+	var exitErr *exec.ExitError
+	raceExit := options.Race && errors.As(runErr, &exitErr) && fileExists(resultPath)
+	if runErr != nil && !raceExit {
+		return nil, runErr
 	}
 	var outcomes []TestOutcome
 	if err := observeStage(observer, "test.read_decode_results", func() error {
@@ -262,7 +310,13 @@ func RunTestsWithStageObserver(program *air.Program, args []string, tests []Test
 		}
 		return json.Unmarshal(data, &outcomes)
 	}); err != nil {
+		if raceExit {
+			return nil, runErr
+		}
 		return nil, err
+	}
+	if raceExit {
+		return outcomes, ErrDataRaceDetected
 	}
 	return outcomes, nil
 }
@@ -1394,6 +1448,10 @@ type goBuildOptions struct {
 	// half on large programs because the linker no longer has to merge and
 	// compress every package's DWARF.
 	release bool
+	// race builds with Go's race detector. It leaves the debug-section policy
+	// alone: the race runtime symbolises Go frames from pclntab, so reports keep
+	// file:line positions in stripped binaries.
+	race bool
 	// goflags is the effective GOFLAGS value the go tool would apply. An explicit
 	// -ldflags on the command line replaces, rather than extends, one from
 	// GOFLAGS, so any linker flags found here are carried into ours.
@@ -1405,6 +1463,9 @@ const stripDebugLinkFlags = "-s -w"
 // goBuildArgs is the argument list passed to the go tool for opts.
 func goBuildArgs(outputPath string, opts goBuildOptions) []string {
 	args := []string{"build", "-mod=mod", "-o", outputPath}
+	if opts.race {
+		args = append(args, "-race")
+	}
 	if len(opts.tags) > 0 {
 		args = append(args, "-tags="+strings.Join(opts.tags, ","))
 	}
@@ -1466,6 +1527,11 @@ func splitGoflags(goflags string) []string {
 }
 
 func buildGeneratedProgram(dir string, outputPath string, opts goBuildOptions) error {
+	if opts.race {
+		if err := checkRaceDetector(dir); err != nil {
+			return err
+		}
+	}
 	if !opts.release {
 		goflags, err := effectiveGoflags(dir)
 		if err != nil {
@@ -1493,8 +1559,45 @@ func effectiveGoflags(dir string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-func goBuildOptionsFor(projectInfo *checker.ProjectInfo, release bool) goBuildOptions {
-	opts := goBuildOptions{release: release}
+// RaceUnavailableError reports that the Go toolchain cannot build with the race
+// detector in the current configuration.
+type RaceUnavailableError struct {
+	// Reason is the go tool's explanation, such as "-race requires cgo".
+	Reason string
+}
+
+func (e *RaceUnavailableError) Error() string {
+	return "--race is unavailable: " + e.Reason
+}
+
+func (e *RaceUnavailableError) Hint() string {
+	return "Go's race detector supports only some GOOS/GOARCH pairs and, outside macOS, needs cgo (CGO_ENABLED=1 and a C compiler); see https://go.dev/doc/articles/race_detector#Requirements"
+}
+
+// checkRaceDetector asks the go tool whether -race is usable for the current
+// GOOS, GOARCH and cgo settings. `go list -race` applies the same validation as
+// `go build -race` in a few milliseconds, so the answer always matches the
+// installed toolchain. Failures that do not concern -race are left for the
+// build itself to report.
+func checkRaceDetector(dir string) error {
+	cmd := exec.Command("go", "list", "-race", "runtime")
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		return nil
+	}
+	reason := strings.TrimSpace(string(out))
+	if !strings.Contains(reason, "-race") {
+		return nil
+	}
+	if line, _, found := strings.Cut(reason, "\n"); found {
+		reason = line
+	}
+	return &RaceUnavailableError{Reason: strings.TrimPrefix(reason, "go: ")}
+}
+
+func goBuildOptionsFor(projectInfo *checker.ProjectInfo, options BuildOptions) goBuildOptions {
+	opts := goBuildOptions{release: options.Release, race: options.Race}
 	if projectInfo != nil && len(projectInfo.Go.BuildTags) > 0 {
 		opts.tags = append([]string(nil), projectInfo.Go.BuildTags...)
 	}

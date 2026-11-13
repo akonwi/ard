@@ -3569,15 +3569,17 @@ func TestGoTargetParityCollectionsMutation(t *testing.T) {
 	})
 }
 
-func TestGoTargetParityAsyncStart(t *testing.T) {
-	cases := []struct {
-		name  string
-		input string
-		want  string
-	}{
-		{
-			name: "async start coordinates over unbuffered channel",
-			input: `use ard/async
+// asyncStartParityCases are synchronized async programs. They also run under
+// Go's race detector (see TestGoTargetParityAsyncStartIsRaceFree), so every case
+// must order its conflicting accesses.
+var asyncStartParityCases = []struct {
+	name  string
+	input string
+	want  string
+}{
+	{
+		name: "async start coordinates over unbuffered channel",
+		input: `use ard/async
 fn main() Bool {
   let done = Chan::new<Bool>()
   async::start(fn() {
@@ -3585,11 +3587,11 @@ fn main() Bool {
   })
   done.recv().expect("done")
 }`,
-			want: "true",
-		},
-		{
-			name: "captured reference shares its pointee",
-			input: `use ard/async
+		want: "true",
+	},
+	{
+		name: "captured reference shares its pointee",
+		input: `use ard/async
 struct Box { value: Int }
 fn main() Int {
   mut box = Box{value: 1}
@@ -3602,11 +3604,11 @@ fn main() Int {
   done.recv().expect("done")
   box.value
 }`,
-			want: "2",
-		},
-		{
-			name: "task may borrow outer storage",
-			input: `use ard/async
+		want: "2",
+	},
+	{
+		name: "task may borrow outer storage",
+		input: `use ard/async
 struct Box { value: Int }
 fn main() Int {
   mut box = Box{value: 1}
@@ -3619,11 +3621,11 @@ fn main() Int {
   done.recv().expect("done")
   box.value
 }`,
-			want: "2",
-		},
-		{
-			name: "task may rebind outer reference slot",
-			input: `use ard/async
+		want: "2",
+	},
+	{
+		name: "task may rebind outer reference slot",
+		input: `use ard/async
 struct Box { value: Int }
 fn main() Int {
   mut first = Box{value: 1}
@@ -3637,10 +3639,12 @@ fn main() Int {
   done.recv().expect("done")
   current.value
 }`,
-			want: "2",
-		},
-	}
-	for _, tc := range cases {
+		want: "2",
+	},
+}
+
+func TestGoTargetParityAsyncStart(t *testing.T) {
+	for _, tc := range asyncStartParityCases {
 		t.Run(tc.name, func(t *testing.T) {
 			program := lowerParitySource(t, tc.input)
 			if got := strings.TrimSpace(runGoTargetParityJSON(t, program)); got != tc.want {
@@ -4052,6 +4056,11 @@ func lowerParitySource(t *testing.T, input string) *air.Program {
 
 func runGoTargetParityJSON(t *testing.T, program *air.Program) string {
 	t.Helper()
+	return runGoTargetParityJSONWithOptions(t, program, goBuildOptions{})
+}
+
+func runGoTargetParityJSONWithOptions(t *testing.T, program *air.Program, buildOptions goBuildOptions) string {
+	t.Helper()
 	tempDir := t.TempDir()
 	sources, err := GenerateSources(program, Options{PackageName: "main"})
 	if err != nil {
@@ -4177,7 +4186,7 @@ func normalizeReflectValue(v reflect.Value) any {
 		t.Fatalf("write go.mod: %v", err)
 	}
 	binaryPath := filepath.Join(tempDir, "parity-bin")
-	if err := buildGeneratedProgram(tempDir, binaryPath, goBuildOptions{}); err != nil {
+	if err := buildGeneratedProgram(tempDir, binaryPath, buildOptions); err != nil {
 		t.Fatalf("build generated program: %v", err)
 	}
 	cmd := exec.Command(binaryPath)

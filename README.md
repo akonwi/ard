@@ -494,6 +494,7 @@ ard test              # run all tests in the project
 ard test math.ard     # run tests in a specific file
 ard test --filter add # filter by name
 ard test --fail-fast  # stop on first failure
+ard test --race       # run with Go's race detector
 ```
 
 Tests can be co-located in the same file as the code they test, or placed under a `/test` directory for integration-style tests that only access public APIs.
