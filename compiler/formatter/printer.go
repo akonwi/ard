@@ -334,6 +334,23 @@ func (p printer) renderStructDefinitionDoc(node *parse.StructDefinition) doc {
 		endRow   int
 	}
 	items := make([]structItem, 0, len(node.Fields)+len(node.Comments))
+	// trailable is the index in items of the field a trailing comment can
+	// follow, or -1 once that field has one or a comment follows it (#583).
+	trailable := -1
+	addComment := func(comment parse.Comment) {
+		text := p.renderComment(comment.Value)
+		if comment.Trailing && trailable >= 0 {
+			items[trailable].doc = dConcat(items[trailable].doc, dTrailingComment(text))
+			trailable = -1
+			return
+		}
+		items = append(items, structItem{
+			doc:      dText(text),
+			startRow: comment.Location.Start.Row,
+			endRow:   comment.Location.End.Row,
+		})
+		trailable = -1
+	}
 	commentIndex := 0
 	for _, field := range node.Fields {
 		fieldRow := field.Name.Location.Start.Row
@@ -341,12 +358,7 @@ func (p printer) renderStructDefinitionDoc(node *parse.StructDefinition) doc {
 			fieldRow = field.Attributes[0].Location.Start.Row
 		}
 		for commentIndex < len(node.Comments) && (fieldRow == 0 || node.Comments[commentIndex].Location.Start.Row < fieldRow) {
-			comment := node.Comments[commentIndex]
-			items = append(items, structItem{
-				doc:      dText(p.renderComment(comment.Value)),
-				startRow: comment.Location.Start.Row,
-				endRow:   comment.Location.End.Row,
-			})
+			addComment(node.Comments[commentIndex])
 			commentIndex++
 		}
 		fieldEnd := field.Type.GetLocation().End.Row
@@ -358,6 +370,9 @@ func (p printer) renderStructDefinitionDoc(node *parse.StructDefinition) doc {
 			type fieldPrefix struct {
 				row int
 				doc doc
+				// trailingText is set for a comment that trails code on
+				// its line.
+				trailingText string
 			}
 			prefixes := make([]fieldPrefix, 0, len(field.Attributes))
 			for _, attribute := range field.Attributes {
@@ -365,12 +380,21 @@ func (p printer) renderStructDefinitionDoc(node *parse.StructDefinition) doc {
 			}
 			for commentIndex < len(node.Comments) && node.Comments[commentIndex].Location.Start.Row < field.Name.Location.Start.Row {
 				comment := node.Comments[commentIndex]
-				prefixes = append(prefixes, fieldPrefix{row: comment.Location.Start.Row, doc: dText(p.renderComment(comment.Value))})
+				prefix := fieldPrefix{row: comment.Location.Start.Row, doc: dText(p.renderComment(comment.Value))}
+				if comment.Trailing {
+					prefix.trailingText = p.renderComment(comment.Value)
+				}
+				prefixes = append(prefixes, prefix)
 				commentIndex++
 			}
 			sort.SliceStable(prefixes, func(i, j int) bool { return prefixes[i].row < prefixes[j].row })
 			prefixDocs := make([]doc, 0, len(prefixes)*2+1)
-			for _, prefix := range prefixes {
+			for index, prefix := range prefixes {
+				if prefix.trailingText != "" && index > 0 && prefixes[index-1].trailingText == "" {
+					// A comment that trails an attribute stays on its line.
+					prefixDocs[len(prefixDocs)-2] = dConcat(prefixDocs[len(prefixDocs)-2], dTrailingComment(prefix.trailingText))
+					continue
+				}
 				prefixDocs = append(prefixDocs, prefix.doc, dHardLine())
 			}
 			prefixDocs = append(prefixDocs, fieldDoc)
@@ -381,14 +405,10 @@ func (p printer) renderStructDefinitionDoc(node *parse.StructDefinition) doc {
 			startRow: fieldRow,
 			endRow:   fieldEnd,
 		})
+		trailable = len(items) - 1
 	}
 	for ; commentIndex < len(node.Comments); commentIndex++ {
-		comment := node.Comments[commentIndex]
-		items = append(items, structItem{
-			doc:      dText(p.renderComment(comment.Value)),
-			startRow: comment.Location.Start.Row,
-			endRow:   comment.Location.End.Row,
-		})
+		addComment(node.Comments[commentIndex])
 	}
 
 	parts := make([]doc, 0, len(items)*3)
@@ -477,18 +497,15 @@ func (p printer) renderEnumDefinitionDoc(node *parse.EnumDefinition) doc {
 		return dText(header + " {}")
 	}
 
-	items := make([]doc, 0, len(node.Variants)+len(node.Comments))
-	for _, comment := range node.Comments {
-		items = append(items, dText(p.renderComment(comment.Value)))
-	}
+	variants := make([]armDoc, 0, len(node.Variants))
 	for _, variant := range node.Variants {
-		if variant.Value == nil {
-			items = append(items, dText(variant.Name+","))
-		} else {
-			items = append(items, dText(fmt.Sprintf("%s = %s,", variant.Name, p.renderExpression(variant.Value, 0))))
+		text := variant.Name + ","
+		if variant.Value != nil {
+			text = fmt.Sprintf("%s = %s,", variant.Name, p.renderExpression(variant.Value, 0))
 		}
+		variants = append(variants, armDoc{doc: dText(text), startRow: variant.Location.Start.Row})
 	}
-	body := dJoin(dHardLine(), items)
+	body := dJoin(dHardLine(), docsOfPlaced(p.placeComments(variants, node.Comments)))
 	return dGroup(dConcat(
 		dText(header+" {"),
 		dIndent(dConcat(dHardLine(), body)),

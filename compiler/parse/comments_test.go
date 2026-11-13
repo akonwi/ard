@@ -305,3 +305,22 @@ func TestCommentsRecordWhetherTheyTrailCode(t *testing.T) {
 		})
 	}
 }
+
+// Enum variants record where they are, so the formatter can keep comments
+// next to the variant they describe (#583).
+func TestEnumVariantsRecordTheirLocation(t *testing.T) {
+	result := Parse([]byte("enum Code {\n  Ok = 0,\n  // the rest\n  Bad,\n}\n"), "test.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	variants := result.Program.Statements[0].(*EnumDefinition).Variants
+	want := []Location{
+		{Start: Point{Row: 2, Col: 3}, End: Point{Row: 2, Col: 8}},
+		{Start: Point{Row: 4, Col: 3}, End: Point{Row: 4, Col: 5}},
+	}
+	for i, variant := range variants {
+		if variant.Location != want[i] {
+			t.Fatalf("variant %s location = %+v, want %+v", variant.Name, variant.Location, want[i])
+		}
+	}
+}

@@ -591,6 +591,7 @@ func (s StructInstance) String() string {
 }
 
 type EnumVariant struct {
+	Location
 	Name  string
 	Value Expression // nil means auto-assign (0 or previous+1)
 }

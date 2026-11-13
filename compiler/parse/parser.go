@@ -1095,7 +1095,7 @@ func (p *parser) enumDef(private bool) Statement {
 			break
 		}
 		variantToken := p.advance()
-		variant := EnumVariant{Name: variantToken.text}
+		variant := EnumVariant{Name: variantToken.text, Location: variantToken.getLocation()}
 
 		// Check for explicit value assignment
 		if p.match(equal) {
@@ -1105,6 +1105,7 @@ func (p *parser) enumDef(private bool) Statement {
 				p.synchronize()
 				return nil
 			}
+			variant.Location.End = variant.Value.GetLocation().End
 		}
 
 		enum.Variants = append(enum.Variants, variant)
