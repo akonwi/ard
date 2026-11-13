@@ -2081,92 +2081,107 @@ func (l *lowerer) lowerDeclaredCallArgs(fn air.Function, expr air.Expr, target a
 	return operandExprs(ops), stmts, writeback, nil
 }
 
-// adaptCallableReturnABI converts a function value of concreteType to the Go
-// signature of declaredType when the two differ only in how the return is laid
-// out. Return layout follows the declared type (ADRs 0038 and 0077), so a
-// generic parameter such as `fn($A) $B` is a Go function returning one value
-// even when `$B` is a Result, a Maybe, or a tuple, whose own function types
-// return their ABI results. The adapter calls the value with its own layout
-// and returns the layout the declaration expects.
-func (l *lowerer) adaptCallableReturnABI(stmts []ast.Stmt, value ast.Expr, concreteType, declaredType air.TypeID) ([]ast.Stmt, ast.Expr, error) {
-	concrete, ok := l.functionTypeInfo(concreteType)
-	if !ok {
-		return stmts, value, nil
+// lowerGetField lowers a field read. The declared type it returns is set for
+// a field of a generic struct whose Go layout differs from its concrete type's
+// (see lowerInDeclaredLayout).
+func (l *lowerer) lowerGetField(fn air.Function, expr air.Expr) (loweredExpr, air.TypeID, error) {
+	if expr.Target == nil {
+		return loweredExpr{}, air.NoType, fmt.Errorf("get field missing target")
 	}
-	declared, ok := l.functionTypeInfo(declaredType)
-	if !ok || len(declared.Params) != len(concrete.Params) || !l.abiReturnShapeAvailable(concrete.Return) {
-		return stmts, value, nil
+	payload := expr.FieldPayload()
+	if payload == nil {
+		return loweredExpr{}, air.NoType, fmt.Errorf("get field is missing its payload")
 	}
-	// packValue: the declaration returns the whole value. Otherwise the only
-	// remaining difference is a fallible tuple declared through a type
-	// parameter, whose success value is one struct rather than its elements.
-	packValue := !l.abiReturnShapeAvailable(declared.Return)
-	if !packValue {
-		concreteReturn := l.program.Types[concrete.Return-1]
-		declaredReturn := l.program.Types[declared.Return-1]
-		if concreteReturn.Kind != air.TypeResult || declaredReturn.Kind != air.TypeResult {
-			return stmts, value, nil
+	target, err := l.lowerExpr(fn, *expr.Target)
+	if err != nil {
+		return loweredExpr{}, air.NoType, err
+	}
+	if !validTypeID(l.program, expr.Target.Type) {
+		return loweredExpr{}, air.NoType, fmt.Errorf("invalid target type id %d", expr.Target.Type)
+	}
+	targetType := l.program.Types[expr.Target.Type-1]
+	if targetType.Kind == air.TypeReference {
+		if !validTypeID(l.program, targetType.Elem) {
+			return loweredExpr{}, air.NoType, fmt.Errorf("invalid reference elem type id %d", targetType.Elem)
 		}
-		_, concreteSpreads := l.abiSpreadTuple(concreteReturn.Value)
-		_, declaredSpreads := l.abiSpreadTuple(declaredReturn.Value)
-		if !concreteSpreads || declaredSpreads {
-			return stmts, value, nil
-		}
+		targetType = l.program.Types[targetType.Elem-1]
 	}
+	if targetType.Kind == air.TypeMaybe {
+		if !validTypeID(l.program, targetType.Elem) {
+			return loweredExpr{}, air.NoType, fmt.Errorf("invalid maybe elem type id %d", targetType.Elem)
+		}
+		elemType := l.program.Types[targetType.Elem-1]
+		if elemType.Kind != air.TypeStruct || payload.Field < 0 || payload.Field >= len(elemType.Fields) {
+			return loweredExpr{}, air.NoType, fmt.Errorf("invalid field index %d", payload.Field)
+		}
+		field := elemType.Fields[payload.Field]
+		targetTemp := l.nextTemp()
+		targetDecls, err := l.declareTemp(expr.Target.Type, targetTemp)
+		if err != nil {
+			return loweredExpr{}, air.NoType, err
+		}
+		resultTemp := l.nextTemp()
+		resultDecls, err := l.declareTemp(expr.Type, resultTemp)
+		if err != nil {
+			return loweredExpr{}, air.NoType, err
+		}
+		targetExpr := l.ident(targetTemp)
+		resultExpr := l.ident(resultTemp)
+		stmts := append([]ast.Stmt{}, target.stmts...)
+		stmts = append(stmts, targetDecls...)
+		stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{targetExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{target.expr}})
+		stmts = append(stmts, resultDecls...)
+		fieldExpr := &ast.SelectorExpr{X: l.maybeValueExpr(targetExpr), Sel: l.ident(l.goFieldName(elemType, field.Name))}
+		assignValue := ast.Expr(fieldExpr)
+		if expr.Type != field.Type {
+			resultInfo := l.program.Types[expr.Type-1]
+			if resultInfo.Kind == air.TypeMaybe && resultInfo.Elem == field.Type {
+				assignValue, err = l.maybeSomeExpr(expr.Type, fieldExpr)
+				if err != nil {
+					return loweredExpr{}, air.NoType, err
+				}
+			} else {
+				return loweredExpr{}, air.NoType, fmt.Errorf("unsupported maybe field projection from %s.%s to type %d", elemType.Name, field.Name, expr.Type)
+			}
+		}
+		stmts = append(stmts, &ast.IfStmt{
+			Cond: l.maybeIsSomeExpr(targetExpr),
+			Body: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{resultExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{assignValue}}}},
+		})
+		return loweredExpr{stmts: stmts, expr: resultExpr}, air.NoType, nil
+	}
+	if targetType.Kind != air.TypeStruct || payload.Field < 0 || payload.Field >= len(targetType.Fields) {
+		return loweredExpr{}, air.NoType, fmt.Errorf("invalid field index %d", payload.Field)
+	}
+	field := targetType.Fields[payload.Field]
+	fieldExpr := &ast.SelectorExpr{X: target.expr, Sel: l.ident(l.goFieldName(targetType, field.Name))}
+	return loweredExpr{stmts: target.stmts, expr: fieldExpr}, l.declaredFieldLayout(targetType, field), nil
+}
 
-	stmts, callee := l.bindTemp(stmts, value)
-	params := make([]*ast.Field, len(concrete.Params))
-	args := make([]ast.Expr, len(concrete.Params))
-	for i, paramType := range concrete.Params {
-		typ, err := l.goType(paramType)
-		if err != nil {
-			return nil, nil, err
-		}
-		if concrete.Variadic && i == len(concrete.Params)-1 {
-			typ = &ast.Ellipsis{Elt: typ}
-		}
-		name := fmt.Sprintf("arg%d", i+1)
-		params[i] = &ast.Field{Names: []*ast.Ident{l.ident(name)}, Type: typ}
-		args[i] = l.ident(name)
+// lowerCall lowers a call to an Ard function. The declared type it returns is
+// set when the callee's declared return gives the result a Go layout that
+// differs from the call's concrete type's (see lowerInDeclaredLayout).
+func (l *lowerer) lowerCall(fn air.Function, expr air.Expr) (loweredExpr, air.TypeID, error) {
+	payload := expr.CallPayload()
+	if payload == nil || !validFunctionID(l.program, payload.Function) {
+		return loweredExpr{}, air.NoType, fmt.Errorf("call has invalid function payload")
 	}
-	call := &ast.CallExpr{Fun: callee, Args: args}
-	if concrete.Variadic {
-		call.Ellipsis = token.Pos(1)
+	target := l.program.Functions[payload.Function]
+	args, stmts, writeback, err := l.lowerDeclaredCallArgs(fn, expr, target)
+	if err != nil {
+		return loweredExpr{}, air.NoType, err
 	}
-
-	var results []*ast.Field
-	var body []ast.Stmt
-	if packValue {
-		resultType, err := l.goType(concrete.Return)
-		if err != nil {
-			return nil, nil, err
-		}
-		packed, err := l.packABICallResult(concrete.Return, concrete.Return, nil, call)
-		if err != nil {
-			return nil, nil, err
-		}
-		results = []*ast.Field{{Type: resultType}}
-		body = append(packed.stmts, &ast.ReturnStmt{Results: []ast.Expr{packed.expr}})
-	} else {
-		tupleType := l.program.Types[concrete.Return-1].Value
-		tupleGoType, err := l.goType(tupleType)
-		if err != nil {
-			return nil, nil, err
-		}
-		decls, temps, tuple, err := l.declareTupleCallTemps(tupleType)
-		if err != nil {
-			return nil, nil, err
-		}
-		errTemp := l.nextTemp()
-		results = []*ast.Field{{Type: tupleGoType}, {Type: l.ident("error")}}
-		body = append(decls,
-			&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{l.ident(errTemp)}, Type: l.ident("error")}}}},
-			&ast.AssignStmt{Lhs: append(temps, l.ident(errTemp)), Tok: token.ASSIGN, Rhs: []ast.Expr{call}},
-			&ast.ReturnStmt{Results: []ast.Expr{tuple, l.ident(errTemp)}},
-		)
+	call := l.functionCallExpr(target, args, payload.TypeArgs)
+	if declared := target.Signature.Return; expr.Type != declared && l.layoutDiffers(expr.Type, declared) {
+		lowered, err := l.packLayoutCall(stmts, call, writeback, expr.Type, declared)
+		return lowered, declared, err
 	}
-	funcType := &ast.FuncType{Params: &ast.FieldList{List: params}, Results: &ast.FieldList{List: results}}
-	return stmts, &ast.FuncLit{Type: funcType, Body: &ast.BlockStmt{List: body}}, nil
+	if l.abiReturnShapeAvailable(target.Signature.Return) && len(writeback) == 0 {
+		lowered, err := l.packABICallResult(expr.Type, target.Signature.Return, stmts, call)
+		return lowered, air.NoType, err
+	}
+	lowered, err := l.finishCallWithWriteback(expr.Type, stmts, call, writeback)
+	return lowered, air.NoType, err
 }
 
 func (l *lowerer) lowerRawCall(fn air.Function, expr air.Expr) (loweredExpr, error) {
@@ -2449,7 +2464,15 @@ func (l *lowerer) lowerStmt(fn air.Function, stmt air.Stmt) ([]ast.Stmt, error) 
 		if l.isVoidType(field.Type) || isVoidExpr(value.expr) {
 			value = l.materializeVoidValue(value)
 		}
-		ops := [2]operand{placeOperand(fieldTarget), valueOperand(value, field.Type)}
+		valueType := field.Type
+		if declared := l.declaredFieldLayout(targetType, field); declared != air.NoType {
+			value.stmts, value.expr, err = l.adaptLayout(value.stmts, value.expr, field.Type, declared, true)
+			if err != nil {
+				return nil, err
+			}
+			valueType = air.NoType
+		}
+		ops := [2]operand{placeOperand(fieldTarget), valueOperand(value, valueType)}
 		out, err := l.sequenceOperands(ops[:])
 		if err != nil {
 			return nil, err
@@ -3339,6 +3362,15 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 			if hasFieldInfo && l.isVoidType(fieldInfo.Type) {
 				value = l.materializeVoidValue(value)
 			}
+			if hasFieldInfo {
+				if declared := l.declaredFieldLayout(typ, fieldInfo); declared != air.NoType {
+					value.stmts, value.expr, err = l.adaptLayout(value.stmts, value.expr, fieldInfo.Type, declared, true)
+					if err != nil {
+						return loweredExpr{}, err
+					}
+					valueType = air.NoType
+				}
+			}
 			ops[i] = valueOperand(value, valueType)
 		}
 		stmts, err := l.sequenceOperands(ops)
@@ -3365,78 +3397,8 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 			return loweredExpr{}, err
 		}
 		return loweredExpr{stmts: target.stmts, expr: selectorExpr(target.expr, air.TupleGoFieldName(payload.Field))}, nil
-	case air.ExprGetField:
-		if expr.Target == nil {
-			return loweredExpr{}, fmt.Errorf("get field missing target")
-		}
-		payload := expr.FieldPayload()
-		if payload == nil {
-			return loweredExpr{}, fmt.Errorf("get field is missing its payload")
-		}
-		target, err := l.lowerExpr(fn, *expr.Target)
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		if !validTypeID(l.program, expr.Target.Type) {
-			return loweredExpr{}, fmt.Errorf("invalid target type id %d", expr.Target.Type)
-		}
-		targetType := l.program.Types[expr.Target.Type-1]
-		if targetType.Kind == air.TypeReference {
-			if !validTypeID(l.program, targetType.Elem) {
-				return loweredExpr{}, fmt.Errorf("invalid reference elem type id %d", targetType.Elem)
-			}
-			targetType = l.program.Types[targetType.Elem-1]
-		}
-		if targetType.Kind == air.TypeMaybe {
-			if !validTypeID(l.program, targetType.Elem) {
-				return loweredExpr{}, fmt.Errorf("invalid maybe elem type id %d", targetType.Elem)
-			}
-			elemType := l.program.Types[targetType.Elem-1]
-			if elemType.Kind != air.TypeStruct || payload.Field < 0 || payload.Field >= len(elemType.Fields) {
-				return loweredExpr{}, fmt.Errorf("invalid field index %d", payload.Field)
-			}
-			field := elemType.Fields[payload.Field]
-			targetTemp := l.nextTemp()
-			targetDecls, err := l.declareTemp(expr.Target.Type, targetTemp)
-			if err != nil {
-				return loweredExpr{}, err
-			}
-			resultTemp := l.nextTemp()
-			resultDecls, err := l.declareTemp(expr.Type, resultTemp)
-			if err != nil {
-				return loweredExpr{}, err
-			}
-			targetExpr := l.ident(targetTemp)
-			resultExpr := l.ident(resultTemp)
-			stmts := append([]ast.Stmt{}, target.stmts...)
-			stmts = append(stmts, targetDecls...)
-			stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{targetExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{target.expr}})
-			stmts = append(stmts, resultDecls...)
-			fieldExpr := &ast.SelectorExpr{X: l.maybeValueExpr(targetExpr), Sel: l.ident(l.goFieldName(elemType, field.Name))}
-			assignValue := ast.Expr(fieldExpr)
-			if expr.Type != field.Type {
-				resultInfo := l.program.Types[expr.Type-1]
-				if resultInfo.Kind == air.TypeMaybe && resultInfo.Elem == field.Type {
-					assignValue, err = l.maybeSomeExpr(expr.Type, fieldExpr)
-					if err != nil {
-						return loweredExpr{}, err
-					}
-				} else {
-					return loweredExpr{}, fmt.Errorf("unsupported maybe field projection from %s.%s to type %d", elemType.Name, field.Name, expr.Type)
-				}
-			}
-			stmts = append(stmts, &ast.IfStmt{
-				Cond: l.maybeIsSomeExpr(targetExpr),
-				Body: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{resultExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{assignValue}}}},
-			})
-			return loweredExpr{stmts: stmts, expr: resultExpr}, nil
-		}
-		if targetType.Kind != air.TypeStruct || payload.Field < 0 || payload.Field >= len(targetType.Fields) {
-			return loweredExpr{}, fmt.Errorf("invalid field index %d", payload.Field)
-		}
-		field := targetType.Fields[payload.Field]
-		fieldExpr := &ast.SelectorExpr{X: target.expr, Sel: l.ident(l.goFieldName(targetType, field.Name))}
-		return loweredExpr{stmts: target.stmts, expr: fieldExpr}, nil
+	case air.ExprGetField, air.ExprCall:
+		return l.lowerSlotRead(fn, expr)
 	case air.ExprBlock:
 		return l.lowerBlockExpr(fn, expr)
 	case air.ExprUnsafeBlock:
@@ -3463,21 +3425,6 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		return l.lowerUnsafeCast(fn, expr)
 	case air.ExprUnsafeIsNil:
 		return l.lowerUnsafeIsNil(fn, expr)
-	case air.ExprCall:
-		payload := expr.CallPayload()
-		if payload == nil || !validFunctionID(l.program, payload.Function) {
-			return loweredExpr{}, fmt.Errorf("call has invalid function payload")
-		}
-		target := l.program.Functions[payload.Function]
-		args, stmts, writeback, err := l.lowerDeclaredCallArgs(fn, expr, target)
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		call := l.functionCallExpr(target, args, payload.TypeArgs)
-		if l.abiReturnShapeAvailable(target.Signature.Return) && len(writeback) == 0 {
-			return l.packABICallResult(expr.Type, target.Signature.Return, stmts, call)
-		}
-		return l.finishCallWithWriteback(expr.Type, stmts, call, writeback)
 	case air.ExprEq, air.ExprNotEq:
 		payload := expr.BinaryPayload()
 		if payload == nil || payload.Left == nil || payload.Right == nil {
@@ -4225,7 +4172,7 @@ func (l *lowerer) callReturnsABIShape(expr air.Expr, returnType air.TypeID) bool
 		return false
 	}
 	declared := l.program.Functions[payload.Function].Signature.Return
-	if !l.abiReturnShapeAvailable(declared) {
+	if !l.abiReturnShapeAvailable(declared) || l.layoutDiffers(expr.Type, declared) {
 		return false
 	}
 	return l.abiResultCount(declared) == l.abiResultCount(returnType)
@@ -5515,10 +5462,9 @@ func (l *lowerer) lowerCallArgs(fn air.Function, rawArgs []air.Expr, params []ai
 
 // lowerCallArgOperands lowers call arguments into ops, one operand per
 // argument, each adapted to its parameter in params. When declared is given,
-// a function-valued argument is also adapted to the Go signature of its
-// declared parameter type (see adaptCallableReturnABI). The statements an
-// adaptation emits belong to its argument, so they run in the argument's
-// place in source order.
+// an argument is also adapted to the Go layout of its declared parameter type
+// (see adaptLayout). The statements an adaptation emits belong to its
+// argument, so they run in the argument's place in source order.
 func (l *lowerer) lowerCallArgOperands(ops []operand, fn air.Function, rawArgs []air.Expr, params []air.Param, declared []air.Param) ([]ast.Stmt, error) {
 	var writeback []ast.Stmt
 	for i, arg := range rawArgs {
@@ -5554,9 +5500,14 @@ func (l *lowerer) lowerCallArgOperands(ops []operand, fn air.Function, rawArgs [
 			writeback = append(writeback, post...)
 		}
 		if i < len(declared) {
-			stmts, argExpr, err = l.adaptCallableReturnABI(stmts, argExpr, arg.Type, declared[i].Type)
+			adapted := argExpr
+			stmts, adapted, err = l.adaptLayout(stmts, argExpr, arg.Type, declared[i].Type, true)
 			if err != nil {
 				return nil, err
+			}
+			if adapted != argExpr {
+				argType = air.NoType
+				argExpr = adapted
 			}
 		}
 		ops[i] = operand{stmts: stmts, expr: argExpr, typ: argType}
@@ -7551,7 +7502,16 @@ func (l *lowerer) lowerCallClosure(fn air.Function, expr air.Expr) (loweredExpr,
 		return loweredExpr{}, fmt.Errorf("closure call is missing its payload")
 	}
 	spreadCall := payload.Spread != nil
-	target, err := l.lowerExpr(fn, *expr.Target)
+	// A callee read out of a generic slot is called with the layout of its
+	// declared type rather than adapted first. A spread call adapts it.
+	var target loweredExpr
+	var err error
+	declared := air.NoType
+	if spreadCall {
+		target, err = l.lowerExpr(fn, *expr.Target)
+	} else {
+		target, declared, err = l.lowerInDeclaredLayout(fn, *expr.Target)
+	}
 	if err != nil {
 		return loweredExpr{}, err
 	}
@@ -7615,7 +7575,15 @@ func (l *lowerer) lowerCallClosure(fn air.Function, expr air.Expr) (loweredExpr,
 		var buf operandBuffer
 		ops := buf.operands(1 + len(expr.Args))
 		ops[0] = valueOperand(target, expr.Target.Type)
-		post, err := l.lowerCallArgOperands(ops[1:], fn, expr.Args, params, nil)
+		var declaredParams []air.Param
+		if declared != air.NoType {
+			ops[0].typ = air.NoType
+			declaredParams = make([]air.Param, len(params))
+			for i, paramType := range l.program.Types[declared-1].Params {
+				declaredParams[i].Type = paramType
+			}
+		}
+		post, err := l.lowerCallArgOperands(ops[1:], fn, expr.Args, params, declaredParams)
 		if err != nil {
 			return loweredExpr{}, err
 		}
@@ -7628,6 +7596,17 @@ func (l *lowerer) lowerCallClosure(fn air.Function, expr air.Expr) (loweredExpr,
 	call := &ast.CallExpr{Fun: calleeExpr, Args: args}
 	if spreadCall {
 		call.Ellipsis = token.Pos(1)
+	}
+	if declared != air.NoType {
+		declaredReturn := l.program.Types[declared-1].Return
+		if l.returnShapeOf(targetInfo.Return) != l.returnShapeOf(declaredReturn) || l.layoutDiffers(targetInfo.Return, declaredReturn) {
+			packed, err := l.packLayoutCall(stmts, call, writeback, targetInfo.Return, declaredReturn)
+			if err != nil {
+				return loweredExpr{}, err
+			}
+			packed.stmts, packed.expr, err = l.adaptLayout(packed.stmts, packed.expr, targetInfo.Return, declaredReturn, false)
+			return packed, err
+		}
 	}
 	if hasFunctionType && l.abiReturnShapeAvailable(targetInfo.Return) && len(writeback) == 0 {
 		return l.packABICallResult(expr.Type, targetInfo.Return, stmts, call)

@@ -151,8 +151,11 @@ same contract:
   tuple value, and spreads the struct into results at a `return`.
 - As in ADR 0038, the layout follows the *declared* type. A function whose
   declared return type is a type parameter returns one value even when the
-  type argument is a tuple, and the backend adapts function values where a
-  tuple-returning function meets a `fn() $T` parameter.
+  type argument is a tuple, a `Maybe`, a `Result`, or `Void`. The backend
+  adapts a function value wherever it enters or leaves a slot declared with
+  a type parameter: a generic function's parameter or return, or a generic
+  struct's field. This includes functions nested in another function type or
+  held in a `Maybe`, `Result`, or tuple (#572).
 
 ### Pipeline
 
@@ -183,6 +186,10 @@ same contract:
 - A tuple that reaches Go as a value, for example through `Any` or a generic
   type argument, is the anonymous struct, not multiple values. Only return
   position spreads.
+- Lists, maps, and generic type arguments holding a function typed with a
+  type parameter (`[fn() $T]`, `Box<fn() $T>`) are not adapted yet. Their
+  concrete and declared Go types differ, and converting them is not O(1)
+  (#588).
 - The tree-sitter grammar needs the tuple type, literal, and destructuring
   forms for editor highlighting.
 
