@@ -3448,6 +3448,7 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		stmts = append(stmts, &ast.IfStmt{Cond: condition, Body: &ast.BlockStmt{List: body}})
 		return loweredExpr{stmts: stmts, expr: result}, nil
 	case air.ExprIntAdd, air.ExprIntSub, air.ExprIntMul, air.ExprIntDiv, air.ExprIntMod,
+		air.ExprIntBitAnd, air.ExprIntBitOr, air.ExprIntBitXor, air.ExprIntShl, air.ExprIntShr,
 		air.ExprFloatAdd, air.ExprFloatSub, air.ExprFloatMul, air.ExprFloatDiv,
 		air.ExprLt, air.ExprLte, air.ExprGt, air.ExprGte, air.ExprStrConcat:
 		payload := expr.BinaryPayload()
@@ -3471,6 +3472,14 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		if isComparisonKind(expr.Kind) {
 			l.castEnumIntComparisonOperands(&left, leftTypeID, &right, rightTypeID)
 		}
+		if (expr.Kind == air.ExprIntShl || expr.Kind == air.ExprIntShr) && payload.Left.Kind == air.ExprConstInt {
+			// Go gives an untyped constant shifted by a non-constant count
+			// the type its context expects, which can be a float
+			// (`float64(1 << n)` does not compile). Pin the Ard type.
+			if left, err = l.typedConstant(left, leftTypeID); err != nil {
+				return loweredExpr{}, err
+			}
+		}
 		return loweredExpr{
 			stmts: stmts,
 			expr:  &ast.BinaryExpr{X: left.expr, Op: l.binaryToken(expr.Kind), Y: right.expr},
@@ -3487,6 +3496,12 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 			return loweredExpr{}, err
 		}
 		return loweredExpr{stmts: target.stmts, expr: &ast.UnaryExpr{Op: token.SUB, X: target.expr}}, nil
+	case air.ExprIntBitNot:
+		target, err := l.lowerExpr(fn, *expr.Target)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		return loweredExpr{stmts: target.stmts, expr: &ast.UnaryExpr{Op: token.XOR, X: target.expr}}, nil
 	default:
 		return loweredExpr{}, fmt.Errorf("unsupported expression kind %d", expr.Kind)
 	}
@@ -3669,6 +3684,20 @@ func (l *lowerer) lowerValueBlock(fn air.Function, block air.Block, resultType a
 
 // lowerNumericConstant materializes AIR scalar types that differ from Go's
 // default int and float64 types before short declarations can erase them.
+// typedConstant converts a bare Go integer constant to its Ard type. Sized
+// constants are already lowered as conversions.
+func (l *lowerer) typedConstant(value loweredExpr, typeID air.TypeID) (loweredExpr, error) {
+	if _, ok := value.expr.(*ast.BasicLit); !ok {
+		return value, nil
+	}
+	typ, err := l.goType(typeID)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	value.expr = &ast.CallExpr{Fun: typ, Args: []ast.Expr{value.expr}}
+	return value, nil
+}
+
 func (l *lowerer) lowerNumericConstant(typeID air.TypeID, kind token.Token, value string) (loweredExpr, error) {
 	// Go's AST printer emits a BasicLit's value verbatim, and the token kind is
 	// not enough to make an integer-looking value (such as "3") a float literal.
@@ -4693,6 +4722,16 @@ func (l *lowerer) binaryToken(kind air.ExprKind) token.Token {
 		return token.QUO
 	case air.ExprIntMod:
 		return token.REM
+	case air.ExprIntBitAnd:
+		return token.AND
+	case air.ExprIntBitOr:
+		return token.OR
+	case air.ExprIntBitXor:
+		return token.XOR
+	case air.ExprIntShl:
+		return token.SHL
+	case air.ExprIntShr:
+		return token.SHR
 	case air.ExprEq:
 		return token.EQL
 	case air.ExprNotEq:

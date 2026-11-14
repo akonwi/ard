@@ -104,6 +104,43 @@ A `Rune` is always a valid Unicode scalar value, so it has no `fit`. Only a
 See [Go interop](/advanced/go-interop/#numeric-conversions) for the full rules,
 including foreign named scalar types.
 
+### Bitwise operators
+
+Integers support `&` (and), `|` (or), `^` (xor), prefix `~` (not), `<<`
+(shift left), and `>>` (shift right):
+
+```ard
+let flags = read | write
+let can_write = flags & write != 0
+let cleared = flags & ~write
+let packed = Uint16::from(hi) << 8 | Uint16::from(lo)
+let low = Byte::fit(packed & 255)
+```
+
+They work on `Int`, the sized integers, `Uintptr`, `Byte`, and Go named
+integer types such as `os::FileMode`. `&`, `|`, and `^` need both operands to
+have the same type, like `+`; a literal adopts the other operand's type. A
+`Rune` must be converted first (`Int32::from(r)`), since it always holds a
+valid Unicode scalar value.
+
+A shift count can be any integer type, and the result has the left operand's
+type. Shifts behave as in Go: values wrap at the type's width, `>>` keeps the
+sign of a signed value, a count past the width shifts every bit out, and a
+negative count panics. A shift of two literals is checked at compile time,
+so `1 << 64` is an error.
+
+The operators use Go's precedence. `<<`, `>>`, and `&` bind like `*`; `|` and
+`^` bind like `+`; all of them bind tighter than comparisons, so
+`flags & write != 0` compares the masked value:
+
+```ard
+a + b << 1   // a + (b << 1)
+a | b & c    // a | (b & c)
+a & b == 0   // (a & b) == 0
+```
+
+`&&` and `||` are errors: logic uses `and` and `or`.
+
 Strings support checked Go-style byte slicing with optional bounds:
 
 ```ard

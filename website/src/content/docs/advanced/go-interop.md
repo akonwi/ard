@@ -303,6 +303,31 @@ Numeric literals already adopt a foreign scalar type directly in arithmetic and
 annotated bindings (`let d: time::Duration = 5 * time::Millisecond`); the
 conversions are for **runtime** values.
 
+### Bit flags
+
+The [bitwise operators](/guide/types/#bitwise-operators) work on foreign named
+integer types without conversion, and typed Go constants keep their named
+type, so Go flag sets read as they do in Go:
+
+```ard
+use go:os
+use go:vaxis
+
+fn has_modifier(mods: vaxis::ModifierMask, flag: vaxis::ModifierMask) Bool {
+  mods & flag != 0
+}
+
+fn is_dir(mode: os::FileMode) Bool {
+  mode & os::ModeDir != 0
+}
+
+let mode = os::ModeDir | 493 // drwxr-xr-x
+```
+
+Both operands of `&`, `|`, and `^` must have the same type, so an untyped Go
+constant (which arrives as `Int`) is converted first:
+`mods & vaxis::ModifierMask::from(flag)`.
+
 ## Variadic Calls
 
 Direct Go variadic functions and methods can be called with repeated trailing arguments. Ard expands those arguments at the Go call site.

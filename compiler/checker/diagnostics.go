@@ -137,6 +137,7 @@ const (
 	DiagnosticCodeUnsupportedIteration          DiagnosticCode = "unsupported_iteration"
 	DiagnosticCodeInvalidUnaryOperator          DiagnosticCode = "invalid_unary_operator"
 	DiagnosticCodeInvalidArithmeticOperation    DiagnosticCode = "invalid_arithmetic_operation"
+	DiagnosticCodeInvalidBitwiseOperation       DiagnosticCode = "invalid_bitwise_operation"
 	DiagnosticCodeInvalidRelationalOperation    DiagnosticCode = "invalid_relational_operation"
 	DiagnosticCodeInvalidEqualityOperation      DiagnosticCode = "invalid_equality_operation"
 	DiagnosticCodeInvalidBooleanOperation       DiagnosticCode = "invalid_boolean_operation"
@@ -1896,6 +1897,8 @@ func (d invalidUnaryOperatorDiagnostic) build() Diagnostic {
 		expected = "a signed numeric value"
 	} else if d.Operator == "not" {
 		expected = "`Bool`"
+	} else if d.Operator == "~" {
+		expected = "an integer"
 	}
 	diagnostic := newLabeledDiagnostic(Error, d.LegacyMessage, "Invalid unary operand", "", DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("`%s` requires %s, but found `%s`", d.Operator, expected, d.Operand)})
 	diagnostic.Code = DiagnosticCodeInvalidUnaryOperator
@@ -1923,6 +1926,42 @@ func (d invalidArithmeticDiagnostic) build() Diagnostic {
 	}
 	diagnostic := newLabeledDiagnostic(Error, d.LegacyMessage, title, "", primary, secondary)
 	diagnostic.Code = DiagnosticCodeInvalidArithmeticOperation
+	return diagnostic
+}
+
+type invalidBitwiseDiagnostic struct {
+	Operator      string
+	LeftType      Type
+	RightType     Type
+	LeftSpan      SourceSpan
+	RightSpan     SourceSpan
+	LegacyMessage string
+	Unsupported   bool
+}
+
+func (d invalidBitwiseDiagnostic) build() Diagnostic {
+	primary := DiagnosticLabel{Span: d.RightSpan, Message: fmt.Sprintf("right operand has type `%s`", d.RightType)}
+	secondary := DiagnosticLabel{Span: d.LeftSpan, Message: fmt.Sprintf("left operand has type `%s`", d.LeftType)}
+	title := "Incompatible bitwise operands"
+	if d.Unsupported {
+		title = "Unsupported bitwise operand"
+		primary.Message = fmt.Sprintf("operator `%s` cannot be applied to `%s`", d.Operator, d.RightType)
+		secondary.Message = fmt.Sprintf("left operand also has type `%s`", d.LeftType)
+	}
+	diagnostic := newLabeledDiagnostic(Error, d.LegacyMessage, title, "", primary, secondary)
+	diagnostic.Code = DiagnosticCodeInvalidBitwiseOperation
+	return diagnostic
+}
+
+type invalidShiftDiagnostic struct {
+	LegacyMessage string
+	Span          SourceSpan
+	Label         string
+}
+
+func (d invalidShiftDiagnostic) build() Diagnostic {
+	diagnostic := newLabeledDiagnostic(Error, d.LegacyMessage, "Invalid shift", "", DiagnosticLabel{Span: d.Span, Message: d.Label})
+	diagnostic.Code = DiagnosticCodeInvalidBitwiseOperation
 	return diagnostic
 }
 

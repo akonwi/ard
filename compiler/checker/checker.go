@@ -6116,6 +6116,11 @@ func (c *Checker) validateUnsafeCatchResultsInExpression(expr Expression, result
 	case *IntModulo:
 		c.validateUnsafeCatchResultsInExpression(e.Left, resultType, loc)
 		c.validateUnsafeCatchResultsInExpression(e.Right, resultType, loc)
+	case *IntBitwise:
+		c.validateUnsafeCatchResultsInExpression(e.Left, resultType, loc)
+		c.validateUnsafeCatchResultsInExpression(e.Right, resultType, loc)
+	case *IntBitNot:
+		c.validateUnsafeCatchResultsInExpression(e.Value, resultType, loc)
 	case *IntGreater:
 		c.validateUnsafeCatchResultsInExpression(e.Left, resultType, loc)
 		c.validateUnsafeCatchResultsInExpression(e.Right, resultType, loc)
@@ -10016,6 +10021,9 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 			if value == nil {
 				return nil
 			}
+			if s.Operator == parse.BitNot {
+				return c.checkBitNot(value, s.Operand.GetLocation())
+			}
 			if s.Operator == parse.Minus {
 				if !isSignedArithmeticLike(value.Type()) {
 					c.addDiagnostic(invalidUnaryOperatorDiagnostic{Operator: "-", Operand: value.Type(), Span: c.sourceSpan(s.Operand.GetLocation()), LegacyMessage: "Only signed numbers can be negated with '-'"}.build())
@@ -10036,6 +10044,10 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 	case *parse.BinaryExpression:
 		{
 			switch s.Operator {
+			case parse.BitAnd, parse.BitOr, parse.BitXor:
+				return c.checkBitwiseBinary(s)
+			case parse.ShiftLeft, parse.ShiftRight:
+				return c.checkShift(s)
 			case parse.Plus:
 				{
 					left, right := c.checkScalarOperands(s.Left, s.Right)
@@ -12704,6 +12716,10 @@ func isUntypedNumLiteral(expr parse.Expression) bool {
 	case *parse.NumLiteral:
 		return true
 	case *parse.UnaryExpression:
+		if e.Operator == parse.BitNot {
+			// `~5` adopts a type like `5` does (ADR 0080).
+			return isUntypedNumLiteral(e.Operand)
+		}
 		if e.Operator != parse.Minus {
 			return false
 		}
@@ -12929,6 +12945,16 @@ func (c *Checker) checkExprAsInner(expr parse.Expression, expectedType Type, exp
 		return literal
 	}
 	switch s := (expr).(type) {
+	case *parse.UnaryExpression:
+		// `~` of an untyped literal adopts the expected integer type, so
+		// `let mask: Uint8 = ~0` is 255 (ADR 0080).
+		if s.Operator == parse.BitNot && isUntypedNumLiteral(s.Operand) && isBitwiseIntegerLike(expectedType) {
+			operand := c.checkExprAs(s.Operand, expectedType)
+			if operand == nil {
+				return nil
+			}
+			return c.checkBitNot(operand, s.Operand.GetLocation())
+		}
 	case *parse.StructInstance:
 		// An expected application supplies otherwise-phantom generic arguments
 		// for an unannotated literal. Explicit source arguments still take

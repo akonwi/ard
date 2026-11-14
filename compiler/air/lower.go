@@ -4562,6 +4562,18 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 			return nil, err
 		}
 		return &Expr{Kind: ExprNeg, Type: typeID, Target: value}, nil
+	case *checker.IntBitwise:
+		kind, err := bitwiseExprKind(e.Op)
+		if err != nil {
+			return nil, err
+		}
+		return fl.lowerBinary(kind, typeID, e.Left, e.Right)
+	case *checker.IntBitNot:
+		value, err := fl.lowerExpr(e.Value)
+		if err != nil {
+			return nil, err
+		}
+		return &Expr{Kind: ExprIntBitNot, Type: typeID, Target: value}, nil
 	case *checker.Block:
 		body, err := fl.lowerBlockWithDefault(e.Stmts, typeID)
 		if err != nil {
@@ -5575,6 +5587,22 @@ func (fl *functionLowerer) lowerArgsWithTypeIDs(args []checker.Expression, expec
 		out[i] = *lowered
 	}
 	return out, nil
+}
+
+func bitwiseExprKind(op checker.BitwiseOp) (ExprKind, error) {
+	switch op {
+	case checker.BitAnd:
+		return ExprIntBitAnd, nil
+	case checker.BitOr:
+		return ExprIntBitOr, nil
+	case checker.BitXor:
+		return ExprIntBitXor, nil
+	case checker.ShiftLeft:
+		return ExprIntShl, nil
+	case checker.ShiftRight:
+		return ExprIntShr, nil
+	}
+	return 0, fmt.Errorf("unknown bitwise operator %d", op)
 }
 
 func (fl *functionLowerer) lowerBinary(kind ExprKind, typeID TypeID, leftExpr, rightExpr checker.Expression) (*Expr, error) {

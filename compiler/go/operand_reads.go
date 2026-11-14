@@ -127,7 +127,7 @@ func (l *lowerer) valueMayChange(expr *air.Expr) bool {
 		// A field of a value is part of that value; a field reached through a
 		// pointer is not.
 		return expr.Target == nil || !l.holdsValueInline(expr.Target.Type) || l.valueMayChange(expr.Target)
-	case air.ExprStrSize, air.ExprStrIsEmpty, air.ExprNot, air.ExprNeg,
+	case air.ExprStrSize, air.ExprStrIsEmpty, air.ExprNot, air.ExprNeg, air.ExprIntBitNot,
 		air.ExprToInt, air.ExprToF64, air.ExprToAny,
 		air.ExprScalarConvert, air.ExprInterfaceConversion, air.ExprTraitUpcast, air.ExprTraitRefProject,
 		air.ExprChannelNarrow, air.ExprUnionWrap, air.ExprMakeResultOk, air.ExprMakeResultErr:
@@ -147,6 +147,7 @@ func (l *lowerer) valueMayChange(expr *air.Expr) bool {
 		// through a pointer can grow.
 		return expr.Target == nil || l.isReferenceType(expr.Target.Type) || l.valueMayChange(expr.Target)
 	case air.ExprIntAdd, air.ExprIntSub, air.ExprIntMul, air.ExprIntDiv, air.ExprIntMod,
+		air.ExprIntBitAnd, air.ExprIntBitOr, air.ExprIntBitXor, air.ExprIntShl, air.ExprIntShr,
 		air.ExprFloatAdd, air.ExprFloatSub, air.ExprFloatMul, air.ExprFloatDiv,
 		air.ExprStrConcat, air.ExprEq, air.ExprNotEq, air.ExprLt, air.ExprLte, air.ExprGt, air.ExprGte,
 		air.ExprAnd, air.ExprOr:

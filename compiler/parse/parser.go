@@ -516,9 +516,9 @@ func (p *parser) endStatement(stmt Statement, err error, terminators []kind) (St
 }
 
 // reportStrayToken reports the token at index i, which cannot continue what
-// precedes it, with the given message. After an expression, `&` and `&&` get
-// specific messages: they look like binary operators Ard doesn't have, but
-// would otherwise parse as the address-of prefix of a separate item.
+// precedes it, with the given message. After an expression, `&&`, `||` and
+// `&mut` get specific messages: the binary operators leave them unconsumed,
+// and they would otherwise read as the start of a separate item.
 func (p *parser) reportStrayToken(i int, message string, afterExpression bool) {
 	stray := p.tokens[i]
 	location := stray.getLocation()
@@ -526,12 +526,18 @@ func (p *parser) reportStrayToken(i int, message string, afterExpression bool) {
 	if location.End.Row == location.Start.Row && location.End.Col < location.Start.Col {
 		location.End = location.Start
 	}
-	if afterExpression && stray.kind == ampersand {
-		if next := &p.tokens[i+1]; next.kind == ampersand && adjacent(location, next) {
+	if afterExpression {
+		next := &p.tokens[i+1]
+		switch {
+		case stray.kind == ampersand && p.adjacentTokens(i, ampersand):
 			location.End = Point{Row: next.line, Col: next.column}
 			message = "Unexpected '&&' after expression; use 'and' for logical and"
-		} else {
-			message = "Unexpected '&' after expression; Ard has no bitwise '&' operator"
+		case stray.kind == pipe && p.adjacentTokens(i, pipe):
+			location.End = Point{Row: next.line, Col: next.column}
+			message = "Unexpected '||' after expression; use 'or' for logical or"
+		case stray.kind == ampersand && next.kind == mut:
+			location.End = Point{Row: next.line, Col: next.column + len(mut) - 1}
+			message = "Unexpected '&mut' after expression"
 		}
 	}
 	p.errors = append(p.errors, ParseError{Location: location, Message: message})
@@ -3437,7 +3443,7 @@ func (p *parser) structInstanceOr(fallback func() (Expression, error)) (Expressi
 // comparison chains like a < b are left untouched. On failure it rewinds to
 // index and reports ok=false.
 func (p *parser) tryGenericStructInstance(index int, static *StaticProperty) (Expression, bool, error) {
-	if !p.check(identifier, less_than) || !adjacent(p.peek().getLocation(), &p.tokens[p.index+1]) {
+	if !p.check(identifier, less_than) || p.check(identifier, less_than, less_than) || !adjacent(p.peek().getLocation(), &p.tokens[p.index+1]) {
 		return nil, false, nil
 	}
 
@@ -3731,17 +3737,18 @@ func (p *parser) comparison() (Expression, error) {
 	}, nil
 }
 
+// addition parses the additive level of Go's precedence ladder, which also
+// holds `|` and `^` (ADR 0080).
 func (p *parser) addition() (Expression, error) {
 	left, err := p.multiplication()
 	if err != nil {
 		return nil, err
 	}
 
-	for p.match(plus, minus) {
-		opToken := p.previous()
-		operator := Plus
-		if opToken.kind == minus {
-			operator = Minus
+	for {
+		operator, ok := p.matchAdditiveOperator()
+		if !ok {
+			return left, nil
 		}
 		right, err := p.multiplication()
 		if err != nil {
@@ -3757,25 +3764,42 @@ func (p *parser) addition() (Expression, error) {
 			Right:    right,
 		}
 	}
-	return left, nil
 }
 
+func (p *parser) matchAdditiveOperator() (Operator, bool) {
+	switch p.peek().kind {
+	case plus:
+		p.advance()
+		return Plus, true
+	case minus:
+		p.advance()
+		return Minus, true
+	case caret:
+		p.advance()
+		return BitXor, true
+	case pipe:
+		// `||` is left for reportStrayToken, which suggests `or`.
+		if p.adjacentTokens(p.index, pipe) {
+			return InvalidOp, false
+		}
+		p.advance()
+		return BitOr, true
+	}
+	return InvalidOp, false
+}
+
+// multiplication parses the multiplicative level of Go's precedence ladder,
+// which also holds `&`, `<<` and `>>` (ADR 0080).
 func (p *parser) multiplication() (Expression, error) {
 	left, err := p.unary()
 	if err != nil {
 		return nil, err
 	}
-	for p.match(star, slash, percent) {
-		var operator Operator
-		switch p.previous().kind {
-		case star:
-			operator = Multiply
-		case slash:
-			operator = Divide
-		case percent:
-			operator = Modulo
+	for {
+		operator, ok := p.matchMultiplicativeOperator()
+		if !ok {
+			return left, nil
 		}
-
 		right, err := p.unary()
 		if err != nil {
 			return nil, err
@@ -3790,7 +3814,62 @@ func (p *parser) multiplication() (Expression, error) {
 			Right:    right,
 		}
 	}
-	return left, nil
+}
+
+func (p *parser) matchMultiplicativeOperator() (Operator, bool) {
+	switch p.peek().kind {
+	case star:
+		p.advance()
+		return Multiply, true
+	case slash:
+		p.advance()
+		return Divide, true
+	case percent:
+		p.advance()
+		return Modulo, true
+	case ampersand:
+		// `&&` and `&mut` are left for reportStrayToken; `a & &b` (spaced) is
+		// an and with an address-of operand.
+		if p.adjacentTokens(p.index, ampersand) || p.check(ampersand, mut) {
+			return InvalidOp, false
+		}
+		p.advance()
+		return BitAnd, true
+	case less_than:
+		// `<<` is two adjacent `<` tokens, so type arguments never see it.
+		if !p.adjacentTokens(p.index, less_than) {
+			return InvalidOp, false
+		}
+		p.advance()
+		p.advance()
+		return ShiftLeft, true
+	case greater_than:
+		// `>>` is two adjacent `>` tokens, so `List<List<Int>>` still closes
+		// one type argument list per token.
+		if !p.adjacentTokens(p.index, greater_than) {
+			return InvalidOp, false
+		}
+		first := p.advance()
+		p.advance()
+		if p.adjacentTokens(p.index-1, greater_than) {
+			third := p.advance()
+			p.errors = append(p.errors, ParseError{
+				Location: Location{Start: first.getLocation().Start, End: Point{Row: third.line, Col: third.column}},
+				Message:  "Ard has no '>>>' operator; shift an unsigned value for a logical shift",
+			})
+		}
+		return ShiftRight, true
+	}
+	return InvalidOp, false
+}
+
+// adjacentTokens reports whether the token after index i has the given kind
+// and directly follows it with no space.
+func (p *parser) adjacentTokens(i int, next kind) bool {
+	if i+1 >= len(p.tokens) || p.tokens[i+1].kind != next {
+		return false
+	}
+	return adjacent(p.tokens[i].getLocation(), &p.tokens[i+1])
 }
 
 // addressOfOperand parses the operand of `&` or `&mut`. The operator binds
@@ -3818,6 +3897,40 @@ func (p *parser) legacyMutRefOperand() (Expression, error) {
 }
 
 func (p *parser) unary() (Expression, error) {
+	if p.match(tilde) {
+		return p.finishPrefixOperator(BitNot)
+	}
+	if p.check(caret) || p.check(bang) || p.check(pipe) {
+		// Go spells bitwise not `^x`, C and Rust spell negation `!x`, and a
+		// stray `|` cannot start an expression. Report and recover.
+		stray := p.advance()
+		var message string
+		operator := BitNot
+		switch stray.kind {
+		case caret:
+			message = "Unexpected '^'; use '~' for bitwise not"
+		case bang:
+			message = "Unexpected '!'; use 'not' for logical not or '~' for bitwise not"
+			operator = Not
+		default:
+			message = "Unexpected '|'; expected an expression"
+		}
+		location := stray.getLocation()
+		location.End = location.Start
+		if stray.kind == pipe && p.check(pipe) && adjacent(location, p.peek()) {
+			// `||`: both bars are skipped together.
+			p.advance()
+		}
+		// A list item or argument starting at a stray `||` was already
+		// reported by reportStrayToken.
+		if n := len(p.errors); n == 0 || p.errors[n-1].Location.Start != location.Start {
+			p.errors = append(p.errors, ParseError{Location: location, Message: message})
+		}
+		if stray.kind == pipe {
+			return p.unary()
+		}
+		return p.finishPrefixOperator(operator)
+	}
 	if p.match(ampersand) {
 		ampersandToken := p.previous()
 		writable := p.match(mut)
@@ -3883,6 +3996,24 @@ func (p *parser) unary() (Expression, error) {
 		}
 	}
 	return p.memberAccess()
+}
+
+// finishPrefixOperator parses the operand of the prefix operator just
+// consumed. It binds like unary minus.
+func (p *parser) finishPrefixOperator(operator Operator) (Expression, error) {
+	opToken := p.previous()
+	operand, err := p.unary()
+	if err != nil {
+		return nil, err
+	}
+	return &UnaryExpression{
+		Location: Location{
+			Start: opToken.getLocation().Start,
+			End:   operand.GetLocation().End,
+		},
+		Operator: operator,
+		Operand:  operand,
+	}, nil
 }
 
 func (p *parser) memberAccess() (Expression, error) {
@@ -4002,7 +4133,7 @@ func (p *parser) tryStaticGenericFunctionCall(target Expression) (Expression, bo
 	restore := p.normalizeMemberName()
 	defer restore()
 
-	if !p.check(identifier, less_than) || !adjacent(p.peek().getLocation(), &p.tokens[p.index+1]) {
+	if !p.check(identifier, less_than) || p.check(identifier, less_than, less_than) || !adjacent(p.peek().getLocation(), &p.tokens[p.index+1]) {
 		return nil, false, nil
 	}
 
@@ -4176,7 +4307,8 @@ func (p *parser) call() (Expression, error) {
 	// Only parse as type arguments if we have an identifier followed by <
 	_, isIdentifier := expr.(*Identifier)
 
-	if isIdentifier && p.check(less_than) && !p.check(less_than, number) && !p.check(less_than, identifier, less_than) && adjacent(expr.GetLocation(), p.peek()) {
+	// Type arguments never start with `<`, so `a<<b` is a shift.
+	if isIdentifier && p.check(less_than) && !p.check(less_than, number) && !p.check(less_than, less_than) && !p.check(less_than, identifier, less_than) && adjacent(expr.GetLocation(), p.peek()) {
 		// Look ahead to see if this is a type argument or a comparison
 		p.advance() // consume the '<'
 
