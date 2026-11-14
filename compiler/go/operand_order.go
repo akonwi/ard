@@ -244,6 +244,56 @@ func (l *lowerer) lowerValueOperand(fn air.Function, expr *air.Expr, expected ai
 	return sourcedOperand(lowered, typ, expr), nil
 }
 
+// lazyOperandBody returns the body of the branch that evaluates an operand
+// only when it is needed: the operand's setup statements followed by use, the
+// statement that uses its expression. The right side of `and` and `or`, and
+// the argument of `or` and `expect` on Maybe and Result (ADR 0079), are such
+// operands. The caller evaluates every earlier operand before the branch, so
+// they are not passed through sequenceOperands.
+func lazyOperandBody(lazy loweredExpr, use ast.Stmt) []ast.Stmt {
+	body := make([]ast.Stmt, 0, len(lazy.stmts)+1)
+	body = append(body, lazy.stmts...)
+	return append(body, use)
+}
+
+// evaluateBranchCallee evaluates callee, the lowered callback argument of a
+// built-in method that calls it only inside a branch, into a temporary
+// appended to stmts. The callback is an ordinary argument (ADR 0079): the
+// expression that produces it is evaluated exactly once, whether or not the
+// branch runs. The caller appends it after every earlier operand.
+//
+// A callback whose evaluation has no effect, such as a function literal or a
+// named function, stays inline, which keeps its generated Go unchanged. A
+// variable or field read can stay inline too, unlike a read to the left of a
+// call (ADR 0078): it is read in the branch, after the target, and no Ard
+// code runs in between, so it sees what source order gives it. The temporary
+// takes the callee's own Go type because the branch calls it as it is.
+func (l *lowerer) evaluateBranchCallee(stmts []ast.Stmt, callee *loweredExpr, arg air.Expr) []ast.Stmt {
+	if evaluationHasNoEffect(arg) {
+		return stmts
+	}
+	if _, ok := callee.expr.(*ast.Ident); ok || operandIsInert(callee.expr) {
+		return stmts
+	}
+	temp := l.nextTemp()
+	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{l.ident(temp)}, Tok: token.DEFINE, Rhs: []ast.Expr{callee.expr}})
+	callee.expr = l.ident(temp)
+	return stmts
+}
+
+// evaluationHasNoEffect reports whether evaluating expr only reads a value or
+// builds a function: a function literal, a reference to a function or a Go
+// value, or a variable or field read.
+func evaluationHasNoEffect(expr air.Expr) bool {
+	switch expr.Kind {
+	case air.ExprMakeClosure, air.ExprFunctionRef, air.ExprForeignValue, air.ExprLoadLocal, air.ExprLoadGlobal:
+		return true
+	case air.ExprGetField, air.ExprDiscardingFunctionCoercion:
+		return expr.Target != nil && evaluationHasNoEffect(*expr.Target)
+	}
+	return false
+}
+
 // sequenceOperandPair is sequenceOperands for two value operands lowered
 // separately, the first from firstSource. It updates first.expr and
 // second.expr in place and returns the statements that evaluate both in order.

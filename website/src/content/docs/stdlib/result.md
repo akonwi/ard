@@ -65,6 +65,8 @@ Return the success value or fail with `message`.
 let value = result.expect("expected success")
 ```
 
+The message is evaluated only when the result is an error.
+
 ### `or(default: $T) $T`
 
 Return the success value or `default`.
@@ -72,6 +74,8 @@ Return the success value or `default`.
 ```ard
 let value = result.or(0)
 ```
+
+The default is evaluated only when the result is an error. When the result is successful, the default expression does not run.
 
 ### `map(with: fn($T) $U) $U!$E`
 
