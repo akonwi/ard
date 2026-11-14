@@ -2110,50 +2110,6 @@ func (l *lowerer) lowerGetField(fn air.Function, expr air.Expr) (loweredExpr, ai
 		}
 		targetType = l.program.Types[targetType.Elem-1]
 	}
-	if targetType.Kind == air.TypeMaybe {
-		if !validTypeID(l.program, targetType.Elem) {
-			return loweredExpr{}, air.NoType, fmt.Errorf("invalid maybe elem type id %d", targetType.Elem)
-		}
-		elemType := l.program.Types[targetType.Elem-1]
-		if elemType.Kind != air.TypeStruct || payload.Field < 0 || payload.Field >= len(elemType.Fields) {
-			return loweredExpr{}, air.NoType, fmt.Errorf("invalid field index %d", payload.Field)
-		}
-		field := elemType.Fields[payload.Field]
-		targetTemp := l.nextTemp()
-		targetDecls, err := l.declareTemp(expr.Target.Type, targetTemp)
-		if err != nil {
-			return loweredExpr{}, air.NoType, err
-		}
-		resultTemp := l.nextTemp()
-		resultDecls, err := l.declareTemp(expr.Type, resultTemp)
-		if err != nil {
-			return loweredExpr{}, air.NoType, err
-		}
-		targetExpr := l.ident(targetTemp)
-		resultExpr := l.ident(resultTemp)
-		stmts := append([]ast.Stmt{}, target.stmts...)
-		stmts = append(stmts, targetDecls...)
-		stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{targetExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{target.expr}})
-		stmts = append(stmts, resultDecls...)
-		fieldExpr := &ast.SelectorExpr{X: l.maybeValueExpr(targetExpr), Sel: l.ident(l.goFieldName(elemType, field.Name))}
-		assignValue := ast.Expr(fieldExpr)
-		if expr.Type != field.Type {
-			resultInfo := l.program.Types[expr.Type-1]
-			if resultInfo.Kind == air.TypeMaybe && resultInfo.Elem == field.Type {
-				assignValue, err = l.maybeSomeExpr(expr.Type, fieldExpr)
-				if err != nil {
-					return loweredExpr{}, air.NoType, err
-				}
-			} else {
-				return loweredExpr{}, air.NoType, fmt.Errorf("unsupported maybe field projection from %s.%s to type %d", elemType.Name, field.Name, expr.Type)
-			}
-		}
-		stmts = append(stmts, &ast.IfStmt{
-			Cond: l.maybeIsSomeExpr(targetExpr),
-			Body: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{resultExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{assignValue}}}},
-		})
-		return loweredExpr{stmts: stmts, expr: resultExpr}, air.NoType, nil
-	}
 	if targetType.Kind != air.TypeStruct || payload.Field < 0 || payload.Field >= len(targetType.Fields) {
 		return loweredExpr{}, air.NoType, fmt.Errorf("invalid field index %d", payload.Field)
 	}

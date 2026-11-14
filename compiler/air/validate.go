@@ -1384,6 +1384,27 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 			}
 		}
 	}
+	if expr.Kind == ExprGetField {
+		if expr.Target == nil || !validTypeID(program, expr.Target.Type) {
+			return fmt.Errorf("field read is missing its target")
+		}
+		// A read through a Maybe is lowered to an option match (ADR 0066),
+		// so the target is always the struct itself or a reference to it.
+		structType, err := referentTypeInfo(program, expr.Target.Type)
+		if err != nil {
+			return err
+		}
+		if structType.Kind != TypeStruct {
+			return fmt.Errorf("field read has non-struct target type %d", expr.Target.Type)
+		}
+		payload := exprPayloadAs[*FieldExprPayload](&expr)
+		if payload == nil {
+			return fmt.Errorf("field read is missing its payload")
+		}
+		if payload.Field < 0 || payload.Field >= len(structType.Fields) {
+			return fmt.Errorf("field read has invalid index %d", payload.Field)
+		}
+	}
 	if expr.Kind == ExprTupleElem {
 		if expr.Target == nil || !validTypeID(program, expr.Target.Type) {
 			return fmt.Errorf("tuple element access is missing its target")
