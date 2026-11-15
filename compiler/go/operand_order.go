@@ -195,6 +195,38 @@ func (l *lowerer) materializePlace(stmts []ast.Stmt, op *operand) []ast.Stmt {
 	return stmts
 }
 
+// evaluateOnce evaluates op so that lowering code can use op.expr more than
+// once while the operand is still evaluated once (#578): a value into a
+// temporary, a place by fixing its storage (materializePlace). Call it right
+// after sequencing the operands, before any statement that evaluates a later
+// operand, so op is still evaluated first.
+//
+// A constant, a function literal, and a path of variables, fields, and
+// dereferences stay as they are: evaluating one again has no effect and, with
+// no Ard code run in between, gives the same value or storage.
+func (l *lowerer) evaluateOnce(stmts []ast.Stmt, op *operand) ([]ast.Stmt, error) {
+	if isPathExpr(op.expr) || operandIsInert(op.expr) {
+		return stmts, nil
+	}
+	return l.materializeOperand(stmts, op)
+}
+
+// isPathExpr reports whether expr is a variable, or a field or dereference of
+// a path.
+func isPathExpr(expr ast.Expr) bool {
+	switch expr := expr.(type) {
+	case *ast.Ident:
+		return true
+	case *ast.SelectorExpr:
+		return isPathExpr(expr.X)
+	case *ast.StarExpr:
+		return isPathExpr(expr.X)
+	case *ast.ParenExpr:
+		return isPathExpr(expr.X)
+	}
+	return false
+}
+
 // operandIsInert reports whether evaluating expr later gives the same value
 // and has no effect: a constant, a function literal (it captures variables,
 // not their values), or a Void value.
