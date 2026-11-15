@@ -950,6 +950,8 @@ type Checker struct {
 	// platformIssues are #platform attribute and sibling errors found while
 	// selecting the module's declarations (ADR 0082).
 	platformIssues []platformIssue
+	// platformIntBits caches the target architecture's int width.
+	platformIntBits int
 }
 
 func New(filePath string, input *parse.Program, moduleResolver *ModuleResolver, options ...CheckOptions) *Checker {
@@ -11705,7 +11707,14 @@ func (c *Checker) targetIntBits() int {
 	if c.options.Target.IntBits != 0 {
 		return c.options.Target.IntBits
 	}
-	return strconv.IntSize
+	// Int follows Go's int on the target architecture (ADR 0082).
+	if c.platformIntBits == 0 {
+		c.platformIntBits = c.targetPlatform().IntBits()
+		if c.platformIntBits == 0 {
+			c.platformIntBits = strconv.IntSize
+		}
+	}
+	return c.platformIntBits
 }
 
 func (c *Checker) targetUintBits() int {

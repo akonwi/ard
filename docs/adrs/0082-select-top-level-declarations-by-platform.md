@@ -147,7 +147,9 @@ Each invocation fixes one platform before loading:
 An explicit platform is passed as `GOOS` and `GOARCH` to `go/packages`
 resolution and to the generated `go build`. Without one, both use the same go
 tool defaults that selection used. Either way, Ard selection, Go resolution,
-and the built binary agree.
+and the built binary agree. The platform's architecture also sets the width of
+`Int`, `Uint`, and `Uintptr` for checking, as it does for Go's `int`, so
+`--platform linux/386` rejects an `Int` literal that does not fit in 32 bits.
 
 ### Checking every platform
 

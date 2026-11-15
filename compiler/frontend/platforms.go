@@ -30,7 +30,7 @@ func RepresentativePlatforms(inputPath string, host platform.Platform) ([]platfo
 	}
 	seen := map[string]bool{}
 	var representatives []platform.Platform
-	for _, candidate := range preferredPlatforms(host) {
+	for _, candidate := range platform.Preferred(host) {
 		var key strings.Builder
 		for _, analysis := range analyses {
 			key.WriteString(analysis.SelectionKey(candidate))
@@ -43,20 +43,6 @@ func RepresentativePlatforms(inputPath string, host platform.Platform) ([]platfo
 		representatives = append(representatives, candidate)
 	}
 	return representatives, nil
-}
-
-func preferredPlatforms(host platform.Platform) []platform.Platform {
-	preferred := []platform.Platform{host, {OS: "linux", Arch: "amd64"}, {OS: "darwin", Arch: "arm64"}, {OS: "windows", Arch: "amd64"}}
-	ordered := make([]platform.Platform, 0, len(platform.Known())+1)
-	added := map[platform.Platform]bool{}
-	for _, candidate := range append(preferred, platform.Known()...) {
-		if candidate.IsZero() || added[candidate] {
-			continue
-		}
-		added[candidate] = true
-		ordered = append(ordered, candidate)
-	}
-	return ordered
 }
 
 // reachablePlatformAnalyses parses every Ard module reachable from inputPath

@@ -5,6 +5,7 @@ package platform
 
 import (
 	"fmt"
+	"go/types"
 	"os"
 	"os/exec"
 	"runtime"
@@ -30,6 +31,16 @@ func (p Platform) String() string {
 // IsZero reports whether p is unset.
 func (p Platform) IsZero() bool {
 	return p.OS == "" && p.Arch == ""
+}
+
+// IntBits is the width of Go's int on p's architecture, which Ard's Int,
+// Uint, and Uintptr follow. It is 0 for an unknown architecture.
+func (p Platform) IntBits() int {
+	sizes := types.SizesFor("gc", p.Arch)
+	if sizes == nil {
+		return 0
+	}
+	return int(sizes.Sizeof(types.Typ[types.Int]) * 8)
 }
 
 // Env returns base with GOOS and GOARCH replaced by p, for running the go
@@ -60,7 +71,6 @@ var known = []Platform{
 	{"freebsd", "amd64"},
 	{"freebsd", "arm"},
 	{"freebsd", "arm64"},
-	{"freebsd", "riscv64"},
 	{"illumos", "amd64"},
 	{"ios", "amd64"},
 	{"ios", "arm64"},
@@ -219,6 +229,23 @@ func ValidateName(name string) error {
 		}
 	}
 	return fmt.Errorf("unknown platform %q: %s does not run on %s", name, osName, arch)
+}
+
+// Preferred returns every known platform, starting with host and then the
+// most common platforms (linux/amd64, darwin/arm64, windows/amd64). Tools use
+// it to pick a representative platform for a set of equivalent ones.
+func Preferred(host Platform) []Platform {
+	candidates := append([]Platform{host, {"linux", "amd64"}, {"darwin", "arm64"}, {"windows", "amd64"}}, Known()...)
+	ordered := make([]Platform, 0, len(candidates))
+	added := map[Platform]bool{}
+	for _, candidate := range candidates {
+		if candidate.IsZero() || added[candidate] {
+			continue
+		}
+		added[candidate] = true
+		ordered = append(ordered, candidate)
+	}
+	return ordered
 }
 
 // Overlap returns a known platform that both name lists match, if any.

@@ -10,6 +10,7 @@ import (
 
 	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/formatter"
+	"github.com/akonwi/ard/lsp/analysis"
 	"github.com/akonwi/ard/parse"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
@@ -230,9 +231,10 @@ func (s *Server) analyzeDiagnostics(ctx context.Context, doc *Doc, docs []Doc) (
 	if s.diagnosticsAnalyzer != nil {
 		return s.diagnosticsAnalyzer(ctx, doc.Text, filePath, overlaySources(docs))
 	}
-	fa, err := s.analyzeSnapshot(ctx, doc.URI)
+	snap := s.workspaceSnapshotFor(filePath)
+	fa, err := snap.AnalyzeCtx(ctx, filePath)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("analyze %s: %w", filePath, err)
 	}
 	if len(fa.ParseErrors) > 0 {
 		diags := make([]checker.Diagnostic, 0, len(fa.ParseErrors))
@@ -241,7 +243,48 @@ func (s *Server) analyzeDiagnostics(ctx context.Context, doc *Doc, docs []Doc) (
 		}
 		return diags, nil
 	}
-	return fa.Diagnostics, nil
+	views, err := snap.PlatformViews(ctx, filePath)
+	if err != nil {
+		return nil, fmt.Errorf("analyze %s: %w", filePath, err)
+	}
+	return withPlatformViewDiagnostics(fa.Diagnostics, views), nil
+}
+
+// withPlatformViewDiagnostics adds the diagnostics other platforms report
+// inside the declarations the primary platform does not select (ADR 0082).
+// Each is labeled with its platform. Platform-independent diagnostics, such
+// as #platform attribute errors, are reported once.
+func withPlatformViewDiagnostics(primary []checker.Diagnostic, views []analysis.PlatformView) []checker.Diagnostic {
+	if len(views) == 0 {
+		return primary
+	}
+	type key struct {
+		message  string
+		location parse.Location
+	}
+	seen := map[key]bool{}
+	for _, diagnostic := range primary {
+		seen[key{diagnostic.Message, diagnostic.Location()}] = true
+	}
+	combined := append([]checker.Diagnostic(nil), primary...)
+	for _, view := range views {
+		if view.Analysis == nil {
+			continue
+		}
+		for _, diagnostic := range view.Analysis.Diagnostics {
+			if !view.Contains(diagnostic.Location().Start) || seen[key{diagnostic.Message, diagnostic.Location()}] {
+				continue
+			}
+			seen[key{diagnostic.Message, diagnostic.Location()}] = true
+			label := view.Platform.String() + ": "
+			diagnostic.Message = label + diagnostic.Message
+			if diagnostic.Title != "" {
+				diagnostic.Title = label + diagnostic.Title
+			}
+			combined = append(combined, diagnostic)
+		}
+	}
+	return combined
 }
 
 func analysisErrorDiagnostic(err error) protocol.Diagnostic {

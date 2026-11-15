@@ -260,3 +260,55 @@ func TestPlatformAttributeOnStructFieldIsUnknown(t *testing.T) {
 		t.Fatalf("diagnostics:\n%s", diagnosticSummary(c))
 	}
 }
+
+func TestPlatformInactiveRegions(t *testing.T) {
+	source := `use go:os
+#platform(windows)
+use go:golang.org/x/sys/windows
+
+fn value() Int { 1 }
+
+#platform(unix)
+fn value() Int { 2 }
+
+#platform(windows)
+fn console() {}
+
+#platform(linx)
+fn broken() {}
+`
+	result := parse.Parse([]byte(source), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	analysis := checker.AnalyzePlatforms(result.Program)
+	regions := analysis.InactiveRegions(linuxAMD64, platform.Preferred(linuxAMD64))
+	type region struct {
+		start, end int
+		platform   platform.Platform
+	}
+	var got []region
+	for _, r := range regions {
+		got = append(got, region{r.Location.Start.Row, r.Location.End.Row, r.Platform})
+	}
+	want := []region{
+		{2, 3, windowsAMD64},
+		{5, 5, windowsAMD64},
+		{10, 11, windowsAMD64},
+		{13, 14, platform.Platform{}},
+	}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("regions = %v, want %v", got, want)
+	}
+}
+
+func TestPlatformArchitectureSetsIntWidth(t *testing.T) {
+	source := "let big: Int = 2147483648\n"
+	if c := checkForPlatform(t, source, linuxAMD64); len(c.Diagnostics()) != 0 {
+		t.Fatalf("linux/amd64 diagnostics:\n%s", diagnosticSummary(c))
+	}
+	c := checkForPlatform(t, source, platform.Platform{OS: "linux", Arch: "386"})
+	if !c.HasErrors() || !strings.Contains(diagnosticSummary(c), "overflow") {
+		t.Fatalf("linux/386 diagnostics:\n%s\nwant an Int overflow", diagnosticSummary(c))
+	}
+}

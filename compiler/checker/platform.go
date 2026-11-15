@@ -3,6 +3,7 @@ package checker
 import (
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/akonwi/ard/formatter"
@@ -400,6 +401,104 @@ func (a *PlatformAnalysis) Select(program *parse.Program, target platform.Platfo
 		}
 	}
 	return selected
+}
+
+// PlatformRegion is the source of a declaration or `use` line, from its
+// first attribute to its end, that is inactive on some platform.
+type PlatformRegion struct {
+	Location parse.Location
+	// Platform is the first candidate platform that selects the region. It
+	// is zero when no candidate does, as for an invalid #platform.
+	Platform platform.Platform
+}
+
+// InactiveRegions returns the declarations and `use` lines target does not
+// select, in source order, each with the first of candidates that selects
+// it. Editors check those regions under that platform.
+func (a *PlatformAnalysis) InactiveRegions(target platform.Platform, candidates []platform.Platform) []PlatformRegion {
+	if a == nil {
+		return nil
+	}
+	active := a.active(target)
+	var inactive []int
+	for index := range a.members {
+		if !active[index] {
+			inactive = append(inactive, index)
+		}
+	}
+	if len(inactive) == 0 {
+		return nil
+	}
+	regions := make([]PlatformRegion, 0, len(inactive))
+	for _, index := range inactive {
+		member := a.members[index]
+		location := member.location
+		if member.annotated {
+			location.Start = member.attribute.Location.Start
+		}
+		regions = append(regions, PlatformRegion{Location: location})
+	}
+	for _, candidate := range candidates {
+		selected := a.active(candidate)
+		pending := false
+		for position, index := range inactive {
+			if regions[position].Platform.IsZero() {
+				if selected[index] {
+					regions[position].Platform = candidate
+				} else {
+					pending = true
+				}
+			}
+		}
+		if !pending {
+			break
+		}
+	}
+	sort.SliceStable(regions, func(i, j int) bool {
+		left, right := regions[i].Location.Start, regions[j].Location.Start
+		return left.Row < right.Row || (left.Row == right.Row && left.Col < right.Col)
+	})
+	return regions
+}
+
+// PlatformSibling is another declaration of the same name, for a different
+// platform.
+type PlatformSibling struct {
+	Location parse.Location
+	// Names are the sibling's platform names; nil for the fallback.
+	Names []string
+}
+
+// SiblingsAt returns the other declarations of the name declared on point's
+// line, when that declaration has platform-specific siblings.
+func (a *PlatformAnalysis) SiblingsAt(point parse.Point) []PlatformSibling {
+	if a == nil {
+		return nil
+	}
+	for _, group := range a.groups {
+		if len(group) < 2 {
+			continue
+		}
+		for _, index := range group {
+			if a.members[index].location.Start.Row != point.Row {
+				continue
+			}
+			siblings := make([]PlatformSibling, 0, len(group)-1)
+			for _, other := range group {
+				if other == index {
+					continue
+				}
+				member := a.members[other]
+				sibling := PlatformSibling{Location: member.location}
+				if member.annotated {
+					sibling.Names = append([]string{}, member.names...)
+				}
+				siblings = append(siblings, sibling)
+			}
+			return siblings
+		}
+	}
+	return nil
 }
 
 // SelectionKey identifies which declarations target selects, so platforms

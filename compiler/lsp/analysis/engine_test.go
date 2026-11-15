@@ -780,7 +780,10 @@ func TestGoSessionRepricesForNewImports(t *testing.T) {
 	for _, diag := range fa.Diagnostics {
 		t.Errorf("unexpected diagnostic before overlay: %s", diag)
 	}
-	first := engine.goResolver
+	primaryResolver := func() *lockedGoResolver {
+		return engine.goSessions[engine.PrimaryPlatform()].resolver
+	}
+	first := primaryResolver()
 
 	// Re-analyzing without new imports reuses the primed session.
 	content, err := os.ReadFile(path)
@@ -791,7 +794,7 @@ func TestGoSessionRepricesForNewImports(t *testing.T) {
 	if _, err := ws.Snapshot().Analyze(path); err != nil {
 		t.Fatal(err)
 	}
-	if engine.goResolver != first {
+	if primaryResolver() != first {
 		t.Fatal("session should be reused when no new Go imports appear")
 	}
 
@@ -805,7 +808,7 @@ func TestGoSessionRepricesForNewImports(t *testing.T) {
 	for _, diag := range fa.Diagnostics {
 		t.Errorf("unexpected diagnostic after new import: %s", diag)
 	}
-	if engine.goResolver == first {
+	if primaryResolver() == first {
 		t.Fatal("session should be rebuilt for a newly appearing Go import")
 	}
 

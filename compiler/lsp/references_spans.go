@@ -479,7 +479,7 @@ func spanGroupIsField(group *spanGroup) bool {
 }
 
 func (s *Server) isStructFieldShorthand(ctx context.Context, docURI uri.URI, rng protocol.Range) (bool, error) {
-	fa, err := s.analyzeSnapshot(ctx, docURI)
+	fa, err := s.analyzeSnapshotAt(ctx, docURI, rng.Start)
 	if err != nil {
 		return false, err
 	}
@@ -551,7 +551,7 @@ type spanGroup struct {
 
 // spanGroupAt resolves the identity group for the symbol at a position.
 func (s *Server) spanGroupAt(ctx context.Context, docURI uri.URI, position protocol.Position) (*spanGroup, error) {
-	fa, err := s.analyzeSnapshot(ctx, docURI)
+	fa, err := s.analyzeSnapshotAt(ctx, docURI, position)
 	if err != nil {
 		return nil, err
 	}

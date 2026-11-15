@@ -1,6 +1,7 @@
 package platform
 
 import (
+	"os/exec"
 	"strings"
 	"testing"
 )
@@ -98,5 +99,54 @@ func TestDetectReportsAKnownPlatform(t *testing.T) {
 	t.Setenv("GOARCH", "arm64")
 	if got := Detect(""); got != (Platform{OS: "windows", Arch: "arm64"}) {
 		t.Fatalf("Detect with GOOS/GOARCH set = %s", got)
+	}
+}
+
+func TestPreferredStartsWithHostThenCommonPlatforms(t *testing.T) {
+	host := Platform{OS: "freebsd", Arch: "arm64"}
+	preferred := Preferred(host)
+	want := []Platform{host, {"linux", "amd64"}, {"darwin", "arm64"}, {"windows", "amd64"}}
+	for index, p := range want {
+		if preferred[index] != p {
+			t.Fatalf("Preferred[%d] = %s, want %s", index, preferred[index], p)
+		}
+	}
+	if len(preferred) != len(Known()) {
+		t.Fatalf("Preferred lists %d platforms, want each known platform once (%d)", len(preferred), len(Known()))
+	}
+}
+
+func TestIntBits(t *testing.T) {
+	tests := map[Platform]int{
+		{"linux", "amd64"}:   64,
+		{"linux", "386"}:     32,
+		{"linux", "arm"}:     32,
+		{"linux", "mipsle"}:  32,
+		{"js", "wasm"}:       64,
+		{"darwin", "arm64"}:  64,
+		{"linux", "unknown"}: 0,
+	}
+	for p, want := range tests {
+		if got := p.IntBits(); got != want {
+			t.Errorf("%s IntBits = %d, want %d", p, got, want)
+		}
+	}
+}
+
+func TestKnownMatchesTheGoToolchain(t *testing.T) {
+	out, err := exec.Command("go", "tool", "dist", "list").Output()
+	if err != nil {
+		t.Skipf("go tool dist list: %v", err)
+	}
+	var want []string
+	for _, line := range strings.Fields(string(out)) {
+		want = append(want, line)
+	}
+	var got []string
+	for _, p := range Known() {
+		got = append(got, p.String())
+	}
+	if strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Fatalf("Known() = %v\ngo tool dist list = %v", got, want)
 	}
 }

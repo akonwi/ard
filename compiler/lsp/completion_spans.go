@@ -44,7 +44,7 @@ func (s *Server) completionFromSpans(ctx context.Context, docURI uri.URI, source
 	}
 	patched := source[:cctx.sepEnd] + placeholder + source[cctx.offset:]
 	snap := s.workspaceSnapshotFor(filePath).WithOverlay(filePath, patched)
-	fa, err := snap.AnalyzeEphemeral(ctx, filePath)
+	fa, err := snap.AnalyzeEphemeralAt(ctx, filePath, offsetToParsePoint(patched, cctx.sepEnd))
 	if err != nil || fa == nil || fa.Spans == nil {
 		return nil
 	}

@@ -28,6 +28,7 @@ import (
 
 	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/parse"
+	"github.com/akonwi/ard/platform"
 )
 
 // Engine holds project-wide shared analysis state. It is safe for concurrent
@@ -35,10 +36,12 @@ import (
 type Engine struct {
 	projectRoot string
 
-	mu           sync.Mutex
-	goResolver   *lockedGoResolver
-	goModHash    string
-	goPrimed     map[string]bool        // go import paths primed into the session
+	mu sync.Mutex
+	// primary is the platform files are analyzed for. Declarations other
+	// platforms select are analyzed in extra per-platform views (ADR 0082).
+	primary platform.Platform
+	// goSessions holds one primed Go resolver session per platform.
+	goSessions   map[platform.Platform]*goSession
 	parseCache   map[string]*parseEntry // content hash -> parse result
 	checkCache   map[string]*FileAnalysis
 	checkCalls   map[string]*checkCall // content signature -> in-flight check
@@ -94,12 +97,22 @@ type FileAnalysis struct {
 	Module checker.Module
 	// Signature identifies the inputs this analysis was computed from.
 	Signature string
+	// Platform is the platform the file was checked for (ADR 0082).
+	Platform platform.Platform
+}
+
+// goSession is one primed go/packages session for a platform.
+type goSession struct {
+	resolver *lockedGoResolver
+	modHash  string
+	primed   map[string]bool // go import paths primed into the session
 }
 
 // NewEngine creates an engine rooted at the given project directory.
 func NewEngine(projectRoot string) *Engine {
 	return &Engine{
 		projectRoot:  projectRoot,
+		goSessions:   map[platform.Platform]*goSession{},
 		parseCache:   map[string]*parseEntry{},
 		checkCache:   map[string]*FileAnalysis{},
 		checkCalls:   map[string]*checkCall{},
@@ -110,6 +123,24 @@ func NewEngine(projectRoot string) *Engine {
 
 // ProjectRoot returns the engine's project root directory.
 func (e *Engine) ProjectRoot() string { return e.projectRoot }
+
+// PrimaryPlatform is the platform files are analyzed for: the go tool's
+// default platform unless SetPrimaryPlatform chose another.
+func (e *Engine) PrimaryPlatform() platform.Platform {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.primary.IsZero() {
+		e.primary = platform.Detect(e.projectRoot)
+	}
+	return e.primary
+}
+
+// SetPrimaryPlatform makes the engine analyze files for target.
+func (e *Engine) SetPrimaryPlatform(target platform.Platform) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.primary = target
+}
 
 // --- shared Go resolver ---
 
@@ -139,16 +170,21 @@ func (e *Engine) goResolverFor(projectInfo *checker.ProjectInfo, goPaths []strin
 	sig := e.goModSignature()
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if e.goResolver != nil && e.goModHash == sig {
+	var target platform.Platform
+	if projectInfo != nil {
+		target = projectInfo.Platform
+	}
+	session := e.goSessions[target]
+	if session != nil && session.modHash == sig {
 		covered := true
 		for _, path := range goPaths {
-			if !e.goPrimed[path] {
+			if !session.primed[path] {
 				covered = false
 				break
 			}
 		}
 		if covered {
-			return e.goResolver
+			return session.resolver
 		}
 	}
 	root := e.projectRoot
@@ -158,11 +194,11 @@ func (e *Engine) goResolverFor(projectInfo *checker.ProjectInfo, goPaths []strin
 		tags = projectInfo.Go.BuildTags
 	}
 	primed := map[string]bool{}
-	if e.goModHash == sig {
+	if session != nil && session.modHash == sig {
 		// Carry previously primed paths into the new session so the rest of
 		// the workspace keeps resolving from the same universe. Paths that
 		// fail to load only cost a per-path error entry.
-		for path := range e.goPrimed {
+		for path := range session.primed {
 			primed[path] = true
 		}
 	}
@@ -176,19 +212,16 @@ func (e *Engine) goResolverFor(projectInfo *checker.ProjectInfo, goPaths []strin
 	sort.Strings(union)
 	resolver := checker.NewGoPackagesResolver(root, tags)
 	resolver.DependencyModuleRoots = checker.DependencyGoModuleRoots(projectInfo)
-	if projectInfo != nil {
-		resolver.Platform = projectInfo.Platform
-	}
+	resolver.Platform = target
 	// Prime on a fresh resolver cannot fail: load-level failures (for
 	// example an unreadable go.mod) are recorded per path and surface as
 	// diagnostics at each Go import.
 	if err := resolver.Prime(union); err != nil {
 		panic(fmt.Sprintf("prime fresh Go resolver session: %v", err))
 	}
-	e.goResolver = &lockedGoResolver{inner: resolver}
-	e.goModHash = sig
-	e.goPrimed = primed
-	return e.goResolver
+	session = &goSession{resolver: &lockedGoResolver{inner: resolver}, modHash: sig, primed: primed}
+	e.goSessions[target] = session
+	return session.resolver
 }
 
 // manifestSignature hashes the project manifest and lockfile so dependency
@@ -364,7 +397,7 @@ func (s *Snapshot) Parse(filePath string) (*parse.Program, []parse.ParseError, e
 // content signature of the file's import closure. Panics in the checker are
 // recovered and reported as errors; failed analyses are not cached.
 func (s *Snapshot) Analyze(filePath string) (*FileAnalysis, error) {
-	return s.analyze(context.Background(), filePath, true)
+	return s.analyze(context.Background(), filePath, true, platform.Platform{})
 }
 
 // AnalyzeCtx is Analyze with cooperative cancellation: the context is
@@ -372,17 +405,20 @@ func (s *Snapshot) Analyze(filePath string) (*FileAnalysis, error) {
 // a superseded or timed-out request stops before the expensive stage instead
 // of burning a full check. The checker itself is not interruptible.
 func (s *Snapshot) AnalyzeCtx(ctx context.Context, filePath string) (*FileAnalysis, error) {
-	return s.analyze(ctx, filePath, true)
+	return s.analyze(ctx, filePath, true, platform.Platform{})
 }
 
 // AnalyzeEphemeral analyzes without inserting into the check cache. Used for
 // synthetic content (e.g. completion placeholder patching) that would
 // otherwise thrash the bounded cache with never-reused entries.
 func (s *Snapshot) AnalyzeEphemeral(ctx context.Context, filePath string) (*FileAnalysis, error) {
-	return s.analyze(ctx, filePath, false)
+	return s.analyze(ctx, filePath, false, platform.Platform{})
 }
 
-func (s *Snapshot) analyze(ctx context.Context, filePath string, cache bool) (analysis *FileAnalysis, err error) {
+// analyze checks the file for target, or for the engine's primary platform
+// when target is zero. Only primary analyses track the dependency graph;
+// other platforms import a subset of the same files.
+func (s *Snapshot) analyze(ctx context.Context, filePath string, cache bool, target platform.Platform) (analysis *FileAnalysis, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			analysis = nil
@@ -401,8 +437,15 @@ func (s *Snapshot) analyze(ctx context.Context, filePath string, cache bool) (an
 	if entry.program == nil {
 		return nil, fmt.Errorf("parse returned no program for %s", filePath)
 	}
+	primary := target.IsZero()
+	if primary {
+		target = s.engine.PrimaryPlatform()
+	}
+	track := cache && primary
 	if len(entry.errors) > 0 && cache {
-		s.engine.updateDependencies(filePath, nil, s.revision, false)
+		if track {
+			s.engine.updateDependencies(filePath, nil, s.revision, false)
+		}
 		// Parse errors block checking on the cached path; not cached in
 		// checkCache because the parse cache already makes this cheap.
 		// Ephemeral (tooling-patched) analyses continue: signature help and
@@ -412,21 +455,22 @@ func (s *Snapshot) analyze(ctx context.Context, filePath string, cache bool) (an
 			FilePath:    filePath,
 			Program:     entry.program,
 			ParseErrors: entry.errors,
+			Platform:    target,
 		}, nil
 	}
 
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	moduleResolver, relPath, err := s.newModuleResolver(filePath)
+	moduleResolver, relPath, err := s.newModuleResolver(filePath, target)
 	if err != nil {
-		if cache {
+		if track {
 			s.engine.updateDependencies(filePath, nil, s.revision, false)
 		}
 		return nil, err
 	}
 
-	sig := s.signature(filePath, content, entry.program, moduleResolver, relPath, cache)
+	sig := s.signature(filePath, content, entry.program, moduleResolver, relPath, track, target)
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -595,12 +639,12 @@ func (e *Engine) AffectedFiles(changedPath string, candidates []string) (affecte
 
 // newModuleResolver builds a resolver rooted at the project with snapshot
 // overlays applied, and returns the file's project-relative module path.
-func (s *Snapshot) newModuleResolver(filePath string) (*checker.ModuleResolver, string, error) {
+func (s *Snapshot) newModuleResolver(filePath string, target platform.Platform) (*checker.ModuleResolver, string, error) {
 	root := s.engine.projectRoot
 	if root == "" {
 		root = filepath.Dir(filePath)
 	}
-	moduleResolver, err := checker.NewModuleResolver(root)
+	moduleResolver, err := checker.NewModuleResolverWithOptions(root, checker.BuildOptions{Platform: target})
 	if err != nil {
 		return nil, "", fmt.Errorf("module resolver: %w", err)
 	}
@@ -640,6 +684,7 @@ func (s *Snapshot) check(filePath string, relPath string, program *parse.Program
 		Checked:     module.Program(),
 		Module:      module,
 		Signature:   sig,
+		Platform:    projectInfo.Platform,
 	}, nil
 }
 
@@ -737,8 +782,10 @@ func collectEmbeddedInputSpec(program *parse.Program) checker.EmbeddedInputSpec 
 	return spec
 }
 
-func (s *Snapshot) signature(filePath string, content []byte, program *parse.Program, moduleResolver *checker.ModuleResolver, relPath string, trackDependencies bool) string {
+func (s *Snapshot) signature(filePath string, content []byte, program *parse.Program, moduleResolver *checker.ModuleResolver, relPath string, trackDependencies bool, target platform.Platform) string {
 	h := sha256.New()
+	h.Write([]byte(target.String()))
+	h.Write([]byte{0})
 	h.Write([]byte(filePath))
 	h.Write([]byte{0})
 	h.Write(content)
