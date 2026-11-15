@@ -14,7 +14,7 @@ import (
 // -race (no cgo where it is required, or an unsupported GOOS/GOARCH).
 func requireRaceDetector(t *testing.T) {
 	t.Helper()
-	if err := checkRaceDetector(t.TempDir()); err != nil {
+	if err := checkRaceDetector(t.TempDir(), nil); err != nil {
 		t.Skipf("race detector unavailable: %v", err)
 	}
 }
@@ -67,7 +67,7 @@ func TestCheckRaceDetectorExplainsUnsupportedConfigurations(t *testing.T) {
 			for key, value := range tt.env {
 				t.Setenv(key, value)
 			}
-			err := checkRaceDetector(t.TempDir())
+			err := checkRaceDetector(t.TempDir(), nil)
 			var unavailable *RaceUnavailableError
 			if !errors.As(err, &unavailable) {
 				t.Fatalf("checkRaceDetector() error = %v, want *RaceUnavailableError", err)

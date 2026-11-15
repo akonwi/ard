@@ -67,6 +67,8 @@ type Import struct {
 	Name         string
 	Kind         ImportKind
 	PathLocation Location
+	// Attributes are written on the lines before the `use` (ADR 0082).
+	Attributes []Attribute
 	Location
 }
 
@@ -116,6 +118,7 @@ type VariableDeclaration struct {
 	Mutable      bool
 	Value        Expression
 	Type         DeclaredType
+	Attributes   []Attribute
 }
 
 type DeclaredType interface {
@@ -238,9 +241,10 @@ func (v VoidType) IsNullable() bool {
 
 type TypeDeclaration struct {
 	Location
-	Name    Identifier
-	Type    []DeclaredType
-	Private bool
+	Name       Identifier
+	Type       []DeclaredType
+	Private    bool
+	Attributes []Attribute
 }
 
 func (t TypeDeclaration) String() string {
@@ -453,6 +457,8 @@ type FunctionDeclaration struct {
 	Body       []Statement
 	Private    bool
 	Comments   []Comment // Comments found within the parameter list
+	// Attributes are written on the lines before a top-level declaration.
+	Attributes []Attribute
 }
 
 func (f FunctionDeclaration) String() string {
@@ -487,6 +493,7 @@ type StructDefinition struct {
 	Fields     []StructField
 	Private    bool
 	Comments   []Comment // Comments found within the struct definition
+	Attributes []Attribute
 }
 
 type StructField struct {
@@ -495,9 +502,10 @@ type StructField struct {
 	Attributes []Attribute
 }
 
-// Attribute is compile-time metadata attached to a struct field. Attribute
-// syntax is represented generically; namespaced attributes make target-specific
-// metadata explicit without assigning it target-neutral semantics.
+// Attribute is compile-time metadata attached to a struct field, a top-level
+// declaration, or a `use` line. Attribute syntax is represented generically;
+// namespaced attributes make target-specific metadata explicit without
+// assigning it target-neutral semantics.
 type Attribute struct {
 	Location
 	Namespace *Identifier
@@ -537,27 +545,30 @@ func (s StructDefinition) String() string {
 
 type ImplBlock struct {
 	Location
-	Target   Identifier
-	Receiver Identifier
-	Methods  []FunctionDeclaration
-	Comments []Comment // Comments found within the impl block
+	Target     Identifier
+	Receiver   Identifier
+	Methods    []FunctionDeclaration
+	Comments   []Comment // Comments found within the impl block
+	Attributes []Attribute
 }
 
 type TraitDefinition struct {
 	Location
-	Name     Identifier
-	Methods  []FunctionDeclaration
-	Private  bool
-	Comments []Comment // Comments found within the trait definition
+	Name       Identifier
+	Methods    []FunctionDeclaration
+	Private    bool
+	Comments   []Comment // Comments found within the trait definition
+	Attributes []Attribute
 }
 
 type TraitImplementation struct {
 	Location
-	Trait    Expression // Identifier | StaticProperty
-	ForType  Identifier
-	Receiver Identifier
-	Methods  []FunctionDeclaration
-	Comments []Comment // Comments found within the implementation body
+	Trait      Expression // Identifier | StaticProperty
+	ForType    Identifier
+	Receiver   Identifier
+	Methods    []FunctionDeclaration
+	Comments   []Comment // Comments found within the implementation body
+	Attributes []Attribute
 }
 
 func (i ImplBlock) String() string {
@@ -606,6 +617,7 @@ type EnumDefinition struct {
 	Variants     []EnumVariant
 	Private      bool
 	Comments     []Comment // Comments found within the enum definition
+	Attributes   []Attribute
 }
 
 func (e EnumDefinition) String() string {

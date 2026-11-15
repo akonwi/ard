@@ -17,6 +17,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/akonwi/ard/platform"
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/module"
 	"golang.org/x/tools/go/gcexportdata"
@@ -26,6 +27,9 @@ import (
 type GoPackagesResolver struct {
 	ProjectRoot string
 	BuildTags   []string
+	// Platform is the explicit target platform Go packages are resolved for
+	// (ADR 0082). When unset, the go tool's default platform is used.
+	Platform platform.Platform
 	// DependencyModuleRoots maps a dependency's Go module path to the local
 	// directory backing its Ard source (a locked Git checkout or path root).
 	// Injected into Go module resolution so dependency FFI is checked against
@@ -462,6 +466,9 @@ func (r *GoPackagesResolver) loadConfig() *packages.Config {
 	}
 	if len(r.BuildTags) > 0 {
 		cfg.BuildFlags = []string{"-tags=" + strings.Join(r.BuildTags, ",")}
+	}
+	if !r.Platform.IsZero() {
+		cfg.Env = r.Platform.Env(os.Environ())
 	}
 	return cfg
 }

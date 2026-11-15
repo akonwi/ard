@@ -162,9 +162,9 @@ func TestMalformedAttributesTerminate(t *testing.T) {
 	}
 }
 
-func TestAttributesAreRejectedOutsideStructFields(t *testing.T) {
-	result := Parse([]byte("#json(name: \"run\")\nfn run() {}\n"), "test.ard")
-	if len(result.Errors) == 0 || result.Errors[0].Message != "Attributes are only supported on struct fields" {
+func TestAttributesAreRejectedInsideBodies(t *testing.T) {
+	result := Parse([]byte("fn run() {\n  #platform(unix)\n  let x = 1\n}\n"), "test.ard")
+	if len(result.Errors) == 0 || result.Errors[0].Message != "Attributes are only supported on struct fields and top-level declarations" {
 		t.Fatalf("errors = %#v", result.Errors)
 	}
 }

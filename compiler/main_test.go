@@ -16,6 +16,7 @@ import (
 	"github.com/akonwi/ard/diagnostics"
 	"github.com/akonwi/ard/frontend"
 	gotarget "github.com/akonwi/ard/go"
+	"github.com/akonwi/ard/platform"
 )
 
 func captureStdout(t *testing.T, fn func()) string {
@@ -106,7 +107,7 @@ func TestReportCLIError(t *testing.T) {
 
 func TestCheckReturnsLoadFailures(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "missing.ard")
-	if err := check(missing); err == nil || !strings.Contains(err.Error(), "error reading file") {
+	if err := check(missing, platform.Platform{}); err == nil || !strings.Contains(err.Error(), "error reading file") {
 		t.Fatalf("check error = %v, want missing-file error", err)
 	}
 }
@@ -122,7 +123,7 @@ func TestCheckDoesNotRepeatRenderedDiagnostics(t *testing.T) {
 	}
 
 	output := captureStderr(t, func() {
-		err := check(mainPath)
+		err := check(mainPath, platform.Platform{})
 		if err == nil {
 			t.Fatal("check succeeded; expected type error")
 		}
@@ -1109,10 +1110,17 @@ func TestParseBuildArgs(t *testing.T) {
 		release    bool
 		race       bool
 		overrides  []checker.BuildOverride
+		platform   platform.Platform
 		expectErr  bool
 		errMessage string
 	}{
 		{name: "input only", args: []string{"demo.ard"}, path: "demo.ard", out: "demo"},
+		{name: "platform", args: []string{"demo.ard", "--platform", "linux/arm64"}, path: "demo.ard", out: "demo", platform: platform.Platform{OS: "linux", Arch: "arm64"}},
+		{name: "windows platform names an exe", args: []string{"--platform", "windows/amd64", "demo.ard"}, path: "demo.ard", out: "demo.exe", platform: platform.Platform{OS: "windows", Arch: "amd64"}},
+		{name: "windows platform keeps explicit output", args: []string{"--platform", "windows/amd64", "demo.ard", "--out", "demo"}, path: "demo.ard", out: "demo", platform: platform.Platform{OS: "windows", Arch: "amd64"}},
+		{name: "unknown platform", args: []string{"demo.ard", "--platform", "linux/wasm"}, expectErr: true, errMessage: "unknown platform \"linux/wasm\"; run `go tool dist list` for supported platforms"},
+		{name: "missing platform", args: []string{"demo.ard", "--platform"}, expectErr: true, errMessage: "--platform requires <os>/<arch>"},
+		{name: "duplicate platform", args: []string{"demo.ard", "--platform", "linux/amd64", "--platform", "linux/arm64"}, expectErr: true, errMessage: "--platform may be provided only once"},
 		{name: "nested input defaults to file basename", args: []string{"samples/main.ard"}, path: "samples/main.ard", out: "main"},
 		{name: "explicit output", args: []string{"samples/main.ard", "--out", "demo"}, path: "samples/main.ard", out: "demo"},
 		{
@@ -1151,6 +1159,44 @@ func TestParseBuildArgs(t *testing.T) {
 			}
 			if got.Release != tt.release || got.Race != tt.race || fmt.Sprint(got.Overrides) != fmt.Sprint(tt.overrides) {
 				t.Fatalf("build options = %#v, want release=%t race=%t overrides=%#v", got, tt.release, tt.race, tt.overrides)
+			}
+			if got.Platform != tt.platform {
+				t.Fatalf("platform = %v, want %v", got.Platform, tt.platform)
+			}
+		})
+	}
+}
+
+func TestParseCheckArgs(t *testing.T) {
+	tests := []struct {
+		name       string
+		args       []string
+		want       checkArgs
+		errMessage string
+	}{
+		{name: "input only", args: []string{"main.ard"}, want: checkArgs{Input: "main.ard"}},
+		{name: "platform", args: []string{"--platform", "windows/arm64", "main.ard"}, want: checkArgs{Input: "main.ard", Platform: platform.Platform{OS: "windows", Arch: "arm64"}}},
+		{name: "all platforms", args: []string{"main.ard", "--all-platforms"}, want: checkArgs{Input: "main.ard", AllPlatforms: true}},
+		{name: "both", args: []string{"main.ard", "--all-platforms", "--platform", "linux/amd64"}, errMessage: "--platform and --all-platforms cannot be combined"},
+		{name: "invalid platform", args: []string{"main.ard", "--platform", "windows"}, errMessage: "invalid platform \"windows\": expected <os>/<arch>, such as linux/amd64"},
+		{name: "missing input", args: []string{"--all-platforms"}, errMessage: "expected filepath argument"},
+		{name: "unknown flag", args: []string{"main.ard", "--wat"}, errMessage: "unknown flag: --wat"},
+		{name: "extra argument", args: []string{"main.ard", "other.ard"}, errMessage: "unexpected argument: other.ard"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseCheckArgs(tt.args)
+			if tt.errMessage != "" {
+				if err == nil || err.Error() != tt.errMessage {
+					t.Fatalf("error = %v, want %q", err, tt.errMessage)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != tt.want {
+				t.Fatalf("parseCheckArgs = %#v, want %#v", got, tt.want)
 			}
 		})
 	}

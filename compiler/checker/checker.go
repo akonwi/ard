@@ -947,6 +947,9 @@ type Checker struct {
 	// silentFailures counts failures that propagate an already reported error
 	// without a new diagnostic (ADR 0074).
 	silentFailures int
+	// platformIssues are #platform attribute and sibling errors found while
+	// selecting the module's declarations (ADR 0082).
+	platformIssues []platformIssue
 }
 
 func New(filePath string, input *parse.Program, moduleResolver *ModuleResolver, options ...CheckOptions) *Checker {
@@ -958,7 +961,6 @@ func New(filePath string, input *parse.Program, moduleResolver *ModuleResolver, 
 	}
 	c := &Checker{
 		diagnostics:    []Diagnostic{},
-		input:          input,
 		filePath:       filePath,
 		modulePath:     modulePath,
 		moduleResolver: moduleResolver,
@@ -988,6 +990,13 @@ func New(filePath string, input *parse.Program, moduleResolver *ModuleResolver, 
 		c.spans = &SpanIndex{}
 		c.moduleFiles = map[string]string{}
 	}
+	// Declarations and `use` lines for other platforms are removed before
+	// anything else sees the module (ADR 0082).
+	if analysis := AnalyzePlatforms(input); analysis != nil {
+		c.platformIssues = analysis.issues
+		input = analysis.Select(input, c.targetPlatform())
+	}
+	c.input = input
 	for _, stmt := range input.Statements {
 		switch def := stmt.(type) {
 		case *parse.FunctionDeclaration:
@@ -1200,6 +1209,7 @@ func (c *Checker) resolveTraitImplementationContract(name parse.Expression) *Tra
 }
 
 func (c *Checker) Check() {
+	c.addPlatformIssues(c.platformIssues)
 	c.primeGoResolver()
 	seenImportAliases := map[string]parse.Location{}
 	for _, imp := range c.input.Imports {
@@ -6101,7 +6111,7 @@ func (c *Checker) primeGoResolver() {
 		// module.
 		return
 	}
-	paths := CollectGoImportPaths(c.moduleResolver, GoImportScanEntry{Program: c.input, ModulePath: c.modulePath})
+	paths := CollectGoImportPaths(c.moduleResolver, GoImportScanEntry{Program: c.input, ModulePath: c.modulePath, Selected: true, Platform: c.targetPlatform()})
 	if len(paths) == 0 {
 		return
 	}
@@ -6120,6 +6130,10 @@ func (c *Checker) primeGoResolver() {
 		}
 		resolver = NewGoPackagesResolver(projectRoot, buildTags)
 		resolver.DependencyModuleRoots = DependencyGoModuleRoots(projectInfo)
+		resolver.Platform = c.options.Platform
+		if resolver.Platform.IsZero() && projectInfo != nil {
+			resolver.Platform = projectInfo.Platform
+		}
 		c.options.GoResolver = resolver
 		if c.moduleResolver != nil {
 			// Checked modules may retain foreign types from an earlier default
