@@ -4151,18 +4151,15 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		}
 		return &Expr{Kind: ExprDiscardingFunctionCoercion, Type: typeID, Target: value}, nil
 	case *checker.ForeignStructInstance:
+		// Fields stay in source order: the Go backend evaluates them in the
+		// order they appear here.
 		fields := make([]StructFieldValue, 0, len(e.Fields))
-		fieldNames := make([]string, 0, len(e.Fields))
-		for name := range e.Fields {
-			fieldNames = append(fieldNames, name)
-		}
-		sort.Strings(fieldNames)
-		for _, name := range fieldNames {
-			value, err := fl.lowerExpr(e.Fields[name])
+		for _, field := range e.Fields {
+			value, err := fl.lowerExpr(field.Value)
 			if err != nil {
 				return nil, err
 			}
-			fields = append(fields, StructFieldValue{Name: name, Value: *value})
+			fields = append(fields, StructFieldValue{Name: field.Name, Value: *value})
 		}
 		return &Expr{Kind: ExprForeignStructInstance, Type: typeID, Payload: &ForeignExprPayload{Target: e.Target, Namespace: e.Namespace, Qualifier: e.Qualifier, Symbol: e.Name, Fields: fields}}, nil
 	case *checker.ForeignScalarConvert:

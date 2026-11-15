@@ -418,8 +418,15 @@ type ForeignStructInstance struct {
 	Namespace string
 	Qualifier string
 	Name      string
-	Fields    map[string]Expression
-	_type     *ForeignType
+	// Fields are in the order they are written in the literal, which is the
+	// order their values are evaluated in (ADR 0078).
+	Fields []ForeignStructField
+	_type  *ForeignType
+}
+
+type ForeignStructField struct {
+	Name  string
+	Value Expression
 }
 
 func (f *ForeignStructInstance) Type() Type { return f._type }

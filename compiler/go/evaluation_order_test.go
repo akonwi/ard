@@ -85,6 +85,30 @@ foreign struct b
 	}
 }
 
+// Regression for #577: Go struct literal fields evaluate in the order they
+// are written, not alphabetically by field name.
+func TestGoTargetForeignStructFieldsEvaluateInSourceOrder(t *testing.T) {
+	got := runGoTargetSourceStdout(t, `use go:fmt
+use go:net/http
+`+evaluationOrderHelpers+`
+fn main() {
+  let plain = http::Request{Proto: now_str("plain Proto", "HTTP/1.1"), Method: now_str("plain Method", "GET")}
+  let staged = http::Request{Proto: later_str("staged Proto", "HTTP/2").or(""), Method: now_str("staged Method", "PUT"), Host: later_str("staged Host", "example.com").or("")}
+  fmt::Println(plain.Proto, plain.Method, staged.Proto, staged.Method, staged.Host)
+}
+`)
+	want := `plain Proto
+plain Method
+staged Proto
+staged Method
+staged Host
+HTTP/1.1 GET HTTP/2 PUT example.com
+`
+	if got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+}
+
 func TestGoTargetCallOperandsEvaluateInSourceOrder(t *testing.T) {
 	got := runGoTargetSourceStdout(t, `use go:fmt
 use go:strings
