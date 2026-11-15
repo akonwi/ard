@@ -1156,7 +1156,7 @@ fn describe(value: Any) Str {
   }
 }`,
 			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Match on a dynamic value requires a catch-all '_' case because the type set is open"},
+				{Kind: checker.Error, Message: "Incomplete match: missing case for '_'"},
 			},
 		},
 		{
@@ -1170,7 +1170,7 @@ fn describe(value: Any) Str {
     _ => "other",
   }
 }`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Warn, Message: "Duplicate case: image::Point"}},
+			diagnostics: []checker.Diagnostic{{Kind: checker.Warn, Message: "Unreachable match arm: image::Point(_)"}},
 		},
 		{
 			name: "interface patterns are rejected",

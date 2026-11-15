@@ -672,18 +672,28 @@ func TestLowerBoolMatch(t *testing.T) {
 	`)
 
 	choose := findFunction(t, program, "choose")
-	if choose.Body.Result == nil || choose.Body.Result.Kind != ExprIf {
-		t.Fatalf("choose result = %#v, want ExprIf", choose.Body.Result)
+	if choose.Body.Result == nil || choose.Body.Result.Kind != ExprMatch {
+		t.Fatalf("choose result = %#v, want ExprMatch", choose.Body.Result)
 	}
-	ifPayload := choose.Body.Result.IfPayload()
-	if ifPayload.Condition == nil || ifPayload.Condition.Kind != ExprLoadLocal {
-		t.Fatalf("condition = %#v, want local load", ifPayload.Condition)
+	if len(choose.Body.Result.Args) != 1 || choose.Body.Result.Args[0].Kind != ExprLoadLocal {
+		t.Fatalf("subject = %#v, want local load", choose.Body.Result.Args)
 	}
-	if ifPayload.Then.Result == nil || ifPayload.Then.Result.TextPayload().Value != "1" {
-		t.Fatalf("then block = %#v, want 1", ifPayload.Then.Result)
+	payload := choose.Body.Result.MatchPayload()
+	tree := payload.Tree
+	if tree.Kind != DecisionSwitch || len(tree.Cases) != 2 || tree.Fallback != nil {
+		t.Fatalf("tree = %#v, want a switch on true and false", tree)
 	}
-	if ifPayload.Else.Result == nil || ifPayload.Else.Result.TextPayload().Value != "2" {
-		t.Fatalf("else block = %#v, want 2", ifPayload.Else.Result)
+	for i, want := range []bool{true, false} {
+		c := tree.Cases[i]
+		if c.Test.Kind != MatchTestBool || c.Test.Bool != want || c.Then.Kind != DecisionRun || c.Then.Arm != i {
+			t.Fatalf("case %d = %#v, want %t running arm %d", i, c, want, i)
+		}
+	}
+	if payload.Arms[0].Body.Result == nil || payload.Arms[0].Body.Result.TextPayload().Value != "1" {
+		t.Fatalf("true arm = %#v, want 1", payload.Arms[0].Body.Result)
+	}
+	if payload.Arms[1].Body.Result == nil || payload.Arms[1].Body.Result.TextPayload().Value != "2" {
+		t.Fatalf("false arm = %#v, want 2", payload.Arms[1].Body.Result)
 	}
 }
 func TestLowerEmptyTemplateStringCarriesPayload(t *testing.T) {
@@ -837,15 +847,19 @@ func TestLowerEnums(t *testing.T) {
 	}
 
 	name := findFunction(t, program, "name")
-	if name.Body.Result == nil || name.Body.Result.Kind != ExprMatchEnum {
-		t.Fatalf("name result = %#v, want ExprMatchEnum", name.Body.Result)
+	if name.Body.Result == nil || name.Body.Result.Kind != ExprMatch {
+		t.Fatalf("name result = %#v, want ExprMatch", name.Body.Result)
 	}
-	matchPayload := name.Body.Result.EnumMatchPayload()
-	if len(matchPayload.Cases) != 4 {
-		t.Fatalf("enum case count = %d, want 4", len(matchPayload.Cases))
+	matchPayload := name.Body.Result.MatchPayload()
+	if len(matchPayload.Arms) != 4 {
+		t.Fatalf("enum arm count = %d, want 4", len(matchPayload.Arms))
 	}
-	if matchPayload.Cases[3].Discriminant != 3 {
-		t.Fatalf("right case = %#v, want discriminant 3", matchPayload.Cases[3])
+	tree := matchPayload.Tree
+	if tree.Kind != DecisionSwitch || len(tree.Cases) != 4 || tree.Fallback != nil {
+		t.Fatalf("enum tree = %#v, want a switch with one case per variant", tree)
+	}
+	if tree.Cases[3].Test.Kind != MatchTestEnum || tree.Cases[3].Test.Discriminant != 3 {
+		t.Fatalf("right case = %#v, want discriminant 3", tree.Cases[3].Test)
 	}
 }
 
@@ -1092,11 +1106,12 @@ func TestLowerMaybes(t *testing.T) {
 	}
 
 	pick := findFunction(t, program, "pick")
-	if pick.Body.Result == nil || pick.Body.Result.Kind != ExprMatchMaybe {
-		t.Fatalf("pick result = %#v, want ExprMatchMaybe", pick.Body.Result)
+	if pick.Body.Result == nil || pick.Body.Result.Kind != ExprMatch {
+		t.Fatalf("pick result = %#v, want ExprMatch", pick.Body.Result)
 	}
-	if pick.Body.Result.MaybeMatchPayload().SomeLocal < LocalID(len(pick.Signature.Params)) {
-		t.Fatalf("some local = %d, want local after params", pick.Body.Result.MaybeMatchPayload().SomeLocal)
+	someArm := pick.Body.Result.MatchPayload().Arms[0]
+	if len(someArm.Bindings) != 1 || someArm.Bindings[0].Local < LocalID(len(pick.Signature.Params)) {
+		t.Fatalf("some bindings = %#v, want one local after params", someArm.Bindings)
 	}
 }
 func TestLowerResults(t *testing.T) {
@@ -1119,15 +1134,17 @@ func TestLowerResults(t *testing.T) {
 	}
 
 	pick := findFunction(t, program, "pick")
-	if pick.Body.Result == nil || pick.Body.Result.Kind != ExprMatchResult {
-		t.Fatalf("pick result = %#v, want ExprMatchResult", pick.Body.Result)
+	if pick.Body.Result == nil || pick.Body.Result.Kind != ExprMatch {
+		t.Fatalf("pick result = %#v, want ExprMatch", pick.Body.Result)
 	}
-	resultPayload := pick.Body.Result.ResultMatchPayload()
-	if resultPayload.OkLocal < LocalID(len(pick.Signature.Params)) {
-		t.Fatalf("ok local = %d, want local after params", resultPayload.OkLocal)
+	resultPayload := pick.Body.Result.MatchPayload()
+	if len(resultPayload.Arms) != 2 {
+		t.Fatalf("result arm count = %d, want 2", len(resultPayload.Arms))
 	}
-	if resultPayload.ErrLocal < LocalID(len(pick.Signature.Params)) {
-		t.Fatalf("err local = %d, want local after params", resultPayload.ErrLocal)
+	for i, arm := range resultPayload.Arms {
+		if len(arm.Bindings) != 1 || arm.Bindings[0].Local < LocalID(len(pick.Signature.Params)) {
+			t.Fatalf("arm %d bindings = %#v, want one local after params", i, arm.Bindings)
+		}
 	}
 }
 func TestLowerTraitAndImplTables(t *testing.T) {
@@ -1474,10 +1491,10 @@ func TestValidateRejectsIncoherentExecutableTypes(t *testing.T) {
 		`)
 		value := findFunction(t, program, "value")
 		match := value.Body.Result
-		value.Locals[match.MaybeMatchPayload().SomeLocal].Type = findType(t, program, "Bool").ID
+		value.Locals[match.MatchPayload().Arms[0].Bindings[0].Local].Type = findType(t, program, "Bool").ID
 		program.Functions[value.ID] = value
 
-		if err := Validate(program); err == nil || !strings.Contains(err.Error(), "Maybe match local type") {
+		if err := Validate(program); err == nil || !strings.Contains(err.Error(), "binding local type") {
 			t.Fatalf("Validate error = %v, want Maybe match binding mismatch", err)
 		}
 	})
@@ -1493,10 +1510,10 @@ func TestValidateRejectsIncoherentExecutableTypes(t *testing.T) {
 		`)
 		value := findFunction(t, program, "value")
 		match := value.Body.Result
-		value.Locals[match.ResultMatchPayload().ErrLocal].Type = findType(t, program, "Bool").ID
+		value.Locals[match.MatchPayload().Arms[1].Bindings[0].Local].Type = findType(t, program, "Bool").ID
 		program.Functions[value.ID] = value
 
-		if err := Validate(program); err == nil || !strings.Contains(err.Error(), "Result err match local type") {
+		if err := Validate(program); err == nil || !strings.Contains(err.Error(), "binding local type") {
 			t.Fatalf("Validate error = %v, want Result match binding mismatch", err)
 		}
 	})
@@ -2574,7 +2591,7 @@ func TestValidateRejectsGenericDependentSpreadElement(t *testing.T) {
 	}
 }
 
-func TestValidateRejectsInvalidExprInForeignTypeCase(t *testing.T) {
+func TestValidateRejectsInvalidExprInMatchArm(t *testing.T) {
 	program := &Program{
 		Modules: []Module{{ID: 0, Path: "main"}},
 		Types:   []TypeInfo{{ID: 1, Kind: TypeVoid, Name: "Void"}},
@@ -2584,24 +2601,27 @@ func TestValidateRejectsInvalidExprInForeignTypeCase(t *testing.T) {
 			Name:      "main",
 			Signature: Signature{Return: 1},
 			Body: Block{Stmts: []Stmt{{Kind: StmtExpr, Expr: &Expr{
-				Kind:   ExprMatchForeignType,
-				Type:   1,
-				Target: &Expr{Kind: ExprConstVoid, Type: 1},
-				Payload: &ForeignMatchExprPayload{Cases: []ForeignTypeMatchCase{{
-					Type: 1,
-					Body: Block{Stmts: []Stmt{{Kind: StmtExpr, Expr: &Expr{
-						Kind:    ExprLoadLocal,
-						Type:    1,
-						Payload: &LocalExprPayload{Local: 99},
-					}}}},
-				}}},
+				Kind: ExprMatch,
+				Type: 1,
+				Args: []Expr{{Kind: ExprConstVoid, Type: 1}},
+				Payload: &MatchExprPayload{
+					Vars: []MatchVar{{Type: 1, Source: MatchVarSubject}},
+					Tree: Decision{Kind: DecisionRun, Arm: 0},
+					Arms: []MatchArm{{
+						Body: Block{Stmts: []Stmt{{Kind: StmtExpr, Expr: &Expr{
+							Kind:    ExprLoadLocal,
+							Type:    1,
+							Payload: &LocalExprPayload{Local: 99},
+						}}}},
+					}},
+				},
 			}}}},
 		}},
 		Entry: 0,
 	}
 
 	if err := Validate(program); err == nil || !strings.Contains(err.Error(), "invalid local") {
-		t.Fatalf("Validate error = %v, want invalid local in foreign type case", err)
+		t.Fatalf("Validate error = %v, want invalid local in match arm", err)
 	}
 }
 
@@ -2894,4 +2914,42 @@ func TestLowerGenericFunctionAdapterClosureCapturesSpecializedCallback(t *testin
 			)
 		}
 	`)
+}
+
+// A dynamic type test applies only to Any or Go interface values and names a
+// concrete foreign type (ADR 0042, ADR 0083).
+func TestValidateRejectsForeignTypeTestOnStaticValue(t *testing.T) {
+	program := &Program{
+		Modules: []Module{{ID: 0, Path: "main"}},
+		Types: []TypeInfo{
+			{ID: 1, Kind: TypeVoid, Name: "Void"},
+			{ID: 2, Kind: TypeInt, Name: "Int"},
+		},
+		Functions: []Function{{
+			ID:        0,
+			Module:    0,
+			Name:      "main",
+			Signature: Signature{Return: 1},
+			Body: Block{Stmts: []Stmt{{Kind: StmtExpr, Expr: &Expr{
+				Kind: ExprMatch,
+				Type: 1,
+				Args: []Expr{{Kind: ExprConstInt, Type: 2, Payload: &TextExprPayload{Value: "1"}}},
+				Payload: &MatchExprPayload{
+					Vars: []MatchVar{{Type: 2, Source: MatchVarSubject}},
+					Tree: Decision{
+						Kind:     DecisionSwitch,
+						Var:      0,
+						Cases:    []DecisionCase{{Test: MatchTest{Kind: MatchTestForeignType, Type: 2}, Then: Decision{Kind: DecisionRun, Arm: 0}}},
+						Fallback: &Decision{Kind: DecisionRun, Arm: 0},
+					},
+					Arms: []MatchArm{{}},
+				},
+			}}}},
+		}},
+		Entry: 0,
+	}
+
+	if err := Validate(program); err == nil || !strings.Contains(err.Error(), "does not apply") {
+		t.Fatalf("Validate error = %v, want a rejected dynamic type test", err)
+	}
 }

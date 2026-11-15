@@ -185,6 +185,18 @@ When a `Maybe` value is matched:
 - The first pattern captures the inner value if present
 - The `_` pattern matches when the value is absent (none)
 
+The explicit patterns `some(...)` and `none` say the same thing, and they also work inside [tuple patterns](/guide/pattern-matching/#matching-on-tuples):
+
+```ard
+fn same(left: Int?, right: Int?) Bool {
+  match (left, right) {
+    (some(a), some(b)) => a == b,
+    (none, none) => true,
+    _ => false,
+  }
+}
+```
+
 ## Examples
 
 ### Check for Presence

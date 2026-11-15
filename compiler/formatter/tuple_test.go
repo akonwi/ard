@@ -139,3 +139,30 @@ func TestUnusedImportRemovalKeepsTupleUses(t *testing.T) {
 		})
 	}
 }
+
+// Tuple and nested match patterns (ADR 0083) format like the expressions they
+// are spelled as.
+func TestFormatTupleMatchPatterns(t *testing.T) {
+	input := `fn describe(pair:(Int,(Bool,Str?))) Str {
+match ( first,second ) {
+(  1,(true,some( s )) ) => s,
+(n,( _ ,none)) => "n {n}",
+( 1..5 , _ ) => "range",
+( ok(200),Result::err(_)) => "mixed",
+_ => "x",
+}
+}
+`
+	want := `fn describe(pair: (Int, (Bool, Str?))) Str {
+  match (first, second) {
+    (1, (true, some(s))) => s,
+    (n, (_, none)) => "n {n}",
+    (1..5, _) => "range",
+    (ok(200), Result::err(_)) => "mixed",
+    _ => "x",
+  }
+}
+`
+
+	assertDerefFormat(t, input, want)
+}

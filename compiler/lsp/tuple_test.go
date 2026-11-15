@@ -111,3 +111,43 @@ fn main() Str {
 		}
 	})
 }
+
+// Names bound by match patterns, including inside tuple patterns, are local
+// bindings for hover, navigation, and rename (ADR 0083).
+func TestNavigationOnMatchPatternBindings(t *testing.T) {
+	source := `fn add(left: Int!Str, right: Int!Str) Int {
+  match (left, right) {
+    (ok(first), ok(second)) => first + second,
+    (err(message), _) => message.size(),
+    _ => 0,
+  }
+}
+`
+	filePath := filepath.Join(t.TempDir(), "match_nav.ard")
+
+	t.Run("hover on a pattern binding", func(t *testing.T) {
+		info := spanHoverAt(t, source, filePath, protocol.Position{Line: 2, Character: 8})
+		if info == nil || !strings.Contains(info.content, "Int") {
+			t.Fatalf("hover = %#v, want Int", info)
+		}
+	})
+
+	t.Run("definition of a pattern binding", func(t *testing.T) {
+		loc := requireDefinition(t, source, filePath, 2, 39)
+		assertDefinitionStart(t, loc, filePath, 2, 19)
+	})
+
+	t.Run("rename a pattern binding", func(t *testing.T) {
+		srv, docURI := spanServer(t, source, filePath)
+		edit, err := srv.renameFromSpans(context.Background(), docURI, protocol.Position{Line: 3, Character: 26}, "text")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if edit == nil {
+			t.Fatal("rename returned no edit")
+		}
+		if edits := edit.Changes[docURI]; len(edits) != 2 {
+			t.Fatalf("rename edits = %#v, want the binding and one use", edits)
+		}
+	})
+}

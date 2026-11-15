@@ -898,45 +898,6 @@ func (o *OptionMatch) Type() Type {
 	return o.Some.Body.Type()
 }
 
-type EnumMatch struct {
-	Subject             Expression
-	Cases               []*Block
-	CatchAll            *Block
-	DiscriminantToIndex map[int]int // Pre-computed discriminant lookup
-	ResultType          Type
-}
-
-func (e *EnumMatch) Type() Type {
-	if e.ResultType != nil {
-		return e.ResultType
-	}
-	// Find the first non-nil case
-	for _, c := range e.Cases {
-		if c != nil {
-			return c.Type()
-		}
-	}
-	// If all cases are nil, use the catch-all
-	if e.CatchAll != nil {
-		return e.CatchAll.Type()
-	}
-	return Void
-}
-
-type BoolMatch struct {
-	Subject    Expression
-	True       *Block
-	False      *Block
-	ResultType Type
-}
-
-func (b *BoolMatch) Type() Type {
-	if b.ResultType != nil {
-		return b.ResultType
-	}
-	return b.True.Type()
-}
-
 // SelectArmKind distinguishes the channel-multiplexing arm forms (ADR 0032).
 type SelectArmKind int
 
@@ -967,117 +928,6 @@ type Select struct {
 func (s *Select) Type() Type {
 	if s.ResultType != nil {
 		return s.ResultType
-	}
-	return Void
-}
-
-type IntRange struct {
-	Start int
-	End   int
-}
-
-type IntMatch struct {
-	Subject    Expression
-	IntCases   map[int]*Block      // keys are integer values
-	RangeCases map[IntRange]*Block // keys are integer ranges
-	CatchAll   *Block
-	ResultType Type
-}
-
-type StrMatch struct {
-	Subject    Expression
-	Cases      map[string]*Block
-	CatchAll   *Block
-	ResultType Type
-}
-
-func (s *StrMatch) Type() Type {
-	if s.ResultType != nil {
-		return s.ResultType
-	}
-	for _, block := range s.Cases {
-		if block != nil {
-			return block.Type()
-		}
-	}
-	if s.CatchAll != nil {
-		return s.CatchAll.Type()
-	}
-	return Void
-}
-
-func (i *IntMatch) Type() Type {
-	if i.ResultType != nil {
-		return i.ResultType
-	}
-	// Find the first non-nil case and return its type
-	for _, block := range i.IntCases {
-		if block != nil {
-			return block.Type()
-		}
-	}
-
-	for _, block := range i.RangeCases {
-		if block != nil {
-			return block.Type()
-		}
-	}
-
-	// If no int cases are defined, use the catch-all case type
-	if i.CatchAll != nil {
-		return i.CatchAll.Type()
-	}
-
-	return Void
-}
-
-type UnionMatch struct {
-	Subject          Expression
-	TypeCases        map[string]*Match // Qualified display-name lookup.
-	TypeCasesByType  map[Type]*Match   // Pre-computed type lookup
-	TypeCasesByIndex map[int]*Match    // Stable lookup for same-named members from different modules.
-	CatchAll         *Block
-	ResultType       Type
-}
-
-func (u *UnionMatch) Type() Type {
-	if u.ResultType != nil {
-		return u.ResultType
-	}
-	// Find the first non-nil case and return its type
-	for _, block := range u.TypeCasesByIndex {
-		if block != nil {
-			return block.Body.Type()
-		}
-	}
-
-	// If no type cases are defined, use the catch-all case type
-	if u.CatchAll != nil {
-		return u.CatchAll.Type()
-	}
-
-	return Void
-}
-
-// ForeignTypeMatch is a dynamic type test over an Any or foreign-interface
-// subject (ADR 0042). Each case narrows to a concrete foreign Go named type;
-// the set is open, so a catch-all arm is required.
-type ForeignTypeMatch struct {
-	Subject    Expression
-	Cases      []ForeignTypeCase
-	CatchAll   *Block
-	ResultType Type
-}
-
-type ForeignTypeCase struct {
-	Type    *ForeignType
-	Binding string
-	Body    *Block
-}
-
-func (f *ForeignTypeMatch) Type() Type {
-	if f.ResultType != nil {
-		return f.ResultType
 	}
 	return Void
 }
@@ -1914,22 +1764,6 @@ type StructInstance struct {
 
 func (s StructInstance) Type() Type {
 	return s._type
-}
-
-type ResultMatch struct {
-	Subject    Expression
-	Ok         *Match
-	Err        *Match
-	OkType     Type // Pre-computed ok type
-	ErrType    Type // Pre-computed err type
-	ResultType Type
-}
-
-func (r ResultMatch) Type() Type {
-	if r.ResultType != nil {
-		return r.ResultType
-	}
-	return r.Ok.Body.Type()
 }
 
 // NeverCoercion records the expected value type at a use of a non-returning

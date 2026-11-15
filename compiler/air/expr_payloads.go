@@ -175,42 +175,6 @@ type IfExprPayload struct {
 
 func (*IfExprPayload) exprPayload() {}
 
-type EnumMatchExprPayload struct {
-	Cases    []EnumMatchCase
-	CatchAll Block
-}
-
-func (*EnumMatchExprPayload) exprPayload() {}
-
-type IntMatchExprPayload struct {
-	Cases      []IntMatchCase
-	RangeCases []IntRangeMatchCase
-	CatchAll   Block
-}
-
-func (*IntMatchExprPayload) exprPayload() {}
-
-type StrMatchExprPayload struct {
-	Cases    []StrMatchCase
-	CatchAll Block
-}
-
-func (*StrMatchExprPayload) exprPayload() {}
-
-type UnionMatchExprPayload struct {
-	Cases    []UnionMatchCase
-	CatchAll Block
-}
-
-func (*UnionMatchExprPayload) exprPayload() {}
-
-type ForeignMatchExprPayload struct {
-	Cases    []ForeignTypeMatchCase
-	CatchAll Block
-}
-
-func (*ForeignMatchExprPayload) exprPayload() {}
-
 type MaybeMatchExprPayload struct {
 	SomeLocal LocalID
 	Some      Block
@@ -218,15 +182,6 @@ type MaybeMatchExprPayload struct {
 }
 
 func (*MaybeMatchExprPayload) exprPayload() {}
-
-type ResultMatchExprPayload struct {
-	OkLocal  LocalID
-	ErrLocal LocalID
-	Ok       Block
-	Err      Block
-}
-
-func (*ResultMatchExprPayload) exprPayload() {}
 
 type TryExprPayload struct {
 	CatchLocal LocalID
@@ -292,19 +247,9 @@ func exprPayloadIsTypedNil(payload ExprPayload) bool {
 		return payload == nil
 	case *IfExprPayload:
 		return payload == nil
-	case *EnumMatchExprPayload:
-		return payload == nil
-	case *IntMatchExprPayload:
-		return payload == nil
-	case *StrMatchExprPayload:
-		return payload == nil
-	case *UnionMatchExprPayload:
-		return payload == nil
-	case *ForeignMatchExprPayload:
+	case *MatchExprPayload:
 		return payload == nil
 	case *MaybeMatchExprPayload:
-		return payload == nil
-	case *ResultMatchExprPayload:
 		return payload == nil
 	case *TryExprPayload:
 		return payload == nil

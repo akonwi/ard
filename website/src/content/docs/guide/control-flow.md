@@ -263,9 +263,27 @@ for item in items {
 }
 ```
 
+### Matching on Tuples
+
+Match a tuple to decide on several values at once. Each element has its own pattern:
+
+```ard
+fn fetch() (Int, Str) {
+  (404, "")
+}
+
+let text = match fetch() {
+  (200, body) => body,
+  (404, _) => "not found",
+  (code, _) => "failed with {code}",
+}
+```
+
+See [Pattern Matching](/guide/pattern-matching/) for every pattern form.
+
 ## Pattern Matching Order
 
-Patterns are evaluated in the order they appear. More specific patterns should come before general ones.
+Patterns are evaluated in the order they appear, and the first matching arm runs. More specific patterns should come before general ones; an arm that earlier arms already cover is reported as unreachable.
 
 ## When to Use Match vs If-Else
 

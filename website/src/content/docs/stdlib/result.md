@@ -121,6 +121,8 @@ match divide(10, 2) {
 }
 ```
 
+The pattern inside `ok(...)` or `err(...)` can test the value, as in `ok(0) => ...`, and a tuple of results can be matched together. See [Pattern Matching](/guide/pattern-matching/#nested-patterns).
+
 ## Error propagation with `try`
 
 `try` unwraps an `ok` value. If the result is an error, the current function returns that error immediately.

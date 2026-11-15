@@ -920,6 +920,23 @@ func (n *localNamer) walkBindingBlock(bind bool, local air.LocalID, b air.Block)
 	n.pop()
 }
 
+// walkBindingsBlock walks a match arm body whose pattern binds locals scoped
+// to that body (ADR 0083).
+func (n *localNamer) walkBindingsBlock(locals []air.LocalID, b air.Block) {
+	if len(locals) == 0 {
+		n.walkBlock(b)
+		return
+	}
+	n.push()
+	scope := make([]int, len(n.fn.Locals))
+	collectBlockRefCounts(b, scope, 1)
+	for _, local := range locals {
+		n.assign(local, scope)
+	}
+	n.walkStmts(b)
+	n.pop()
+}
+
 func (n *localNamer) walkStmt(s air.Stmt, scopeRefs []int) {
 	switch s.Kind {
 	case air.StmtLet:
@@ -998,40 +1015,18 @@ func (n *localNamer) walkExpr(e air.Expr) {
 		}
 		n.walkBlock(payload.Then)
 		n.walkBlock(payload.Else)
-	case *air.EnumMatchExprPayload:
-		for i := range payload.Cases {
-			n.walkBlock(payload.Cases[i].Body)
+	case *air.MatchExprPayload:
+		for i := range payload.Arms {
+			arm := payload.Arms[i]
+			locals := make([]air.LocalID, len(arm.Bindings))
+			for j, binding := range arm.Bindings {
+				locals[j] = binding.Local
+			}
+			n.walkBindingsBlock(locals, arm.Body)
 		}
-		n.walkBlock(payload.CatchAll)
-	case *air.IntMatchExprPayload:
-		for i := range payload.Cases {
-			n.walkBlock(payload.Cases[i].Body)
-		}
-		for i := range payload.RangeCases {
-			n.walkBlock(payload.RangeCases[i].Body)
-		}
-		n.walkBlock(payload.CatchAll)
-	case *air.StrMatchExprPayload:
-		for i := range payload.Cases {
-			n.walkBlock(payload.Cases[i].Body)
-		}
-		n.walkBlock(payload.CatchAll)
-	case *air.UnionMatchExprPayload:
-		for i := range payload.Cases {
-			n.walkBindingBlock(true, payload.Cases[i].Local, payload.Cases[i].Body)
-		}
-		n.walkBlock(payload.CatchAll)
-	case *air.ForeignMatchExprPayload:
-		for i := range payload.Cases {
-			n.walkBindingBlock(payload.Cases[i].Bound, payload.Cases[i].Local, payload.Cases[i].Body)
-		}
-		n.walkBlock(payload.CatchAll)
 	case *air.MaybeMatchExprPayload:
 		n.walkBindingBlock(true, payload.SomeLocal, payload.Some)
 		n.walkBlock(payload.None)
-	case *air.ResultMatchExprPayload:
-		n.walkBindingBlock(true, payload.OkLocal, payload.Ok)
-		n.walkBindingBlock(true, payload.ErrLocal, payload.Err)
 	case *air.TryExprPayload:
 		n.walkBindingBlock(e.Kind == air.ExprTryResult, payload.CatchLocal, payload.Catch)
 	case *air.SelectExprPayload:
@@ -1127,40 +1122,13 @@ func collectExprRefCounts(e air.Expr, into []int, delta int) {
 		}
 		collectBlockRefCounts(payload.Then, into, delta)
 		collectBlockRefCounts(payload.Else, into, delta)
-	case *air.EnumMatchExprPayload:
-		for i := range payload.Cases {
-			collectBlockRefCounts(payload.Cases[i].Body, into, delta)
+	case *air.MatchExprPayload:
+		for i := range payload.Arms {
+			collectBlockRefCounts(payload.Arms[i].Body, into, delta)
 		}
-		collectBlockRefCounts(payload.CatchAll, into, delta)
-	case *air.IntMatchExprPayload:
-		for i := range payload.Cases {
-			collectBlockRefCounts(payload.Cases[i].Body, into, delta)
-		}
-		for i := range payload.RangeCases {
-			collectBlockRefCounts(payload.RangeCases[i].Body, into, delta)
-		}
-		collectBlockRefCounts(payload.CatchAll, into, delta)
-	case *air.StrMatchExprPayload:
-		for i := range payload.Cases {
-			collectBlockRefCounts(payload.Cases[i].Body, into, delta)
-		}
-		collectBlockRefCounts(payload.CatchAll, into, delta)
-	case *air.UnionMatchExprPayload:
-		for i := range payload.Cases {
-			collectBlockRefCounts(payload.Cases[i].Body, into, delta)
-		}
-		collectBlockRefCounts(payload.CatchAll, into, delta)
-	case *air.ForeignMatchExprPayload:
-		for i := range payload.Cases {
-			collectBlockRefCounts(payload.Cases[i].Body, into, delta)
-		}
-		collectBlockRefCounts(payload.CatchAll, into, delta)
 	case *air.MaybeMatchExprPayload:
 		collectBlockRefCounts(payload.Some, into, delta)
 		collectBlockRefCounts(payload.None, into, delta)
-	case *air.ResultMatchExprPayload:
-		collectBlockRefCounts(payload.Ok, into, delta)
-		collectBlockRefCounts(payload.Err, into, delta)
 	case *air.TryExprPayload:
 		collectBlockRefCounts(payload.Catch, into, delta)
 	case *air.SelectExprPayload:

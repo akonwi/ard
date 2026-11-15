@@ -75,7 +75,11 @@ func standardLibraryGoResolver(t *testing.T) checker.GoPackageResolver {
 
 var compareOptions = cmp.Options{
 	cmpopts.SortMaps(func(a, b string) bool { return a < b }),
-	cmpopts.IgnoreFields(checker.BoolMatch{}, "ResultType"),
+	cmpopts.IgnoreFields(checker.PatternMatch{}, "Vars", "Tree", "ResultType"),
+	cmpopts.IgnoreFields(checker.EnumPattern{}, "Location", "Enum"),
+	cmpopts.IgnoreFields(checker.IntPattern{}, "Location"),
+	cmpopts.IgnoreFields(checker.WildcardPattern{}, "Location"),
+	cmpopts.IgnoreFields(checker.BoolPattern{}, "Location"),
 	cmpopts.IgnoreFields(checker.If{}, "ResultType"),
 	cmpopts.IgnoreFields(checker.Block{}, "failedFinal"),
 	cmpopts.IgnoreFields(checker.Parameter{}, "Loc", "declaredAt"),
@@ -83,7 +87,6 @@ var compareOptions = cmp.Options{
 	// diagnostic family must assert its structured fields in diagnostics_test.go.
 	cmpopts.IgnoreFields(checker.Diagnostic{}, "Code", "Title", "Text", "Primary", "Secondary"),
 	cmpopts.IgnoreFields(checker.OptionMatch{}, "ResultType"),
-	cmpopts.IgnoreFields(checker.EnumMatch{}, "DiscriminantToIndex", "ResultType"),
 	cmpopts.IgnoreFields(checker.EnumVariant{}, "EnumType", "Discriminant"),
 	cmpopts.IgnoreFields(checker.ListLiteral{}, "ListType"),
 	cmpopts.IgnoreFields(checker.InstanceMethod{}, "ReceiverKind", "StructType", "EnumType", "TraitType", "DispatchTrait"),
@@ -91,13 +94,9 @@ var compareOptions = cmp.Options{
 	cmpopts.IgnoreFields(checker.FunctionCall{}, "ReturnType"),
 	cmpopts.IgnoreFields(checker.FunctionDef{}, "CallGenericParams", "LocalNamed", "DefaultVoidGeneric", "DeferCallCompleteness", "requiredComparable", "invalidComparable"),
 	cmpopts.IgnoreFields(checker.FunctionCall{}, "TypeArgs"),
-	cmpopts.IgnoreFields(checker.ResultMatch{}, "OkType", "ErrType", "ResultType"),
 	cmpopts.IgnoreFields(checker.TryOp{}, "OkType", "ErrType"),
 	cmpopts.IgnoreFields(checker.StructInstance{}, "StructType"),
 	cmpopts.IgnoreFields(checker.TryOp{}, "OkType"),
-	cmpopts.IgnoreFields(checker.IntMatch{}, "ResultType"),
-	cmpopts.IgnoreFields(checker.StrMatch{}, "ResultType"),
-	cmpopts.IgnoreFields(checker.UnionMatch{}, "TypeCasesByType", "TypeCasesByIndex", "ResultType"),
 	cmpopts.IgnoreFields(checker.ConditionalMatch{}, "ResultType"),
 	cmpopts.IgnoreUnexported(
 		checker.TypeVar{},
@@ -2158,18 +2157,20 @@ func TestMatchingOnEnums(t *testing.T) {
 						},
 					},
 					{
-						Expr: &checker.EnumMatch{
+						Expr: &checker.PatternMatch{
 							Subject: &checker.Variable{},
-							Cases: []*checker.Block{
+							Arms: []checker.PatternArm{
 								{
-									Stmts: []checker.Statement{
+									Pattern: &checker.EnumPattern{Variant: 0, Discriminant: 0},
+									Body: &checker.Block{Stmts: []checker.Statement{
 										{Expr: &checker.StrLiteral{Value: "north"}},
-									},
+									}},
 								},
 								{
-									Stmts: []checker.Statement{
+									Pattern: &checker.EnumPattern{Variant: 1, Discriminant: 1},
+									Body: &checker.Block{Stmts: []checker.Statement{
 										{Expr: &checker.StrLiteral{Value: "south"}},
-									},
+									}},
 								},
 							},
 						},
@@ -2196,18 +2197,20 @@ func TestMatchingOnEnums(t *testing.T) {
 						},
 					},
 					{
-						Expr: &checker.EnumMatch{
+						Expr: &checker.PatternMatch{
 							Subject: &checker.Variable{},
-							Cases: []*checker.Block{
+							Arms: []checker.PatternArm{
 								{
-									Stmts: []checker.Statement{
+									Pattern: &checker.EnumPattern{Variant: 0, Discriminant: 0},
+									Body: &checker.Block{Stmts: []checker.Statement{
 										{Expr: &checker.StrLiteral{Value: "north"}},
-									},
+									}},
 								},
 								{
-									Stmts: []checker.Statement{
+									Pattern: &checker.EnumPattern{Variant: 1, Discriminant: 1},
+									Body: &checker.Block{Stmts: []checker.Statement{
 										{Expr: &checker.StrLiteral{Value: "south"}},
-									},
+									}},
 								},
 							},
 						},
@@ -2228,11 +2231,7 @@ func TestMatchingOnEnums(t *testing.T) {
 			diagnostics: []checker.Diagnostic{
 				{
 					Kind:    checker.Error,
-					Message: "Incomplete match: missing case for 'Direction::left'",
-				},
-				{
-					Kind:    checker.Error,
-					Message: "Incomplete match: missing case for 'Direction::right'",
+					Message: "Incomplete match: missing cases for 'Direction::left', 'Direction::right'",
 				},
 			},
 		},
@@ -2251,8 +2250,8 @@ func TestMatchingOnEnums(t *testing.T) {
 			}, "\n"),
 			diagnostics: []checker.Diagnostic{
 				{
-					Kind:    checker.Error,
-					Message: "Duplicate case: Direction::down",
+					Kind:    checker.Warn,
+					Message: "Unreachable match arm: Direction::down",
 				},
 			},
 		},
@@ -2295,25 +2294,26 @@ func TestMatchingOnEnums(t *testing.T) {
 						},
 					},
 					{
-						Expr: &checker.EnumMatch{
+						Expr: &checker.PatternMatch{
 							Subject: &checker.Variable{},
-							Cases: []*checker.Block{
+							Arms: []checker.PatternArm{
 								{
-									Stmts: []checker.Statement{
+									Pattern: &checker.EnumPattern{Variant: 0, Discriminant: 0},
+									Body: &checker.Block{Stmts: []checker.Statement{
 										{Expr: &checker.StrLiteral{Value: "north"}},
-									},
+									}},
 								},
 								{
-									Stmts: []checker.Statement{
+									Pattern: &checker.EnumPattern{Variant: 1, Discriminant: 1},
+									Body: &checker.Block{Stmts: []checker.Statement{
 										{Expr: &checker.StrLiteral{Value: "south"}},
-									},
+									}},
 								},
-								nil,
-								nil,
-							},
-							CatchAll: &checker.Block{
-								Stmts: []checker.Statement{
-									{Expr: &checker.StrLiteral{Value: "lateral"}},
+								{
+									Pattern: &checker.WildcardPattern{},
+									Body: &checker.Block{Stmts: []checker.Statement{
+										{Expr: &checker.StrLiteral{Value: "lateral"}},
+									}},
 								},
 							},
 						},
@@ -2349,7 +2349,7 @@ func TestMatchingOnBooleans(t *testing.T) {
 			diagnostics: []checker.Diagnostic{
 				{
 					Kind:    checker.Error,
-					Message: "Incomplete match: Missing case for 'false'",
+					Message: "Incomplete match: missing case for 'false'",
 				},
 			},
 		},
@@ -2365,8 +2365,8 @@ func TestMatchingOnBooleans(t *testing.T) {
 			}, "\n"),
 			diagnostics: []checker.Diagnostic{
 				{
-					Kind:    checker.Error,
-					Message: "Duplicate case: 'true'",
+					Kind:    checker.Warn,
+					Message: "Unreachable match arm: true",
 				},
 			},
 		},
@@ -2478,7 +2478,7 @@ func TestMatchingOnBooleans(t *testing.T) {
 			diagnostics: []checker.Diagnostic{},
 		},
 		{
-			name: "Cannot use a catch-all case",
+			name: "A catch-all case covers the remaining boolean",
 			input: strings.Join([]string{
 				`let is_big = "foo".size() > 20`,
 				`match is_big {`,
@@ -2486,9 +2486,7 @@ func TestMatchingOnBooleans(t *testing.T) {
 				`  _ => "smol"`,
 				`}`,
 			}, "\n"),
-			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Catch-all case is not allowed for boolean matches"},
-			},
+			diagnostics: []checker.Diagnostic{},
 		},
 	})
 }
@@ -2540,7 +2538,7 @@ func TestMatchingOnStrings(t *testing.T) {
 				`  "md" => "markdown",`,
 				`}`,
 			}, "\n"),
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Incomplete match: missing catch-all case for Str match"}},
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Incomplete match: missing case for '_'"}},
 		},
 		{
 			name: "Matching on strings rejects duplicate cases",
@@ -2552,7 +2550,7 @@ func TestMatchingOnStrings(t *testing.T) {
 				`  _ => "unknown",`,
 				`}`,
 			}, "\n"),
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: `Duplicate case: "md"`}},
+			diagnostics: []checker.Diagnostic{{Kind: checker.Warn, Message: `Unreachable match arm: "md"`}},
 		},
 		{
 			name: "Matching on strings rejects non-string patterns",
@@ -2582,7 +2580,7 @@ func TestMatchingOnInts(t *testing.T) {
 			diagnostics: []checker.Diagnostic{
 				{
 					Kind:    checker.Error,
-					Message: "Incomplete match: missing catch-all case for Int match",
+					Message: "Incomplete match: missing case for '_'",
 				},
 			},
 		},
@@ -2607,16 +2605,13 @@ func TestMatchingOnInts(t *testing.T) {
 						},
 					},
 					{
-						Expr: &checker.IntMatch{
+						Expr: &checker.PatternMatch{
 							Subject: &checker.Variable{},
-							IntCases: map[int]*checker.Block{
-								0: {Stmts: []checker.Statement{{Expr: &checker.StrLiteral{Value: "Active"}}}},
-								1: {Stmts: []checker.Statement{{Expr: &checker.StrLiteral{Value: "Inactive"}}}},
-								2: {Stmts: []checker.Statement{{Expr: &checker.StrLiteral{Value: "Pending"}}}},
-							},
-							RangeCases: map[checker.IntRange]*checker.Block{},
-							CatchAll: &checker.Block{
-								Stmts: []checker.Statement{{Expr: &checker.StrLiteral{Value: "Unknown"}}},
+							Arms: []checker.PatternArm{
+								{Pattern: &checker.IntPattern{Start: 0, End: 0}, Body: &checker.Block{Stmts: []checker.Statement{{Expr: &checker.StrLiteral{Value: "Active"}}}}},
+								{Pattern: &checker.IntPattern{Start: 1, End: 1}, Body: &checker.Block{Stmts: []checker.Statement{{Expr: &checker.StrLiteral{Value: "Inactive"}}}}},
+								{Pattern: &checker.IntPattern{Start: 2, End: 2}, Body: &checker.Block{Stmts: []checker.Statement{{Expr: &checker.StrLiteral{Value: "Pending"}}}}},
+								{Pattern: &checker.WildcardPattern{}, Body: &checker.Block{Stmts: []checker.Statement{{Expr: &checker.StrLiteral{Value: "Unknown"}}}}},
 							},
 						},
 					},

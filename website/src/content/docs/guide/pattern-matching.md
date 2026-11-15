@@ -15,11 +15,37 @@ let label = match is_ready {
 }
 ```
 
+## How Arms Are Chosen
+
+Arms are tried in the order they are written, and the first arm whose pattern matches runs. The subject is evaluated once, before any arm is tried.
+
+Two patterns match any value: `_`, which ignores it, and a name, which binds it for the arm's body.
+
+```ard
+let code = 503
+
+let message = match code {
+  200 => "OK",
+  404 => "Not Found",
+  other => "Unexpected status {other}",
+}
+```
+
 ## Exhaustiveness
 
-Match expressions must be exhaustive and handle all possibilities.
+Match expressions must be exhaustive: every possible value has to be matched by some arm. When one is missing, the compiler lists the cases that no arm covers:
 
-The `_` wildcard matches serves as a catch-all after specific cases.
+```text
+error: Non-exhaustive match
+ --> main.ard:2:3
+  |
+2 |   match (left, right) {
+  |   ^^^^^^^^^^^^^^^^^^^^^ add a case for `(ok(_), err(_))`
+```
+
+`Bool`, enums, `Maybe`, `Result`, and type unions have a fixed set of cases, so listing them all is enough. `Int`, `Rune`, and `Str` values are open-ended, so a match on them needs a `_` or a name to catch the rest.
+
+An arm that can never run, because earlier arms already match every value it matches, is reported as an unreachable arm. This includes repeated cases and anything after a catch-all.
 
 ## Integer Patterns
 
@@ -86,7 +112,7 @@ let good = match number {
 // Problematic: general case first
 let bad = match number {
   40..50 => "forties",   // This catches 42
-  42 => "the answer",    // This will never match
+  42 => "the answer",    // Unreachable: reported as a warning
   _ => "other",
 }
 ```
@@ -105,7 +131,7 @@ let kind = match extension {
 }
 ```
 
-String patterns use exact equality. Duplicate string cases are rejected.
+String patterns use exact equality. A repeated string case is unreachable and reported as a warning.
 
 ## Boolean Patterns
 
@@ -127,6 +153,8 @@ let message = match logged_in and verified {
   false => "Please log in and verify your account",
 }
 ```
+
+A `_` arm can stand in for the remaining case.
 
 ## Matching Enums
 
@@ -193,8 +221,20 @@ Omit the binding to use the implicit `it` variable, such as `sql::DB => it.Close
 
 ## Matching on Maybes
 
-```ard
+`some(pattern)` matches a present value and `none` matches an absent one:
 
+```ard
+let maybe_name: Str? = Maybe::new("Alice")
+
+let greeting = match maybe_name {
+  some(name) => "Hello, {name}!",
+  none => "Hello, stranger!",
+}
+```
+
+A match on a whole `Maybe` can also use the shorter form, where a name binds the present value and `_` matches the absent one:
+
+```ard
 let maybe_name: Str? = Maybe::new("Alice")
 
 let greeting = match maybe_name {
@@ -202,6 +242,8 @@ let greeting = match maybe_name {
   _ => "Hello, stranger!",      // Matches none case
 }
 ```
+
+The shorter form only applies to the whole subject. Inside a [tuple pattern](#matching-on-tuples), a name binds the whole element and `_` matches anything, so use `some(...)` and `none` there.
 
 ## Matching on Results
 
@@ -219,4 +261,65 @@ let message = match result {
   err(error) => "Error: {error}",
 }
 ```
+
+The qualified spellings `Result::ok(value)` and `Result::err(error)` work too. A bare `ok` or `err` binds the value under that name, as in `ok => "Result: {ok}"`.
+
+## Nested Patterns
+
+The pattern inside `ok(...)`, `err(...)`, `some(...)`, or a union member such as `Int(...)` can itself be any pattern for the value it holds, not only a name:
+
+```ard
+fn describe(response: Int!Str) Str {
+  match response {
+    ok(200) => "OK",
+    ok(code) => "Unexpected status {code}",
+    err("timeout") => "Try again",
+    err(message) => "Failed: {message}",
+  }
+}
+```
+
+## Matching on Tuples
+
+A tuple can be matched with tuple patterns: a parenthesized, comma-separated list with one pattern per element. Each element pattern is any pattern for that element's type, `_`, or a name that binds the element. This makes decisions over several values at once:
+
+```ard
+fn add(left: Int!Str, right: Int!Str) Int!Str {
+  match (left, right) {
+    (ok(a), ok(b)) => Result::ok(a + b),
+    (err(e), _) => Result::err(e),
+    (_, err(e)) => Result::err(e),
+  }
+}
+```
+
+The subject can be any tuple, including the results of a call:
+
+```ard
+fn fetch() (Int, Str) {
+  (200, "hello")
+}
+
+let text = match fetch() {
+  (200, body) => body,
+  (404, _) => "not found",
+  (code, _) => "failed with {code}",
+}
+```
+
+```ard
+fn same_index(left: Int?, right: Int?) Bool {
+  match (left, right) {
+    (some(a), some(b)) => a == b,
+    (none, none) => true,
+    _ => false,
+  }
+}
+```
+
+A tuple pattern must have exactly as many elements as the tuple, and tuple patterns nest for tuples inside tuples. When the subject is written as a tuple, like `(left, right)`, its elements are evaluated once each, left to right.
+
+Exhaustiveness covers combinations: `(true, _)` and `(false, _)` together cover a `(Bool, Str)`, and a missing combination is reported as a pattern such as `(false, _)`.
+
+Inside a tuple pattern, constructor patterns spell out their value: write `ok(_)` rather than `ok`, and `Str(_)` or `Str(text)` rather than a bare union member name.
 

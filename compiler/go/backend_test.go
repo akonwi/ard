@@ -320,16 +320,27 @@ func TestLowerExprQualifiesCrossModuleUnionWrapAndMatchInModulePackageMode(t *te
 
 	fn := air.Function{Module: 1, Locals: []air.Local{{ID: 0, Name: "input", Type: 3}, {ID: 1, Name: "value", Type: 1}}}
 	match, err := l.lowerExpr(fn, air.Expr{
-		Kind:   air.ExprMatchUnion,
-		Type:   1,
-		Target: &air.Expr{Kind: air.ExprLoadLocal, Type: 3, Payload: &air.LocalExprPayload{Local: 0}},
-		Payload: &air.UnionMatchExprPayload{
-			Cases: []air.UnionMatchCase{{
-				Tag:   0,
-				Local: 1,
-				Body:  air.Block{Result: &air.Expr{Kind: air.ExprLoadLocal, Type: 1, Payload: &air.LocalExprPayload{Local: 1}}},
-			}},
-			CatchAll: air.Block{Result: &air.Expr{Kind: air.ExprConstInt, Type: 1, Payload: &air.TextExprPayload{Value: "0"}}},
+		Kind: air.ExprMatch,
+		Type: 1,
+		Args: []air.Expr{{Kind: air.ExprLoadLocal, Type: 3, Payload: &air.LocalExprPayload{Local: 0}}},
+		Payload: &air.MatchExprPayload{
+			Vars: []air.MatchVar{
+				{Type: 3, Source: air.MatchVarSubject},
+				{Type: 1, Source: air.MatchVarUnionMember, Parent: 0, Tag: 0},
+			},
+			Tree: air.Decision{
+				Kind:     air.DecisionSwitch,
+				Var:      0,
+				Cases:    []air.DecisionCase{{Test: air.MatchTest{Kind: air.MatchTestUnionTag, Tag: 0}, Then: air.Decision{Kind: air.DecisionRun, Arm: 0}}},
+				Fallback: &air.Decision{Kind: air.DecisionRun, Arm: 1},
+			},
+			Arms: []air.MatchArm{
+				{
+					Bindings: []air.MatchBinding{{Local: 1, Var: 1}},
+					Body:     air.Block{Result: &air.Expr{Kind: air.ExprLoadLocal, Type: 1, Payload: &air.LocalExprPayload{Local: 1}}},
+				},
+				{Body: air.Block{Result: &air.Expr{Kind: air.ExprConstInt, Type: 1, Payload: &air.TextExprPayload{Value: "0"}}}},
+			},
 		},
 	})
 	if err != nil {

@@ -139,7 +139,7 @@ func enumMatchPatternCompletionItems(fa *analysis.FileAnalysis, point parse.Poin
 			continue
 		}
 
-		checked, ok := rec.Node.(*checker.EnumMatch)
+		checked, ok := rec.Node.(*checker.PatternMatch)
 		if !ok || checked.Subject == nil {
 			return nil
 		}

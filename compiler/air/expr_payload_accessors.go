@@ -90,38 +90,13 @@ func (e Expr) IfPayload() *IfExprPayload {
 	return payload
 }
 
-func (e Expr) EnumMatchPayload() *EnumMatchExprPayload {
-	payload, _ := e.Payload.(*EnumMatchExprPayload)
-	return payload
-}
-
-func (e Expr) IntMatchPayload() *IntMatchExprPayload {
-	payload, _ := e.Payload.(*IntMatchExprPayload)
-	return payload
-}
-
-func (e Expr) StrMatchPayload() *StrMatchExprPayload {
-	payload, _ := e.Payload.(*StrMatchExprPayload)
-	return payload
-}
-
-func (e Expr) UnionMatchPayload() *UnionMatchExprPayload {
-	payload, _ := e.Payload.(*UnionMatchExprPayload)
-	return payload
-}
-
-func (e Expr) ForeignMatchPayload() *ForeignMatchExprPayload {
-	payload, _ := e.Payload.(*ForeignMatchExprPayload)
+func (e Expr) MatchPayload() *MatchExprPayload {
+	payload, _ := e.Payload.(*MatchExprPayload)
 	return payload
 }
 
 func (e Expr) MaybeMatchPayload() *MaybeMatchExprPayload {
 	payload, _ := e.Payload.(*MaybeMatchExprPayload)
-	return payload
-}
-
-func (e Expr) ResultMatchPayload() *ResultMatchExprPayload {
-	payload, _ := e.Payload.(*ResultMatchExprPayload)
 	return payload
 }
 

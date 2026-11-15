@@ -1107,20 +1107,10 @@ func validateExprPayload(expr Expr) error {
 		compatible = expr.Kind == ExprBlock || expr.Kind == ExprUnsafeBlock
 	case *IfExprPayload:
 		compatible = expr.Kind == ExprIf
-	case *EnumMatchExprPayload:
-		compatible = expr.Kind == ExprMatchEnum
-	case *IntMatchExprPayload:
-		compatible = expr.Kind == ExprMatchInt
-	case *StrMatchExprPayload:
-		compatible = expr.Kind == ExprMatchStr
-	case *UnionMatchExprPayload:
-		compatible = expr.Kind == ExprMatchUnion
-	case *ForeignMatchExprPayload:
-		compatible = expr.Kind == ExprMatchForeignType
+	case *MatchExprPayload:
+		compatible = expr.Kind == ExprMatch
 	case *MaybeMatchExprPayload:
 		compatible = expr.Kind == ExprMatchMaybe
-	case *ResultMatchExprPayload:
-		compatible = expr.Kind == ExprMatchResult
 	case *TryExprPayload:
 		compatible = expr.Kind == ExprTryResult || expr.Kind == ExprTryMaybe
 	case *SelectExprPayload:
@@ -1186,11 +1176,11 @@ func exprPayloadRequired(kind ExprKind) bool {
 		ExprForeignCall, ExprForeignMethodCall, ExprForeignMethodValue,
 		ExprForeignFieldAccess, ExprForeignStructInstance, ExprForeignValue,
 		ExprInterfaceConversion, ExprUnsafeCast, ExprMutRef, ExprDeref,
-		ExprTraitRefProject, ExprMatchForeignType, ExprMakeClosure, ExprCallClosure,
-		ExprUnionWrap, ExprMatchUnion, ExprTraitUpcast, ExprCallTrait,
+		ExprTraitRefProject, ExprMatch, ExprMakeClosure, ExprCallClosure,
+		ExprUnionWrap, ExprTraitUpcast, ExprCallTrait,
 		ExprMakeMap, ExprSelect, ExprMakeStruct, ExprGetField, ExprTupleElem,
 		ExprBlock, ExprUnsafeBlock, ExprIf, ExprEnumVariant,
-		ExprMatchEnum, ExprMatchInt, ExprMatchStr, ExprMatchMaybe, ExprMatchResult:
+		ExprMatchMaybe:
 		return true
 	default:
 		return false
@@ -1671,138 +1661,6 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 			return err
 		}
 	}
-	if expr.Kind == ExprMatchEnum {
-		payload := exprPayloadAs[*EnumMatchExprPayload](&expr)
-		if payload == nil {
-			return fmt.Errorf("enum match is missing its payload")
-		}
-		for _, matchCase := range payload.Cases {
-			if err := validateBlock(program, fn, matchCase.Body); err != nil {
-				return err
-			}
-		}
-		if err := validateBlock(program, fn, payload.CatchAll); err != nil {
-			return err
-		}
-	}
-	if expr.Kind == ExprMatchStr {
-		if expr.Target == nil {
-			return fmt.Errorf("str match missing target")
-		}
-		targetType, err := typeInfo(program, expr.Target.Type)
-		if err != nil {
-			return err
-		}
-		if targetType.Kind != TypeStr {
-			return fmt.Errorf("str match target has type kind %d", targetType.Kind)
-		}
-		payload := exprPayloadAs[*StrMatchExprPayload](&expr)
-		if payload == nil {
-			return fmt.Errorf("str match is missing its payload")
-		}
-		for _, matchCase := range payload.Cases {
-			if err := validateBlock(program, fn, matchCase.Body); err != nil {
-				return err
-			}
-		}
-		if err := validateBlock(program, fn, payload.CatchAll); err != nil {
-			return err
-		}
-	}
-	if expr.Kind == ExprMatchInt {
-		if expr.Target == nil {
-			return fmt.Errorf("int match missing target")
-		}
-		targetType, err := typeInfo(program, expr.Target.Type)
-		if err != nil {
-			return err
-		}
-		if targetType.Kind != TypeInt && targetType.Kind != TypeByte && targetType.Kind != TypeRune {
-			return fmt.Errorf("int match target has type kind %d", targetType.Kind)
-		}
-		payload := exprPayloadAs[*IntMatchExprPayload](&expr)
-		if payload == nil {
-			return fmt.Errorf("int match is missing its payload")
-		}
-		for _, matchCase := range payload.Cases {
-			if err := validateBlock(program, fn, matchCase.Body); err != nil {
-				return err
-			}
-		}
-		for _, matchCase := range payload.RangeCases {
-			if matchCase.Start > matchCase.End {
-				return fmt.Errorf("int match range start %d is greater than end %d", matchCase.Start, matchCase.End)
-			}
-			if err := validateBlock(program, fn, matchCase.Body); err != nil {
-				return err
-			}
-		}
-		if err := validateBlock(program, fn, payload.CatchAll); err != nil {
-			return err
-		}
-	}
-	if expr.Kind == ExprMatchUnion {
-		if expr.Target == nil {
-			return fmt.Errorf("union match missing target")
-		}
-		unionType, err := typeInfo(program, expr.Target.Type)
-		if err != nil {
-			return err
-		}
-		if unionType.Kind != TypeUnion {
-			return fmt.Errorf("union match target has type kind %d", unionType.Kind)
-		}
-		payload := exprPayloadAs[*UnionMatchExprPayload](&expr)
-		if payload == nil {
-			return fmt.Errorf("union match is missing its payload")
-		}
-		for _, matchCase := range payload.Cases {
-			member, ok := unionMemberByTag(unionType, matchCase.Tag)
-			if !ok {
-				return fmt.Errorf("union match has invalid tag %d for %s", matchCase.Tag, unionType.Name)
-			}
-			if matchCase.Local < 0 || int(matchCase.Local) >= len(fn.Locals) {
-				return fmt.Errorf("union match binds invalid local %d", matchCase.Local)
-			}
-			if fn.Locals[matchCase.Local].Type != member.Type {
-				return fmt.Errorf("union match member %s local type %d does not match member type %d", member.Name, fn.Locals[matchCase.Local].Type, member.Type)
-			}
-			if err := validateBlock(program, fn, matchCase.Body); err != nil {
-				return err
-			}
-		}
-		if err := validateBlock(program, fn, payload.CatchAll); err != nil {
-			return err
-		}
-	}
-	if expr.Kind == ExprMatchForeignType {
-		if expr.Target == nil {
-			return fmt.Errorf("foreign type match missing target")
-		}
-		payload := exprPayloadAs[*ForeignMatchExprPayload](&expr)
-		if payload == nil {
-			return fmt.Errorf("foreign type match is missing its payload")
-		}
-		for _, matchCase := range payload.Cases {
-			if !validTypeID(program, matchCase.Type) {
-				return fmt.Errorf("foreign type match has invalid case type %d", matchCase.Type)
-			}
-			if matchCase.Bound {
-				if matchCase.Local < 0 || int(matchCase.Local) >= len(fn.Locals) {
-					return fmt.Errorf("foreign type match binds invalid local %d", matchCase.Local)
-				}
-				if fn.Locals[matchCase.Local].Type != matchCase.Type {
-					return fmt.Errorf("foreign type match local type %d does not match case type %d", fn.Locals[matchCase.Local].Type, matchCase.Type)
-				}
-			}
-			if err := validateBlock(program, fn, matchCase.Body); err != nil {
-				return err
-			}
-		}
-		if err := validateBlock(program, fn, payload.CatchAll); err != nil {
-			return err
-		}
-	}
 	if expr.Kind == ExprCallTrait {
 		if expr.Target == nil {
 			return fmt.Errorf("trait call missing target")
@@ -1840,6 +1698,11 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 		}
 		if len(expr.Args) != len(method.Signature.Params) {
 			return fmt.Errorf("trait call method %s expects %d args, got %d", method.Name, len(method.Signature.Params), len(expr.Args))
+		}
+	}
+	if expr.Kind == ExprMatch {
+		if err := validateMatch(program, fn, expr); err != nil {
+			return err
 		}
 	}
 	if expr.Kind == ExprMatchMaybe {
@@ -1938,40 +1801,6 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 			if err := validateBlock(program, fn, arm.Body); err != nil {
 				return err
 			}
-		}
-	}
-	if expr.Kind == ExprMatchResult {
-		if expr.Target == nil {
-			return fmt.Errorf("Result match missing target")
-		}
-		resultType, err := typeInfo(program, expr.Target.Type)
-		if err != nil {
-			return err
-		}
-		if resultType.Kind != TypeResult {
-			return fmt.Errorf("Result match target has type kind %d", resultType.Kind)
-		}
-		payload := exprPayloadAs[*ResultMatchExprPayload](&expr)
-		if payload == nil {
-			return fmt.Errorf("Result match is missing its payload")
-		}
-		if payload.OkLocal < 0 || int(payload.OkLocal) >= len(fn.Locals) {
-			return fmt.Errorf("Result match binds invalid ok local %d", payload.OkLocal)
-		}
-		if payload.ErrLocal < 0 || int(payload.ErrLocal) >= len(fn.Locals) {
-			return fmt.Errorf("Result match binds invalid err local %d", payload.ErrLocal)
-		}
-		if fn.Locals[payload.OkLocal].Type != resultType.Value {
-			return fmt.Errorf("Result ok match local type %d does not match value type %d", fn.Locals[payload.OkLocal].Type, resultType.Value)
-		}
-		if fn.Locals[payload.ErrLocal].Type != resultType.Error {
-			return fmt.Errorf("Result err match local type %d does not match error type %d", fn.Locals[payload.ErrLocal].Type, resultType.Error)
-		}
-		if err := validateBlock(program, fn, payload.Ok); err != nil {
-			return err
-		}
-		if err := validateBlock(program, fn, payload.Err); err != nil {
-			return err
 		}
 	}
 	if expr.Kind == ExprTryResult || expr.Kind == ExprTryMaybe {

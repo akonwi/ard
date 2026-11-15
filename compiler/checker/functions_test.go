@@ -307,11 +307,11 @@ func TestCheckedProgramTypeBoundaryCharacterization(t *testing.T) {
 
 		pick := c.Module().Program().Statements[0].Expr.(*checker.FunctionDef)
 		definition := pick.Body.Stmts[0].Stmt.(*checker.VariableDef)
-		match := definition.Value.(*checker.BoolMatch)
+		match := definition.Value.(*checker.PatternMatch)
 		if got := match.Type().String(); got != "Int!Str" {
 			t.Fatalf("match type = %q, want Int!Str", got)
 		}
-		branches := []*checker.Block{match.True, match.False}
+		branches := []*checker.Block{match.Arms[0].Body, match.Arms[1].Body}
 		for index, branch := range branches {
 			call := branch.Stmts[0].Expr.(*checker.ModuleFunctionCall)
 			resultType := call.Type().(*checker.Result)
@@ -474,7 +474,7 @@ func TestErasedConstructorComponentsResolveBeforeAIR(t *testing.T) {
 		}
 	}
 
-	match := statements[3].Expr.(*checker.FunctionDef).Body.Stmts[0].Expr.(*checker.ResultMatch)
+	match := statements[3].Expr.(*checker.FunctionDef).Body.Stmts[0].Expr.(*checker.PatternMatch)
 	matchType := match.Subject.Type().(*checker.Result)
 	if got := resolvedCheckerType(matchType.Err()); got != checker.Void {
 		t.Fatalf("Result match erased error = %s, want concrete Void", got)

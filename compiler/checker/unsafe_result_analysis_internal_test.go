@@ -28,10 +28,10 @@ func TestUnsafeCatchValueTypesCoversResultExpressionFamilies(t *testing.T) {
 		},
 		{
 			name: "canonical result constructors",
-			expr: &BoolMatch{
-				True:  unsafeCatchTestBlock(unsafeCatchTestConstructor("ok", &IntLiteral{Value: 1})),
-				False: unsafeCatchTestBlock(unsafeCatchTestConstructor("err", &StrLiteral{Value: "error"})),
-			},
+			expr: &PatternMatch{Arms: []PatternArm{
+				{Body: unsafeCatchTestBlock(unsafeCatchTestConstructor("ok", &IntLiteral{Value: 1}))},
+				{Body: unsafeCatchTestBlock(unsafeCatchTestConstructor("err", &StrLiteral{Value: "error"}))},
+			}},
 			wantOk:  []string{"Int"},
 			wantErr: []string{"Str"},
 		},
@@ -60,41 +60,10 @@ func TestUnsafeCatchValueTypesCoversResultExpressionFamilies(t *testing.T) {
 			wantErr: []string{"Float64", "Rune", "Str"},
 		},
 		{
-			name:    "bool match",
-			expr:    &BoolMatch{True: first, False: second},
-			wantOk:  []string{"Bool", "Int"},
-			wantErr: []string{"Rune", "Str"},
-		},
-		{
-			name: "int match",
-			expr: &IntMatch{
-				IntCases:   map[int]*Block{1: first},
-				RangeCases: map[IntRange]*Block{{Start: 2, End: 3}: second},
-				CatchAll:   third,
-			},
+			name:    "pattern match",
+			expr:    &PatternMatch{Arms: []PatternArm{{Body: first}, {Body: second}, {Body: third}}},
 			wantOk:  []string{"Bool", "Byte", "Int"},
 			wantErr: []string{"Float64", "Rune", "Str"},
-		},
-		{
-			name:    "string match",
-			expr:    &StrMatch{Cases: map[string]*Block{"first": first}, CatchAll: second},
-			wantOk:  []string{"Bool", "Int"},
-			wantErr: []string{"Rune", "Str"},
-		},
-		{
-			name:    "enum match",
-			expr:    &EnumMatch{Cases: []*Block{first, nil}, CatchAll: second},
-			wantOk:  []string{"Bool", "Int"},
-			wantErr: []string{"Rune", "Str"},
-		},
-		{
-			name: "union match",
-			expr: &UnionMatch{
-				TypeCasesByIndex: map[int]*Match{0: {Body: first}, 1: nil},
-				CatchAll:         second,
-			},
-			wantOk:  []string{"Bool", "Int"},
-			wantErr: []string{"Rune", "Str"},
 		},
 		{
 			name: "conditional match",
@@ -108,12 +77,6 @@ func TestUnsafeCatchValueTypesCoversResultExpressionFamilies(t *testing.T) {
 		{
 			name:    "option match",
 			expr:    &OptionMatch{Some: &Match{Body: first}, None: second},
-			wantOk:  []string{"Bool", "Int"},
-			wantErr: []string{"Rune", "Str"},
-		},
-		{
-			name:    "result match",
-			expr:    &ResultMatch{Ok: &Match{Body: first}, Err: &Match{Body: second}},
 			wantOk:  []string{"Bool", "Int"},
 			wantErr: []string{"Rune", "Str"},
 		},

@@ -30,12 +30,12 @@ func TestResults(t *testing.T) {
 							Body: &checker.Block{
 								Stmts: []checker.Statement{
 									{
-										Expr: &checker.BoolMatch{
+										Expr: &checker.PatternMatch{
 											Subject: &checker.Equality{
 												&checker.Variable{},
 												&checker.IntLiteral{Value: 0},
 											},
-											True: &checker.Block{
+											Arms: []checker.PatternArm{{Pattern: &checker.BoolPattern{Value: true}, Body: &checker.Block{
 												Stmts: []checker.Statement{
 													{
 														Expr: &checker.ModuleFunctionCall{
@@ -49,8 +49,7 @@ func TestResults(t *testing.T) {
 														},
 													},
 												},
-											},
-											False: &checker.Block{
+											}}, {Pattern: &checker.BoolPattern{Value: false}, Body: &checker.Block{
 												Stmts: []checker.Statement{
 													{
 														Expr: &checker.ModuleFunctionCall{
@@ -67,7 +66,7 @@ func TestResults(t *testing.T) {
 														},
 													},
 												},
-											},
+											}}},
 										},
 									},
 								},
