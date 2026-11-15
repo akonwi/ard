@@ -2,25 +2,38 @@ package checker
 
 import (
 	"fmt"
+	"go/constant"
 	"go/token"
 	"go/types"
 	"math"
+	"math/big"
 )
 
 // GoPackage is target metadata for a directly imported Go package. It is kept
 // separate from Ard modules so Go symbols do not become core Ard declarations.
 type GoPackage struct {
-	Path                 string
-	TypesName            string
-	Functions            map[string]*FunctionDef
-	Generics             map[string]*types.Func
-	Types                map[string]Type
-	Constants            map[string]Type
+	Path      string
+	TypesName string
+	Functions map[string]*FunctionDef
+	Generics  map[string]*types.Func
+	Types     map[string]Type
+	Constants map[string]Type
+	// IntConstants holds the exact value of each integer constant, so the
+	// checker can evaluate constant expressions as Go will.
+	IntConstants         map[string]*big.Int
 	Variables            map[string]Type
 	UnsupportedTypes     map[string]string
 	UnsupportedConstants map[string]string
 	UnsupportedVariables map[string]string
 	UnsupportedFunctions map[string]string
+}
+
+// goIntConstantValue returns the exact value of an integer Go constant.
+func goIntConstantValue(value constant.Value) (*big.Int, bool) {
+	if value.Kind() != constant.Int {
+		return nil, false
+	}
+	return new(big.Int).SetString(value.ExactString(), 10)
 }
 
 type GoPackageResolver interface {
@@ -58,6 +71,12 @@ func goPackageFromTypesPackage(path string, pkg *types.Package) *GoPackage {
 		if constant, ok := obj.(*types.Const); ok {
 			if typ, reason := constTypeFromGo(constant.Type()); reason == "" {
 				goPkg.Constants[name] = typ
+				if value, ok := goIntConstantValue(constant.Val()); ok {
+					if goPkg.IntConstants == nil {
+						goPkg.IntConstants = map[string]*big.Int{}
+					}
+					goPkg.IntConstants[name] = value
+				}
 			} else {
 				goPkg.UnsupportedConstants[name] = reason
 			}

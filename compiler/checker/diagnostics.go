@@ -154,6 +154,7 @@ const (
 	DiagnosticCodeInvalidTry                    DiagnosticCode = "invalid_try"
 	DiagnosticCodeInvalidLiteral                DiagnosticCode = "invalid_literal"
 	DiagnosticCodeNumericLiteralOverflow        DiagnosticCode = "numeric_literal_overflow"
+	DiagnosticCodeDivisionByZero                DiagnosticCode = "division_by_zero"
 	DiagnosticCodeInvalidConversion             DiagnosticCode = "invalid_conversion"
 	DiagnosticCodeRedundantNullableVoid         DiagnosticCode = "redundant_nullable_void"
 	DiagnosticCodeInvalidTupleDestructuring     DiagnosticCode = "invalid_tuple_destructuring"
@@ -2189,6 +2190,30 @@ type numericLiteralOverflowDiagnostic struct {
 func (d numericLiteralOverflowDiagnostic) build() Diagnostic {
 	diagnostic := newLabeledDiagnostic(Error, d.LegacyMessage, "Numeric literal overflow", "", DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("this value cannot be represented as `%s`", d.Target)})
 	diagnostic.Code = DiagnosticCodeNumericLiteralOverflow
+	return diagnostic
+}
+
+// constantOverflowDiagnostic reports a constant expression whose value does
+// not fit its type. It shares the literal overflow code.
+type constantOverflowDiagnostic struct {
+	LegacyMessage string
+	Span          SourceSpan
+	Target        Type
+}
+
+func (d constantOverflowDiagnostic) build() Diagnostic {
+	diagnostic := newLabeledDiagnostic(Error, d.LegacyMessage, "Constant overflow", "", DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("this constant expression cannot be represented as `%s`", d.Target)})
+	diagnostic.Code = DiagnosticCodeNumericLiteralOverflow
+	return diagnostic
+}
+
+type divisionByZeroDiagnostic struct {
+	Span SourceSpan
+}
+
+func (d divisionByZeroDiagnostic) build() Diagnostic {
+	diagnostic := newLabeledDiagnostic(Error, "Division by zero", "Division by zero", "", DiagnosticLabel{Span: d.Span, Message: "the divisor is a constant zero"})
+	diagnostic.Code = DiagnosticCodeDivisionByZero
 	return diagnostic
 }
 

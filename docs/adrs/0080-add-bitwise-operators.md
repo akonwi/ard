@@ -115,12 +115,12 @@ Shifts have Go's semantics:
 - A negative count at run time panics, like division by zero.
 - Values wrap at the type's width: `Uint8` 200 `<< 1` is 144.
 
-A shift of two literals is a Go constant expression, which Go evaluates at
-compile time and rejects when it does not fit. The checker therefore rejects
-a negative literal count, a literal shift whose result does not fit its type
-(`1 << 63` overflows `Int`), and a literal shift whose count is at least the
-type's width. A variable shifted by a large literal count is allowed and
-follows the rules above.
+Go rejects a negative constant count even for a variable operand, so the
+checker rejects a negative literal count. A shift of two constants is a Go
+constant expression, evaluated while compiling (ADR 0081): its result must
+fit its type (`1 << 63` overflows `Int`), and its count must be less than the
+type's width, since Go also rejects large constant counts. A variable
+shifted by a large literal count is allowed and follows the rules above.
 
 ### Lowering
 

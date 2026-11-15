@@ -92,6 +92,12 @@ let ms = Int::try(elapsed).or(0)
 `fit` always succeeds: integers wrap, floats round, and a float converted to an
 integer saturates at the target's bounds with `NaN` becoming `0`.
 
+An integer expression made only of literals and Go constants is evaluated at
+compile time, and every step must fit its type, so `9223372036854775807 + 1`
+is a compile error rather than a wrapped value. Dividing an integer by a
+constant zero is also an error. `fit` of such an expression wraps the same way
+it would at run time: `Uint8::fit(0 - 1)` is 255.
+
 `Int`, `Uint`, and `Uintptr` are 32 or 64 bits depending on the platform, so a
 conversion involving them is only lossless when it holds on every platform.
 That is why `Int::try(x: Int64)` is checked even though it always succeeds on a
@@ -126,8 +132,8 @@ valid Unicode scalar value.
 A shift count can be any integer type, and the result has the left operand's
 type. Shifts behave as in Go: values wrap at the type's width, `>>` keeps the
 sign of a signed value, a count past the width shifts every bit out, and a
-negative count panics. A shift of two literals is checked at compile time,
-so `1 << 64` is an error.
+negative count panics. A shift of two constants is evaluated at compile time,
+so `1 << 63` (which overflows `Int`) and `1 << 64` are errors.
 
 The operators use Go's precedence. `<<`, `>>`, and `&` bind like `*`; `|` and
 `^` bind like `+`; all of them bind tighter than comparisons, so

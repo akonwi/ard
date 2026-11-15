@@ -167,12 +167,12 @@ fn f(mode: os::FileMode, bits: Uint32) os::FileMode { mode | bits }`,
 		{
 			name:        "constant shift that overflows Int",
 			input:       `let x = 1 << 64`,
-			diagnostics: errorDiagnostic("Constant 1 << 64 overflows Int"),
+			diagnostics: errorDiagnostic("Constant shift count 64 is too large for Int"),
 		},
 		{
 			name:        "constant shift into the sign bit",
 			input:       `let x = 1 << 63`,
-			diagnostics: errorDiagnostic("Constant 1 << 63 overflows Int"),
+			diagnostics: errorDiagnostic("Constant value 9223372036854775808 overflows Int"),
 		},
 		{
 			name:  "constant shift to the minimum Int",

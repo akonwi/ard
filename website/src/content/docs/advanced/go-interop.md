@@ -303,6 +303,15 @@ Numeric literals already adopt a foreign scalar type directly in arithmetic and
 annotated bindings (`let d: time::Duration = 5 * time::Millisecond`); the
 conversions are for **runtime** values.
 
+Integer Go constants are constants in Ard too. An expression made only of
+literals and Go constants is evaluated at compile time and must fit its type
+at every step, as Go requires:
+
+```ard
+time::Second * 10000000000000 // error: Constant value 10000000000000000000000 overflows time::Duration
+Int32::fit(time::Hour * 1000) // wraps, like Int32::fit of a variable
+```
+
 ### Bit flags
 
 The [bitwise operators](/guide/types/#bitwise-operators) work on foreign named

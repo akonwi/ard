@@ -941,6 +941,9 @@ type Checker struct {
 	constraintFunctionStack           []*FunctionDef
 	comparableConstraintCalls         []comparableConstraintCall
 	genericTraitConstraintChecks      []genericTraitConstraintCheck
+	// constants holds the value of each folded constant integer
+	// expression (constant_fold.go).
+	constants map[Expression]*big.Int
 	// silentFailures counts failures that propagate an already reported error
 	// without a new diagnostic (ADR 0074).
 	silentFailures int
@@ -7909,8 +7912,8 @@ func (c *Checker) checkScalarConversion(s *parse.StaticFunction, target Type, ti
 		// A literal adopts the target and is range-checked at compile time, so
 		// it is lossless by construction and `from` is the only spelling.
 		// `isNumericLiteralNode` matches a literal or a negated literal; a
-		// constant expression like `1 + 2` is an ordinary runtime value and
-		// falls through to normal tier checking.
+		// constant expression like `1 + 2` is an ordinary value for tier
+		// checking, and `fit` wraps it below (ADR 0081).
 		if tier != ConversionFrom {
 			legacy := fmt.Sprintf("%s does not take a literal", name)
 			c.addDiagnostic(invalidConversionDiagnostic{
@@ -7953,6 +7956,15 @@ func (c *Checker) checkScalarConversion(s *parse.StaticFunction, target Type, ti
 			Label:         wrongConversionTierLabel(argType, target, tier, valid),
 		}.build())
 		return nil
+	}
+	if tier == ConversionFit && isBitwiseIntegerLike(target) {
+		// Go rejects a constant conversion that loses the value, so a
+		// constant argument that does not fit is wrapped here, as `fit`
+		// promises. One that fits stays a conversion, which keeps the Go
+		// constant's name in the generated code.
+		if value, ok := c.constantValue(arg); ok && !c.constantFits(value, target) {
+			return constantLiteral(c.wrapConstant(value, target), target)
+		}
 	}
 	return &ScalarFrom{Value: arg, Target: target, Tier: tier}
 }
@@ -10029,7 +10041,7 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 					c.addDiagnostic(invalidUnaryOperatorDiagnostic{Operator: "-", Operand: value.Type(), Span: c.sourceSpan(s.Operand.GetLocation()), LegacyMessage: "Only signed numbers can be negated with '-'"}.build())
 					return nil
 				}
-				return &Negation{value}
+				return c.foldConstant(&Negation{value}, s.GetLocation())
 			}
 
 			if IsNever(value.Type()) {
@@ -10060,7 +10072,7 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 						return nil
 					}
 					if isArithmeticIntegerLike(left.Type()) {
-						return &IntAddition{left, right}
+						return c.foldConstant(&IntAddition{left, right}, s.GetLocation())
 					}
 					if isArithmeticFloatLike(left.Type()) {
 						return &FloatAddition{left, right}
@@ -10083,7 +10095,7 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 						return nil
 					}
 					if isArithmeticIntegerLike(left.Type()) {
-						return &IntSubtraction{left, right}
+						return c.foldConstant(&IntSubtraction{left, right}, s.GetLocation())
 					}
 					if isArithmeticFloatLike(left.Type()) {
 						return &FloatSubtraction{left, right}
@@ -10103,7 +10115,7 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 						return nil
 					}
 					if isArithmeticIntegerLike(left.Type()) {
-						return &IntMultiplication{left, right}
+						return c.foldConstant(&IntMultiplication{left, right}, s.GetLocation())
 					}
 					if isArithmeticFloatLike(left.Type()) {
 						return &FloatMultiplication{left, right}
@@ -10123,7 +10135,7 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 						return nil
 					}
 					if isArithmeticIntegerLike(left.Type()) {
-						return &IntDivision{left, right}
+						return c.foldConstant(&IntDivision{left, right}, s.GetLocation())
 					}
 					if isArithmeticFloatLike(left.Type()) {
 						return &FloatDivision{left, right}
@@ -10143,7 +10155,7 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 						return nil
 					}
 					if isArithmeticIntegerLike(left.Type()) {
-						return &IntModulo{left, right}
+						return c.foldConstant(&IntModulo{left, right}, s.GetLocation())
 					}
 					c.addInvalidArithmetic("%", left, right, s.Left.GetLocation(), s.Right.GetLocation(), "The '%' operator can only be used for integer scalars", true)
 					return nil
@@ -11835,7 +11847,11 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 					switch prop := s.Property.(type) {
 					case *parse.Identifier:
 						if typ := goPkg.Constants[prop.Name]; typ != nil {
-							return &ForeignValue{Target: "go", Namespace: goPkg.Path, Qualifier: goPkg.TypesName, Symbol: prop.Name, ValueType: typ}
+							value := &ForeignValue{Target: "go", Namespace: goPkg.Path, Qualifier: goPkg.TypesName, Symbol: prop.Name, ValueType: typ}
+							if constant, ok := goPkg.IntConstants[prop.Name]; ok {
+								c.recordConstant(value, constant)
+							}
+							return value
 						}
 						if typ := goPkg.Variables[prop.Name]; typ != nil {
 							return &ForeignValue{Target: "go", Namespace: goPkg.Path, Qualifier: goPkg.TypesName, Symbol: prop.Name, ValueType: typ, Assignable: true}
