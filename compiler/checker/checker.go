@@ -6508,7 +6508,7 @@ func (c *Checker) validateForeignStructInstance(foreign *ForeignType, typeArgs [
 		foreign.Fields, foreign.UnsupportedFields = foreign.LoadFields()
 		foreign.FieldsLoaded = true
 	}
-	fields := map[string]Expression{}
+	fields := make([]ForeignStructField, 0, len(properties))
 	seen := map[string]SourceSpan{}
 	for _, property := range properties {
 		name := property.Name.Name
@@ -6536,7 +6536,7 @@ func (c *Checker) validateForeignStructInstance(foreign *ForeignType, typeArgs [
 			c.addTypeMismatch(fieldType, value.Type(), property.Value.GetLocation())
 			continue
 		}
-		fields[name] = value
+		fields = append(fields, ForeignStructField{Name: name, Value: value})
 	}
 	return &ForeignStructInstance{Target: foreign.Target, Namespace: foreign.Namespace, Qualifier: foreign.Qualifier, Name: foreign.Name, Fields: fields, _type: foreign}
 }

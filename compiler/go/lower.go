@@ -3816,11 +3816,12 @@ func (l *lowerer) lowerForeignStructInstance(fn air.Function, expr air.Expr) (lo
 	if err != nil {
 		return loweredExpr{}, err
 	}
+	// AIR keeps the fields in source order, which is the order they must be
+	// evaluated in (ADR 0078); Go keyed literals accept fields in any order.
 	fields := make([]*air.StructFieldValue, len(payload.Fields))
 	for i := range payload.Fields {
 		fields[i] = &payload.Fields[i]
 	}
-	sort.Slice(fields, func(i, j int) bool { return fields[i].Name < fields[j].Name })
 	var buf operandBuffer
 	ops := buf.operands(len(fields))
 	for i, field := range fields {
