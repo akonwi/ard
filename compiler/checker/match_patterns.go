@@ -146,14 +146,15 @@ type matchVarKey struct {
 }
 
 type matchVarTable struct {
-	vars  []MatchVar
+	vars []MatchVar
+	// index is created by the first child variable. Most matches test only
+	// the subject and never need it; reads from a nil map find nothing.
 	index map[matchVarKey]int
 }
 
 func newMatchVarTable(subject Type) *matchVarTable {
 	return &matchVarTable{
-		vars:  []MatchVar{{Type: subject, Parent: -1, Access: MatchAccessSubject}},
-		index: map[matchVarKey]int{},
+		vars: []MatchVar{{Type: subject, Parent: -1, Access: MatchAccessSubject}},
 	}
 }
 
@@ -172,6 +173,9 @@ func (t *matchVarTable) child(parent int, access MatchVarAccess, index int, fore
 	}
 	id := len(t.vars)
 	t.vars = append(t.vars, MatchVar{Type: typ, Parent: parent, Access: access, Index: index, Foreign: foreign})
+	if t.index == nil {
+		t.index = map[matchVarKey]int{}
+	}
 	t.index[key] = id
 	return id
 }
