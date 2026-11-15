@@ -33,15 +33,9 @@ func TestUnsupportedSourceCharactersReportLexErrors(t *testing.T) {
 		location Location
 	}{
 		{
-			name:     "caret",
-			source:   "^",
-			message:  "Unexpected character '^'",
-			location: Location{Start: Point{Row: 1, Col: 1}, End: Point{Row: 1, Col: 1}},
-		},
-		{
-			name:     "tilde",
-			source:   "\n  ~",
-			message:  "Unexpected character '~'",
+			name:     "backslash on a later line",
+			source:   "\n  \\",
+			message:  "Unexpected character '\\\\'",
 			location: Location{Start: Point{Row: 2, Col: 3}, End: Point{Row: 2, Col: 3}},
 		},
 		{
@@ -71,7 +65,7 @@ func TestUnsupportedSourceCharactersReportLexErrors(t *testing.T) {
 }
 
 func TestMalformedUTF8ReportsEachInvalidByteAndRecovers(t *testing.T) {
-	lexer := NewLexer([]byte{0xff, '^'})
+	lexer := NewLexer([]byte{0xff, '\\'})
 	lexer.Scan()
 	want := []ParseError{
 		{
@@ -80,7 +74,7 @@ func TestMalformedUTF8ReportsEachInvalidByteAndRecovers(t *testing.T) {
 		},
 		{
 			Location: Location{Start: Point{Row: 1, Col: 2}, End: Point{Row: 1, Col: 2}},
-			Message:  "Unexpected character '^'",
+			Message:  "Unexpected character '\\\\'",
 		},
 	}
 	if diff := cmp.Diff(want, lexer.errors); diff != "" {
@@ -89,10 +83,10 @@ func TestMalformedUTF8ReportsEachInvalidByteAndRecovers(t *testing.T) {
 }
 
 func TestUnsupportedSourceCharactersFlowIntoParseErrors(t *testing.T) {
-	result := Parse([]byte("fn main() Int { 1^ }"), "test.ard")
+	result := Parse([]byte("fn main() Int { 1§ }"), "test.ard")
 	want := []ParseError{{
-		Location: Location{Start: Point{Row: 1, Col: 18}, End: Point{Row: 1, Col: 18}},
-		Message:  "Unexpected character '^'",
+		Location: Location{Start: Point{Row: 1, Col: 18}, End: Point{Row: 1, Col: 19}},
+		Message:  "Unexpected character '§'",
 	}}
 	if diff := cmp.Diff(want, result.Errors); diff != "" {
 		t.Fatalf("parse errors mismatch (-want +got):\n%s", diff)

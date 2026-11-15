@@ -6,8 +6,9 @@ import (
 
 // A statement ends at a new line, a closing brace, a trailing comment, or the
 // end of the file. Leftover tokens on the same line must be reported rather
-// than silently parsed as a separate statement: `let a = 5 & 4` used to parse
-// as `let a = 5` followed by a stray `&4` expression statement.
+// than silently parsed as a separate statement: before bitwise operators
+// (ADR 0080), `let a = 5 & 4` parsed as `let a = 5` followed by a stray `&4`
+// expression statement.
 func TestStatementsMustEndBeforeAnotherStatementStarts(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -15,19 +16,19 @@ func TestStatementsMustEndBeforeAnotherStatementStarts(t *testing.T) {
 		wantErr ParseError
 	}{
 		{
-			name:  "bitwise-looking & after a variable value",
-			input: "let a = 5 & 4\n",
+			name:  "|| after a variable value",
+			input: "let a = true || false\n",
 			wantErr: ParseError{
-				Location: Location{Start: Point{Row: 1, Col: 11}, End: Point{Row: 1, Col: 11}},
-				Message:  "Unexpected '&' after expression; Ard has no bitwise '&' operator",
+				Location: Location{Start: Point{Row: 1, Col: 14}, End: Point{Row: 1, Col: 15}},
+				Message:  "Unexpected '||' after expression; use 'or' for logical or",
 			},
 		},
 		{
 			name:  "&mut after a variable value",
 			input: "mut b = 1\nlet a = 5 &mut b\n",
 			wantErr: ParseError{
-				Location: Location{Start: Point{Row: 2, Col: 11}, End: Point{Row: 2, Col: 11}},
-				Message:  "Unexpected '&' after expression; Ard has no bitwise '&' operator",
+				Location: Location{Start: Point{Row: 2, Col: 11}, End: Point{Row: 2, Col: 14}},
+				Message:  "Unexpected '&mut' after expression",
 			},
 		},
 		{
@@ -39,19 +40,19 @@ func TestStatementsMustEndBeforeAnotherStatementStarts(t *testing.T) {
 			},
 		},
 		{
-			name:  "& after an assignment value",
-			input: "mut a = 1\na = 5 & 4\n",
+			name:  "&& after an assignment value",
+			input: "mut a = true\na = a && false\n",
 			wantErr: ParseError{
-				Location: Location{Start: Point{Row: 2, Col: 7}, End: Point{Row: 2, Col: 7}},
-				Message:  "Unexpected '&' after expression; Ard has no bitwise '&' operator",
+				Location: Location{Start: Point{Row: 2, Col: 7}, End: Point{Row: 2, Col: 8}},
+				Message:  "Unexpected '&&' after expression; use 'and' for logical and",
 			},
 		},
 		{
-			name:  "& after an expression statement",
-			input: "fn f() Int { 1 }\nf() & 4\n",
+			name:  "|| after an expression statement",
+			input: "fn f() Bool { true }\nf() || true\n",
 			wantErr: ParseError{
-				Location: Location{Start: Point{Row: 2, Col: 5}, End: Point{Row: 2, Col: 5}},
-				Message:  "Unexpected '&' after expression; Ard has no bitwise '&' operator",
+				Location: Location{Start: Point{Row: 2, Col: 5}, End: Point{Row: 2, Col: 6}},
+				Message:  "Unexpected '||' after expression; use 'or' for logical or",
 			},
 		},
 		{
@@ -79,19 +80,19 @@ func TestStatementsMustEndBeforeAnotherStatementStarts(t *testing.T) {
 			},
 		},
 		{
-			name:  "& after a for-loop update",
-			input: "for mut i = 0; i < 3; i =+ 1 & 2 {\n}\n",
+			name:  "&& after a for-loop update",
+			input: "for mut i = 0; i < 3; i =+ 1 && 2 {\n}\n",
 			wantErr: ParseError{
-				Location: Location{Start: Point{Row: 1, Col: 30}, End: Point{Row: 1, Col: 30}},
-				Message:  "Unexpected '&' after expression; Ard has no bitwise '&' operator",
+				Location: Location{Start: Point{Row: 1, Col: 30}, End: Point{Row: 1, Col: 31}},
+				Message:  "Unexpected '&&' after expression; use 'and' for logical and",
 			},
 		},
 		{
 			name:  "stray tokens inside a single-line block",
-			input: "fn f() Int { 5 & 4 }\n",
+			input: "fn f() Int { 5 4 }\n",
 			wantErr: ParseError{
 				Location: Location{Start: Point{Row: 1, Col: 16}, End: Point{Row: 1, Col: 16}},
-				Message:  "Unexpected '&' after expression; Ard has no bitwise '&' operator",
+				Message:  "Expected new line after statement",
 			},
 		},
 	}
@@ -112,7 +113,7 @@ func TestStatementsMustEndBeforeAnotherStatementStarts(t *testing.T) {
 // Recovery skips the rest of the offending line only, so the following
 // statements and the enclosing block still parse.
 func TestStatementEndRecoveryKeepsFollowingStatements(t *testing.T) {
-	result := Parse([]byte("fn main() {\n  let a = 5 & (4 + 1)\n  let b = a\n}\n"), "test.ard")
+	result := Parse([]byte("fn main() {\n  let a = 5 && (4 + 1)\n  let b = a\n}\n"), "test.ard")
 	if len(result.Errors) != 1 {
 		t.Fatalf("errors = %v, want exactly one", result.Errors)
 	}
@@ -127,14 +128,16 @@ func TestStatementEndRecoveryKeepsFollowingStatements(t *testing.T) {
 
 func TestStatementTerminators(t *testing.T) {
 	for name, input := range map[string]string{
-		"new line":                 "let a = 5\nlet b = 4\n",
-		"end of file":              "let a = 5",
-		"trailing comment":         "let a = 5 // five\n",
-		"closing brace":            "fn f() Int { 5 }\n",
-		"assignment closing brace": "mut a = 1\nif true { a = 2 }\n",
-		"c-style for loop header":  "for mut i = 0; i < 3; i =+ 1 {\n}\n",
-		"for loop header with ';'": "for mut i = 0; i < 3; i =+ 1; {\n}\n",
-		"address-of on a new line": "mut b = 1\nlet a = 5\n&mut b\n",
+		"new line":                         "let a = 5\nlet b = 4\n",
+		"end of file":                      "let a = 5",
+		"trailing comment":                 "let a = 5 // five\n",
+		"closing brace":                    "fn f() Int { 5 }\n",
+		"assignment closing brace":         "mut a = 1\nif true { a = 2 }\n",
+		"c-style for loop header":          "for mut i = 0; i < 3; i =+ 1 {\n}\n",
+		"for loop header with ';'":         "for mut i = 0; i < 3; i =+ 1; {\n}\n",
+		"address-of on a new line":         "mut b = 1\nlet a = 5\n&mut b\n",
+		"bitwise and":                      "let a = 5 & 4\n",
+		"bitwise and in a for loop update": "for mut i = 0; i < 3; i =+ 1 & 2 {\n}\n",
 		// The checker, not the parser, rejects a non-reassignment update.
 		"declaration as for loop update": "for mut i = 0; i < 3; let x = 1 {\n}\n",
 	} {

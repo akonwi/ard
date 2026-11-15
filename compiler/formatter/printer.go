@@ -2008,9 +2008,9 @@ func (p printer) binaryPrecedence(operator parse.Operator) int {
 		return precedenceAnd
 	case parse.Equal, parse.NotEqual, parse.GreaterThan, parse.GreaterThanOrEqual, parse.LessThan, parse.LessThanOrEqual, parse.Range:
 		return precedenceCompare
-	case parse.Plus, parse.Minus:
+	case parse.Plus, parse.Minus, parse.BitOr, parse.BitXor:
 		return precedenceAdd
-	case parse.Multiply, parse.Divide, parse.Modulo:
+	case parse.Multiply, parse.Divide, parse.Modulo, parse.BitAnd, parse.ShiftLeft, parse.ShiftRight:
 		return precedenceMul
 	default:
 		return precedenceLowest
@@ -2057,6 +2057,18 @@ func (p printer) operatorString(operator parse.Operator) string {
 		return ".."
 	case parse.Assign:
 		return "="
+	case parse.BitAnd:
+		return "&"
+	case parse.BitOr:
+		return "|"
+	case parse.BitXor:
+		return "^"
+	case parse.BitNot:
+		return "~"
+	case parse.ShiftLeft:
+		return "<<"
+	case parse.ShiftRight:
+		return ">>"
 	default:
 		return ""
 	}

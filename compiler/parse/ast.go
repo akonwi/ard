@@ -808,6 +808,13 @@ const (
 	Or
 	Range
 	Assign
+	// Bitwise operators on integers (ADR 0080).
+	BitAnd
+	BitOr
+	BitXor
+	BitNot
+	ShiftLeft
+	ShiftRight
 )
 
 type UnaryExpression struct {

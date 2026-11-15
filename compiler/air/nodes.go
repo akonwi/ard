@@ -230,7 +230,20 @@ const (
 	ExprResultAndThen
 	ExprTryResult
 	ExprTryMaybe
+	// Bitwise operators on integers (ADR 0080). The binary kinds carry a
+	// BinaryExprPayload; for the shifts the right operand (the count) may
+	// have a different integer type than the left and the result.
+	ExprIntBitAnd
+	ExprIntBitOr
+	ExprIntBitXor
+	ExprIntShl
+	ExprIntShr
+	// ExprIntBitNot complements its integer Target.
+	ExprIntBitNot
 )
+
+// lastExprKind is the highest valid ExprKind; keep it at the end of the list.
+const lastExprKind = ExprIntBitNot
 
 type ForeignResultShape uint8
 

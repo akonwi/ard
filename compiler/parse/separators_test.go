@@ -34,9 +34,9 @@ func TestMissingSeparatorsAreReported(t *testing.T) {
 			wantErr: ParseError{Location: at(3, 3), Message: "Expected ',' between list items"},
 		},
 		{
-			name:    "bitwise-looking & in a list",
-			input:   "let a = [5 & 4]\n",
-			wantErr: ParseError{Location: at(1, 12), Message: "Unexpected '&' after expression; Ard has no bitwise '&' operator"},
+			name:    "&& in a list",
+			input:   "let a = [true && false]\n",
+			wantErr: ParseError{Location: Location{Start: Point{Row: 1, Col: 15}, End: Point{Row: 1, Col: 16}}, Message: "Unexpected '&&' after expression; use 'and' for logical and"},
 		},
 		{
 			name:    "map entries",
@@ -49,9 +49,9 @@ func TestMissingSeparatorsAreReported(t *testing.T) {
 			wantErr: ParseError{Location: at(1, 5), Message: "Expected ',' between arguments"},
 		},
 		{
-			name:    "bitwise-looking & in call arguments",
-			input:   "f(5 & 4)\n",
-			wantErr: ParseError{Location: at(1, 5), Message: "Unexpected '&' after expression; Ard has no bitwise '&' operator"},
+			name:    "|| in call arguments",
+			input:   "f(true || false)\n",
+			wantErr: ParseError{Location: Location{Start: Point{Row: 1, Col: 8}, End: Point{Row: 1, Col: 9}}, Message: "Unexpected '||' after expression; use 'or' for logical or"},
 		},
 		{
 			name:    "named call arguments",

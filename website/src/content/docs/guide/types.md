@@ -92,6 +92,12 @@ let ms = Int::try(elapsed).or(0)
 `fit` always succeeds: integers wrap, floats round, and a float converted to an
 integer saturates at the target's bounds with `NaN` becoming `0`.
 
+An integer expression made only of literals and Go constants is evaluated at
+compile time, and every step must fit its type, so `9223372036854775807 + 1`
+is a compile error rather than a wrapped value. Dividing an integer by a
+constant zero is also an error. `fit` of such an expression wraps the same way
+it would at run time: `Uint8::fit(0 - 1)` is 255.
+
 `Int`, `Uint`, and `Uintptr` are 32 or 64 bits depending on the platform, so a
 conversion involving them is only lossless when it holds on every platform.
 That is why `Int::try(x: Int64)` is checked even though it always succeeds on a
@@ -103,6 +109,43 @@ A `Rune` is always a valid Unicode scalar value, so it has no `fit`. Only a
 
 See [Go interop](/advanced/go-interop/#numeric-conversions) for the full rules,
 including foreign named scalar types.
+
+### Bitwise operators
+
+Integers support `&` (and), `|` (or), `^` (xor), prefix `~` (not), `<<`
+(shift left), and `>>` (shift right):
+
+```ard
+let flags = read | write
+let can_write = flags & write != 0
+let cleared = flags & ~write
+let packed = Uint16::from(hi) << 8 | Uint16::from(lo)
+let low = Byte::fit(packed & 255)
+```
+
+They work on `Int`, the sized integers, `Uintptr`, `Byte`, and Go named
+integer types such as `os::FileMode`. `&`, `|`, and `^` need both operands to
+have the same type, like `+`; a literal adopts the other operand's type. A
+`Rune` must be converted first (`Int32::from(r)`), since it always holds a
+valid Unicode scalar value.
+
+A shift count can be any integer type, and the result has the left operand's
+type. Shifts behave as in Go: values wrap at the type's width, `>>` keeps the
+sign of a signed value, a count past the width shifts every bit out, and a
+negative count panics. A shift of two constants is evaluated at compile time,
+so `1 << 63` (which overflows `Int`) and `1 << 64` are errors.
+
+The operators use Go's precedence. `<<`, `>>`, and `&` bind like `*`; `|` and
+`^` bind like `+`; all of them bind tighter than comparisons, so
+`flags & write != 0` compares the masked value:
+
+```ard
+a + b << 1   // a + (b << 1)
+a | b & c    // a | (b & c)
+a & b == 0   // (a & b) == 0
+```
+
+`&&` and `||` are errors: logic uses `and` and `or`.
 
 Strings support checked Go-style byte slicing with optional bounds:
 

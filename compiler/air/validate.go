@@ -1061,7 +1061,7 @@ func validateTailSpread(program *Program, expr Expr) error {
 }
 
 func validateExprPayload(expr Expr) error {
-	if expr.Kind > ExprTryMaybe {
+	if expr.Kind > lastExprKind {
 		return fmt.Errorf("invalid expression kind %d", expr.Kind)
 	}
 	if expr.Payload != nil && exprPayloadIsTypedNil(expr.Payload) {
@@ -1142,6 +1142,7 @@ func validateExprPayload(expr Expr) error {
 func binaryExprPayloadAllowed(kind ExprKind) bool {
 	switch kind {
 	case ExprIntAdd, ExprIntSub, ExprIntMul, ExprIntDiv, ExprIntMod,
+		ExprIntBitAnd, ExprIntBitOr, ExprIntBitXor, ExprIntShl, ExprIntShr,
 		ExprFloatAdd, ExprFloatSub, ExprFloatMul, ExprFloatDiv, ExprStrConcat,
 		ExprEq, ExprNotEq, ExprLt, ExprLte, ExprGt, ExprGte, ExprAnd, ExprOr:
 		return true

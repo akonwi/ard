@@ -33,6 +33,8 @@ const (
 	at_sign            = "at_sign"
 	ampersand          = "ampersand"
 	hash               = "hash"
+	caret              = "caret"
+	tilde              = "tilde"
 
 	colon_colon        = "colon_colon"
 	bang               = "bang"
@@ -386,6 +388,10 @@ func (l *lexer) take() (token, bool) {
 		return currentChar.asToken(ampersand), true
 	case '#':
 		return currentChar.asToken(hash), true
+	case '^':
+		return currentChar.asToken(caret), true
+	case '~':
+		return currentChar.asToken(tilde), true
 	case '$':
 		if l.hasMore() && l.peek().isAlpha() {
 			l.start = l.cursor - 1

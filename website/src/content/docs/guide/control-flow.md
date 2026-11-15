@@ -25,7 +25,7 @@ Conditions must be boolean expressions. There are no implicit truthy/falsy coerc
 
 ### Boolean Operator Grouping
 
-Comparisons bind more tightly than `and`, and `and` binds more tightly than `or`. Ard's prefix `not` is intentionally broad: it negates the complete expression to its right, including comparisons and `and` or `or` expressions.
+Comparisons bind more tightly than `and`, and `and` binds more tightly than `or`. Arithmetic and [bitwise operators](/guide/types/#bitwise-operators) bind more tightly than comparisons. Ard's prefix `not` is intentionally broad: it negates the complete expression to its right, including comparisons and `and` or `or` expressions.
 
 ```ard
 not value == expected  // not (value == expected)

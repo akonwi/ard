@@ -1012,3 +1012,49 @@ func TestFormatKeepsCommentOnlySequences(t *testing.T) {
 		})
 	}
 }
+
+// Bitwise operators follow Go's precedence ladder (ADR 0080): `<<`, `>>` and
+// `&` bind like `*`; `|` and `^` bind like `+`. The formatter keeps only the
+// parentheses the parser needs.
+func TestFormatBitwiseOperators(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "spaces around binary operators", input: "let x = a&b|c^d<<1>>e\n", want: "let x = a & b | c ^ d << 1 >> e\n"},
+		{name: "not hugs its operand", input: "let x = ~ a\n", want: "let x = ~a\n"},
+		{name: "not of a group keeps parentheses", input: "let x = ~(a & b)\n", want: "let x = ~(a & b)\n"},
+		{name: "and before comparison needs none", input: "let x = (mods & flag) != 0\n", want: "let x = mods & flag != 0\n"},
+		{name: "and inside or needs none", input: "let x = (a & b) | c\n", want: "let x = a & b | c\n"},
+		{name: "or inside and keeps parentheses", input: "let x = a & (b | c)\n", want: "let x = a & (b | c)\n"},
+		{name: "packing needs none", input: "let x = (hi << 8) | lo\n", want: "let x = hi << 8 | lo\n"},
+		{name: "addition inside a shift keeps parentheses", input: "let x = (a + b) << 1\n", want: "let x = (a + b) << 1\n"},
+		{name: "shift inside addition needs none", input: "let x = a + (b << 1)\n", want: "let x = a + b << 1\n"},
+		{name: "xor on the right of subtraction keeps parentheses", input: "let x = a - (b ^ c)\n", want: "let x = a - (b ^ c)\n"},
+		{name: "xor on the left of subtraction needs none", input: "let x = (a ^ b) - c\n", want: "let x = a ^ b - c\n"},
+		{name: "shift count group keeps parentheses", input: "let x = 1 << (n - 1)\n", want: "let x = 1 << (n - 1)\n"},
+		{name: "address-of operand", input: "let x = a & &b\n", want: "let x = a & &b\n"},
+		{name: "negated operand", input: "let x = p & -p\n", want: "let x = p & -p\n"},
+		{name: "not of a negation", input: "let x = ~-a\n", want: "let x = ~-a\n"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			formatted, err := Format([]byte(tt.input), "test.ard")
+			if err != nil {
+				t.Fatalf("format: %v", err)
+			}
+			if string(formatted) != tt.want {
+				t.Fatalf("formatted = %q, want %q", string(formatted), tt.want)
+			}
+			again, err := Format(formatted, "test.ard")
+			if err != nil {
+				t.Fatalf("second format: %v", err)
+			}
+			if string(again) != tt.want {
+				t.Fatalf("formatter is not idempotent: %q", string(again))
+			}
+		})
+	}
+}

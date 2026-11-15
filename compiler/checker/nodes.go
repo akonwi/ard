@@ -800,6 +800,39 @@ func (n *IntModulo) Type() Type {
 	return n.Left.Type()
 }
 
+// BitwiseOp is the operator of an IntBitwise expression (ADR 0080).
+type BitwiseOp int
+
+const (
+	BitAnd BitwiseOp = iota
+	BitOr
+	BitXor
+	ShiftLeft
+	ShiftRight
+)
+
+// IntBitwise is `&`, `|`, `^`, `<<` or `>>` on integers. For `&`, `|` and
+// `^` both operands have the same type; a shift count may be any integer
+// type. The result has the left operand's type.
+type IntBitwise struct {
+	Op    BitwiseOp
+	Left  Expression
+	Right Expression
+}
+
+func (n *IntBitwise) Type() Type {
+	return n.Left.Type()
+}
+
+// IntBitNot is `~x`, the bitwise complement of an integer.
+type IntBitNot struct {
+	Value Expression
+}
+
+func (n *IntBitNot) Type() Type {
+	return n.Value.Type()
+}
+
 type IntGreater struct {
 	Left  Expression
 	Right Expression
