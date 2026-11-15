@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted. Amends ADR 0031. Amended for reads before calls (#575).
+Accepted. Amends ADR 0031. Amended for reads before calls (#575) and for
+operands a built-in method uses more than once (#578).
 
 ## Context
 
@@ -62,6 +63,14 @@ returns.
   as it is; a dereference `*p` fixes its pointer (`t := p`, used as `*t`);
   any other place is fixed by address (`t := &place`, used as `*t`). Writes
   still reach the original storage.
+
+A built-in method whose Go lowering uses an operand more than once, such as
+the receiver of `push`, `swap`, and `sort` on a list, or the comparator that
+`sort` calls once per comparison, evaluates it once with `evaluateOnce`
+right after sequencing, before any later operand (#578). A value goes into a
+temporary and a place is fixed as above. A constant, a function literal, and
+a path of variables, fields, and dereferences stay inline, so the generated Go
+for `items.push(x)` or `h.items.sort(cmp)` does not change.
 
 Calls with a spread argument keep ADR 0062's rule of evaluating every
 component into a temporary.
@@ -141,8 +150,6 @@ These ordering problems remain and are tracked separately:
 - Named arguments and struct literal fields reach AIR in declaration order,
   so the backend cannot see the written order (#576). Go struct literal
   fields are lowered in alphabetical order (#577).
-- `push`, `swap`, and `sort` on a list repeat their receiver expression
-  (#578).
 - A `let` module global is read inline next to a call. Go code that receives
   its address can still write it; finding those globals needs a scan of the
   whole program rather than of one function.

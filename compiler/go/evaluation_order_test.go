@@ -375,3 +375,69 @@ foreign field value
 		t.Fatalf("stdout = %q, want %q", got, want)
 	}
 }
+
+// A built-in list method that uses its receiver more than once evaluates the
+// receiver once, before its arguments (#578). push and swap mutate through the
+// receiver, so the mutation must reach the original field or list.
+func TestGoTargetListMethodReceiversEvaluateOnce(t *testing.T) {
+	got := runGoTargetSourceStdout(t, `use go:fmt
+`+evaluationOrderHelpers+`
+struct Holder {
+  items: [Int],
+}
+
+fn holder(h: &mut Holder) &mut Holder {
+  fmt::Println("holder")
+  h
+}
+
+fn list(items: &mut [Int]) &mut [Int] {
+  fmt::Println("list")
+  items
+}
+
+fn ordered(label: Str) fn(Int, Int) Bool {
+  fmt::Println(label)
+  fn(a: Int, b: Int) Bool { a < b }
+}
+
+fn main() {
+  let h = &mut Holder{items: [1]}
+  let size = holder(h).items.push(now("push value", 2))
+  fmt::Println(size, h.items)
+  holder(h).items.swap(now("field swap left", 0), now("field swap right", 1))
+  fmt::Println(h.items)
+  holder(h).items.sort(ordered("field sort comparator"))
+  fmt::Println(h.items)
+  let items = &mut [3, 1, 2, 5, 4]
+  list(items).swap(now("swap left", 0), now("swap right", 2))
+  fmt::Println(items)
+  list(items).sort(fn(a: Int, b: Int) Bool { a > b })
+  fmt::Println(items)
+  items.sort(ordered("sort comparator"))
+  fmt::Println(items)
+}
+`)
+	want := `holder
+push value
+2 [1 2]
+holder
+field swap left
+field swap right
+[2 1]
+holder
+field sort comparator
+[1 2]
+list
+swap left
+swap right
+&[2 1 3 5 4]
+list
+&[5 4 3 2 1]
+sort comparator
+&[1 2 3 4 5]
+`
+	if got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+}

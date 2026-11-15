@@ -7554,13 +7554,24 @@ func (l *lowerer) lowerListSwap(fn air.Function, expr air.Expr) (loweredExpr, er
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	stmts, err := l.sequenceOperandTriple(&target, expr.Target, &left, &expr.Args[0], &right, expr.Args[1].Type)
+	target.expr = l.valueThroughReference(expr.Target.Type, target.expr)
+	ops := [3]operand{
+		placeOperand(target, expr.Target),
+		sourcedOperand(left, expr.Args[0].Type, &expr.Args[0]),
+		sourcedOperand(right, expr.Args[1].Type, &expr.Args[1]),
+	}
+	stmts, err := l.sequenceOperands(ops[:])
 	if err != nil {
 		return loweredExpr{}, err
 	}
+	// The receiver is used four times and the indexes are evaluated below.
+	if stmts, err = l.evaluateOnce(stmts, &ops[0]); err != nil {
+		return loweredExpr{}, err
+	}
+	targetExpr := ops[0].expr
+	left.expr, right.expr = ops[1].expr, ops[2].expr
 	leftName := l.nextTemp()
 	rightName := l.nextTemp()
-	targetExpr := l.valueThroughReference(expr.Target.Type, target.expr)
 	stmts = append(stmts,
 		&ast.AssignStmt{Lhs: []ast.Expr{l.ident(leftName)}, Tok: token.DEFINE, Rhs: []ast.Expr{left.expr}},
 		&ast.AssignStmt{Lhs: []ast.Expr{l.ident(rightName)}, Tok: token.DEFINE, Rhs: []ast.Expr{right.expr}},
@@ -7632,12 +7643,22 @@ func (l *lowerer) lowerListSort(fn air.Function, expr air.Expr) (loweredExpr, er
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	stmts, err := l.sequenceOperandPair(&target, expr.Target, &cmp, expr.Args[0].Type)
+	target.expr = l.valueThroughReference(expr.Target.Type, target.expr)
+	ops := [2]operand{placeOperand(target, expr.Target), sourcedOperand(cmp, expr.Args[0].Type, &expr.Args[0])}
+	stmts, err := l.sequenceOperands(ops[:])
 	if err != nil {
 		return loweredExpr{}, err
 	}
+	// The less function uses the receiver and calls the comparator once per
+	// comparison.
+	for i := range ops {
+		if stmts, err = l.evaluateOnce(stmts, &ops[i]); err != nil {
+			return loweredExpr{}, err
+		}
+	}
+	targetExpr := ops[0].expr
+	cmp.expr = ops[1].expr
 	sortAlias := l.registerImport("sort", "sort")
-	targetExpr := l.valueThroughReference(expr.Target.Type, target.expr)
 	lessFunc := &ast.FuncLit{
 		Type: &ast.FuncType{
 			Params: &ast.FieldList{List: []*ast.Field{
@@ -7707,6 +7728,10 @@ func (l *lowerer) lowerListPush(fn air.Function, expr air.Expr) (loweredExpr, er
 	ops := [2]operand{placeOperand(loweredExpr{stmts: targetStmts, expr: target}, expr.Target), valueOperand(value, valueType)}
 	stmts, err := l.sequenceOperands(ops[:])
 	if err != nil {
+		return loweredExpr{}, err
+	}
+	// The target is used three times; the value is evaluated in the append.
+	if stmts, err = l.evaluateOnce(stmts, &ops[0]); err != nil {
 		return loweredExpr{}, err
 	}
 	target, valueExpr := ops[0].expr, ops[1].expr
