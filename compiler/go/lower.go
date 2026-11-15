@@ -2664,10 +2664,8 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		return loweredExpr{expr: value}, nil
 	case air.ExprUnionWrap:
 		return l.lowerUnionWrap(fn, expr)
-	case air.ExprMatchUnion:
-		return l.lowerMatchUnion(fn, expr)
-	case air.ExprMatchForeignType:
-		return l.lowerMatchForeignType(fn, expr)
+	case air.ExprMatch:
+		return l.lowerMatch(fn, expr)
 	case air.ExprScalarConvert:
 		if expr.Target == nil {
 			return loweredExpr{}, fmt.Errorf("scalar convert missing target")
@@ -2918,16 +2916,8 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		return l.lowerResultIsOk(fn, expr)
 	case air.ExprResultIsErr:
 		return l.lowerResultIsErr(fn, expr)
-	case air.ExprMatchResult:
-		return l.lowerMatchResult(fn, expr)
 	case air.ExprTryResult:
 		return l.lowerTryResult(fn, expr)
-	case air.ExprMatchEnum:
-		return l.lowerMatchEnum(fn, expr)
-	case air.ExprMatchInt:
-		return l.lowerMatchInt(fn, expr)
-	case air.ExprMatchStr:
-		return l.lowerMatchStr(fn, expr)
 	case air.ExprMakeList:
 		return l.lowerMakeList(fn, expr)
 	case air.ExprMakeListSized:
@@ -6006,280 +5996,6 @@ func (l *lowerer) lowerUnionWrap(fn air.Function, expr air.Expr) (loweredExpr, e
 	}}}, nil
 }
 
-func (l *lowerer) lowerMatchUnion(fn air.Function, expr air.Expr) (loweredExpr, error) {
-	if expr.Target == nil {
-		return loweredExpr{}, fmt.Errorf("union match missing target")
-	}
-	payload := expr.UnionMatchPayload()
-	if payload == nil {
-		return loweredExpr{}, fmt.Errorf("union match is missing its payload")
-	}
-	target, err := l.lowerExpr(fn, *expr.Target)
-	if err != nil {
-		return loweredExpr{}, err
-	}
-	if !validTypeID(l.program, expr.Target.Type) {
-		return loweredExpr{}, fmt.Errorf("invalid union target type %d", expr.Target.Type)
-	}
-	unionType := l.program.Types[expr.Target.Type-1]
-	resultExpr := l.ident("nil")
-	stmts := append([]ast.Stmt{}, target.stmts...)
-	var assignTarget ast.Expr
-	if !l.isVoidType(expr.Type) {
-		temp := l.nextTemp()
-		decls, err := l.declareTemp(expr.Type, temp)
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		stmts = append(stmts, decls...)
-		assignTarget = l.ident(temp)
-		resultExpr = l.ident(temp)
-	}
-	cases := make([]ast.Stmt, 0, len(payload.Cases)+1)
-	for _, unionCase := range payload.Cases {
-		fieldName := ""
-		for _, member := range unionType.Members {
-			if member.Tag == unionCase.Tag {
-				fieldName = unionMemberFieldName(unionType, member)
-				break
-			}
-		}
-		if fieldName == "" {
-			return loweredExpr{}, fmt.Errorf("invalid union case tag %d", unionCase.Tag)
-		}
-		localName := l.localName(fn, unionCase.Local)
-		l.declaredLocals[unionCase.Local] = true
-		bind := &ast.AssignStmt{Lhs: []ast.Expr{l.ident(localName)}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.SelectorExpr{X: target.expr, Sel: l.ident(fieldName)}}}
-		body, err := l.lowerValueBlock(fn, unionCase.Body, expr.Type, assignTarget)
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		body = append([]ast.Stmt{bind, &ast.AssignStmt{Lhs: []ast.Expr{l.ident("_")}, Tok: token.ASSIGN, Rhs: []ast.Expr{l.ident(localName)}}}, body...)
-		cases = append(cases, &ast.CaseClause{List: []ast.Expr{&ast.BasicLit{Kind: token.INT, Value: fmt.Sprintf("%d", unionCase.Tag)}}, Body: body})
-	}
-	if len(payload.CatchAll.Stmts) > 0 || payload.CatchAll.Result != nil {
-		body, err := l.lowerValueBlock(fn, payload.CatchAll, expr.Type, assignTarget)
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		cases = append(cases, &ast.CaseClause{Body: body})
-	}
-	stmts = append(stmts, &ast.SwitchStmt{Tag: &ast.SelectorExpr{X: target.expr, Sel: l.ident(unionTagFieldName(unionType))}, Body: &ast.BlockStmt{List: cases}})
-	return loweredExpr{stmts: stmts, expr: resultExpr}, nil
-}
-
-// lowerMatchForeignType lowers a dynamic foreign type test (ADR 0042) to a Go
-// type switch over the subject's dynamic type.
-func (l *lowerer) lowerMatchForeignType(fn air.Function, expr air.Expr) (loweredExpr, error) {
-	payload := expr.ForeignMatchPayload()
-	if payload == nil {
-		return loweredExpr{}, fmt.Errorf("foreign type match is missing its payload")
-	}
-	if expr.Target == nil {
-		return loweredExpr{}, fmt.Errorf("foreign type match missing target")
-	}
-	target, err := l.lowerExpr(fn, *expr.Target)
-	if err != nil {
-		return loweredExpr{}, err
-	}
-	resultExpr := l.ident("nil")
-	stmts := append([]ast.Stmt{}, target.stmts...)
-	var assignTarget ast.Expr
-	if !l.isVoidType(expr.Type) {
-		temp := l.nextTemp()
-		decls, err := l.declareTemp(expr.Type, temp)
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		stmts = append(stmts, decls...)
-		assignTarget = l.ident(temp)
-		resultExpr = l.ident(temp)
-	}
-	switchLocal := l.nextTemp()
-	cases := make([]ast.Stmt, 0, len(payload.Cases)+1)
-	for _, foreignCase := range payload.Cases {
-		caseType, err := l.goType(foreignCase.Type)
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		body, err := l.lowerValueBlock(fn, foreignCase.Body, expr.Type, assignTarget)
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		if foreignCase.Bound {
-			localName := l.localName(fn, foreignCase.Local)
-			l.declaredLocals[foreignCase.Local] = true
-			bind := &ast.AssignStmt{Lhs: []ast.Expr{l.ident(localName)}, Tok: token.DEFINE, Rhs: []ast.Expr{l.ident(switchLocal)}}
-			discard := &ast.AssignStmt{Lhs: []ast.Expr{l.ident("_")}, Tok: token.ASSIGN, Rhs: []ast.Expr{l.ident(localName)}}
-			body = append([]ast.Stmt{bind, discard}, body...)
-		}
-		cases = append(cases, &ast.CaseClause{List: []ast.Expr{caseType}, Body: body})
-	}
-	catchAll, err := l.lowerValueBlock(fn, payload.CatchAll, expr.Type, assignTarget)
-	if err != nil {
-		return loweredExpr{}, err
-	}
-	cases = append(cases, &ast.CaseClause{Body: catchAll})
-	anyBound := false
-	for _, foreignCase := range payload.Cases {
-		if foreignCase.Bound {
-			anyBound = true
-			break
-		}
-	}
-	typeSwitch := &ast.TypeSwitchStmt{Body: &ast.BlockStmt{List: cases}}
-	if anyBound {
-		typeSwitch.Assign = &ast.AssignStmt{Lhs: []ast.Expr{l.ident(switchLocal)}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.TypeAssertExpr{X: target.expr, Type: nil}}}
-	} else {
-		typeSwitch.Assign = &ast.ExprStmt{X: &ast.TypeAssertExpr{X: target.expr, Type: nil}}
-	}
-	stmts = append(stmts, typeSwitch)
-	return loweredExpr{stmts: stmts, expr: resultExpr}, nil
-}
-
-func (l *lowerer) lowerMatchInt(fn air.Function, expr air.Expr) (loweredExpr, error) {
-	payload := expr.IntMatchPayload()
-	if payload == nil {
-		return loweredExpr{}, fmt.Errorf("int match is missing its payload")
-	}
-	if expr.Target == nil {
-		return loweredExpr{}, fmt.Errorf("int match missing target")
-	}
-	target, err := l.lowerExpr(fn, *expr.Target)
-	if err != nil {
-		return loweredExpr{}, err
-	}
-	resultTypeID := expr.Type
-	resultExpr := l.ident("nil")
-	stmts := append([]ast.Stmt{}, target.stmts...)
-	var assignTarget ast.Expr
-	if !l.isVoidType(resultTypeID) {
-		temp := l.nextTemp()
-		decls, err := l.declareTemp(resultTypeID, temp)
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		stmts = append(stmts, decls...)
-		assignTarget = l.ident(temp)
-		resultExpr = l.ident(temp)
-	}
-	cases := make([]ast.Stmt, 0, len(payload.Cases)+len(payload.RangeCases)+1)
-	for _, intCase := range payload.Cases {
-		body, err := l.lowerValueBlock(fn, intCase.Body, resultTypeID, assignTarget)
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		cases = append(cases, &ast.CaseClause{List: []ast.Expr{&ast.BinaryExpr{X: target.expr, Op: token.EQL, Y: &ast.BasicLit{Kind: token.INT, Value: fmt.Sprintf("%d", intCase.Value)}}}, Body: body})
-	}
-	for _, rangeCase := range payload.RangeCases {
-		body, err := l.lowerValueBlock(fn, rangeCase.Body, resultTypeID, assignTarget)
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		cond := &ast.BinaryExpr{X: &ast.BinaryExpr{X: target.expr, Op: token.GEQ, Y: &ast.BasicLit{Kind: token.INT, Value: fmt.Sprintf("%d", rangeCase.Start)}}, Op: token.LAND, Y: &ast.BinaryExpr{X: target.expr, Op: token.LEQ, Y: &ast.BasicLit{Kind: token.INT, Value: fmt.Sprintf("%d", rangeCase.End)}}}
-		cases = append(cases, &ast.CaseClause{List: []ast.Expr{cond}, Body: body})
-	}
-	if len(payload.CatchAll.Stmts) > 0 || payload.CatchAll.Result != nil {
-		body, err := l.lowerValueBlock(fn, payload.CatchAll, resultTypeID, assignTarget)
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		cases = append(cases, &ast.CaseClause{Body: body})
-	}
-	stmts = append(stmts, &ast.SwitchStmt{Tag: l.ident("true"), Body: &ast.BlockStmt{List: cases}})
-	return loweredExpr{stmts: stmts, expr: resultExpr}, nil
-}
-
-func (l *lowerer) lowerMatchStr(fn air.Function, expr air.Expr) (loweredExpr, error) {
-	payload := expr.StrMatchPayload()
-	if payload == nil {
-		return loweredExpr{}, fmt.Errorf("str match is missing its payload")
-	}
-	if expr.Target == nil {
-		return loweredExpr{}, fmt.Errorf("str match missing target")
-	}
-	target, err := l.lowerExpr(fn, *expr.Target)
-	if err != nil {
-		return loweredExpr{}, err
-	}
-	resultTypeID := expr.Type
-	resultExpr := l.ident("nil")
-	stmts := append([]ast.Stmt{}, target.stmts...)
-	var assignTarget ast.Expr
-	if !l.isVoidType(resultTypeID) {
-		temp := l.nextTemp()
-		decls, err := l.declareTemp(resultTypeID, temp)
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		stmts = append(stmts, decls...)
-		assignTarget = l.ident(temp)
-		resultExpr = l.ident(temp)
-	}
-	cases := make([]ast.Stmt, 0, len(payload.Cases)+1)
-	for _, strCase := range payload.Cases {
-		body, err := l.lowerValueBlock(fn, strCase.Body, resultTypeID, assignTarget)
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		cases = append(cases, &ast.CaseClause{List: []ast.Expr{&ast.BasicLit{Kind: token.STRING, Value: strconv.Quote(strCase.Value)}}, Body: body})
-	}
-	body, err := l.lowerValueBlock(fn, payload.CatchAll, resultTypeID, assignTarget)
-	if err != nil {
-		return loweredExpr{}, err
-	}
-	cases = append(cases, &ast.CaseClause{Body: body})
-	stmts = append(stmts, &ast.SwitchStmt{Tag: target.expr, Body: &ast.BlockStmt{List: cases}})
-	return loweredExpr{stmts: stmts, expr: resultExpr}, nil
-}
-
-func (l *lowerer) lowerMatchEnum(fn air.Function, expr air.Expr) (loweredExpr, error) {
-	payload := expr.EnumMatchPayload()
-	if payload == nil {
-		return loweredExpr{}, fmt.Errorf("enum match is missing its payload")
-	}
-	if expr.Target == nil {
-		return loweredExpr{}, fmt.Errorf("enum match missing target")
-	}
-	target, err := l.lowerExpr(fn, *expr.Target)
-	if err != nil {
-		return loweredExpr{}, err
-	}
-	resultExpr := l.ident("nil")
-	stmts := append([]ast.Stmt{}, target.stmts...)
-	var assignTarget ast.Expr
-	if !l.isVoidType(expr.Type) {
-		temp := l.nextTemp()
-		decls, err := l.declareTemp(expr.Type, temp)
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		stmts = append(stmts, decls...)
-		assignTarget = l.ident(temp)
-		resultExpr = l.ident(temp)
-	}
-	cases := make([]ast.Stmt, 0, len(payload.Cases)+1)
-	for _, enumCase := range payload.Cases {
-		body, err := l.lowerValueBlock(fn, enumCase.Body, expr.Type, assignTarget)
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		cases = append(cases, &ast.CaseClause{
-			List: []ast.Expr{&ast.BasicLit{Kind: token.INT, Value: fmt.Sprintf("%d", enumCase.Discriminant)}},
-			Body: body,
-		})
-	}
-	if len(payload.CatchAll.Stmts) > 0 || payload.CatchAll.Result != nil {
-		body, err := l.lowerValueBlock(fn, payload.CatchAll, expr.Type, assignTarget)
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		cases = append(cases, &ast.CaseClause{Body: body})
-	}
-	stmts = append(stmts, &ast.SwitchStmt{Tag: target.expr, Body: &ast.BlockStmt{List: cases}})
-	return loweredExpr{stmts: stmts, expr: resultExpr}, nil
-}
-
 func (l *lowerer) lowerMaybeExpect(fn air.Function, expr air.Expr) (loweredExpr, error) {
 	if expr.Target == nil {
 		return loweredExpr{}, fmt.Errorf("maybe expect missing target")
@@ -6889,63 +6605,6 @@ func (l *lowerer) lowerResultAndThen(fn air.Function, expr air.Expr) (loweredExp
 				}}},
 			},
 		}},
-	})
-	return loweredExpr{stmts: stmts, expr: resultExpr}, nil
-}
-
-func (l *lowerer) lowerMatchResult(fn air.Function, expr air.Expr) (loweredExpr, error) {
-	payload := expr.ResultMatchPayload()
-	if payload == nil {
-		return loweredExpr{}, fmt.Errorf("result match is missing its payload")
-	}
-	if expr.Target == nil {
-		return loweredExpr{}, fmt.Errorf("result match missing target")
-	}
-	target, err := l.lowerExpr(fn, *expr.Target)
-	if err != nil {
-		return loweredExpr{}, err
-	}
-	targetTemp := l.nextTemp()
-	targetDecls, err := l.declareTemp(expr.Target.Type, targetTemp)
-	if err != nil {
-		return loweredExpr{}, err
-	}
-	targetExpr := l.ident(targetTemp)
-	resultExpr := l.ident("nil")
-	stmts := append([]ast.Stmt{}, target.stmts...)
-	stmts = append(stmts, targetDecls...)
-	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{targetExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{target.expr}})
-	var assignTarget ast.Expr
-	if !l.isVoidType(expr.Type) {
-		temp := l.nextTemp()
-		decls, err := l.declareTemp(expr.Type, temp)
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		stmts = append(stmts, decls...)
-		assignTarget = l.ident(temp)
-		resultExpr = l.ident(temp)
-	}
-	okName := l.localName(fn, payload.OkLocal)
-	errName := l.localName(fn, payload.ErrLocal)
-	l.declaredLocals[payload.OkLocal] = true
-	l.declaredLocals[payload.ErrLocal] = true
-	okBind := &ast.AssignStmt{Lhs: []ast.Expr{l.ident(okName)}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.SelectorExpr{X: targetExpr, Sel: l.ident("Value")}}}
-	errBind := &ast.AssignStmt{Lhs: []ast.Expr{l.ident(errName)}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.SelectorExpr{X: targetExpr, Sel: l.ident("Err")}}}
-	okBody, err := l.lowerValueBlock(fn, payload.Ok, expr.Type, assignTarget)
-	if err != nil {
-		return loweredExpr{}, err
-	}
-	okBody = append([]ast.Stmt{okBind, &ast.AssignStmt{Lhs: []ast.Expr{l.ident("_")}, Tok: token.ASSIGN, Rhs: []ast.Expr{l.ident(okName)}}}, okBody...)
-	errBody, err := l.lowerValueBlock(fn, payload.Err, expr.Type, assignTarget)
-	if err != nil {
-		return loweredExpr{}, err
-	}
-	errBody = append([]ast.Stmt{errBind, &ast.AssignStmt{Lhs: []ast.Expr{l.ident("_")}, Tok: token.ASSIGN, Rhs: []ast.Expr{l.ident(errName)}}}, errBody...)
-	stmts = append(stmts, &ast.IfStmt{
-		Cond: &ast.SelectorExpr{X: targetExpr, Sel: l.ident("Ok")},
-		Body: &ast.BlockStmt{List: okBody},
-		Else: &ast.BlockStmt{List: errBody},
 	})
 	return loweredExpr{stmts: stmts, expr: resultExpr}, nil
 }
@@ -9088,40 +8747,13 @@ func walkExpr(expr air.Expr, visit func(air.Expr)) {
 		}
 		walkBlockExprs(payload.Then, visit)
 		walkBlockExprs(payload.Else, visit)
-	case *air.EnumMatchExprPayload:
-		for i := range payload.Cases {
-			walkBlockExprs(payload.Cases[i].Body, visit)
+	case *air.MatchExprPayload:
+		for i := range payload.Arms {
+			walkBlockExprs(payload.Arms[i].Body, visit)
 		}
-		walkBlockExprs(payload.CatchAll, visit)
-	case *air.IntMatchExprPayload:
-		for i := range payload.Cases {
-			walkBlockExprs(payload.Cases[i].Body, visit)
-		}
-		for i := range payload.RangeCases {
-			walkBlockExprs(payload.RangeCases[i].Body, visit)
-		}
-		walkBlockExprs(payload.CatchAll, visit)
-	case *air.StrMatchExprPayload:
-		for i := range payload.Cases {
-			walkBlockExprs(payload.Cases[i].Body, visit)
-		}
-		walkBlockExprs(payload.CatchAll, visit)
-	case *air.UnionMatchExprPayload:
-		for i := range payload.Cases {
-			walkBlockExprs(payload.Cases[i].Body, visit)
-		}
-		walkBlockExprs(payload.CatchAll, visit)
-	case *air.ForeignMatchExprPayload:
-		for i := range payload.Cases {
-			walkBlockExprs(payload.Cases[i].Body, visit)
-		}
-		walkBlockExprs(payload.CatchAll, visit)
 	case *air.MaybeMatchExprPayload:
 		walkBlockExprs(payload.Some, visit)
 		walkBlockExprs(payload.None, visit)
-	case *air.ResultMatchExprPayload:
-		walkBlockExprs(payload.Ok, visit)
-		walkBlockExprs(payload.Err, visit)
 	case *air.TryExprPayload:
 		walkBlockExprs(payload.Catch, visit)
 	case *air.SelectExprPayload:

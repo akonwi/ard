@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted. Extends ADR 0038.
+Accepted. Extends ADR 0038. Extended by ADR 0083, which adds tuple
+`match` patterns.
 
 ## Context
 

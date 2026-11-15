@@ -373,10 +373,10 @@ func TestADR0057MaybeMatchReferenceLocalMetadataAgreesWithType(t *testing.T) {
 	`)
 
 	read := findFunction(t, program, "read")
-	if read.Body.Result == nil || read.Body.Result.Kind != ExprMatchMaybe {
+	if read.Body.Result == nil || read.Body.Result.Kind != ExprMatch {
 		t.Fatalf("read body = %#v", read.Body)
 	}
-	local := read.Locals[read.Body.Result.MaybeMatchPayload().SomeLocal]
+	local := read.Locals[read.Body.Result.MatchPayload().Arms[0].Bindings[0].Local]
 	if typeKind(t, program, local.Type) != TypeReference || !local.Reference {
 		t.Fatalf("some local = %#v, want reference type and live-storage metadata", local)
 	}

@@ -3069,14 +3069,8 @@ func (fl *functionLowerer) lowerExprWithExpectedRaw(expr checker.Expression, exp
 			return fl.lowerErrorConstructor(expected, call)
 		}
 	}
-	if match, ok := expr.(*checker.BoolMatch); ok {
-		return fl.lowerBoolMatch(expected, match)
-	}
-	if match, ok := expr.(*checker.IntMatch); ok {
-		return fl.lowerIntMatch(expected, match)
-	}
-	if match, ok := expr.(*checker.StrMatch); ok {
-		return fl.lowerStrMatch(expected, match)
+	if match, ok := expr.(*checker.PatternMatch); ok {
+		return fl.lowerPatternMatch(expected, match)
 	}
 	if ifExpr, ok := expr.(*checker.If); ok {
 		return fl.lowerIf(expected, ifExpr)
@@ -4482,18 +4476,8 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		return fl.lowerMapMethod(typeID, e)
 	case *checker.EnumVariant:
 		return &Expr{Kind: ExprEnumVariant, Type: typeID, Payload: &EnumExprPayload{Variant: int(e.Variant), Discriminant: e.Discriminant}}, nil
-	case *checker.BoolMatch:
-		return fl.lowerBoolMatch(typeID, e)
-	case *checker.IntMatch:
-		return fl.lowerIntMatch(typeID, e)
-	case *checker.StrMatch:
-		return fl.lowerStrMatch(typeID, e)
-	case *checker.EnumMatch:
-		return fl.lowerEnumMatch(typeID, e)
-	case *checker.UnionMatch:
-		return fl.lowerUnionMatch(typeID, e)
-	case *checker.ForeignTypeMatch:
-		return fl.lowerForeignTypeMatch(typeID, e)
+	case *checker.PatternMatch:
+		return fl.lowerPatternMatch(typeID, e)
 	case *checker.MaybeMethod:
 		return fl.lowerMaybeMethod(typeID, e)
 	case *checker.OptionMatch:
@@ -4502,8 +4486,6 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		return fl.lowerSelect(typeID, e)
 	case *checker.ResultMethod:
 		return fl.lowerResultMethod(typeID, e)
-	case *checker.ResultMatch:
-		return fl.lowerResultMatch(typeID, e)
 	case *checker.TryOp:
 		return fl.lowerTryOp(typeID, e)
 	case *checker.IntAddition:
@@ -4765,25 +4747,6 @@ func (fl *functionLowerer) lowerMaybeConstructor(kind ExprKind, typeID TypeID, c
 	}
 }
 
-func (fl *functionLowerer) lowerBoolMatch(typeID TypeID, match *checker.BoolMatch) (*Expr, error) {
-	condition, err := fl.lowerExpr(match.Subject)
-	if err != nil {
-		return nil, err
-	}
-	if match.True == nil || match.False == nil {
-		return nil, fmt.Errorf("Bool match missing branch")
-	}
-	trueBlock, err := fl.lowerBlockWithDefault(match.True.Stmts, typeID)
-	if err != nil {
-		return nil, err
-	}
-	falseBlock, err := fl.lowerBlockWithDefault(match.False.Stmts, typeID)
-	if err != nil {
-		return nil, err
-	}
-	return &Expr{Kind: ExprIf, Type: typeID, Payload: &IfExprPayload{Condition: condition, Then: trueBlock, Else: falseBlock}}, nil
-}
-
 func (fl *functionLowerer) lowerListLiteral(typeID TypeID, list *checker.ListLiteral, elem TypeID) (*Expr, error) {
 	args := make([]Expr, len(list.Elements))
 	for i, item := range list.Elements {
@@ -4892,218 +4855,6 @@ func (fl *functionLowerer) lowerMapLiteral(typeID TypeID, m *checker.MapLiteral,
 		entries[i] = MapEntry{Key: *key, Value: *value}
 	}
 	return &Expr{Kind: ExprMakeMap, Type: typeID, Payload: &AggregateExprPayload{Entries: entries}}, nil
-}
-
-func (fl *functionLowerer) lowerEnumMatch(typeID TypeID, match *checker.EnumMatch) (*Expr, error) {
-	subject, err := fl.lowerExpr(match.Subject)
-	if err != nil {
-		return nil, err
-	}
-	enumType, ok := fl.l.typeInfo(subject.Type)
-	if !ok || enumType.Kind != TypeEnum {
-		return nil, fmt.Errorf("enum match lowered with non-enum subject %s", match.Subject.Type().String())
-	}
-
-	cases := make([]EnumMatchCase, 0, len(match.Cases))
-	for variant, block := range match.Cases {
-		if block == nil {
-			continue
-		}
-		if variant < 0 || variant >= len(enumType.Variants) {
-			return nil, fmt.Errorf("enum match case index %d out of range for %s", variant, enumType.Name)
-		}
-		lowered, err := fl.lowerBlockWithDefault(block.Stmts, typeID)
-		if err != nil {
-			return nil, err
-		}
-		cases = append(cases, EnumMatchCase{
-			Variant:      variant,
-			Discriminant: enumType.Variants[variant].Discriminant,
-			Body:         lowered,
-		})
-	}
-
-	var catchAll Block
-	if match.CatchAll != nil {
-		catchAll, err = fl.lowerBlockWithDefault(match.CatchAll.Stmts, typeID)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	return &Expr{Kind: ExprMatchEnum, Type: typeID, Target: subject, Payload: &EnumMatchExprPayload{Cases: cases, CatchAll: catchAll}}, nil
-}
-
-func (fl *functionLowerer) lowerIntMatch(typeID TypeID, match *checker.IntMatch) (*Expr, error) {
-	subject, err := fl.lowerExpr(match.Subject)
-	if err != nil {
-		return nil, err
-	}
-	subjectType, ok := fl.l.typeInfo(subject.Type)
-	if !ok || (subjectType.Kind != TypeInt && subjectType.Kind != TypeByte && subjectType.Kind != TypeRune) {
-		return nil, fmt.Errorf("int match lowered with non-integer subject %s", match.Subject.Type().String())
-	}
-
-	intValues := make([]int, 0, len(match.IntCases))
-	for value := range match.IntCases {
-		intValues = append(intValues, value)
-	}
-	sort.Ints(intValues)
-	intCases := make([]IntMatchCase, 0, len(intValues))
-	for _, value := range intValues {
-		block := match.IntCases[value]
-		if block == nil {
-			continue
-		}
-		lowered, err := fl.lowerBlockWithDefault(block.Stmts, typeID)
-		if err != nil {
-			return nil, err
-		}
-		intCases = append(intCases, IntMatchCase{Value: value, Body: lowered})
-	}
-
-	ranges := make([]checker.IntRange, 0, len(match.RangeCases))
-	for intRange := range match.RangeCases {
-		ranges = append(ranges, intRange)
-	}
-	sort.Slice(ranges, func(i, j int) bool {
-		if ranges[i].Start == ranges[j].Start {
-			return ranges[i].End < ranges[j].End
-		}
-		return ranges[i].Start < ranges[j].Start
-	})
-	rangeCases := make([]IntRangeMatchCase, 0, len(ranges))
-	for _, intRange := range ranges {
-		block := match.RangeCases[intRange]
-		if block == nil {
-			continue
-		}
-		lowered, err := fl.lowerBlockWithDefault(block.Stmts, typeID)
-		if err != nil {
-			return nil, err
-		}
-		rangeCases = append(rangeCases, IntRangeMatchCase{Start: intRange.Start, End: intRange.End, Body: lowered})
-	}
-
-	var catchAll Block
-	if match.CatchAll != nil {
-		catchAll, err = fl.lowerBlockWithDefault(match.CatchAll.Stmts, typeID)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	return &Expr{Kind: ExprMatchInt, Type: typeID, Target: subject, Payload: &IntMatchExprPayload{Cases: intCases, RangeCases: rangeCases, CatchAll: catchAll}}, nil
-}
-
-func (fl *functionLowerer) lowerStrMatch(typeID TypeID, match *checker.StrMatch) (*Expr, error) {
-	subject, err := fl.lowerExpr(match.Subject)
-	if err != nil {
-		return nil, err
-	}
-	subjectType, ok := fl.l.typeInfo(subject.Type)
-	if !ok || subjectType.Kind != TypeStr {
-		return nil, fmt.Errorf("str match lowered with non-str subject %s", match.Subject.Type().String())
-	}
-
-	values := make([]string, 0, len(match.Cases))
-	for value := range match.Cases {
-		values = append(values, value)
-	}
-	sort.Strings(values)
-	strCases := make([]StrMatchCase, 0, len(values))
-	for _, value := range values {
-		block := match.Cases[value]
-		if block == nil {
-			continue
-		}
-		lowered, err := fl.lowerBlockWithDefault(block.Stmts, typeID)
-		if err != nil {
-			return nil, err
-		}
-		strCases = append(strCases, StrMatchCase{Value: value, Body: lowered})
-	}
-
-	var catchAll Block
-	if match.CatchAll != nil {
-		catchAll, err = fl.lowerBlockWithDefault(match.CatchAll.Stmts, typeID)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	return &Expr{Kind: ExprMatchStr, Type: typeID, Target: subject, Payload: &StrMatchExprPayload{Cases: strCases, CatchAll: catchAll}}, nil
-}
-
-func (fl *functionLowerer) lowerUnionMatch(typeID TypeID, match *checker.UnionMatch) (*Expr, error) {
-	subject, err := fl.lowerExpr(match.Subject)
-	if err != nil {
-		return nil, err
-	}
-	unionType, ok := fl.l.typeInfo(subject.Type)
-	if !ok || unionType.Kind != TypeUnion {
-		return nil, fmt.Errorf("union match lowered with non-union subject %s", match.Subject.Type().String())
-	}
-
-	cases := make([]UnionMatchCase, 0, len(match.TypeCasesByIndex))
-	for memberIndex, member := range unionType.Members {
-		matchCase := match.TypeCasesByIndex[memberIndex]
-		if matchCase == nil {
-			continue
-		}
-		local, body, err := fl.lowerBoundBlockWithDefault(matchCase.Pattern.Name, member.Type, matchCase.Body.Stmts, typeID)
-		if err != nil {
-			return nil, err
-		}
-		cases = append(cases, UnionMatchCase{Tag: member.Tag, Local: local, Body: body})
-	}
-
-	var catchAll Block
-	if match.CatchAll != nil {
-		catchAll, err = fl.lowerBlockWithDefault(match.CatchAll.Stmts, typeID)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	return &Expr{Kind: ExprMatchUnion, Type: typeID, Target: subject, Payload: &UnionMatchExprPayload{Cases: cases, CatchAll: catchAll}}, nil
-}
-
-func (fl *functionLowerer) lowerForeignTypeMatch(typeID TypeID, match *checker.ForeignTypeMatch) (*Expr, error) {
-	subject, err := fl.lowerExpr(match.Subject)
-	if err != nil {
-		return nil, err
-	}
-	cases := make([]ForeignTypeMatchCase, 0, len(match.Cases))
-	for _, matchCase := range match.Cases {
-		if matchCase.Body == nil {
-			continue
-		}
-		caseTypeID, err := fl.l.internType(matchCase.Type)
-		if err != nil {
-			return nil, err
-		}
-		bound := matchCase.Binding != "" && matchCase.Binding != "_"
-		var local LocalID
-		var body Block
-		if bound {
-			local, body, err = fl.lowerBoundBlockWithDefault(matchCase.Binding, caseTypeID, matchCase.Body.Stmts, typeID)
-		} else {
-			body, err = fl.lowerBlockWithDefault(matchCase.Body.Stmts, typeID)
-		}
-		if err != nil {
-			return nil, err
-		}
-		cases = append(cases, ForeignTypeMatchCase{Type: caseTypeID, Local: local, Bound: bound, Body: body})
-	}
-	if match.CatchAll == nil {
-		return nil, fmt.Errorf("foreign type match missing catch-all")
-	}
-	catchAll, err := fl.lowerBlockWithDefault(match.CatchAll.Stmts, typeID)
-	if err != nil {
-		return nil, err
-	}
-	return &Expr{Kind: ExprMatchForeignType, Type: typeID, Target: subject, Payload: &ForeignMatchExprPayload{Cases: cases, CatchAll: catchAll}}, nil
 }
 
 func (fl *functionLowerer) lowerOptionMatch(typeID TypeID, match *checker.OptionMatch) (*Expr, error) {
@@ -5362,34 +5113,6 @@ func (fl *functionLowerer) lowerMapMethod(typeID TypeID, method *checker.MapMeth
 		return nil, err
 	}
 	return &Expr{Kind: kind, Type: typeID, Target: target, Args: args}, nil
-}
-
-func (fl *functionLowerer) lowerResultMatch(typeID TypeID, match *checker.ResultMatch) (*Expr, error) {
-	subject, err := fl.lowerExpr(match.Subject)
-	if err != nil {
-		return nil, err
-	}
-	resultType, ok := fl.l.typeInfo(subject.Type)
-	if !ok || resultType.Kind != TypeResult {
-		return nil, fmt.Errorf("Result match lowered with non-Result subject %s", match.Subject.Type().String())
-	}
-	if match.Ok == nil || match.Ok.Pattern == nil || match.Ok.Body == nil {
-		return nil, fmt.Errorf("Result match missing ok case")
-	}
-	if match.Err == nil || match.Err.Pattern == nil || match.Err.Body == nil {
-		return nil, fmt.Errorf("Result match missing err case")
-	}
-
-	okLocal, okBlock, err := fl.lowerBoundBlockWithDefault(match.Ok.Pattern.Name, resultType.Value, match.Ok.Body.Stmts, typeID)
-	if err != nil {
-		return nil, err
-	}
-	errLocal, errBlock, err := fl.lowerBoundBlockWithDefault(match.Err.Pattern.Name, resultType.Error, match.Err.Body.Stmts, typeID)
-	if err != nil {
-		return nil, err
-	}
-
-	return &Expr{Kind: ExprMatchResult, Type: typeID, Target: subject, Payload: &ResultMatchExprPayload{OkLocal: okLocal, ErrLocal: errLocal, Ok: okBlock, Err: errBlock}}, nil
 }
 
 func (fl *functionLowerer) lowerResultMethod(typeID TypeID, method *checker.ResultMethod) (*Expr, error) {

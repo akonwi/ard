@@ -100,7 +100,9 @@ const (
 	// ExprTraitRefProject widens a concrete mutable reference to the trait's
 	// native interface while preserving its concrete pointer (ADR 0061).
 	ExprTraitRefProject
-	ExprMatchForeignType
+	// ExprMatch runs a compiled pattern match (ADR 0083). Args are the
+	// subjects and the MatchExprPayload carries the decision tree.
+	ExprMatch
 	// ExprScalarConvert converts Target's foreign named scalar value to the
 	// primitive scalar named by Type (for example Go's string(v)). It also
 	// carries the lossless `T::from` tier and implicit foreign scalar
@@ -118,7 +120,6 @@ const (
 	ExprMakeClosure
 	ExprCallClosure
 	ExprUnionWrap
-	ExprMatchUnion
 	ExprTraitUpcast
 	ExprCallTrait
 	ExprMakeList
@@ -204,9 +205,6 @@ const (
 	ExprMakeResultOk
 	ExprMakeResultErr
 	ExprEnumVariant
-	ExprMatchEnum
-	ExprMatchInt
-	ExprMatchStr
 	ExprMakeMaybeSome
 	ExprMakeMaybeNone
 	ExprMakeMaybeNew
@@ -220,7 +218,6 @@ const (
 	ExprMaybeAndThen
 	ExprMaybeSet
 	ExprMaybeClear
-	ExprMatchResult
 	ExprResultExpect
 	ExprResultOr
 	ExprResultIsOk
@@ -317,42 +314,4 @@ type StructFieldValue struct {
 type MapEntry struct {
 	Key   Expr
 	Value Expr
-}
-
-type EnumMatchCase struct {
-	Variant      int
-	Discriminant int
-	Body         Block
-}
-
-type IntMatchCase struct {
-	Value int
-	Body  Block
-}
-
-type StrMatchCase struct {
-	Value string
-	Body  Block
-}
-
-type IntRangeMatchCase struct {
-	Start int
-	End   int
-	Body  Block
-}
-
-type UnionMatchCase struct {
-	Tag   uint32
-	Local LocalID
-	Body  Block
-}
-
-// ForeignTypeMatchCase is one arm of a dynamic foreign type test (ADR 0042).
-// Type names the concrete foreign type asserted by the arm. Bound reports
-// whether Local should carry the narrowed value into Body.
-type ForeignTypeMatchCase struct {
-	Type  TypeID
-	Local LocalID
-	Bound bool
-	Body  Block
 }

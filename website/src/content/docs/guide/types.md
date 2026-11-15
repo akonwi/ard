@@ -205,7 +205,9 @@ let _, largest = min_max([3, 1, 4])
 
 `let` makes every name immutable and `mut` makes every name mutable. The number of names must match the number of elements, and destructuring is a statement inside a function, not a module-level declaration.
 
-Tuples are for passing a few values together, most often the results of a Go function (see [Multiple Results](/advanced/go-interop/#multiple-results)). They are deliberately minimal: there is no `pair.0` access, no `==`, no `match` on a tuple, and a tuple cannot be a map key or be interpolated into a string. Destructure first, or define a struct when the values need names or behavior.
+A tuple can also be the subject of a `match`, with a pattern per element (see [Matching on Tuples](/guide/pattern-matching/#matching-on-tuples)).
+
+Tuples are for passing a few values together, most often the results of a Go function (see [Multiple Results](/advanced/go-interop/#multiple-results)). They are deliberately minimal: there is no `pair.0` access, no `==`, and a tuple cannot be a map key or be interpolated into a string. Destructure or match first, or define a struct when the values need names or behavior.
 
 A tuple always has at least two elements. `()` is the `Void` value and `(value)` is a parenthesized expression.
 

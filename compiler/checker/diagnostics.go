@@ -146,10 +146,10 @@ const (
 	DiagnosticCodeInvalidMatchPattern           DiagnosticCode = "invalid_match_pattern"
 	DiagnosticCodeDuplicateMatchArm             DiagnosticCode = "duplicate_match_arm"
 	DiagnosticCodeNonExhaustiveMatch            DiagnosticCode = "non_exhaustive_match"
+	DiagnosticCodeUnreachableMatchArm           DiagnosticCode = "unreachable_match_arm"
 	DiagnosticCodeInvalidMatchSubject           DiagnosticCode = "invalid_match_subject"
 	DiagnosticCodeInvalidForeignTypePattern     DiagnosticCode = "invalid_foreign_type_pattern"
 	DiagnosticCodeInvalidSelectArm              DiagnosticCode = "invalid_select_arm"
-	DiagnosticCodeIgnoredMatchPattern           DiagnosticCode = "ignored_match_pattern"
 	DiagnosticCodeNonBooleanMatchCondition      DiagnosticCode = "non_boolean_match_condition"
 	DiagnosticCodeInvalidTry                    DiagnosticCode = "invalid_try"
 	DiagnosticCodeInvalidLiteral                DiagnosticCode = "invalid_literal"
@@ -2091,11 +2091,34 @@ type nonExhaustiveMatchDiagnostic struct {
 	LegacyMessage string
 	Span          SourceSpan
 	Label         string
+	Text          string
 }
 
 func (d nonExhaustiveMatchDiagnostic) build() Diagnostic {
-	diagnostic := newLabeledDiagnostic(Error, d.LegacyMessage, "Non-exhaustive match", "", DiagnosticLabel{Span: d.Span, Message: d.Label})
+	diagnostic := newLabeledDiagnostic(Error, d.LegacyMessage, "Non-exhaustive match", d.Text, DiagnosticLabel{Span: d.Span, Message: d.Label})
 	diagnostic.Code = DiagnosticCodeNonExhaustiveMatch
+	return diagnostic
+}
+
+// unreachableMatchArmDiagnostic reports a match arm that can never run
+// because earlier arms match every value it matches (ADR 0083).
+type unreachableMatchArmDiagnostic struct {
+	Span      SourceSpan
+	CoveredBy *SourceSpan
+	Pattern   string
+}
+
+func (d unreachableMatchArmDiagnostic) build() Diagnostic {
+	legacy := fmt.Sprintf("Unreachable match arm: %s", d.Pattern)
+	secondary := []DiagnosticLabel{}
+	text := ""
+	if d.CoveredBy != nil {
+		secondary = append(secondary, DiagnosticLabel{Span: *d.CoveredBy, Message: "every value it matches is matched here first"})
+	} else {
+		text = "Earlier arms match every value this arm matches."
+	}
+	diagnostic := newLabeledDiagnostic(Warn, legacy, "Unreachable match arm", text, DiagnosticLabel{Span: d.Span, Message: "this arm can never run"}, secondary...)
+	diagnostic.Code = DiagnosticCodeUnreachableMatchArm
 	return diagnostic
 }
 
@@ -2132,16 +2155,6 @@ type invalidSelectArmDiagnostic struct {
 func (d invalidSelectArmDiagnostic) build() Diagnostic {
 	diagnostic := newLabeledDiagnostic(Error, d.LegacyMessage, "Invalid select arm", "", DiagnosticLabel{Span: d.Span, Message: d.Label})
 	diagnostic.Code = DiagnosticCodeInvalidSelectArm
-	return diagnostic
-}
-
-type ignoredMatchPatternDiagnostic struct {
-	Span SourceSpan
-}
-
-func (d ignoredMatchPatternDiagnostic) build() Diagnostic {
-	diagnostic := newLabeledDiagnostic(Warn, "Ignored pattern", "Ignored match pattern", "", DiagnosticLabel{Span: d.Span, Message: "expected an `ok` or `err` pattern"})
-	diagnostic.Code = DiagnosticCodeIgnoredMatchPattern
 	return diagnostic
 }
 
