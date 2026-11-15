@@ -169,3 +169,21 @@ fn main() {
 		t.Fatalf("output mismatch\ngot:\n%s\nwant:\n%s", got, want)
 	}
 }
+
+// Go types an untyped constant shifted by a variable count from its context,
+// and a float context does not compile. Every constant left operand is
+// emitted with its Ard type: a literal, an untyped Go constant, and a
+// constant expression.
+func TestGoTargetConstantShiftedByVariableCount(t *testing.T) {
+	got := runGoTargetSourceStdout(t, `use go:fmt
+use go:math
+
+fn main() {
+  let n: Uint8 = 1
+  fmt::Println(Float64::fit(1 << n), Float64::fit(math::MaxInt << n), Float64::fit((1 + 2) << n), Float64::fit(~1 << n), Float64::fit(-8 >> n))
+}
+`)
+	if got != "2 -2 6 -4 -4\n" {
+		t.Fatalf("got %q", got)
+	}
+}

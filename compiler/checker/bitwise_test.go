@@ -167,7 +167,7 @@ fn f(mode: os::FileMode, bits: Uint32) os::FileMode { mode | bits }`,
 		{
 			name:        "constant shift that overflows Int",
 			input:       `let x = 1 << 64`,
-			diagnostics: errorDiagnostic("Constant shift count 64 is too large for Int"),
+			diagnostics: errorDiagnostic("Constant value 18446744073709551616 overflows Int"),
 		},
 		{
 			name:        "constant shift into the sign bit",
@@ -179,18 +179,18 @@ fn f(mode: os::FileMode, bits: Uint32) os::FileMode { mode | bits }`,
 			input: `let x = -1 << 63`,
 		},
 		{
-			name:  "constant right shift within the width",
-			input: `let x = -8 >> 63`,
+			name: "constant shifts past the width that still fit",
+			input: `let a = 0 << 64
+let b = -1 >> 64
+let c = 8 >> 64
+let d = Uint8::from(0) << 8
+let e = Int8::from(-1) >> 8
+let f = 0 << 1074`,
 		},
 		{
-			name:        "constant right shift past the width",
-			input:       `let x = 8 >> 64`,
-			diagnostics: errorDiagnostic("Constant shift count 64 is too large for Int"),
-		},
-		{
-			name:        "constant zero shifted past the width",
-			input:       `let x = 0 << 2000`,
-			diagnostics: errorDiagnostic("Constant shift count 2000 is too large for Int"),
+			name:        "constant shift count past Go's bound",
+			input:       `let x = 0 << 1075`,
+			diagnostics: errorDiagnostic("Constant shift count 1075 is too large"),
 		},
 		{
 			name:  "a variable shifted by a large literal count",

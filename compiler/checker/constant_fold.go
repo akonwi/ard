@@ -140,7 +140,7 @@ func (c *Checker) foldConstant(node Expression, loc parse.Location) Expression {
 		case BitXor:
 			result.Xor(leftValue, rightValue)
 		case ShiftLeft:
-			// checkShift has bounded the count by the type's width.
+			// checkShift has bounded the count by maxConstantShiftCount.
 			result.Lsh(leftValue, uint(rightValue.Uint64()))
 		case ShiftRight:
 			result.Rsh(leftValue, uint(rightValue.Uint64()))

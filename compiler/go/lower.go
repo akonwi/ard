@@ -40,14 +40,17 @@ type lowerer struct {
 	currentGlobalInitializer air.GlobalID
 	goTypeCache              map[air.TypeID]ast.Expr
 	identCache               map[string]*ast.Ident
-	declaredLocals           map[air.LocalID]bool
-	readScope                operandReadScope
-	runtimeImport            string
-	runtimeHelpers           map[string]bool
-	projectInfo              *checker.ProjectInfo
-	generatedModulePath      string
-	inlineClosures           map[air.FunctionID]bool
-	goMethodCollisions       map[string]bool
+	// goConstantCache memoizes mayBeGoConstant for shift operands, so a
+	// chain of constant shifts is classified in linear time.
+	goConstantCache     map[*air.Expr]bool
+	declaredLocals      map[air.LocalID]bool
+	readScope           operandReadScope
+	runtimeImport       string
+	runtimeHelpers      map[string]bool
+	projectInfo         *checker.ProjectInfo
+	generatedModulePath string
+	inlineClosures      map[air.FunctionID]bool
+	goMethodCollisions  map[string]bool
 	// memberGoNamesByType caches, per struct or union type, the Go field
 	// names its members occupy, so method-name collision checks do not
 	// recompute every member's identifier per method.
@@ -3472,7 +3475,7 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		if isComparisonKind(expr.Kind) {
 			l.castEnumIntComparisonOperands(&left, leftTypeID, &right, rightTypeID)
 		}
-		if (expr.Kind == air.ExprIntShl || expr.Kind == air.ExprIntShr) && payload.Left.Kind == air.ExprConstInt {
+		if (expr.Kind == air.ExprIntShl || expr.Kind == air.ExprIntShr) && l.mayBeGoConstant(payload.Left) {
 			// Go gives an untyped constant shifted by a non-constant count
 			// the type its context expects, which can be a float
 			// (`float64(1 << n)` does not compile). Pin the Ard type.
@@ -3684,10 +3687,46 @@ func (l *lowerer) lowerValueBlock(fn air.Function, block air.Block, resultType a
 
 // lowerNumericConstant materializes AIR scalar types that differ from Go's
 // default int and float64 types before short declarations can erase them.
-// typedConstant converts a bare Go integer constant to its Ard type. Sized
-// constants are already lowered as conversions.
+// mayBeGoConstant reports whether expr may lower to an untyped Go constant:
+// an integer literal, an imported Go constant, or integer operations on
+// those.
+func (l *lowerer) mayBeGoConstant(expr *air.Expr) bool {
+	if expr == nil {
+		return false
+	}
+	switch expr.Kind {
+	case air.ExprConstInt:
+		return true
+	case air.ExprForeignValue:
+		payload := expr.ForeignPayload()
+		return payload != nil && !payload.Variable
+	case air.ExprNeg, air.ExprIntBitNot,
+		air.ExprIntAdd, air.ExprIntSub, air.ExprIntMul, air.ExprIntDiv, air.ExprIntMod,
+		air.ExprIntBitAnd, air.ExprIntBitOr, air.ExprIntBitXor, air.ExprIntShl, air.ExprIntShr:
+	default:
+		return false
+	}
+	if constant, ok := l.goConstantCache[expr]; ok {
+		return constant
+	}
+	var constant bool
+	if expr.Kind == air.ExprNeg || expr.Kind == air.ExprIntBitNot {
+		constant = l.mayBeGoConstant(expr.Target)
+	} else {
+		payload := expr.BinaryPayload()
+		constant = payload != nil && l.mayBeGoConstant(payload.Left) && l.mayBeGoConstant(payload.Right)
+	}
+	if l.goConstantCache == nil {
+		l.goConstantCache = map[*air.Expr]bool{}
+	}
+	l.goConstantCache[expr] = constant
+	return constant
+}
+
+// typedConstant converts a Go integer constant expression to its Ard type. A
+// conversion, such as a sized literal's, is already typed.
 func (l *lowerer) typedConstant(value loweredExpr, typeID air.TypeID) (loweredExpr, error) {
-	if _, ok := value.expr.(*ast.BasicLit); !ok {
+	if _, ok := value.expr.(*ast.CallExpr); ok {
 		return value, nil
 	}
 	typ, err := l.goType(typeID)

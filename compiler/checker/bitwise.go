@@ -163,20 +163,23 @@ func (c *Checker) checkShift(s *parse.BinaryExpression) Expression {
 		}.build())
 		return nil
 	}
-	if _, ok := c.constantValue(left); ok && countIsConstant {
+	if _, ok := c.constantValue(left); ok && countIsConstant && count.Cmp(big.NewInt(maxConstantShiftCount)) > 0 {
 		// A shift of two constants is evaluated while compiling (see
-		// constant_fold.go), and Go rejects large constant counts.
-		if bits := c.integerBits(left.Type()); count.Cmp(big.NewInt(int64(bits))) >= 0 {
-			c.addDiagnostic(invalidShiftDiagnostic{
-				LegacyMessage: fmt.Sprintf("Constant shift count %s is too large for %s", count, left.Type()),
-				Span:          c.sourceSpan(s.Right.GetLocation()),
-				Label:         fmt.Sprintf("`%s` has %d bits", left.Type(), bits),
-			}.build())
-			return nil
-		}
+		// constant_fold.go); its result must fit its type. Go rejects a
+		// constant count above this bound whatever the result.
+		c.addDiagnostic(invalidShiftDiagnostic{
+			LegacyMessage: fmt.Sprintf("Constant shift count %s is too large", count),
+			Span:          c.sourceSpan(s.Right.GetLocation()),
+			Label:         fmt.Sprintf("a constant shift count must be at most %d", maxConstantShiftCount),
+		}.build())
+		return nil
 	}
 	return c.foldConstant(&IntBitwise{Op: bitwiseOp(s.Operator), Left: left, Right: right}, s.GetLocation())
 }
+
+// maxConstantShiftCount is the largest count Go accepts in a shift of two
+// constants (go/types' shiftBound).
+const maxConstantShiftCount = 1074
 
 // integerBits returns the width of an integer type that supports bitwise
 // operators.

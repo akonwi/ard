@@ -118,9 +118,10 @@ Shifts have Go's semantics:
 Go rejects a negative constant count even for a variable operand, so the
 checker rejects a negative literal count. A shift of two constants is a Go
 constant expression, evaluated while compiling (ADR 0081): its result must
-fit its type (`1 << 63` overflows `Int`), and its count must be less than the
-type's width, since Go also rejects large constant counts. A variable
-shifted by a large literal count is allowed and follows the rules above.
+fit its type (`1 << 63` overflows `Int`), while `0 << 64` and `-1 >> 64`
+are 0 and -1 as above. Go also rejects a constant shift count above 1074
+whatever the result, and so does the checker. A variable shifted by a large
+literal count is allowed and follows the rules above.
 
 ### Lowering
 
@@ -128,10 +129,11 @@ The checker produces `IntBitwise` (with an operator) and `IntBitNot`. AIR
 has `ExprIntBitAnd`, `ExprIntBitOr`, `ExprIntBitXor`, `ExprIntShl`,
 `ExprIntShr`, and `ExprIntBitNot`. The Go backend emits Go's `&`, `|`, `^`,
 `<<`, `>>`, and unary `^`, through the same operand-ordering path as the
-arithmetic operators (ADR 0078). An `Int` literal shifted by a non-constant
-count is emitted as `int(1) << n`: Go gives an untyped constant in that
-position the type its context expects, and `float64(1 << n)` does not
-compile.
+arithmetic operators (ADR 0078). A constant left operand of a shift (a
+literal, an imported Go constant, or an expression of those) is emitted
+with its type, as in `int(1) << n`: Go gives an untyped constant shifted by
+a non-constant count the type its context expects, and `float64(1 << n)`
+does not compile.
 
 ## Alternatives Considered
 
