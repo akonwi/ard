@@ -2721,9 +2721,13 @@ func (p *parser) selectExpr() (Expression, error) {
 			return sel, nil
 		}
 	}
-	p.advance() // consume '{'
+	openBrace := p.advance() // consume '{'
 
-	p.newLineAfterOpenBrace()
+	// An empty select is `{}` on one line, as the formatter prints it; the
+	// checker reports the missing cases (issue #595).
+	if !p.check(right_brace) {
+		p.newLineAfterOpenBrace()
+	}
 
 	for !p.match(right_brace) {
 		// Stop at end of input so a missing '}' cannot loop forever (issue #349).
@@ -2799,6 +2803,7 @@ func (p *parser) selectExpr() (Expression, error) {
 	}
 
 	sel.Location.End = Point{Row: p.previous().line, Col: p.previous().column}
+	sel.BracesLocation = Location{Start: Point{Row: openBrace.line, Col: openBrace.column}, End: sel.Location.End}
 	return sel, nil
 }
 
@@ -2837,9 +2842,13 @@ func (p *parser) matchExpr() (Expression, error) {
 				return matchExpr, nil
 			}
 		}
-		p.advance() // consume the '{'
+		openBrace := p.advance() // consume the '{'
 
-		p.newLineAfterOpenBrace()
+		// An empty match is `{}` on one line, as the formatter prints it;
+		// the checker reports the missing cases (issue #595).
+		if !p.check(right_brace) {
+			p.newLineAfterOpenBrace()
+		}
 
 		for !p.isAtEnd() && !p.match(right_brace) {
 			// Parse and collect comments
@@ -2896,6 +2905,7 @@ func (p *parser) matchExpr() (Expression, error) {
 		}
 
 		matchExpr.Location.End = Point{Row: p.previous().line, Col: p.previous().column}
+		matchExpr.BracesLocation = Location{Start: Point{Row: openBrace.line, Col: openBrace.column}, End: matchExpr.Location.End}
 		matchExpr.Subject = expr
 		return matchExpr, nil
 	}
@@ -2914,9 +2924,13 @@ func (p *parser) parseConditionalMatch(keyword token) (Expression, error) {
 		p.addError(p.peek(), "Expected '{'")
 		return conditionalMatch, nil
 	}
-	p.advance() // consume the '{'
+	openBrace := p.advance() // consume the '{'
 
-	p.newLineAfterOpenBrace()
+	// An empty match is `{}` on one line, as the formatter prints it; the
+	// checker reports the missing cases (issue #595).
+	if !p.check(right_brace) {
+		p.newLineAfterOpenBrace()
+	}
 
 	for !p.isAtEnd() && !p.match(right_brace) {
 		// Parse and collect comments
@@ -2986,6 +3000,7 @@ func (p *parser) parseConditionalMatch(keyword token) (Expression, error) {
 	}
 
 	conditionalMatch.Location.End = Point{Row: p.previous().line, Col: p.previous().column}
+	conditionalMatch.BracesLocation = Location{Start: Point{Row: openBrace.line, Col: openBrace.column}, End: conditionalMatch.Location.End}
 	return conditionalMatch, nil
 }
 

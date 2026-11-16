@@ -987,9 +987,11 @@ func (m MapLiteral) String() string {
 
 type MatchExpression struct {
 	Location
-	Subject  Expression
-	Cases    []MatchCase
-	Comments []Comment // Comments found within the match expression
+	Subject Expression
+	// BracesLocation spans the arms block, from `{` through `}`.
+	BracesLocation Location
+	Cases          []MatchCase
+	Comments       []Comment // Comments found within the match expression
 }
 
 func (m MatchExpression) String() string {
@@ -1010,8 +1012,10 @@ func (m MatchCase) String() string {
 // arm whose operation can proceed first. See ADR 0032.
 type SelectExpression struct {
 	Location
-	Cases    []SelectCase
-	Comments []Comment
+	// BracesLocation spans the arms block, from `{` through `}`.
+	BracesLocation Location
+	Cases          []SelectCase
+	Comments       []Comment
 }
 
 func (s SelectExpression) String() string {
@@ -1034,8 +1038,10 @@ func (s SelectCase) String() string {
 
 type ConditionalMatchExpression struct {
 	Location
-	Cases    []ConditionalMatchCase
-	Comments []Comment // Comments found within the match expression
+	// BracesLocation spans the arms block, from `{` through `}`.
+	BracesLocation Location
+	Cases          []ConditionalMatchCase
+	Comments       []Comment // Comments found within the match expression
 }
 
 func (c ConditionalMatchExpression) String() string {
