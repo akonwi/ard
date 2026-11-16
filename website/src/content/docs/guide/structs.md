@@ -43,6 +43,8 @@ let person = Person{name, age, email}
 
 This is equivalent to `Person{name: name, age: age, email: email}`.
 
+Fields can be written in any order, and each field only once. Their values are evaluated in the order they are written, not the order the fields are declared in.
+
 ## Accessing Fields
 
 Use dot notation to access struct fields:

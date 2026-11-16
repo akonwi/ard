@@ -1126,7 +1126,25 @@ func validateExprPayload(expr Expr) error {
 	if exprPayloadRequired(expr.Kind) && expr.Payload == nil {
 		return fmt.Errorf("expression kind %d is missing its payload", expr.Kind)
 	}
+	if order := expr.ArgOrder(); order != nil && !isPermutation(order, len(expr.Args)) {
+		return fmt.Errorf("expression kind %d has argument order %v for %d arguments", expr.Kind, order, len(expr.Args))
+	}
 	return nil
+}
+
+// isPermutation reports whether order lists each of 0..n-1 exactly once.
+func isPermutation(order []int, n int) bool {
+	if len(order) != n {
+		return false
+	}
+	seen := make([]bool, n)
+	for _, index := range order {
+		if index < 0 || index >= n || seen[index] {
+			return false
+		}
+		seen[index] = true
+	}
+	return true
 }
 
 func binaryExprPayloadAllowed(kind ExprKind) bool {
@@ -1148,7 +1166,7 @@ func callExprPayloadAllowed(kind ExprKind) bool {
 		ExprListPrepend, ExprListPush, ExprListSet, ExprListSize, ExprListSort, ExprListSwap,
 		ExprStrAt, ExprStrSlice, ExprStrBytes, ExprStrRunes, ExprStrSize, ExprStrIsEmpty,
 		ExprStrContains, ExprStrReplace, ExprStrReplaceAll, ExprStrStartsWith, ExprStrEndsWith,
-		ExprToStr, ExprStrTrim:
+		ExprToStr, ExprStrTrim, ExprMapSet:
 		return true
 	default:
 		return false

@@ -6025,7 +6025,7 @@ func (c *Checker) validateUnsafeCatchResultsInExpression(expr Expression, result
 		}
 	case *StructInstance:
 		for _, field := range e.Fields {
-			c.validateUnsafeCatchResultsInExpression(field, resultType, loc)
+			c.validateUnsafeCatchResultsInExpression(field.Value, resultType, loc)
 		}
 	case *FunctionCall:
 		for _, arg := range e.Args {
@@ -6058,7 +6058,7 @@ func (c *Checker) validateUnsafeCatchResultsInExpression(expr Expression, result
 	case *ModuleStructInstance:
 		if e.Property != nil {
 			for _, field := range e.Property.Fields {
-				c.validateUnsafeCatchResultsInExpression(field, resultType, loc)
+				c.validateUnsafeCatchResultsInExpression(field.Value, resultType, loc)
 			}
 		}
 	case *TemplateStr:
@@ -6508,7 +6508,7 @@ func (c *Checker) validateForeignStructInstance(foreign *ForeignType, typeArgs [
 		foreign.Fields, foreign.UnsupportedFields = foreign.LoadFields()
 		foreign.FieldsLoaded = true
 	}
-	fields := make([]ForeignStructField, 0, len(properties))
+	fields := make([]StructFieldValue, 0, len(properties))
 	seen := map[string]SourceSpan{}
 	for _, property := range properties {
 		name := property.Name.Name
@@ -6536,7 +6536,7 @@ func (c *Checker) validateForeignStructInstance(foreign *ForeignType, typeArgs [
 			c.addTypeMismatch(fieldType, value.Type(), property.Value.GetLocation())
 			continue
 		}
-		fields = append(fields, ForeignStructField{Name: name, Value: value})
+		fields = append(fields, StructFieldValue{Name: name, Value: value})
 	}
 	return &ForeignStructInstance{Target: foreign.Target, Namespace: foreign.Namespace, Qualifier: foreign.Qualifier, Name: foreign.Name, Fields: fields, _type: foreign}
 }
@@ -7089,6 +7089,15 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 	fields := make(map[string]Expression)
 	fieldTypes := make(map[string]Type)
 	providedFields := make(map[string]bool)
+	// fieldOrder lists the checked fields in the order they are written, which
+	// is the order their values are evaluated in (ADR 0078).
+	fieldOrder := make([]string, 0, len(properties))
+	setField := func(name string, value Expression, fieldType Type) {
+		fields[name] = value
+		fieldTypes[name] = fieldType
+		fieldOrder = append(fieldOrder, name)
+	}
+	seen := make(map[string]SourceSpan, len(properties))
 
 	// For generic structs, infer generics from provided field values
 	var structDefCopy *StructDef
@@ -7172,7 +7181,12 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 
 		if !ok {
 			c.addUnresolvedReference(unknownStructField, fieldName, property.GetLocation())
+		} else if original, duplicate := seen[fieldName]; duplicate {
+			c.addDiagnostic(duplicateStructLiteralFieldDiagnostic{
+				Name: fieldName, Span: c.sourceSpan(property.Name.GetLocation()), PreviousSpan: original,
+			}.build())
 		} else {
+			seen[fieldName] = c.sourceSpan(property.Name.GetLocation())
 			providedFields[fieldName] = true
 
 			// A `mut T` (MutableRef) field accepts an existing `mut T` reference value
@@ -7186,8 +7200,7 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 				resolvedField := derefType(field)
 				if checked := c.checkExprAs(property.Value, resolvedField); checked != nil && validationEqualTypes(checked.Type(), resolvedField) {
 					field = resolvedField
-					fields[fieldName] = checked
-					fieldTypes[fieldName] = field
+					setField(fieldName, checked, field)
 					continue
 				}
 				c.diagnostics = c.diagnostics[:diagCount]
@@ -7207,8 +7220,7 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 					spansMark := c.spansMark()
 					if checked := c.checkExprAs(property.Value, resolvedField); checked != nil {
 						field = resolvedField
-						fields[fieldName] = checked
-						fieldTypes[fieldName] = field
+						setField(fieldName, checked, field)
 						continue
 					}
 					c.diagnostics = c.diagnostics[:diagCount]
@@ -7245,8 +7257,7 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 						continue
 					}
 					field = derefType(field)
-					fields[fieldName] = checkVal
-					fieldTypes[fieldName] = field
+					setField(fieldName, checkVal, field)
 					continue
 				}
 
@@ -7274,8 +7285,7 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 				fieldExpected = derefType(fieldExpected)
 				field = fieldExpected
 
-				fields[fieldName] = checkVal
-				fieldTypes[fieldName] = field
+				setField(fieldName, checkVal, field)
 			} else {
 				// For non-generic structs, handle nullable fields with implicit wrapping
 				var val Expression
@@ -7353,8 +7363,7 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 						}.build())
 						continue
 					}
-					fields[fieldName] = val
-					fieldTypes[fieldName] = field
+					setField(fieldName, val, field)
 				}
 			}
 		}
@@ -7386,7 +7395,10 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 		c.addDiagnostic(missingStructFieldsDiagnostic{Fields: missing, Span: c.sourceSpan(loc)}.build())
 	}
 
-	instance.Fields = fields
+	instance.Fields = make([]StructFieldValue, len(fieldOrder))
+	for i, name := range fieldOrder {
+		instance.Fields[i] = StructFieldValue{Name: name, Value: fields[name]}
+	}
 	instance.FieldTypes = fieldTypes
 	// Store the refined struct definition (with resolved generics) as the instance's type
 	resolvedTypeArgs := make([]Type, len(structDefCopy.TypeArgs))
@@ -7429,45 +7441,23 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 	return instance
 }
 
-// createPrimitiveMethodNode creates type-specific method nodes for primitives and collections
-// Falls back to generic InstanceMethod for user-defined types (structs, enums)
-func applySliceArgumentOrder(node Expression, sourceArgs []parse.Argument, params []Parameter) Expression {
-	if len(params) == 0 {
+// withArgumentOrder records on a method call node the order its arguments
+// are written in (see argumentOrder), nil when that is parameter order.
+func withArgumentOrder(node Expression, order []int) Expression {
+	if order == nil {
 		return node
 	}
-	paramIndexes := make(map[string]int, len(params))
-	for i, param := range params {
-		paramIndexes[param.Name] = i
-	}
-	order := make([]int, 0, len(params))
-	used := make([]bool, len(params))
-	nextPositional := 0
-	for _, arg := range sourceArgs {
-		index := nextPositional
-		if arg.Name != "" {
-			index = paramIndexes[arg.Name]
-		} else {
-			nextPositional++
-		}
-		if index >= 0 && index < len(params) && !used[index] {
-			order = append(order, index)
-			used[index] = true
-		}
-	}
-	for i := range params {
-		if !used[i] {
-			order = append(order, i)
-		}
-	}
 	switch method := node.(type) {
+	case *InstanceMethod:
+		if method.Method != nil {
+			method.Method.ArgOrder = order
+		}
 	case *StrMethod:
-		if method.Kind == StrSlice {
-			method.ArgOrder = order
-		}
+		method.ArgOrder = order
 	case *ListMethod:
-		if method.Kind == ListSlice {
-			method.ArgOrder = order
-		}
+		method.ArgOrder = order
+	case *MapMethod:
+		method.ArgOrder = order
 	}
 	return node
 }
@@ -8307,7 +8297,7 @@ func expressionContainsNever(expr Expression) bool {
 			}
 		case *StructInstance:
 			for _, field := range current.Fields {
-				if contains(field) {
+				if contains(field.Value) {
 					return true
 				}
 			}
@@ -8380,7 +8370,7 @@ func finalizeErasedResultExpression(expr Expression) Type {
 		}
 	case *StructInstance:
 		for _, field := range current.Fields {
-			finalizeChild(field)
+			finalizeChild(field.Value)
 		}
 	case *ModuleStructInstance:
 		finalizeChild(current.Property)
@@ -8934,7 +8924,7 @@ func (c *Checker) checkFunctionValueCall(callee Expression, callArgs []parse.Arg
 	}
 
 	callTypeArgs := c.resolveCallTypeArgs(typeArgs)
-	resolvedExprs, tailSpread, ok := c.resolveCallArguments(callArgs, fnDef, location)
+	resolvedExprs, argOrder, tailSpread, ok := c.resolveCallArguments(callArgs, fnDef, location)
 	if !ok {
 		return nil
 	}
@@ -8970,6 +8960,7 @@ func (c *Checker) checkFunctionValueCall(callee Expression, callArgs []parse.Arg
 	return &FunctionValueCall{
 		Callee:       callee,
 		Args:         args,
+		ArgOrder:     argOrder,
 		TailSpread:   tailSpread,
 		FunctionType: fnToUse,
 		ReturnType:   fnToUse.ReturnType,
@@ -9330,7 +9321,7 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 			callTypeArgs := c.resolveCallTypeArgs(s.TypeArgs)
 
 			// Resolve named arguments to positional arguments (for expressions only).
-			resolvedExprs, tailSpread, ok := c.resolveCallArguments(s.Args, fnDef, s.GetLocation())
+			resolvedExprs, argOrder, tailSpread, ok := c.resolveCallArguments(s.Args, fnDef, s.GetLocation())
 			if !ok {
 				return nil
 			}
@@ -9367,6 +9358,7 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 			}
 
 			call.Args = args
+			call.ArgOrder = argOrder
 			call.TypeArgs = callTypeArgs
 			call.TailSpread = tailSpread
 			call.signature = fnToUse
@@ -9593,7 +9585,7 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 			}
 
 			// Resolve named and positional arguments to match parameters.
-			resolvedExprs, tailSpread, ok := c.resolveCallArguments(s.Method.Args, fnDef, s.GetLocation())
+			resolvedExprs, argOrder, tailSpread, ok := c.resolveCallArguments(s.Method.Args, fnDef, s.GetLocation())
 			if !ok {
 				return nil
 			}
@@ -9666,15 +9658,16 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 			// its referent's Go type (ADR 0057).
 			if foreign, ok := derefMutableRef(subj.Type()).(*ForeignType); ok {
 				if foreign.MapKey != nil && foreign.MapValue != nil && isMapMethodName(s.Method.Name) {
-					return c.createPrimitiveMethodNode(subj, s.Method.Name, args, fnToUse, callTypeArgs, s.Method.GetLocation())
+					node := c.createPrimitiveMethodNode(subj, s.Method.Name, args, fnToUse, callTypeArgs, s.Method.GetLocation())
+					return withArgumentOrder(node, argOrder)
 				}
 				if foreign.Elem != nil && isListMethodName(s.Method.Name) {
 					node := c.createPrimitiveMethodNode(subj, s.Method.Name, args, fnToUse, callTypeArgs, s.Method.GetLocation())
-					return applySliceArgumentOrder(node, s.Method.Args, fnToUse.Parameters)
+					return withArgumentOrder(node, argOrder)
 				}
 				if _, ok := foreign.Underlying.(*FixedArray); ok && isListMethodName(s.Method.Name) {
 					node := c.createPrimitiveMethodNode(subj, s.Method.Name, args, fnToUse, callTypeArgs, s.Method.GetLocation())
-					return applySliceArgumentOrder(node, s.Method.Args, fnToUse.Parameters)
+					return withArgumentOrder(node, argOrder)
 				}
 				for _, arg := range s.Method.Args {
 					if arg.Name != "" {
@@ -9685,8 +9678,8 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 				pointer := foreign.Pointer || foreignPointerReceiver
 				return &ForeignMethodCall{Subject: subj, Target: foreign.Target, Namespace: foreign.Namespace, Qualifier: foreign.Qualifier, Receiver: foreign.Name, Pointer: pointer, Symbol: s.Method.Name, ForeignResultShape: fnToUse.ForeignResultShape, Call: &FunctionCall{Name: s.Method.Name, Args: args, TailSpread: tailSpread, signature: fnToUse, ReturnType: fnToUse.ReturnType}}
 			}
-			// Create function call. Slice bounds retain source evaluation order even
-			// though named arguments are stored by destination parameter index.
+			// Create function call. Named arguments are stored by parameter
+			// index; the call keeps the order they are written in.
 			node := c.createPrimitiveMethodNode(subj, s.Method.Name, args, fnToUse, callTypeArgs, s.Method.GetLocation())
 			if instance, ok := node.(*InstanceMethod); ok {
 				instance.Method.declaration = declaration
@@ -9700,7 +9693,7 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 					instance.HasTraitMethodSlot = true
 				}
 			}
-			return applySliceArgumentOrder(node, s.Method.Args, fnToUse.Parameters)
+			return withArgumentOrder(node, argOrder)
 		}
 	case *parse.MutRef:
 		return c.checkMutRef(s)
@@ -10134,7 +10127,7 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 				callTypeArgs := c.resolveCallTypeArgs(s.Function.TypeArgs)
 
 				// Resolve named and positional arguments to match parameters.
-				resolvedExprs, tailSpread, ok := c.resolveCallArguments(s.Function.Args, fnDef, s.GetLocation())
+				resolvedExprs, argOrder, tailSpread, ok := c.resolveCallArguments(s.Function.Args, fnDef, s.GetLocation())
 				if !ok {
 					return nil
 				}
@@ -10166,6 +10159,7 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 				return &FunctionCall{
 					Name:        absolutePath,
 					Args:        args,
+					ArgOrder:    argOrder,
 					TypeArgs:    callTypeArgs,
 					TailSpread:  tailSpread,
 					declaration: declaration,
@@ -10279,7 +10273,7 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 						return nil
 					}
 				}
-				resolvedExprs, tailSpread, ok := c.resolveCallArguments(s.Function.Args, fnDef, s.GetLocation())
+				resolvedExprs, _, tailSpread, ok := c.resolveCallArguments(s.Function.Args, fnDef, s.GetLocation())
 				if !ok {
 					return nil
 				}
@@ -10372,7 +10366,7 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 			callTypeArgs := c.resolveCallTypeArgs(s.Function.TypeArgs)
 
 			// Resolve named and positional arguments to match parameters.
-			resolvedExprs, tailSpread, ok := c.resolveCallArguments(s.Function.Args, fnDef, s.GetLocation())
+			resolvedExprs, argOrder, tailSpread, ok := c.resolveCallArguments(s.Function.Args, fnDef, s.GetLocation())
 			if !ok {
 				return nil
 			}
@@ -10413,6 +10407,7 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 			call := &FunctionCall{
 				Name:        callName,
 				Args:        args,
+				ArgOrder:    argOrder,
 				TypeArgs:    callTypeArgs,
 				TailSpread:  tailSpread,
 				declaration: declaration,
@@ -14066,59 +14061,61 @@ func (c *Checker) rejectSpreadForFixedCall(args []parse.Argument) bool {
 
 // resolveCallArguments preserves a final spread argument until call checking has
 // validated its referenced outer slice. Ordinary calls retain named-argument
-// binding through resolveArguments.
-func (c *Checker) resolveCallArguments(args []parse.Argument, fnDef *FunctionDef, location parse.Location) ([]parse.Expression, bool, bool) {
+// binding through resolveArguments, which also returns the order the
+// arguments are written in (see argumentOrder).
+func (c *Checker) resolveCallArguments(args []parse.Argument, fnDef *FunctionDef, location parse.Location) ([]parse.Expression, []int, bool, bool) {
 	spreadIndex := -1
 	for i, arg := range args {
 		if arg.Spread {
 			if spreadIndex >= 0 {
 				c.addDiagnostic(variadicSpreadDiagnostic{Kind: spreadMixedTail, Span: c.sourceSpan(arg.EllipsisLocation)}.build())
-				return nil, false, false
+				return nil, nil, false, false
 			}
 			spreadIndex = i
 		}
 	}
 	if spreadIndex < 0 {
-		resolved, err := c.resolveArguments(args, fnDef.Parameters)
+		resolved, order, err := c.resolveArguments(args, fnDef.Parameters)
 		if err != nil {
 			c.addArgumentBindingError(err, location)
-			return nil, false, false
+			return nil, nil, false, false
 		}
-		return resolved, false, true
+		return resolved, order, false, true
 	}
 	if spreadIndex != len(args)-1 {
 		c.addDiagnostic(variadicSpreadDiagnostic{Kind: spreadMustBeFinal, Span: c.sourceSpan(args[spreadIndex].EllipsisLocation)}.build())
-		return nil, false, false
+		return nil, nil, false, false
 	}
 	for _, arg := range args {
 		if arg.Name != "" {
 			c.addDiagnostic(variadicSpreadDiagnostic{Kind: spreadNamedArgument, Span: c.sourceSpan(arg.GetLocation())}.build())
-			return nil, false, false
+			return nil, nil, false, false
 		}
 	}
 	if fnDef == nil || len(fnDef.Parameters) == 0 || !fnDef.Parameters[len(fnDef.Parameters)-1].Variadic {
 		c.addDiagnostic(variadicSpreadDiagnostic{Kind: spreadRequiresVariadic, Span: c.sourceSpan(args[spreadIndex].EllipsisLocation)}.build())
-		return nil, false, false
+		return nil, nil, false, false
 	}
 	fixedCount := len(fnDef.Parameters) - 1
 	providedFixed := len(args) - 1
 	if providedFixed < fixedCount {
 		c.addDiagnostic(variadicSpreadDiagnostic{Kind: spreadMissingFixed, Span: c.sourceSpan(args[spreadIndex].GetLocation())}.build())
-		return nil, false, false
+		return nil, nil, false, false
 	}
 	if providedFixed > fixedCount {
 		c.addDiagnostic(variadicSpreadDiagnostic{Kind: spreadMixedTail, Span: c.sourceSpan(args[spreadIndex].GetLocation())}.build())
-		return nil, false, false
+		return nil, nil, false, false
 	}
 	resolved := make([]parse.Expression, len(args))
 	for i := range args {
 		resolved[i] = args[i].Value
 	}
-	return resolved, true, true
+	return resolved, nil, true, true
 }
 
 // resolveArguments converts unified argument list to positional arguments.
-func (c *Checker) resolveArguments(args []parse.Argument, params []Parameter) ([]parse.Expression, *argumentBindingError) {
+// With named arguments it also returns their argumentOrder.
+func (c *Checker) resolveArguments(args []parse.Argument, params []Parameter) ([]parse.Expression, []int, *argumentBindingError) {
 	var positionalArgs []parse.Argument
 	var namedArgs []parse.Argument
 	for _, arg := range args {
@@ -14134,7 +14131,7 @@ func (c *Checker) resolveArguments(args []parse.Argument, params []Parameter) ([
 		for i := range positionalArgs {
 			result[i] = positionalArgs[i].Value
 		}
-		return result, nil
+		return result, nil, nil
 	}
 
 	paramMap := make(map[string]int)
@@ -14147,34 +14144,59 @@ func (c *Checker) resolveArguments(args []parse.Argument, params []Parameter) ([
 
 	for i, arg := range positionalArgs {
 		if i >= len(params) {
-			return nil, &argumentBindingError{Kind: tooManyPositionalArguments, Location: arg.GetLocation()}
+			return nil, nil, &argumentBindingError{Kind: tooManyPositionalArguments, Location: arg.GetLocation()}
 		}
 		result[i] = arg.Value
 		used[i] = true
 		usedAt[i] = arg.GetLocation()
 	}
 
+	// Positional arguments precede named ones, so the written order starts
+	// with the positional parameters in order.
+	order := make([]int, len(positionalArgs), len(params))
+	for i := range positionalArgs {
+		order[i] = i
+	}
 	for _, namedArg := range namedArgs {
 		paramIndex, exists := paramMap[namedArg.Name]
 		if !exists {
-			return nil, &argumentBindingError{Kind: unknownNamedArgument, Name: namedArg.Name, Location: namedArg.GetLocation()}
+			return nil, nil, &argumentBindingError{Kind: unknownNamedArgument, Name: namedArg.Name, Location: namedArg.GetLocation()}
 		}
 		if used[paramIndex] {
 			previous := usedAt[paramIndex]
-			return nil, &argumentBindingError{Kind: duplicateArgument, Name: namedArg.Name, Location: namedArg.GetLocation(), Previous: &previous}
+			return nil, nil, &argumentBindingError{Kind: duplicateArgument, Name: namedArg.Name, Location: namedArg.GetLocation(), Previous: &previous}
 		}
 		result[paramIndex] = namedArg.Value
 		used[paramIndex] = true
 		usedAt[paramIndex] = namedArg.GetLocation()
+		order = append(order, paramIndex)
 	}
 
 	for i, param := range params {
 		if !used[i] && !callableParameterOmittable(params, i) {
 			parameter := param
-			return nil, &argumentBindingError{Name: param.Name, Parameter: &parameter}
+			return nil, nil, &argumentBindingError{Name: param.Name, Parameter: &parameter}
 		}
 	}
-	return result, nil
+	return result, argumentOrder(order, used), nil
+}
+
+// argumentOrder completes the parameter indexes of the written arguments,
+// in the order they are written, with the omitted parameters, which the call
+// fills in after them. It returns nil when the result is parameter order, so
+// a call records an order (ArgOrder) only when named arguments change it.
+func argumentOrder(written []int, used []bool) []int {
+	for i := range used {
+		if !used[i] {
+			written = append(written, i)
+		}
+	}
+	for i, param := range written {
+		if param != i {
+			return written
+		}
+	}
+	return nil
 }
 
 // buildComparison builds a comparison expression node from two operands and an operator

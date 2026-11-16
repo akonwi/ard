@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/go-cmp/cmp"
+
 	checker "github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/parse"
 )
@@ -645,6 +647,46 @@ func TestNamedArgumentsRefineGenericsInSourceOrder(t *testing.T) {
 	}
 }
 
+// A call records the order its arguments are written in when named arguments
+// change it from parameter order (#576): positional arguments first, then the
+// named ones as written, then the omitted parameters.
+func TestNamedArgumentsRecordWrittenOrder(t *testing.T) {
+	result := parse.Parse([]byte(`
+		fn take(a: Int, b: Int, c: Int?) Int { a + b }
+		fn main() {
+			take(1, 2, 3)
+			take(a: 1, b: 2)
+			take(1, c: 3, b: 2)
+			take(b: 2, a: 1)
+			take(c: 3, b: 2, a: 1)
+		}
+	`), "test.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	c := checker.New("test.ard", result.Program, nil)
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
+	}
+	want := [][]int{nil, nil, {0, 2, 1}, {1, 0, 2}, {2, 1, 0}}
+	var got [][]int
+	for _, statement := range checker.UnwrapStatementRuns(c.Module().Program().Statements) {
+		main, ok := statement.Expr.(*checker.FunctionDef)
+		if !ok || main.Name != "main" {
+			continue
+		}
+		for _, inner := range main.Body.Stmts {
+			if call, ok := inner.Expr.(*checker.FunctionCall); ok {
+				got = append(got, call.ArgOrder)
+			}
+		}
+	}
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Fatalf("argument orders (-want +got):\n%s", diff)
+	}
+}
+
 func TestNamedArgumentsDoNotUseLaterEvidence(t *testing.T) {
 	result := parse.Parse([]byte(`
 		fn apply(value: $T, callback: fn($T) Int) Int { callback(value) }
@@ -1152,6 +1194,8 @@ func TestNamedArguments(t *testing.T) {
 								&checker.StrLiteral{Value: "Bob"},
 								&checker.IntLiteral{Value: 42},
 							},
+							// age is written first, so it is evaluated first.
+							ArgOrder: []int{1, 0},
 						},
 					},
 				},
@@ -1192,6 +1236,7 @@ func TestNamedArguments(t *testing.T) {
 								&checker.IntLiteral{Value: 2},
 								&checker.IntLiteral{Value: 3},
 							},
+							ArgOrder: []int{2, 0, 1},
 						},
 					},
 				},

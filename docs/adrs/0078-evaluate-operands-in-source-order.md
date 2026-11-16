@@ -2,8 +2,9 @@
 
 ## Status
 
-Accepted. Amends ADR 0031. Amended for reads before calls (#575) and for
-operands a built-in method uses more than once (#578).
+Accepted. Amends ADR 0031. Amended for reads before calls (#575), for
+operands a built-in method uses more than once (#578), and for named
+arguments and struct literal fields written out of declaration order (#576).
 
 ## Context
 
@@ -139,17 +140,47 @@ which operands are evaluated: the right side of `and` and `or` is still
 evaluated only when needed, as is the argument of `or` and `expect` on Maybe
 and Result (ADR 0079).
 
+### Named arguments and struct literal fields
+
+Named arguments and struct literal fields can be written in any order. They
+are evaluated in the order they are written, not in parameter or declaration
+order (#576, #577).
+
+- The checker keeps the fields of an Ard or Go struct literal in the order
+  they are written, and AIR keeps them in that order. Go keyed literals accept
+  fields in any order, so the backend emits them as written.
+- A call stores its arguments in parameter order, the order a Go call takes
+  them in. When named arguments are written in another order, the checker
+  records it as `ArgOrder` on the call, AIR carries it on the call's payload
+  (`CallExprPayload` or `TraitExprPayload`), and AIR validation checks that it
+  is a permutation of the arguments. It is nil when the order written is
+  parameter order, so most calls carry none. Positional arguments come first
+  in the order, then the named ones as written, then the omitted parameters,
+  which are filled in with constants. A receiver held in the call's
+  arguments is evaluated first. This covers calls of functions, static and
+  module functions, methods, trait methods, and function values, and the
+  built-in `replace`, `replace_all`, `slice`, `set`, `swap`, and Map `set`
+  methods. Go functions and methods do not accept named arguments.
+- The backend sequences such operands with `sequenceOperandsInOrder`. It
+  evaluates the operands in `ArgOrder` as `sequenceOperands` does and also
+  evaluates into a temporary each operand that is evaluated before an
+  operand Go would run first, when one of the two contains a call and the
+  other contains a call or is a read that the call could change. Every
+  operand evaluated before it is evaluated first as well. Constants, function
+  literals, and reads that no call can change stay inline, so
+  `take(b: 2, a: loud())` lowers to `Take(Loud(), 2)` and only
+  `take(b: loud("first"), a: loud("second"))` gains a temporary.
+
 New lowering code that combines operands must use `sequenceOperands` (or
-`sequenceOperandPair` and `sequenceOperandTriple` for two or three value
-operands) instead of concatenating their statements.
+`sequenceOperandPair` for two value operands, `sequenceTargetArgs` for the
+target and arguments of a built-in method, and `sequenceOperandsInOrder` for
+operands evaluated in an order other than the one they appear in) instead of
+concatenating their statements.
 
 ## Limits
 
-These ordering problems remain and are tracked separately:
+This ordering problem remains:
 
-- Named arguments and struct literal fields reach AIR in declaration order,
-  so the backend cannot see the written order (#576). Go struct literal
-  fields are lowered in alphabetical order (#577).
 - A `let` module global is read inline next to a call. Go code that receives
   its address can still write it; finding those globals needs a scan of the
   whole program rather than of one function.
@@ -180,6 +211,11 @@ These ordering problems remain and are tracked separately:
   the only differences are the `ard.Read` wrappers and the few
   assignment-target statements.
 - Lowering code that builds an operand must give it its AIR source, with
-  `sourcedOperand` or the source parameter of `sequenceOperandPair` and
-  `sequenceOperandTriple`, and must drop the source if it adapts the Go
-  expression in a way that reads through a pointer.
+  `sourcedOperand` or the source parameter of `sequenceOperandPair`, and
+  must drop the source if it adapts the Go expression in a way that reads
+  through a pointer.
+- Calls whose arguments are written in parameter order lower to
+  byte-identical Go; this was checked by comparing the generated Go for the
+  samples, `std_lib`, and the examples. Ard struct literals now list their
+  fields in the order written rather than alphabetically, which changes only
+  the order of keys in Go keyed literals.

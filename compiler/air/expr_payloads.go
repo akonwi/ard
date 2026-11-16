@@ -85,8 +85,13 @@ func spreadExprPayload(expr *Expr) *SpreadExprPayload {
 }
 
 type CallExprPayload struct {
-	Function      FunctionID
-	TypeArgs      []TypeID
+	Function FunctionID
+	TypeArgs []TypeID
+	// ArgOrder lists the indexes of the expression's Args in the order they
+	// are evaluated, which is the order they are written in (ADR 0078). It is
+	// nil when Args are evaluated in order. Named arguments are stored in
+	// parameter order, so a call that writes them in another order has one;
+	// a method's receiver, when it is Args[0], is evaluated first.
 	ArgOrder      []int
 	CaptureLocals []LocalID
 	Spread        *SpreadExprPayload
@@ -143,6 +148,8 @@ type TraitExprPayload struct {
 	Impl   ImplID
 	Trait  TraitID
 	Method int
+	// ArgOrder is CallExprPayload.ArgOrder for an ExprCallTrait.
+	ArgOrder []int
 }
 
 func (*TraitExprPayload) exprPayload() {}

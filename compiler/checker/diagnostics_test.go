@@ -358,6 +358,14 @@ func TestStructLiteralDiagnosticsAreStructured(t *testing.T) {
 			code: checker.DiagnosticCodeDuplicateStructLiteralField, legacyMessage: "Duplicate field: X", secondaries: 1,
 		},
 		{
+			name: "duplicate Ard field", source: "struct Pair {\n  a: Int,\n  b: Int\n}\nlet p = Pair{a: 1, b: 2, a: 3}\n",
+			code: checker.DiagnosticCodeDuplicateStructLiteralField, legacyMessage: "Duplicate field: a", secondaries: 1,
+		},
+		{
+			name: "duplicate Ard module struct field", source: "use ard/list\nlet p = list::IntPartition{selected: [], others: [], selected: []}\n",
+			code: checker.DiagnosticCodeDuplicateStructLiteralField, legacyMessage: "Duplicate field: selected", secondaries: 1,
+		},
+		{
 			name: "missing Ard field", source: "struct Person {\n  name: Str,\n  age: Int\n}\nlet p = Person{name: \"Ada\"}\n",
 			code: checker.DiagnosticCodeMissingStructFields, legacyMessage: "Missing field: age",
 		},

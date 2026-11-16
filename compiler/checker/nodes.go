@@ -420,11 +420,12 @@ type ForeignStructInstance struct {
 	Name      string
 	// Fields are in the order they are written in the literal, which is the
 	// order their values are evaluated in (ADR 0078).
-	Fields []ForeignStructField
+	Fields []StructFieldValue
 	_type  *ForeignType
 }
 
-type ForeignStructField struct {
+// StructFieldValue is one field written in a struct literal.
+type StructFieldValue struct {
 	Name  string
 	Value Expression
 }
@@ -487,9 +488,12 @@ const (
 )
 
 type StrMethod struct {
-	Subject  Expression
-	Kind     StrMethodKind
-	Args     []Expression
+	Subject Expression
+	Kind    StrMethodKind
+	Args    []Expression
+	// ArgOrder lists the indexes of Args in the order the arguments are
+	// written, which is the order they are evaluated in (ADR 0078). It is nil
+	// when that is the order of Args; named arguments can make it differ.
 	ArgOrder []int
 }
 
@@ -660,9 +664,12 @@ const (
 )
 
 type ListMethod struct {
-	Subject    Expression
-	Kind       ListMethodKind
-	Args       []Expression
+	Subject Expression
+	Kind    ListMethodKind
+	Args    []Expression
+	// ArgOrder lists the indexes of Args in the order the arguments are
+	// written, which is the order they are evaluated in (ADR 0078). It is nil
+	// when that is the order of Args; named arguments can make it differ.
 	ArgOrder   []int
 	ReturnType Type // Resolved from the specialized method signature; required.
 }
@@ -683,9 +690,13 @@ const (
 )
 
 type MapMethod struct {
-	Subject    Expression
-	Kind       MapMethodKind
-	Args       []Expression
+	Subject Expression
+	Kind    MapMethodKind
+	Args    []Expression
+	// ArgOrder lists the indexes of Args in the order the arguments are
+	// written, which is the order they are evaluated in (ADR 0078). It is nil
+	// when that is the order of Args; named arguments can make it differ.
+	ArgOrder   []int
 	ReturnType Type // Resolved from the specialized method signature; required.
 }
 
@@ -1334,8 +1345,12 @@ func (f *FunctionDef) hasGenerics() bool {
 // non-generic signature may alias its declaration; specialized signatures are
 // bodyless and cannot lose declaration identity when copied.
 type FunctionCall struct {
-	Name        string
-	Args        []Expression
+	Name string
+	Args []Expression
+	// ArgOrder lists the indexes of Args in the order the arguments are
+	// written, which is the order they are evaluated in (ADR 0078). It is nil
+	// when that is the order of Args; named arguments can make it differ.
+	ArgOrder    []int
 	TypeArgs    []Type
 	TailSpread  bool
 	declaration *FunctionDef
@@ -1378,8 +1393,12 @@ func (f *FunctionCall) Definition() *FunctionDef {
 }
 
 type FunctionValueCall struct {
-	Callee       Expression
-	Args         []Expression
+	Callee Expression
+	Args   []Expression
+	// ArgOrder lists the indexes of Args in the order the arguments are
+	// written, which is the order they are evaluated in (ADR 0078). It is nil
+	// when that is the order of Args; named arguments can make it differ.
+	ArgOrder     []int
 	TailSpread   bool
 	FunctionType *FunctionDef
 	ReturnType   Type
@@ -1762,8 +1781,11 @@ func (def StructDef) hasTrait(trait *Trait) bool {
 }
 
 type StructInstance struct {
-	Name       string
-	Fields     map[string]Expression
+	Name string
+	// Fields are the fields written in the literal, in the order they are
+	// written, which is the order their values are evaluated in (ADR 0078).
+	// A Maybe field the literal omits is absent.
+	Fields     []StructFieldValue
 	_type      *StructDef
 	FieldTypes map[string]Type // Pre-computed by checker
 	StructType Type            // Pre-computed by checker

@@ -288,10 +288,10 @@ func TestStructs(t *testing.T) {
 							Name: "alice",
 							Value: &checker.StructInstance{
 								Name: "Person",
-								Fields: map[string]checker.Expression{
-									"name":     &checker.StrLiteral{"Alice"},
-									"age":      &checker.IntLiteral{30},
-									"employed": &checker.BoolLiteral{true},
+								Fields: []checker.StructFieldValue{
+									{Name: "name", Value: &checker.StrLiteral{"Alice"}},
+									{Name: "age", Value: &checker.IntLiteral{30}},
+									{Name: "employed", Value: &checker.BoolLiteral{true}},
 								},
 								FieldTypes: map[string]checker.Type{
 									"name":     checker.Str,

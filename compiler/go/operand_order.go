@@ -1,6 +1,7 @@
 package gotarget
 
 import (
+	"fmt"
 	"go/ast"
 	"go/token"
 
@@ -71,9 +72,19 @@ func placeOperand(lowered loweredExpr, base *air.Expr) operand {
 // in order (readOperandsInOrder). Otherwise every expression stays inline and
 // the operands' own statements are returned unchanged.
 func (l *lowerer) sequenceOperands(ops []operand) ([]ast.Stmt, error) {
+	return l.sequenceOperandsFixing(ops, -1)
+}
+
+// sequenceOperandsFixing is sequenceOperands that also evaluates each operand
+// up to and including ops[fixed] into a temporary, or leaves it inline when
+// its expression cannot observe or cause side effects. fixed < 0 adds none.
+func (l *lowerer) sequenceOperandsFixing(ops []operand, fixed int) ([]ast.Stmt, error) {
 	last := -1
+	if fixed >= 0 {
+		last = fixed + 1
+	}
 	for i := range ops {
-		if len(ops[i].stmts) > 0 {
+		if len(ops[i].stmts) > 0 && i > last {
 			last = i
 		}
 	}
@@ -101,6 +112,90 @@ func (l *lowerer) sequenceOperands(ops []operand) ([]ast.Stmt, error) {
 		}
 	}
 	return stmts, nil
+}
+
+// sequenceOperandsInOrder is sequenceOperands for operands that are
+// evaluated in an order other than the one they appear in: order lists the
+// indexes of ops in evaluation order, and nil means the order of ops. A call
+// with named arguments has such operands (#576): its Go arguments are in
+// parameter order, and the arguments are evaluated in the order they are
+// written.
+//
+// Go evaluates the calls in an expression in the order they appear, so an
+// operand that must be evaluated before an operand appearing to its left is
+// evaluated into a temporary first when the two conflict (operandsConflict):
+// one contains a call, and the other contains a call or is a read that call
+// could change. Every operand evaluated before it is evaluated first as well
+// (sequenceOperandsFixing). Operands out of order that do not conflict, such
+// as constants, function literals, and reads no call can change, need
+// nothing, so the generated Go for them does not change.
+func (l *lowerer) sequenceOperandsInOrder(ops []operand, order []int) ([]ast.Stmt, error) {
+	if order == nil {
+		return l.sequenceOperands(ops)
+	}
+	if len(order) != len(ops) {
+		return nil, fmt.Errorf("operand order %v for %d operands", order, len(ops))
+	}
+	var buf operandBuffer
+	inOrder := buf.operands(len(ops))
+	for i, index := range order {
+		if index < 0 || index >= len(ops) {
+			return nil, fmt.Errorf("operand order %v for %d operands", order, len(ops))
+		}
+		inOrder[i] = ops[index]
+	}
+	stmts, err := l.sequenceOperandsFixing(inOrder, l.lastOperandOutOfOrder(inOrder, order))
+	if err != nil {
+		return nil, err
+	}
+	for i, index := range order {
+		ops[index] = inOrder[i]
+	}
+	return stmts, nil
+}
+
+// operandOrderAfter is the evaluation order of lead operands, such as a
+// callee or a receiver, followed by arguments evaluated in argOrder (an AIR
+// ArgOrder). It is nil when argOrder is.
+func operandOrderAfter(lead int, argOrder []int) []int {
+	if argOrder == nil {
+		return nil
+	}
+	order := make([]int, lead, lead+len(argOrder))
+	for i := range lead {
+		order[i] = i
+	}
+	for _, index := range argOrder {
+		order = append(order, lead+index)
+	}
+	return order
+}
+
+// lastOperandOutOfOrder returns the last of ops, which are in evaluation
+// order, that appears after a later operand it must be evaluated before
+// (see sequenceOperandsInOrder), or -1. order maps each to its position.
+func (l *lowerer) lastOperandOutOfOrder(ops []operand, order []int) int {
+	for i := len(ops) - 2; i >= 0; i-- {
+		for j := i + 1; j < len(ops); j++ {
+			if order[j] < order[i] && l.operandsConflict(&ops[i], &ops[j]) {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
+// operandsConflict reports whether evaluating later before earlier could
+// change what either does: one contains a call, and the other contains a call
+// or is a read that the call could change.
+func (l *lowerer) operandsConflict(earlier, later *operand) bool {
+	if operandIsInert(earlier.expr) || operandIsInert(later.expr) {
+		return false
+	}
+	earlierCalls := l.exprContainsCall(earlier.expr)
+	laterCalls := l.exprContainsCall(later.expr)
+	return earlierCalls && (laterCalls || l.operandMayChange(later)) ||
+		laterCalls && l.operandMayChange(earlier)
 }
 
 // readOperandsInOrder finds the operands at or after last whose value a call
@@ -342,23 +437,27 @@ func (l *lowerer) sequenceOperandPair(first *loweredExpr, firstSource *air.Expr,
 	return stmts, nil
 }
 
-// sequenceOperandTriple is sequenceOperandPair for three value operands, the
-// first two lowered from firstSource and secondSource.
-func (l *lowerer) sequenceOperandTriple(first *loweredExpr, firstSource *air.Expr, second *loweredExpr, secondSource *air.Expr, third *loweredExpr, thirdType air.TypeID) ([]ast.Stmt, error) {
-	ops := [3]operand{
-		sourcedOperand(*first, firstSource.Type, firstSource),
-		sourcedOperand(*second, secondSource.Type, secondSource),
-		valueOperand(*third, thirdType),
+// sequenceTargetArgs sequences the target of a built-in method expr and its
+// arguments, lowered from expr.Args, updating each expression in place. The
+// target is evaluated first and the arguments in expr's ArgOrder.
+func (l *lowerer) sequenceTargetArgs(expr air.Expr, target *loweredExpr, args ...*loweredExpr) ([]ast.Stmt, error) {
+	if len(args) != len(expr.Args) {
+		return nil, fmt.Errorf("built-in method has %d arguments, lowered %d", len(expr.Args), len(args))
 	}
-	if len(second.stmts) == 0 && len(third.stmts) == 0 &&
-		!l.readBeforeCall(&ops[0], second.expr, third.expr) && !l.readBeforeCall(&ops[1], third.expr) {
-		return first.stmts, nil
+	var buf operandBuffer
+	ops := buf.operands(1 + len(args))
+	ops[0] = sourcedOperand(*target, expr.Target.Type, expr.Target)
+	for i, arg := range args {
+		ops[1+i] = sourcedOperand(*arg, expr.Args[i].Type, &expr.Args[i])
 	}
-	stmts, err := l.sequenceOperands(ops[:])
+	stmts, err := l.sequenceOperandsInOrder(ops, operandOrderAfter(1, expr.ArgOrder()))
 	if err != nil {
 		return nil, err
 	}
-	first.expr, second.expr, third.expr = ops[0].expr, ops[1].expr, ops[2].expr
+	target.expr = ops[0].expr
+	for i, arg := range args {
+		arg.expr = ops[1+i].expr
+	}
 	return stmts, nil
 }
 

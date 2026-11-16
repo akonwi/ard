@@ -1,6 +1,9 @@
 package gotarget
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // The tests in this file print from every operand of a composite expression.
 // An operand written with `later` lowers to setup statements (the call returns
@@ -103,6 +106,188 @@ staged Proto
 staged Method
 staged Host
 HTTP/1.1 GET HTTP/2 PUT example.com
+`
+	if got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+}
+
+// Regression for #576: named arguments evaluate in the order they are
+// written, not in parameter order, for every kind of call that takes them.
+func TestGoTargetNamedArgumentsEvaluateInSourceOrder(t *testing.T) {
+	got := runGoTargetSourceStdout(t, `use go:fmt
+use ard/list
+`+evaluationOrderHelpers+`
+fn take(a: Int, b: Int) Int {
+  a * 10 + b
+}
+
+fn take3(a: Int, b: Int, c: Int?) Int {
+  a * 100 + b * 10 + c.or(0)
+}
+
+struct Pair {
+  a: Int,
+  b: Int,
+}
+
+impl Pair {
+  fn sum(x: Int, y: Int) Int {
+    self.a + x * 10 + y
+  }
+}
+
+fn Pair::make(a: Int, b: Int) Pair {
+  Pair{a: a, b: b}
+}
+
+trait Combine {
+  fn combine(x: Int, y: Int) Int
+}
+
+impl Combine for Pair {
+  fn combine(x: Int, y: Int) Int {
+    x * 10 + y
+  }
+}
+
+fn main() {
+  let call = take(b: now("call b", 2), a: now("call a", 1))
+  let mixed = take3(now("mixed a", 1), c: now("mixed c", 3), b: now("mixed b", 2))
+  let omitted = take3(b: now("omitted b", 2), a: now("omitted a", 1))
+  let staged = take3(c: later("staged c", 3), b: now("staged b", 2), a: later("staged a", 1).or(0))
+  let pair = Pair::make(b: now("static b", 2), a: now("static a", 1))
+  let method = pair.sum(y: now("method y", 2), x: now("method x", 1))
+  let closure = fn(a: Int, b: Int) Int { a * 10 + b }
+  let value_call = closure(b: now("closure b", 2), a: now("closure a", 1))
+  let combiner: Combine = pair
+  let trait_call = combiner.combine(y: now("trait y", 2), x: now("trait x", 1))
+  let joined = list::concat(b: [now("module b", 2)], a: [now("module a", 1)])
+  let replaced = "abc".replace(new: now_str("replace new", "x"), old: now_str("replace old", "b"))
+  let items = &mut [1, 2, 3]
+  items.set(value: now("set value", 9), index: now("set index", 0))
+  items.swap(r: now("swap r", 2), l: now("swap l", 1))
+  let table: &mut [Int: Int] = &mut [:]
+  table.set(value: now("map value", 7), key: now("map key", 1))
+  fmt::Println(call, mixed, omitted, staged, pair.a, pair.b, method, value_call, trait_call, joined, replaced, items.*, table.*)
+}
+`)
+	want := `call b
+call a
+mixed a
+mixed c
+mixed b
+omitted b
+omitted a
+staged c
+staged b
+staged a
+static b
+static a
+method y
+method x
+closure b
+closure a
+trait y
+trait x
+module b
+module a
+replace new
+replace old
+set value
+set index
+swap r
+swap l
+map value
+map key
+12 123 120 123 1 2 13 12 12 [1 2] axc [9 3 2] map[1:7]
+`
+	if got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+}
+
+// Named arguments out of order add a temporary only for an argument that
+// must be evaluated before a call that Go would run first (#576). Constants
+// and reads no call can change stay inline, and arguments in order lower as
+// before.
+func TestGoTargetNamedArgumentsAddTemporariesOnlyWhereNeeded(t *testing.T) {
+	source := generatedReadBeforeCallSource(t, `use go:fmt
+
+fn loud(label: Str) Int {
+  fmt::Println(label)
+  1
+}
+
+fn take(a: Int, b: Int) Int {
+  a + b
+}
+
+fn take3(a: Int, b: Int, c: Int) Int {
+  a + b + c
+}
+
+fn main() {
+  let x = 5
+  let in_order = take(a: loud("in order a"), b: loud("in order b"))
+  let calls = take(b: loud("first"), a: loud("second"))
+  let constant = take(b: 2, a: loud("only call"))
+  let stable = take(b: x, a: loud("stable read"))
+  let mixed = take3(c: loud("c"), a: 1, b: loud("b"))
+  fmt::Println(in_order, calls, constant, stable, mixed)
+}
+`)
+	for _, want := range []string{
+		`Take(Loud("in order a"), Loud("in order b"))`,
+		`= Loud("first")`,
+		`Take(Loud("second"), _tmp_`,
+		`Take(Loud("only call"), 2)`,
+		`Take(Loud("stable read"), x)`,
+		`= Loud("c")`,
+		`Take3(1, Loud("b"), _tmp_`,
+	} {
+		if !strings.Contains(source, want) {
+			t.Errorf("generated Go does not contain %q:\n%s", want, source)
+		}
+	}
+}
+
+// Regression for #576: Ard struct literal fields evaluate in the order they
+// are written, not in declaration order, including when a Maybe field is
+// omitted and when the struct is generic.
+func TestGoTargetStructFieldsEvaluateInSourceOrder(t *testing.T) {
+	got := runGoTargetSourceStdout(t, `use go:fmt
+`+evaluationOrderHelpers+`
+struct Trio {
+  a: Int,
+  b: Int?,
+  c: Int,
+}
+
+struct Box<$T> {
+  first: $T,
+  second: $T,
+}
+
+fn main() {
+  let plain = Trio{c: now("plain c", 3), b: now("plain b", 2), a: now("plain a", 1)}
+  let omitted = Trio{c: now("omitted c", 3), a: now("omitted a", 1)}
+  let staged = Trio{c: later("staged c", 3).or(0), a: now("staged a", 1), b: later("staged b", 2)}
+  let boxed = Box{second: now_str("generic second", "y"), first: now_str("generic first", "x")}
+  fmt::Println(plain.a, plain.b.or(0), plain.c, omitted.a, omitted.b.or(0), omitted.c, staged.a, staged.b.or(0), staged.c, boxed.first, boxed.second)
+}
+`)
+	want := `plain c
+plain b
+plain a
+omitted c
+omitted a
+staged c
+staged a
+staged b
+generic second
+generic first
+1 2 3 1 0 3 1 2 3 x y
 `
 	if got != want {
 		t.Fatalf("stdout = %q, want %q", got, want)

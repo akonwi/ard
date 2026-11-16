@@ -3805,7 +3805,7 @@ func (fl *functionLowerer) lowerForLoop(loop *checker.ForLoop) ([]Stmt, error) {
 	return []Stmt{*init, Stmt{Kind: StmtWhile, Condition: condition, Body: body}}, nil
 }
 
-func (fl *functionLowerer) lowerFunctionTypeCall(name string, args []checker.Expression, target *Expr, tailSpread bool) (*Expr, error) {
+func (fl *functionLowerer) lowerFunctionTypeCall(name string, args []checker.Expression, argOrder []int, target *Expr, tailSpread bool) (*Expr, error) {
 	if target == nil {
 		return nil, fmt.Errorf("function value call %s missing target", name)
 	}
@@ -3827,7 +3827,7 @@ func (fl *functionLowerer) lowerFunctionTypeCall(name string, args []checker.Exp
 		spreadElement = typeInfo.Params[len(typeInfo.Params)-1]
 		spreadCallable = functionTypeID
 	}
-	return &Expr{Kind: ExprCallClosure, Type: typeInfo.Return, Target: target, Args: loweredArgs, Payload: &CallExprPayload{Spread: newSpreadExprPayload(tailSpread, spreadElement, spreadCallable)}}, nil
+	return &Expr{Kind: ExprCallClosure, Type: typeInfo.Return, Target: target, Args: loweredArgs, Payload: &CallExprPayload{ArgOrder: append([]int(nil), argOrder...), Spread: newSpreadExprPayload(tailSpread, spreadElement, spreadCallable)}}, nil
 }
 
 // functionTypeIDForCallable resolves a callee type to its function type: a
@@ -4009,13 +4009,13 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		}
 		if ok && fl.localKind(local) == TypeFunction {
 			target := &Expr{Kind: ExprLoadLocal, Type: fl.fn.Locals[local].Type, Payload: &LocalExprPayload{Local: local}}
-			return fl.lowerFunctionTypeCall(e.Name, e.Args, target, e.TailSpread)
+			return fl.lowerFunctionTypeCall(e.Name, e.Args, e.ArgOrder, target, e.TailSpread)
 		}
 		if global, ok := fl.l.lookupGlobalInModule(fl.fn.Module, e.Name); ok {
 			globalType := fl.l.program.Globals[global].Type
 			if typeInfo, ok := fl.l.typeInfo(globalType); ok && typeInfo.Kind == TypeFunction {
 				target := &Expr{Kind: ExprLoadGlobal, Type: globalType, Payload: &GlobalExprPayload{Global: global}}
-				return fl.lowerFunctionTypeCall(e.Name, e.Args, target, e.TailSpread)
+				return fl.lowerFunctionTypeCall(e.Name, e.Args, e.ArgOrder, target, e.TailSpread)
 			}
 		}
 	}
@@ -4087,26 +4087,26 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		if err != nil {
 			return nil, err
 		}
-		return fl.lowerFunctionTypeCall("function value", e.Args, target, e.TailSpread)
+		return fl.lowerFunctionTypeCall("function value", e.Args, e.ArgOrder, target, e.TailSpread)
 	case *checker.FunctionCall:
 		if local, ok := fl.locals[e.Name]; ok {
 			if _, callable := fl.functionTypeIDForCallable(fl.fn.Locals[local].Type); callable {
 				target := &Expr{Kind: ExprLoadLocal, Type: fl.fn.Locals[local].Type, Payload: &LocalExprPayload{Local: local}}
-				return fl.lowerFunctionTypeCall(e.Name, e.Args, target, e.TailSpread)
+				return fl.lowerFunctionTypeCall(e.Name, e.Args, e.ArgOrder, target, e.TailSpread)
 			}
 		}
 		if global, ok := fl.l.lookupGlobalInModule(fl.fn.Module, e.Name); ok {
 			globalType := fl.l.program.Globals[global].Type
 			if typeInfo, ok := fl.l.typeInfo(globalType); ok && typeInfo.Kind == TypeFunction {
 				target := &Expr{Kind: ExprLoadGlobal, Type: globalType, Payload: &GlobalExprPayload{Global: global}}
-				return fl.lowerFunctionTypeCall(e.Name, e.Args, target, e.TailSpread)
+				return fl.lowerFunctionTypeCall(e.Name, e.Args, e.ArgOrder, target, e.TailSpread)
 			}
 		}
 		if local, hasLocal, err := fl.resolveLocal(e.Name); err != nil {
 			return nil, err
 		} else if hasLocal && fl.localKind(local) == TypeFunction {
 			target := &Expr{Kind: ExprLoadLocal, Type: fl.fn.Locals[local].Type, Payload: &LocalExprPayload{Local: local}}
-			return fl.lowerFunctionTypeCall(e.Name, e.Args, target, e.TailSpread)
+			return fl.lowerFunctionTypeCall(e.Name, e.Args, e.ArgOrder, target, e.TailSpread)
 		}
 		if declaration := e.Declaration(); declaration != nil {
 			if declaration.LocalNamed {
@@ -4380,7 +4380,7 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 			globalType := fl.l.program.Globals[global].Type
 			if _, callable := fl.functionTypeIDForCallable(globalType); callable {
 				target := &Expr{Kind: ExprLoadGlobal, Type: globalType, Payload: &GlobalExprPayload{Global: global}}
-				return fl.lowerFunctionTypeCall(e.Call.Name, e.Call.Args, target, e.Call.TailSpread)
+				return fl.lowerFunctionTypeCall(e.Call.Name, e.Call.Args, e.Call.ArgOrder, target, e.Call.TailSpread)
 			}
 		}
 		declaration := e.Call.Declaration()
@@ -5109,7 +5109,11 @@ func (fl *functionLowerer) lowerMapMethod(typeID TypeID, method *checker.MapMeth
 	if err != nil {
 		return nil, err
 	}
-	return &Expr{Kind: kind, Type: typeID, Target: target, Args: args}, nil
+	var payload ExprPayload
+	if method.ArgOrder != nil {
+		payload = &CallExprPayload{ArgOrder: append([]int(nil), method.ArgOrder...)}
+	}
+	return &Expr{Kind: kind, Type: typeID, Target: target, Args: args, Payload: payload}, nil
 }
 
 func (fl *functionLowerer) lowerResultMethod(typeID TypeID, method *checker.ResultMethod) (*Expr, error) {
@@ -5406,19 +5410,31 @@ func (fl *functionLowerer) lowerStructInstance(typeID TypeID, inst *checker.Stru
 	if !ok || typeInfo.Kind != TypeStruct {
 		return nil, fmt.Errorf("struct instance lowered with non-struct type %s", inst.Type().String())
 	}
-	fields := make([]StructFieldValue, 0, len(typeInfo.Fields))
-	for _, field := range typeInfo.Fields {
-		fieldExpr, ok := inst.Fields[field.Name]
+	// Fields stay in source order: the Go backend evaluates them in the order
+	// they appear here (ADR 0078). A Maybe field the literal omits is absent.
+	fields := make([]StructFieldValue, 0, len(inst.Fields))
+	for _, written := range inst.Fields {
+		field, ok := structFieldInfo(typeInfo, written.Name)
 		if !ok {
-			continue
+			return nil, fmt.Errorf("field %s not found on %s", written.Name, typeInfo.Name)
 		}
-		value, err := fl.lowerExprWithExpected(fieldExpr, field.Type)
+		value, err := fl.lowerExprWithExpected(written.Value, field.Type)
 		if err != nil {
 			return nil, err
 		}
 		fields = append(fields, StructFieldValue{Index: field.Index, Name: field.Name, Value: *value})
 	}
 	return &Expr{Kind: ExprMakeStruct, Type: typeID, Payload: &AggregateExprPayload{Fields: fields}}, nil
+}
+
+// structFieldInfo returns the field of the struct typ named name.
+func structFieldInfo(typ TypeInfo, name string) (FieldInfo, bool) {
+	for _, field := range typ.Fields {
+		if field.Name == name {
+			return field, true
+		}
+	}
+	return FieldInfo{}, false
 }
 
 func (fl *functionLowerer) lowerInstanceProperty(typeID TypeID, prop *checker.InstanceProperty) (*Expr, error) {
@@ -5681,7 +5697,7 @@ func (fl *functionLowerer) lowerInstanceMethod(typeID TypeID, method *checker.In
 		if err != nil {
 			return nil, err
 		}
-		return &Expr{Kind: ExprCallTrait, Type: typeID, Target: target, Args: args, Payload: &TraitExprPayload{Trait: typeInfo.Trait, Method: slot}}, nil
+		return &Expr{Kind: ExprCallTrait, Type: typeID, Target: target, Args: args, Payload: &TraitExprPayload{Trait: typeInfo.Trait, Method: slot, ArgOrder: append([]int(nil), method.Method.ArgOrder...)}}, nil
 	}
 	if typeInfo.Kind == TypeChannel || typeInfo.Kind == TypeReceiver || typeInfo.Kind == TypeSender {
 		return fl.lowerChanMethod(typeID, target, method)
@@ -5796,7 +5812,7 @@ func (fl *functionLowerer) lowerStaticTraitMethod(typeID TypeID, target *Expr, m
 		if genericMatch {
 			typeArgs = append([]TypeID(nil), implTargetInfo.GenericArgs...)
 		}
-		return &Expr{Kind: ExprCall, Type: typeID, Args: args, Payload: &CallExprPayload{Function: id, TypeArgs: typeArgs}}, true, nil
+		return &Expr{Kind: ExprCall, Type: typeID, Args: args, Payload: &CallExprPayload{Function: id, TypeArgs: typeArgs, ArgOrder: receiverArgOrder(method.Method.ArgOrder)}}, true, nil
 	}
 	return nil, false, nil
 }
@@ -5846,7 +5862,7 @@ func (fl *functionLowerer) lowerUserDefinedInstanceMethod(typeID TypeID, target 
 			return nil, err
 		}
 		args = append(args, loweredArgs...)
-		return &Expr{Kind: ExprCall, Type: typeID, Args: args, Payload: &CallExprPayload{Function: id, TypeArgs: typeArgs}}, nil
+		return &Expr{Kind: ExprCall, Type: typeID, Args: args, Payload: &CallExprPayload{Function: id, TypeArgs: typeArgs, ArgOrder: receiverArgOrder(method.Method.ArgOrder)}}, nil
 	}
 	id, err := fl.declareInstanceMethodFunction(module, typeInfo.Name, typeInfo.ID, def, method.Method.Args, typeID)
 	if err != nil {
@@ -5863,7 +5879,22 @@ func (fl *functionLowerer) lowerUserDefinedInstanceMethod(typeID TypeID, target 
 		return nil, err
 	}
 	args = append(args, loweredArgs...)
-	return &Expr{Kind: ExprCall, Type: typeID, Args: args, Payload: &CallExprPayload{Function: id}}, nil
+	return &Expr{Kind: ExprCall, Type: typeID, Args: args, Payload: &CallExprPayload{Function: id, ArgOrder: receiverArgOrder(method.Method.ArgOrder)}}, nil
+}
+
+// receiverArgOrder is a method call's argument order (checker ArgOrder) for
+// AIR Args that hold the receiver first: the receiver, which is written
+// before the arguments, is evaluated first.
+func receiverArgOrder(order []int) []int {
+	if order == nil {
+		return nil
+	}
+	shifted := make([]int, 0, len(order)+1)
+	shifted = append(shifted, 0)
+	for _, index := range order {
+		shifted = append(shifted, index+1)
+	}
+	return shifted
 }
 
 func (fl *functionLowerer) defineLocal(name string, typeID TypeID, mutable bool) LocalID {
@@ -6438,7 +6469,7 @@ func (fl *functionLowerer) buildResolvedCallExpr(id FunctionID, call *checker.Fu
 	if err != nil {
 		return nil, err
 	}
-	return &Expr{Kind: ExprCall, Type: signature.Return, Args: args, Payload: &CallExprPayload{Function: id, TypeArgs: typeArgs, Spread: newSpreadExprPayload(call.TailSpread, spreadElement, spreadCallable)}}, nil
+	return &Expr{Kind: ExprCall, Type: signature.Return, Args: args, Payload: &CallExprPayload{Function: id, TypeArgs: typeArgs, ArgOrder: append([]int(nil), call.ArgOrder...), Spread: newSpreadExprPayload(call.TailSpread, spreadElement, spreadCallable)}}, nil
 }
 
 func (l *lowerer) genericBindingsKeyWithInterner(def *checker.FunctionDef, intern func(checker.Type) (TypeID, error)) (string, map[string]TypeID, error) {
