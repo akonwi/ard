@@ -160,6 +160,69 @@ func TestUnspecializedGenericFunctionValueIsRejectedByChecker(t *testing.T) {
 	}
 }
 
+// Issue #593: a generic function reference is instantiated only from an
+// expected function type that fixes every one of its type parameters.
+func TestGenericFunctionValueWithoutFixingContextIsRejected(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		source string
+	}{
+		{"no expected type", `fn main() { let f = same }`},
+		{"non-function expected type", `fn main() { let f: Any = same }`},
+		{"function argument before the argument that fixes $A", `
+			fn apply(f: fn($A) $A, x: $A) $A { f(x) }
+			fn main() { let value = apply(same, 4) }`},
+		{"return-only generic against an open callback return", `
+			fn make() $T { panic("no value") }
+			fn call(f: fn() $R) $R { f() }
+			fn main() { let value = call(make) }`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result := parse.Parse([]byte("fn same(x: $T) $T { x }\n"+tc.source), "test.ard")
+			if len(result.Errors) > 0 {
+				t.Fatalf("parse errors: %v", result.Errors)
+			}
+			c := checker.New("test.ard", result.Program, nil)
+			c.Check()
+			if got := diagnosticsString(c.Diagnostics()); !strings.Contains(got, "Unresolved generic") {
+				t.Fatalf("diagnostics = %v, want unresolved generic", c.Diagnostics())
+			}
+		})
+	}
+}
+
+// Issue #593: an expected function type that conflicts with the generic
+// function's shape or bindings is a type mismatch, not an unresolved generic.
+func TestGenericFunctionValueConflictingExpectedTypeIsMismatch(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		source string
+		want   string
+	}{
+		{"return conflicts with parameter binding", `fn main() { let f: fn(Int) Str = same }`, "Expected fn(Int) Str, got fn(Int) Int"},
+		{"parameter count", `fn main() { let f: fn(Int, Int) Int = same }`, "Expected fn(Int, Int) Int, got fn($T) $T"},
+		{"conflicting parameters", `
+			fn both(a: $T, b: $T) $T { a }
+			fn main() { let f: fn(Int, Str) Int = both }`, "Type mismatch"},
+		{"argument", `
+			fn apply(f: fn(Int) Str, x: Int) Str { f(x) }
+			fn main() { let value = apply(same, 4) }`, "Type mismatch"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result := parse.Parse([]byte("fn same(x: $T) $T { x }\n"+tc.source), "test.ard")
+			if len(result.Errors) > 0 {
+				t.Fatalf("parse errors: %v", result.Errors)
+			}
+			c := checker.New("test.ard", result.Program, nil)
+			c.Check()
+			got := diagnosticsString(c.Diagnostics())
+			if !strings.Contains(got, tc.want) || strings.Contains(got, "Unresolved generic") {
+				t.Fatalf("diagnostics = %v, want %q and no unresolved generic", c.Diagnostics(), tc.want)
+			}
+		})
+	}
+}
+
 func TestExpectedContextPreviewPreservesEarlierArgumentBindings(t *testing.T) {
 	result := parse.Parse([]byte(`
 		fn make_callback() fn($X) $Y { panic("no callback") }

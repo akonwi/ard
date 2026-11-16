@@ -62,6 +62,26 @@ let label = apply<Int, Str>(42, fn(value: Int) Str { value.to_str() })
 
 Type arguments correspond to the order of generics introduced in the signature.
 
+## Generic Functions as Values
+
+A generic function can be passed or stored as a function value where a function type is expected. Its generics are inferred from that type, the same way a call infers them from its arguments:
+
+```ard
+fn identity(value: $T) $T {
+  value
+}
+
+fn twice(transform: fn(Int) Int, value: Int) Int {
+  transform(transform(value))
+}
+
+let same: fn(Str) Str = identity  // $T inferred as Str
+let four = twice(identity, 4)     // $T inferred as Int
+let doubled = Maybe::new(2).map(identity)
+```
+
+The expected type must fix every generic. Without an expected function type, such as `let f = identity`, the generic is unresolved and the compiler reports an error. Inference runs left to right as it does for calls: in `apply(identity, 4)` with `fn apply(f: fn($A) $A, value: $A)`, the later argument cannot fix `$A` for the earlier one. Wrap the call in an anonymous function, or pass the value first.
+
 ## Generics in Anonymous Functions
 
 Anonymous functions may use generic parameters from their enclosing function or receiver method as explicit call type arguments. The generic may be used only in the anonymous function body; it does not need to appear in the anonymous function's own signature:

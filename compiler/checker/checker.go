@@ -935,6 +935,7 @@ type Checker struct {
 	spans                             *SpanIndex
 	nextCallInferenceID               uint64
 	expectedCallExpectation           *typeExpectation
+	functionValueExpectation          *genericFunctionValueExpectation
 	deferReceiverTypeCompleteness     bool
 	foreignABIParameters              map[*parse.FunctionDeclaration][]ForeignParameterABI
 	moduleFiles                       map[string]string
@@ -4417,9 +4418,14 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					}
 					if maybeField, isMaybe := fieldType.(*Maybe); isMaybe {
 						// Mirror call-argument checking for nullable targets:
-						// literals and anonymous functions check against the
-						// inner type; other expressions check freely and wrap
-						// below when they produce the inner type.
+						// literals, anonymous functions, and generic function
+						// references check against the inner type; other
+						// expressions check freely and wrap below when they
+						// produce the inner type.
+						if c.isGenericFunctionReference(s.Value) {
+							value = c.checkExprAs(s.Value, maybeField.Of())
+							return
+						}
 						switch s.Value.(type) {
 						case *parse.StrLiteral, *parse.NumLiteral, *parse.BoolLiteral,
 							*parse.RuneLiteral, *parse.InterpolatedStr,
@@ -5377,6 +5383,11 @@ func (c *Checker) checkBlockWithExpected(stmts []parse.Statement, setup func(), 
 }
 
 func (c *Checker) canCheckStatementAsExpectedExpression(stmt parse.Statement, expectedFinal Type, onlyMatchFinal bool) bool {
+	// A generic function reference is instantiated from an expected function
+	// type (issue #593).
+	if id, ok := stmt.(*parse.Identifier); ok && expectedFinal != Void && c.isGenericFunctionReference(id) {
+		return true
+	}
 	if onlyMatchFinal && expectedFinal != Void {
 		switch s := stmt.(type) {
 		case *parse.MatchExpression, *parse.ConditionalMatchExpression, *parse.SelectExpression, *parse.IfStatement,
@@ -7312,10 +7323,16 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 				var val Expression
 				if maybeField, isMaybe := fieldExpected.(*Maybe); isMaybe {
 					// Preserve full Maybe<T> type context for expressions like Maybe::new(...)
-					// and Maybe::new(), but use the inner type for literals and anonymous
-					// functions so they can still infer their element/parameter types.
+					// and Maybe::new(), but use the inner type for literals, anonymous
+					// functions, and generic function references so they can still
+					// infer their element/parameter types.
+					innerContext := c.isGenericFunctionReference(property.Value)
 					switch property.Value.(type) {
 					case *parse.ListLiteral, *parse.MapLiteral, *parse.AnonymousFunction:
+						innerContext = true
+					}
+					switch {
+					case innerContext:
 						val = c.checkExprAs(property.Value, maybeField.Of())
 						if val != nil {
 							val = c.synthesizeMaybeSome(val, field)
@@ -9249,11 +9266,21 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 				c.failSilently()
 				return nil
 			}
-			if c.rejectUnspecializedGenericFunctionValue(sym.Type, s.GetLocation()) {
+			valueType, ok := c.functionValueType(s, sym.Type, s.GetLocation())
+			if !ok {
 				return nil
 			}
-			c.recordSymbolUse(s, sym, nil)
-			return &Variable{*sym}
+			if valueType == sym.Type {
+				c.recordSymbolUse(s, sym, nil)
+				return &Variable{*sym}
+			}
+			// A specialized generic function reference hovers as its
+			// instantiated type (issue #593).
+			value := *sym
+			value.Type = valueType
+			node := &Variable{value}
+			c.recordSymbolUse(s, sym, node)
+			return node
 		}
 		c.addDiagnostic(undefinedNameDiagnostic{
 			Kind: undefinedVariable,
@@ -10864,10 +10891,13 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 							c.addExpectedValue(fmt.Sprintf("%s::%s", id.Name, prop.Name), prop.GetLocation())
 							return nil
 						}
-						if c.rejectUnspecializedGenericFunctionValue(sym.Type, prop.GetLocation()) {
+						valueType, ok := c.functionValueType(s, sym.Type, prop.GetLocation())
+						if !ok {
 							return nil
 						}
-						node := &ModuleSymbol{Module: mod.Path(), Symbol: sym}
+						value := sym
+						value.Type = valueType
+						node := &ModuleSymbol{Module: mod.Path(), Symbol: value}
 						c.recordTarget(prop, node, SpanTarget{Kind: TargetValue, Module: mod.Path(), Symbol: prop.Name})
 						return node
 					default:
@@ -10888,10 +10918,13 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 					if fnSym, ok := c.scope.get(staticFnName); ok {
 						// Found a static function, return it as a function variable.
 						if fnDef, ok := fnSym.Type.(*FunctionDef); ok {
-							if c.rejectUnspecializedGenericFunctionValue(fnDef, propIdent.GetLocation()) {
+							valueType, ok := c.functionValueType(s, fnDef, propIdent.GetLocation())
+							if !ok {
 								return nil
 							}
-							return &Variable{*fnSym}
+							value := *fnSym
+							value.Type = valueType
+							return &Variable{value}
 						}
 					}
 				}
@@ -11868,6 +11901,9 @@ func discardingFunctionTypes(expected Type, actual Type) (*FunctionDef, *Functio
 func (c *Checker) checkExprAsInner(expr parse.Expression, expectedType Type, expectation *typeExpectation, argumentParameter *Parameter) Expression {
 	if literal := c.checkNumericLiteralAs(expr, expectedType); literal != nil {
 		return literal
+	}
+	if checked, ok := c.checkGenericFunctionValueAs(expr, expectedType, expectation, argumentParameter); ok {
+		return checked
 	}
 	switch s := (expr).(type) {
 	case *parse.UnaryExpression:
@@ -12917,7 +12953,11 @@ func (c *Checker) checkMaybeNewStatic(s *parse.StaticFunction, mod Module, expec
 		case *parse.ListLiteral, *parse.MapLiteral, *parse.AnonymousFunction:
 			value = c.checkExprAs(arg.Value, typeVar)
 		default:
-			value = c.checkExpr(arg.Value)
+			if c.isGenericFunctionReference(arg.Value) {
+				value = c.checkExprAs(arg.Value, typeVar)
+			} else {
+				value = c.checkExpr(arg.Value)
+			}
 		}
 	} else {
 		value = c.checkExpr(arg.Value)
@@ -13434,7 +13474,11 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 			if !isLiteralOrFunc {
 				_, isLiteralOrFunc = resolvedExprs[i].(*parse.AnonymousFunction)
 			}
-			// For literals and anonymous functions in Maybe parameters, use inner type
+			if !isLiteralOrFunc {
+				isLiteralOrFunc = c.isGenericFunctionReference(resolvedExprs[i])
+			}
+			// For literals, anonymous functions, and generic function references
+			// in Maybe parameters, use inner type
 			if isLiteralOrFunc {
 				expectedType = maybeParam.Of()
 			}
@@ -13466,6 +13510,14 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 				}
 			case *parse.AnonymousFunction:
 				checkedArg = c.checkExprAsArgument(resolvedExprs[i], expectedType, fnDefCopy.Parameters[i])
+			case *parse.Identifier, *parse.StaticProperty:
+				// A generic function reference is instantiated from the
+				// parameter's function type (issue #593).
+				if c.isGenericFunctionReference(resolvedExprs[i]) {
+					checkedArg = c.checkExprAsArgument(resolvedExprs[i], expectedType, fnDefCopy.Parameters[i])
+				} else {
+					checkedArg = c.checkExpr(resolvedExprs[i])
+				}
 			case *parse.FunctionCall, *parse.FunctionValueCall, *parse.StaticFunction, *parse.InstanceMethod:
 				// A nested call gets parameter context only after receiver, explicit,
 				// earlier-argument, or enclosing-return evidence has resolved this
@@ -13734,33 +13786,7 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 			}
 		} else {
 			// Create specialized function with resolved generics
-			fnToUse = &FunctionDef{
-				Name:                    fnDefCopy.Name,
-				GenericParams:           append([]string(nil), fnDefCopy.GenericParams...),
-				CallGenericParams:       append([]string(nil), fnDefCopy.CallGenericParams...),
-				LocalNamed:              fnDefCopy.LocalNamed,
-				DefaultVoidGeneric:      fnDefCopy.DefaultVoidGeneric,
-				DeferCallCompleteness:   fnDefCopy.DeferCallCompleteness,
-				Parameters:              make([]Parameter, len(fnDefCopy.Parameters)),
-				ReturnType:              substituteType(fnDefCopy.ReturnType, bindings),
-				ForeignResultShape:      fnDefCopy.ForeignResultShape,
-				InferReturnTypeFromBody: fnDefCopy.InferReturnTypeFromBody,
-				Mutates:                 fnDefCopy.Mutates,
-				Private:                 fnDefCopy.Private,
-				GenericBindings:         cloneTypeMap(bindings),
-			}
-
-			// Replace generics in parameters
-			for i, param := range fnDefCopy.Parameters {
-				fnToUse.Parameters[i] = Parameter{
-					Name:       param.Name,
-					Type:       substituteType(param.Type, bindings),
-					Mutable:    param.Mutable,
-					Loc:        param.Loc,
-					declaredAt: param.declaredAt,
-					Variadic:   param.Variadic,
-				}
-			}
+			fnToUse = specializeFunctionSignature(fnDefCopy, bindings)
 		}
 	} else {
 		fnToUse = fnDef

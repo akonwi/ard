@@ -3992,11 +3992,7 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 				if err != nil {
 					return nil, err
 				}
-				id, err := fl.l.declareAndLowerFunction(fl.fn.Module, declaration)
-				if err != nil {
-					return nil, err
-				}
-				return &Expr{Kind: ExprFunctionRef, Type: functionType, Payload: &CallExprPayload{Function: id}}, nil
+				return fl.lowerFunctionValueRef(fl.fn.Module, declaration, e.Type(), functionType)
 			}
 			return nil, fmt.Errorf("unknown local %s", e.Name())
 		}
@@ -5646,6 +5642,26 @@ func (fl *functionLowerer) lowerModuleSymbol(typeID TypeID, symbol *checker.Modu
 	module := fl.l.internModule(symbol.Module)
 	if err := fl.l.ensureModuleTraitImplsDeclared(symbol.Module); err != nil {
 		return nil, err
+	}
+	return fl.lowerFunctionValueRef(module, declaration, symbol.Type(), typeID)
+}
+
+// lowerFunctionValueRef lowers a reference to a source function used as a
+// value. A generic function's reference carries the specialization the
+// checker inferred from the expected function type (issue #593): like a call,
+// it names the single generic definition and supplies concrete type
+// arguments, which Go lowers as an explicit instantiation such as same[int].
+func (fl *functionLowerer) lowerFunctionValueRef(module ModuleID, declaration *checker.FunctionDef, valueType checker.Type, typeID TypeID) (*Expr, error) {
+	if specialized, ok := valueType.(*checker.FunctionDef); ok && len(specialized.GenericBindings) > 0 {
+		id, err := fl.l.declareGenericFunctionDef(module, declaration)
+		if err != nil {
+			return nil, err
+		}
+		typeArgs, err := fl.genericCallTypeArgs(specialized)
+		if err != nil {
+			return nil, err
+		}
+		return &Expr{Kind: ExprFunctionRef, Type: typeID, Payload: &CallExprPayload{Function: id, TypeArgs: typeArgs}}, nil
 	}
 	id, err := fl.l.declareAndLowerFunction(module, declaration)
 	if err != nil {
