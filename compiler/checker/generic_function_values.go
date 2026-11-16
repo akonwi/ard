@@ -62,22 +62,23 @@ func (c *Checker) isGenericFunctionReference(expr parse.Expression) bool {
 			return isUnspecializedGenericFunction(sym.Type)
 		}
 	case *parse.StaticProperty:
-		id, ok := s.Target.(*parse.Identifier)
-		if !ok {
-			return false
-		}
 		prop, ok := s.Property.(*parse.Identifier)
 		if !ok {
 			return false
 		}
-		if c.program.GoImports[id.Name] != nil {
-			return false
+		if id, ok := s.Target.(*parse.Identifier); ok {
+			if ref, ok := c.localStaticFunction(id.Name, prop.Name); ok {
+				return isUnspecializedGenericFunction(ref.symbol.Type)
+			}
+			if c.program.GoImports[id.Name] != nil {
+				return false
+			}
+			if mod := c.resolveModule(id.Name); mod != nil {
+				return isUnspecializedGenericFunction(mod.Get(prop.Name).Type)
+			}
 		}
-		if mod := c.resolveModule(id.Name); mod != nil {
-			return isUnspecializedGenericFunction(mod.Get(prop.Name).Type)
-		}
-		if sym, ok := c.scope.get(id.Name + "::" + prop.Name); ok {
-			return isUnspecializedGenericFunction(sym.Type)
+		if ref, ok := c.lookupStaticFunction(s.Target, prop.Name); ok {
+			return isUnspecializedGenericFunction(ref.symbol.Type)
 		}
 	}
 	return false
@@ -90,20 +91,24 @@ func isUnspecializedGenericFunction(typ Type) bool {
 
 // functionValueType returns the type a function reference node has as a
 // value. A non-generic function is its declared type. A generic function is
-// specialized from the expected function type supplied for this node; with no
-// such expectation, or when the expectation leaves a variable open, the
-// reference is rejected and ok is false.
-func (c *Checker) functionValueType(expr parse.Expression, typ Type, location parse.Location) (Type, bool) {
+// specialized from ownerBindings, the type arguments an alias owner applies to
+// a static function's generics (issue #607), and from the expected function
+// type supplied for this node. With neither, or when they leave a variable
+// open, the reference is rejected and ok is false.
+func (c *Checker) functionValueType(expr parse.Expression, typ Type, ownerBindings map[string]Type, location parse.Location) (Type, bool) {
 	fn, isFn := typ.(*FunctionDef)
 	if !isFn || len(fn.CallGenericParams) == 0 {
 		return typ, true
 	}
 	expectation := c.functionValueExpectation
-	if expectation == nil || expectation.expr != expr {
+	if expectation != nil && expectation.expr != expr {
+		expectation = nil
+	}
+	if expectation == nil && len(ownerBindings) == 0 {
 		c.rejectUnspecializedGenericFunctionValue(fn, location)
 		return nil, false
 	}
-	specialized := c.instantiateGenericFunctionValue(fn, expectation, location)
+	specialized := c.instantiateGenericFunctionValue(fn, expectation, ownerBindings, location)
 	if specialized == nil {
 		return nil, false
 	}
@@ -111,34 +116,39 @@ func (c *Checker) functionValueType(expr parse.Expression, typ Type, location pa
 }
 
 // instantiateGenericFunctionValue specializes a generic function from the
-// expected function type. The expected parameter and return types are
-// constraint sources; unresolved variables owned by an enclosing call provide
-// no evidence (ADR 0055's left-to-right rule: an earlier argument or other
-// context must fix them first). Conflicting evidence is reported as a type
-// mismatch between the expected type and the specialization.
-func (c *Checker) instantiateGenericFunctionValue(fn *FunctionDef, expectation *genericFunctionValueExpectation, location parse.Location) *FunctionDef {
-	target := expectation.target
-	if !sameFunctionShape(fn, target) {
+// owner bindings and the expected function type, either of which may be
+// absent. The expected parameter and return types are constraint sources;
+// unresolved variables owned by an enclosing call provide no evidence (ADR
+// 0055's left-to-right rule: an earlier argument or other context must fix
+// them first). Conflicting evidence is reported as a type mismatch between
+// the expected type and the specialization.
+func (c *Checker) instantiateGenericFunctionValue(fn *FunctionDef, expectation *genericFunctionValueExpectation, ownerBindings map[string]Type, location parse.Location) *FunctionDef {
+	if expectation != nil && !sameFunctionShape(fn, expectation.target) {
 		c.reportFunctionValueMismatch(expectation, fn, location)
 		return nil
 	}
 
-	fnCopy, genericScope, err := c.setupFunctionCall(fn, nil, nil)
+	genericParams := append([]string(nil), callGenericParamsForFunction(fn)...)
+	fnCopy, genericScope, err := c.setupFunctionCallWithBindings(fn, genericParams, ownerBindings, genericParams, nil, nil)
 	if err != nil {
 		c.addGenericFunctionResolutionError(err, location)
 		return nil
 	}
 	conflict := false
-	for i := range fnCopy.Parameters {
-		if c.constrainFunctionValueType(fnCopy.Parameters[i].Type, target.Parameters[i].Type, genericScope) != nil {
-			conflict = true
+	if expectation != nil {
+		target := expectation.target
+		for i := range fnCopy.Parameters {
+			if c.constrainFunctionValueType(fnCopy.Parameters[i].Type, target.Parameters[i].Type, genericScope) != nil {
+				conflict = true
+			}
 		}
-	}
-	// A Void expectation discards the return value (coerceDiscardingFunction),
-	// so it is no evidence for the function's own return type.
-	if target.ReturnType != Void {
-		if c.constrainFunctionValueType(fnCopy.ReturnType, target.ReturnType, genericScope) != nil {
-			conflict = true
+		// A Void expectation discards the return value
+		// (coerceDiscardingFunction), so it is no evidence for the function's
+		// own return type.
+		if target.ReturnType != Void {
+			if c.constrainFunctionValueType(fnCopy.ReturnType, target.ReturnType, genericScope) != nil {
+				conflict = true
+			}
 		}
 	}
 
@@ -154,7 +164,6 @@ func (c *Checker) instantiateGenericFunctionValue(fn *FunctionDef, expectation *
 	}
 
 	bindings := genericScope.getGenericBindings()
-	genericParams := callGenericParamsForFunction(fn)
 	genericArgs := make([]Type, len(genericParams))
 	for i, param := range genericParams {
 		genericArgs[i] = bindings[param]
@@ -168,8 +177,15 @@ func (c *Checker) instantiateGenericFunctionValue(fn *FunctionDef, expectation *
 
 	// Like a call, the specialization carries its bindings; a conflict that
 	// still resolved every variable surfaces as a mismatch against the
-	// expected type when the caller checks compatibility.
-	return specializeFunctionSignature(fnCopy, bindings)
+	// expected type when the caller checks compatibility. Unlike a call's
+	// signature, the specialization is the value's type: a concrete function
+	// type that a binding such as `let wrap = IntCell::wrap` keeps, so it
+	// declares no generics of its own. AIR takes the parameter order from the
+	// declaration.
+	specialized := specializeFunctionSignature(fnCopy, bindings)
+	specialized.GenericParams = nil
+	specialized.CallGenericParams = nil
+	return specialized
 }
 
 // constrainFunctionValueType binds the reference's call-local variables in

@@ -1773,3 +1773,38 @@ func TestClosureReturnTypeInference(t *testing.T) {
 		},
 	})
 }
+
+// Issue #607: an alias that applies type arguments binds the static
+// function's same-named generics, so they conflict with other evidence.
+func TestStaticFunctionThroughGenericAliasBindsOwnerTypeArguments(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		source string
+		want   string
+	}{
+		{"call argument", `fn main() { let c = IntCell::wrap("s") }`, "expected Int, got Str"},
+		{"explicit type argument", `fn main() { let c = IntCell::wrap<Str>("s") }`, "generic T already bound to Int, cannot bind to Str"},
+		{"expected function type", `fn main() { let f: fn(Str) Cell<Str> = IntCell::wrap }`, "Expected fn(Str) Cell<Str>, got fn(Int) Cell<Int>"},
+		{"generic the alias does not bind", `fn main() { let f = IntCell::tag }`, "Unresolved generic"},
+		{"missing static function", `fn main() { let f = IntCell::missing }`, "IntCell::missing"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result := parse.Parse([]byte(`
+struct Cell<$T> {
+  value: $T,
+}
+fn Cell::wrap(value: $T) Cell<$T> { Cell{value: value} }
+fn Cell::tag(value: $T, label: $L) Cell<$T> { Cell{value: value} }
+type IntCell = Cell<Int>
+`+tc.source), "test.ard")
+			if len(result.Errors) > 0 {
+				t.Fatalf("parse errors: %v", result.Errors)
+			}
+			c := checker.New("test.ard", result.Program, nil)
+			c.Check()
+			if got := diagnosticsString(c.Diagnostics()); !strings.Contains(got, tc.want) {
+				t.Fatalf("diagnostics = %v, want %q", c.Diagnostics(), tc.want)
+			}
+		})
+	}
+}

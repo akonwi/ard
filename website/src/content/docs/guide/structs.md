@@ -282,3 +282,26 @@ fn Todo::new(title: Str) Todo {
 
 let todo = Todo::new("Learn Ard")
 ```
+
+A static function can be reached through any name for its type: from another module (`todos::Todo::new`), or through a type alias (`type Task = Todo`, then `Task::new`). It can also be used as a function value:
+
+```ard
+let make: fn(Str) Todo = Todo::new
+```
+
+When an alias applies type arguments to a generic struct, they fix the static function's generics of the same name:
+
+```ard
+struct Box<$T> {
+  value: $T,
+}
+
+fn Box::wrap(value: $T) Box<$T> {
+  Box{value: value}
+}
+
+type IntBox = Box<Int>
+
+let boxed = IntBox::wrap(1) // $T is Int
+let wrap = IntBox::wrap     // fn(Int) Box<Int>
+```

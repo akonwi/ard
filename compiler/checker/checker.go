@@ -9266,7 +9266,7 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 				c.failSilently()
 				return nil
 			}
-			valueType, ok := c.functionValueType(s, sym.Type, s.GetLocation())
+			valueType, ok := c.functionValueType(s, sym.Type, nil, s.GetLocation())
 			if !ok {
 				return nil
 			}
@@ -10162,7 +10162,20 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 
 			// Handle local functions
 			absolutePath := s.Target.String() + "::" + s.Function.Name
-			if sym, ok := c.scope.get(absolutePath); ok {
+			localSym, isLocal := c.scope.get(absolutePath)
+			// A static function may be named through a type alias of its
+			// owner, here or in another module (issue #607).
+			var staticRef staticFunctionRef
+			staticResolved := false
+			if !isLocal {
+				staticRef, staticResolved = c.lookupStaticFunction(s.Target, s.Function.Name)
+				if staticResolved && staticRef.module == nil {
+					localSym, isLocal = &staticRef.symbol, true
+					absolutePath = staticRef.name
+				}
+			}
+			if isLocal {
+				sym := localSym
 				if c.spans != nil {
 					if targetIdent, isIdent := s.Target.(*parse.Identifier); isIdent {
 						if typeSym, found := c.scope.get(targetIdent.Name); found && isNominalType(typeSym.Type) {
@@ -10194,7 +10207,7 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 					resolvedExprs = resolvedExprs[:len(fnDef.Parameters)]
 				}
 
-				fnDefCopy, genericScope, setupErr := c.setupFunctionCall(fnDef, callTypeArgs, s.Function.TypeArgs)
+				fnDefCopy, genericScope, setupErr := c.setupStaticFunctionCall(fnDef, staticRef.ownerBindings, callTypeArgs, s.Function.TypeArgs)
 				if setupErr != nil {
 					c.addGenericFunctionResolutionError(setupErr, s.GetLocation())
 					return nil
@@ -10378,6 +10391,9 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 
 			var fnDef *FunctionDef
 			mod := c.resolveModule(modName)
+			if staticResolved {
+				mod, name = staticRef.module, staticRef.name
+			}
 			if mod == nil {
 				c.addUnresolvedReference(undefinedModule, modName, s.Target.GetLocation())
 				return nil
@@ -10434,7 +10450,7 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 				resolvedExprs = resolvedExprs[:len(fnDef.Parameters)]
 			}
 
-			fnDefCopy, genericScope, setupErr := c.setupFunctionCall(fnDef, callTypeArgs, s.Function.TypeArgs)
+			fnDefCopy, genericScope, setupErr := c.setupStaticFunctionCall(fnDef, staticRef.ownerBindings, callTypeArgs, s.Function.TypeArgs)
 			if setupErr != nil {
 				c.addGenericFunctionResolutionError(setupErr, s.GetLocation())
 				return nil
@@ -10772,6 +10788,13 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 	case *parse.StaticProperty:
 		{
 			if id, ok := s.Target.(*parse.Identifier); ok {
+				// A static function declared here under this exact name wins over
+				// a module or Go package of the same name, as it does for calls.
+				if prop, ok := s.Property.(*parse.Identifier); ok {
+					if ref, ok := c.localStaticFunction(id.Name, prop.Name); ok {
+						return c.staticFunctionValue(s, prop, ref)
+					}
+				}
 				if goPkg := c.program.GoImports[id.Name]; goPkg != nil {
 					switch prop := s.Property.(type) {
 					case *parse.Identifier:
@@ -10891,7 +10914,7 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 							c.addExpectedValue(fmt.Sprintf("%s::%s", id.Name, prop.Name), prop.GetLocation())
 							return nil
 						}
-						valueType, ok := c.functionValueType(s, sym.Type, prop.GetLocation())
+						valueType, ok := c.functionValueType(s, sym.Type, nil, prop.GetLocation())
 						if !ok {
 							return nil
 						}
@@ -10912,20 +10935,11 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 					return nil
 				}
 
-				// Check if it's accessing a static function (e.g., Fixture::from_api_entry)
+				// A static function (e.g., Fixture::from_api_entry), possibly
+				// named through a type alias, is a function value.
 				if propIdent, ok := s.Property.(*parse.Identifier); ok {
-					staticFnName := id.Name + "::" + propIdent.Name
-					if fnSym, ok := c.scope.get(staticFnName); ok {
-						// Found a static function, return it as a function variable.
-						if fnDef, ok := fnSym.Type.(*FunctionDef); ok {
-							valueType, ok := c.functionValueType(s, fnDef, propIdent.GetLocation())
-							if !ok {
-								return nil
-							}
-							value := *fnSym
-							value.Type = valueType
-							return &Variable{value}
-						}
+					if ref, ok := c.lookupStaticFunction(id, propIdent.Name); ok {
+						return c.staticFunctionValue(s, propIdent, ref)
 					}
 				}
 
@@ -10951,6 +10965,13 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 				owner, resolved := c.resolveStaticOwner(target)
 				if !resolved {
 					return nil
+				}
+				// A static function declared in another module, such as
+				// feature::Box::wrap, is a function value (issue #607).
+				if propIdent, ok := s.Property.(*parse.Identifier); ok && owner.typeDeclaration {
+					if ref, ok := c.lookupStaticFunction(target, propIdent.Name); ok {
+						return c.staticFunctionValue(s, propIdent, ref)
+					}
 				}
 				if enum, ok := owner.typ.(*Enum); ok && owner.typeDeclaration {
 					return c.resolveEnumVariant(enum, s.Property.(*parse.Identifier), s.Property.GetLocation())

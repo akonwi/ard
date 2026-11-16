@@ -5657,7 +5657,12 @@ func (fl *functionLowerer) lowerFunctionValueRef(module ModuleID, declaration *c
 		if err != nil {
 			return nil, err
 		}
-		typeArgs, err := fl.genericCallTypeArgs(specialized)
+		// The specialized value type is concrete; the type arguments follow
+		// the declaration's generic parameter order.
+		ordered := *specialized
+		ordered.GenericParams = declaration.GenericParams
+		ordered.CallGenericParams = declaration.CallGenericParams
+		typeArgs, err := fl.genericCallTypeArgs(&ordered)
 		if err != nil {
 			return nil, err
 		}
