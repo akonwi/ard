@@ -650,3 +650,100 @@ sort comparator
 		t.Fatalf("stdout = %q, want %q", got, want)
 	}
 }
+
+// push and prepend accept any receiver the checker accepts: a field, or a
+// call returning a mutable list reference (#600, #601). The receiver is
+// evaluated once, before the value, and the mutation reaches the original
+// list or field.
+func TestGoTargetListPushPrependCallAndFieldReceivers(t *testing.T) {
+	got := runGoTargetSourceStdout(t, `use go:fmt
+`+evaluationOrderHelpers+`
+struct Holder {
+  items: [Int],
+}
+
+fn holder(h: &mut Holder) &mut Holder {
+  fmt::Println("holder")
+  h
+}
+
+fn list(items: &mut [Int]) &mut [Int] {
+  fmt::Println("list")
+  items
+}
+
+fn main() {
+  let items = &mut [1]
+  let pushed = list(items).push(now("push value", 2))
+  fmt::Println(items, pushed)
+  let size = list(items).push(later("push later value", 3).or(0))
+  fmt::Println(items, size)
+  let h = &mut Holder{items: [1]}
+  let prepended = h.items.prepend(now("field prepend value", 0))
+  fmt::Println(h.items, prepended)
+  let through = holder(h).items.prepend(later("holder prepend value", -1).or(0))
+  fmt::Println(h.items, through)
+  let others = &mut [1]
+  let front = list(others).prepend(now("prepend value", 0))
+  fmt::Println(others, front)
+  list(others).prepend(later("prepend later value", -1).or(0))
+  fmt::Println(others)
+}
+`)
+	want := `list
+push value
+&[1 2] 2
+list
+push later value
+&[1 2 3] 3
+field prepend value
+[0 1] 2
+holder
+holder prepend value
+[-1 0 1] 3
+list
+prepend value
+&[0 1] 2
+list
+prepend later value
+&[-1 0 1]
+`
+	if got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+}
+
+// Maybe set and clear accept a call returning a mutable Maybe reference as
+// their receiver. The receiver is evaluated once, before the value, and the
+// mutation reaches the original variable.
+func TestGoTargetMaybeSetClearCallReceivers(t *testing.T) {
+	got := runGoTargetSourceStdout(t, `use go:fmt
+`+evaluationOrderHelpers+`
+fn slot(label: Str, m: &mut Int?) &mut Int? {
+  fmt::Println(label)
+  m
+}
+
+fn main() {
+  mut m: Int? = Maybe::new()
+  slot("set target", &mut m).set(now("set value", 3))
+  fmt::Println(m.or(-1))
+  slot("later set target", &mut m).set(later("later set value", 4).or(0))
+  fmt::Println(m.or(-1))
+  slot("clear target", &mut m).clear()
+  fmt::Println(m.or(-1))
+}
+`)
+	want := `set target
+set value
+3
+later set target
+later set value
+4
+clear target
+-1
+`
+	if got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+}
