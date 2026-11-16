@@ -25,6 +25,10 @@ func TestExprPayloadShapeValidation(t *testing.T) {
 		{name: "optional unary", expr: Expr{Kind: ExprToStr}},
 		{name: "unknown kind", expr: Expr{Kind: ExprKind(255)}, wantErr: true},
 		{name: "typed nil", expr: Expr{Kind: ExprCall, Payload: (*CallExprPayload)(nil)}, wantErr: true},
+		{name: "argument order", expr: Expr{Kind: ExprCall, Args: make([]Expr, 2), Payload: &CallExprPayload{ArgOrder: []int{1, 0}}}},
+		{name: "argument order repeats an argument", expr: Expr{Kind: ExprCall, Args: make([]Expr, 2), Payload: &CallExprPayload{ArgOrder: []int{1, 1}}}, wantErr: true},
+		{name: "argument order misses an argument", expr: Expr{Kind: ExprCallTrait, Args: make([]Expr, 2), Payload: &TraitExprPayload{ArgOrder: []int{0}}}, wantErr: true},
+		{name: "map set argument order", expr: Expr{Kind: ExprMapSet, Args: make([]Expr, 2), Payload: &CallExprPayload{ArgOrder: []int{1, 0}}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

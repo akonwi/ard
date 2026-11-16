@@ -114,3 +114,76 @@ func TestSequenceOperands(t *testing.T) {
 		})
 	}
 }
+
+func TestSequenceOperandsInOrder(t *testing.T) {
+	tests := []struct {
+		name  string
+		ops   func(l *lowerer) []operand
+		order []int
+		want  string
+	}{
+		{
+			name: "no order sequences the operands as they are",
+			ops: func(l *lowerer) []operand {
+				return []operand{{expr: operandCall(l, "a")}, {expr: operandCall(l, "b")}}
+			},
+			want: "use a()\nuse b()\n",
+		},
+		{
+			name: "a call evaluated first but used later is evaluated first",
+			ops: func(l *lowerer) []operand {
+				return []operand{{expr: operandCall(l, "a")}, {expr: operandCall(l, "b")}}
+			},
+			order: []int{1, 0},
+			want:  "_tmp_0 := b()\nuse a()\nuse _tmp_0\n",
+		},
+		{
+			name: "a constant out of order stays inline",
+			ops: func(l *lowerer) []operand {
+				return []operand{{expr: operandCall(l, "a")}, {expr: &ast.BasicLit{Kind: token.INT, Value: "1"}}}
+			},
+			order: []int{1, 0},
+			want:  "use a()\nuse 1\n",
+		},
+		{
+			name: "a read used before a call evaluated before it waits for the call",
+			ops: func(l *lowerer) []operand {
+				return []operand{{expr: l.ident("local")}, {expr: operandCall(l, "b")}}
+			},
+			order: []int{1, 0},
+			want:  "_tmp_0 := b()\nuse local\nuse _tmp_0\n",
+		},
+		{
+			name: "operands evaluated before a moved operand are evaluated first",
+			ops: func(l *lowerer) []operand {
+				return []operand{{expr: operandCall(l, "callee")}, {expr: operandCall(l, "a")}, {expr: operandCall(l, "b")}}
+			},
+			order: []int{0, 2, 1},
+			want:  "_tmp_0 := callee()\n_tmp_1 := b()\nuse _tmp_0\nuse a()\nuse _tmp_1\n",
+		},
+		{
+			name: "setup of an operand evaluated first runs first",
+			ops: func(l *lowerer) []operand {
+				return []operand{{expr: operandCall(l, "a")}, {stmts: setupStmt(l, "setupB"), expr: operandCall(l, "b")}}
+			},
+			order: []int{1, 0},
+			want:  "setupB()\n_tmp_0 := b()\nuse a()\nuse _tmp_0\n",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			l := &lowerer{}
+			ops := tt.ops(l)
+			for i := range ops {
+				ops[i].typ = air.NoType
+			}
+			stmts, err := l.sequenceOperandsInOrder(ops, tt.order)
+			if err != nil {
+				t.Fatalf("sequenceOperandsInOrder: %v", err)
+			}
+			if got := renderOperandSequence(t, stmts, ops); got != tt.want {
+				t.Fatalf("got:\n%s\nwant:\n%s", got, tt.want)
+			}
+		})
+	}
+}

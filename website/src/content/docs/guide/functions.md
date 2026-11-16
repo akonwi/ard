@@ -177,6 +177,8 @@ create_user("Alice", 25, "alice@example.com")
 create_user(age: 30, email: "bob@example.com", name: "Bob")
 ```
 
+Arguments are evaluated in the order they are written, not the order the parameters are declared in.
+
 Positional and named arguments can be mixed, but positional arguments must come first:
 
 ```ard

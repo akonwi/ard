@@ -119,3 +119,19 @@ func (e Expr) UnsafeCastPayload() *UnsafeCastExprPayload {
 	payload, _ := e.Payload.(*UnsafeCastExprPayload)
 	return payload
 }
+
+// ArgOrder returns the order a call evaluates its Args in: the indexes of
+// Args in evaluation order, or nil when that is the order of Args.
+func (e Expr) ArgOrder() []int {
+	switch payload := e.Payload.(type) {
+	case *CallExprPayload:
+		if payload != nil {
+			return payload.ArgOrder
+		}
+	case *TraitExprPayload:
+		if payload != nil {
+			return payload.ArgOrder
+		}
+	}
+	return nil
+}

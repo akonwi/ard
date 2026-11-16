@@ -2081,7 +2081,7 @@ func (l *lowerer) lowerDeclaredCallArgs(fn air.Function, expr air.Expr, target a
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	stmts, err := l.sequenceOperands(ops)
+	stmts, err := l.sequenceOperandsInOrder(ops, expr.ArgOrder())
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -2971,7 +2971,7 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		if err != nil {
 			return loweredExpr{}, err
 		}
-		stmts, err := l.sequenceOperandTriple(&target, expr.Target, &from, &expr.Args[0], &to, expr.Args[1].Type)
+		stmts, err := l.sequenceTargetArgs(expr, &target, &from, &to)
 		if err != nil {
 			return loweredExpr{}, err
 		}
@@ -2992,7 +2992,7 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		if err != nil {
 			return loweredExpr{}, err
 		}
-		stmts, err := l.sequenceOperandTriple(&target, expr.Target, &from, &expr.Args[0], &to, expr.Args[1].Type)
+		stmts, err := l.sequenceTargetArgs(expr, &target, &from, &to)
 		if err != nil {
 			return loweredExpr{}, err
 		}
@@ -7300,7 +7300,7 @@ func (l *lowerer) lowerCallClosure(fn air.Function, expr air.Expr) (loweredExpr,
 		if err != nil {
 			return loweredExpr{}, err
 		}
-		stmts, err = l.sequenceOperands(ops)
+		stmts, err = l.sequenceOperandsInOrder(ops, operandOrderAfter(1, expr.ArgOrder()))
 		if err != nil {
 			return loweredExpr{}, err
 		}
@@ -7510,17 +7510,31 @@ func (l *lowerer) lowerListSet(fn air.Function, expr air.Expr) (loweredExpr, err
 		Lhs: []ast.Expr{l.ident(targetTemp)}, Tok: token.DEFINE,
 		Rhs: []ast.Expr{l.valueThroughReference(expr.Target.Type, target.expr)},
 	})
-	stmts = append(stmts, index.stmts...)
-	indexTemp := l.nextTemp()
-	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{l.ident(indexTemp)}, Tok: token.DEFINE, Rhs: []ast.Expr{index.expr}})
-	stmts = append(stmts, value.stmts...)
-	valueExpr := value.expr
-	if l.isVoidType(elemType) || isVoidExpr(valueExpr) {
-		stmts = l.appendVoidValueEval(stmts, valueExpr)
-		valueExpr = l.voidValueExpr()
+	// The index and the value are each evaluated into a temporary, in the
+	// order they are written (ADR 0078).
+	var indexTemp, valueTemp string
+	bindIndex := func() {
+		stmts = append(stmts, index.stmts...)
+		indexTemp = l.nextTemp()
+		stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{l.ident(indexTemp)}, Tok: token.DEFINE, Rhs: []ast.Expr{index.expr}})
 	}
-	valueTemp := l.nextTemp()
-	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{l.ident(valueTemp)}, Tok: token.DEFINE, Rhs: []ast.Expr{valueExpr}})
+	bindValue := func() {
+		stmts = append(stmts, value.stmts...)
+		valueExpr := value.expr
+		if l.isVoidType(elemType) || isVoidExpr(valueExpr) {
+			stmts = l.appendVoidValueEval(stmts, valueExpr)
+			valueExpr = l.voidValueExpr()
+		}
+		valueTemp = l.nextTemp()
+		stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{l.ident(valueTemp)}, Tok: token.DEFINE, Rhs: []ast.Expr{valueExpr}})
+	}
+	if order := expr.ArgOrder(); order != nil && order[0] == 1 {
+		bindValue()
+		bindIndex()
+	} else {
+		bindIndex()
+		bindValue()
+	}
 	resultTemp := l.nextTemp()
 	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{l.ident(resultTemp)}, Tok: token.DEFINE, Rhs: []ast.Expr{l.ident("false")}})
 
@@ -7561,7 +7575,7 @@ func (l *lowerer) lowerListSwap(fn air.Function, expr air.Expr) (loweredExpr, er
 		sourcedOperand(left, expr.Args[0].Type, &expr.Args[0]),
 		sourcedOperand(right, expr.Args[1].Type, &expr.Args[1]),
 	}
-	stmts, err := l.sequenceOperands(ops[:])
+	stmts, err := l.sequenceOperandsInOrder(ops[:], operandOrderAfter(1, expr.ArgOrder()))
 	if err != nil {
 		return loweredExpr{}, err
 	}
@@ -8125,7 +8139,7 @@ func (l *lowerer) lowerMapSet(fn air.Function, expr air.Expr) (loweredExpr, erro
 		return loweredExpr{}, err
 	}
 	ops := [3]operand{sourcedOperand(target, expr.Target.Type, expr.Target), key, value}
-	stmts, err := l.sequenceOperands(ops[:])
+	stmts, err := l.sequenceOperandsInOrder(ops[:], operandOrderAfter(1, expr.ArgOrder()))
 	if err != nil {
 		return loweredExpr{}, err
 	}
@@ -8359,7 +8373,7 @@ func (l *lowerer) lowerNativeTraitInterfaceCall(fn air.Function, target loweredE
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	stmts, err := l.sequenceOperands(ops)
+	stmts, err := l.sequenceOperandsInOrder(ops, operandOrderAfter(1, expr.ArgOrder()))
 	if err != nil {
 		return loweredExpr{}, err
 	}
