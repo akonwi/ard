@@ -4130,9 +4130,16 @@ func (p *parser) memberAccess() (Expression, error) {
 				continue
 			}
 
+			memberToken := p.peek()
+			validName := p.atMemberName()
+			errorCount := len(p.errors)
 			call, err := p.memberCall()
 			if err != nil {
 				return nil, err
+			}
+			if !validName {
+				p.reportInvalidMember(memberToken, errorCount, invalidInstanceMemberMessage(expr, memberToken))
+				continue
 			}
 
 			switch prop := call.(type) {
@@ -4154,6 +4161,8 @@ func (p *parser) memberAccess() (Expression, error) {
 						End:   prop.GetLocation().End,
 					},
 				}
+			default:
+				p.reportInvalidMember(memberToken, errorCount, invalidInstanceMemberMessage(expr, memberToken))
 			}
 		} else {
 			if staticCall, ok, err := p.tryStaticGenericFunctionCall(expr); err != nil {
@@ -4161,9 +4170,16 @@ func (p *parser) memberAccess() (Expression, error) {
 			} else if ok {
 				expr = staticCall
 			} else {
+				memberToken := p.peek()
+				validName := p.atMemberName()
+				errorCount := len(p.errors)
 				call, err := p.memberCall()
 				if err != nil {
 					return nil, err
+				}
+				if !validName {
+					p.reportInvalidMember(memberToken, errorCount, invalidStaticMemberMessage)
+					continue
 				}
 
 				switch prop := call.(type) {
@@ -4185,6 +4201,8 @@ func (p *parser) memberAccess() (Expression, error) {
 						Target:   expr,
 						Function: *prop,
 					}
+				default:
+					p.reportInvalidMember(memberToken, errorCount, invalidStaticMemberMessage)
 				}
 			}
 		}
@@ -4196,6 +4214,51 @@ func (p *parser) memberCall() (Expression, error) {
 	restore := p.normalizeMemberName()
 	defer restore()
 	return p.call()
+}
+
+// atMemberName reports whether the next token can name a member after `.` or
+// `::`. Keywords count, as normalizeMemberName reclassifies them there.
+func (p *parser) atMemberName() bool {
+	next := p.peek()
+	return next != nil && (next.kind == identifier || p.isKeyword(next.kind))
+}
+
+// reportInvalidMember reports a member after `.` or `::` that is not a name.
+// Errors raised at the member token while memberCall consumed it (such as
+// "Unexpected token" for a missing member) say the same thing less clearly,
+// so they are replaced; errors elsewhere in the consumed input are kept.
+func (p *parser) reportInvalidMember(member *token, errorCount int, msg string) {
+	var at Point
+	if member != nil {
+		at = member.getLocation().Start
+	}
+	kept := p.errors[:errorCount]
+	for _, err := range p.errors[errorCount:] {
+		if member == nil || err.Location.Start != at {
+			kept = append(kept, err)
+		}
+	}
+	p.errors = kept
+	p.addError(member, msg)
+}
+
+const invalidStaticMemberMessage = "Expected a name after '::'"
+
+// invalidInstanceMemberMessage describes a member after `.` that is not a
+// name. memberCall still parses whatever primary expression is there, to
+// recover, but it is reported rather than silently dropped (#606). A number
+// gets a tuple hint, since that is how positional access is spelled
+// elsewhere; tuples are read by destructuring or `match` (ADR 0077).
+func invalidInstanceMemberMessage(receiver Expression, member *token) string {
+	const expected = "Expected a field or method name after '.'"
+	if member == nil || member.kind != number {
+		return expected
+	}
+	tuple := "tuple"
+	if id, ok := receiver.(*Identifier); ok {
+		tuple = id.Name
+	}
+	return fmt.Sprintf("%s; Ard has no positional access like `.%s`. Read a tuple by destructuring it (`let first, second = %s`) or with `match`", expected, member.text, tuple)
 }
 
 func (p *parser) tryStaticGenericFunctionCall(target Expression) (Expression, bool, error) {
