@@ -1772,14 +1772,7 @@ func (p printer) renderMatchExpressionDoc(node *parse.MatchExpression) doc {
 	for _, matchCase := range node.Cases {
 		arms = append(arms, armDoc{doc: dConcat(p.renderMatchCaseDoc(matchCase), dText(",")), startRow: matchCase.Location.Start.Row})
 	}
-	body := p.renderArmsWithComments(arms, node.Comments)
-
-	return dGroup(dConcat(
-		dText("match "+p.renderExpression(node.Subject, 0)+" {"),
-		dIndent(dConcat(dHardLine(), body)),
-		dHardLine(),
-		dText("}"),
-	))
+	return p.renderArmsBlockDoc("match "+p.renderExpression(node.Subject, 0), arms, node.Comments)
 }
 
 func (p printer) renderConditionalMatchExpressionDoc(node *parse.ConditionalMatchExpression) doc {
@@ -1787,14 +1780,7 @@ func (p printer) renderConditionalMatchExpressionDoc(node *parse.ConditionalMatc
 	for _, matchCase := range node.Cases {
 		arms = append(arms, armDoc{doc: dConcat(p.renderConditionalMatchCaseDoc(matchCase), dText(",")), startRow: matchCase.Location.Start.Row})
 	}
-	body := p.renderArmsWithComments(arms, node.Comments)
-
-	return dGroup(dConcat(
-		dText("match {"),
-		dIndent(dConcat(dHardLine(), body)),
-		dHardLine(),
-		dText("}"),
-	))
+	return p.renderArmsBlockDoc("match", arms, node.Comments)
 }
 
 func (p printer) renderConditionalMatchCaseDoc(matchCase parse.ConditionalMatchCase) doc {
@@ -1890,11 +1876,19 @@ func (p printer) renderSelectExpressionDoc(node *parse.SelectExpression) doc {
 	for _, arm := range node.Cases {
 		arms = append(arms, armDoc{doc: dConcat(p.renderSelectCaseDoc(arm), dText(",")), startRow: arm.Location.Start.Row})
 	}
-	body := p.renderArmsWithComments(arms, node.Comments)
+	return p.renderArmsBlockDoc("select", arms, node.Comments)
+}
 
+// renderArmsBlockDoc renders `head {`, one arm per line, then `}`. A block
+// with no arms and no comments prints as `head {}`, which parses again; the
+// checker reports the missing cases (issue #595).
+func (p printer) renderArmsBlockDoc(head string, arms []armDoc, comments []parse.Comment) doc {
+	if len(arms) == 0 && len(comments) == 0 {
+		return dText(head + " {}")
+	}
 	return dGroup(dConcat(
-		dText("select {"),
-		dIndent(dConcat(dHardLine(), body)),
+		dText(head+" {"),
+		dIndent(dConcat(dHardLine(), p.renderArmsWithComments(arms, comments))),
 		dHardLine(),
 		dText("}"),
 	))

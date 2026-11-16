@@ -150,6 +150,8 @@ const (
 	DiagnosticCodeInvalidMatchPattern           DiagnosticCode = "invalid_match_pattern"
 	DiagnosticCodeDuplicateMatchArm             DiagnosticCode = "duplicate_match_arm"
 	DiagnosticCodeNonExhaustiveMatch            DiagnosticCode = "non_exhaustive_match"
+	DiagnosticCodeEmptyMatch                    DiagnosticCode = "empty_match"
+	DiagnosticCodeEmptySelect                   DiagnosticCode = "empty_select"
 	DiagnosticCodeUnreachableMatchArm           DiagnosticCode = "unreachable_match_arm"
 	DiagnosticCodeInvalidMatchSubject           DiagnosticCode = "invalid_match_subject"
 	DiagnosticCodeInvalidForeignTypePattern     DiagnosticCode = "invalid_foreign_type_pattern"
@@ -2101,6 +2103,24 @@ type nonExhaustiveMatchDiagnostic struct {
 func (d nonExhaustiveMatchDiagnostic) build() Diagnostic {
 	diagnostic := newLabeledDiagnostic(Error, d.LegacyMessage, "Non-exhaustive match", d.Text, DiagnosticLabel{Span: d.Span, Message: d.Label})
 	diagnostic.Code = DiagnosticCodeNonExhaustiveMatch
+	return diagnostic
+}
+
+// emptyMatchDiagnostic reports a match or select with no cases (issue
+// #595). Ard has no uninhabited types, so an empty match can never be
+// exhaustive, and an empty select would block forever.
+type emptyMatchDiagnostic struct {
+	Construct string // "match" or "select"
+	Span      SourceSpan
+}
+
+func (d emptyMatchDiagnostic) build() Diagnostic {
+	title := fmt.Sprintf("A %s needs at least one case", d.Construct)
+	diagnostic := newLabeledDiagnostic(Error, title, title, "", DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("this %s has no cases", d.Construct)})
+	diagnostic.Code = DiagnosticCodeEmptyMatch
+	if d.Construct == "select" {
+		diagnostic.Code = DiagnosticCodeEmptySelect
+	}
 	return diagnostic
 }
 

@@ -254,6 +254,9 @@ select {
 - **`_ => body`** runs when no other arm is ready, making the whole `select`
   non-blocking.
 
+A `select` needs at least one arm. Unlike Go, an empty `select {}` is a compile
+error, not a way to block forever.
+
 ### Timeouts
 
 Go's `time::After` returns a channel that fires after a delay, which composes

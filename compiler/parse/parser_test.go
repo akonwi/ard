@@ -15,6 +15,9 @@ var compareOptions = cmp.Options{
 	cmpopts.IgnoreFields(TupleDestructure{}, "ParensLocation", "TrailingCommaLocation"),
 	cmpopts.IgnoreFields(Import{}, "PathLocation"),
 	cmpopts.IgnoreFields(Argument{}, "EllipsisLocation"),
+	cmpopts.IgnoreFields(MatchExpression{}, "BracesLocation"),
+	cmpopts.IgnoreFields(ConditionalMatchExpression{}, "BracesLocation"),
+	cmpopts.IgnoreFields(SelectExpression{}, "BracesLocation"),
 	cmp.AllowUnexported(MutableType{}),
 	cmpopts.IgnoreUnexported(
 		Identifier{},

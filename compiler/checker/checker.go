@@ -1469,6 +1469,11 @@ func (c *Checker) addNonExhaustiveMatch(message string, location parse.Location,
 	c.addDiagnostic(nonExhaustiveMatchDiagnostic{LegacyMessage: message, Span: c.sourceSpan(location), Label: label}.build())
 }
 
+// addEmptyMatch reports a match or select whose braces hold no cases.
+func (c *Checker) addEmptyMatch(construct string, braces parse.Location) {
+	c.addDiagnostic(emptyMatchDiagnostic{Construct: construct, Span: c.sourceSpan(braces)}.build())
+}
+
 func (c *Checker) addInvalidSelectArm(message string, location parse.Location, label string) {
 	c.addDiagnostic(invalidSelectArmDiagnostic{LegacyMessage: message, Span: c.sourceSpan(location), Label: label}.build())
 }
@@ -10546,6 +10551,10 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 		}
 		return nil
 	case *parse.SelectExpression:
+		if len(s.Cases) == 0 {
+			c.addEmptyMatch("select", s.BracesLocation)
+			return nil
+		}
 		allowMixedVoid := discardThisExpr || c.expectedExpr == Void
 		previousArmDiscard := c.matchArmDiscardContext
 		c.matchArmDiscardContext = allowMixedVoid
@@ -10660,9 +10669,17 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 		if subject == nil {
 			return nil
 		}
+		if len(s.Cases) == 0 {
+			c.addEmptyMatch("match", s.BracesLocation)
+			return nil
+		}
 
 		return c.checkPatternMatch(s, subject, allowMixedVoid)
 	case *parse.ConditionalMatchExpression:
+		if len(s.Cases) == 0 {
+			c.addEmptyMatch("match", s.BracesLocation)
+			return nil
+		}
 		allowMixedVoid := discardThisExpr || c.expectedExpr == Void
 		previousArmDiscard := c.matchArmDiscardContext
 		c.matchArmDiscardContext = allowMixedVoid
