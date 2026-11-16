@@ -183,7 +183,8 @@ func TestRemovedAtDereferenceIsAParseError(t *testing.T) {
 		t.Fatal("expected a parse error")
 	}
 	got := result.Errors[0]
-	if want := (Point{Row: 1, Col: 24}); got.Location.Start != want || got.Message != "Unexpected token: at_sign" {
-		t.Fatalf("first error = %#v, want %q at %#v", got, "Unexpected token: at_sign", want)
+	wantMessage := "Expected a field or method name after '.'"
+	if want := (Point{Row: 1, Col: 24}); got.Location.Start != want || got.Message != wantMessage {
+		t.Fatalf("first error = %#v, want %q at %#v", got, wantMessage, want)
 	}
 }
