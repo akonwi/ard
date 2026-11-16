@@ -6158,9 +6158,6 @@ func (l *lowerer) lowerMaybeSet(fn air.Function, expr air.Expr) (loweredExpr, er
 	if expr.Target == nil || len(expr.Args) != 1 {
 		return loweredExpr{}, fmt.Errorf("maybe set expects target and one arg")
 	}
-	if expr.Target.Kind != air.ExprLoadLocal && expr.Target.Kind != air.ExprGetField && expr.Target.Kind != air.ExprLoadGlobal {
-		return loweredExpr{}, fmt.Errorf("maybe set requires an addressable local, field, or global target")
-	}
 	if !validTypeID(l.program, expr.Target.Type) {
 		return loweredExpr{}, fmt.Errorf("maybe set target type is invalid")
 	}
@@ -6172,50 +6169,33 @@ func (l *lowerer) lowerMaybeSet(fn air.Function, expr air.Expr) (loweredExpr, er
 	if maybeInfo.Kind != air.TypeMaybe {
 		return loweredExpr{}, fmt.Errorf("maybe set target is not Maybe")
 	}
+	target, err := l.lowerMutationTarget(fn, expr.Target, "maybe set")
+	if err != nil {
+		return loweredExpr{}, err
+	}
 	value, err := l.lowerExprWithExpectedType(fn, expr.Args[0], maybeInfo.Elem)
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	var target ast.Expr
-	var targetStmts []ast.Stmt
-	if expr.Target.Kind == air.ExprLoadLocal {
-		targetPayload := expr.Target.LocalPayload()
-		if targetPayload == nil {
-			return loweredExpr{}, fmt.Errorf("Maybe mutation local target is missing its payload")
-		}
-		target = l.localValueExpr(fn, targetPayload.Local)
-	} else {
-		loweredTarget, err := l.lowerExpr(fn, *expr.Target)
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		target = loweredTarget.expr
-		targetStmts = loweredTarget.stmts
-	}
-	target = l.valueThroughReference(expr.Target.Type, target)
 	if l.isVoidType(maybeInfo.Elem) || isVoidExpr(value.expr) {
 		value = l.materializeVoidValue(value)
 	}
-	ops := [2]operand{placeOperand(loweredExpr{stmts: targetStmts, expr: target}, expr.Target), valueOperand(value, maybeInfo.Elem)}
+	ops := [2]operand{target, valueOperand(value, maybeInfo.Elem)}
 	stmts, err := l.sequenceOperands(ops[:])
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	target = ops[0].expr
 	some, err := l.maybeSomeExpr(maybeType, ops[1].expr)
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{target}, Tok: token.ASSIGN, Rhs: []ast.Expr{some}})
+	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{ops[0].expr}, Tok: token.ASSIGN, Rhs: []ast.Expr{some}})
 	return loweredExpr{stmts: stmts, expr: l.voidValueExpr()}, nil
 }
 
 func (l *lowerer) lowerMaybeClear(fn air.Function, expr air.Expr) (loweredExpr, error) {
 	if expr.Target == nil || len(expr.Args) != 0 {
 		return loweredExpr{}, fmt.Errorf("maybe clear expects target and no args")
-	}
-	if expr.Target.Kind != air.ExprLoadLocal && expr.Target.Kind != air.ExprGetField && expr.Target.Kind != air.ExprLoadGlobal {
-		return loweredExpr{}, fmt.Errorf("maybe clear requires an addressable local, field, or global target")
 	}
 	if !validTypeID(l.program, expr.Target.Type) {
 		return loweredExpr{}, fmt.Errorf("maybe clear target type is invalid")
@@ -6228,29 +6208,16 @@ func (l *lowerer) lowerMaybeClear(fn air.Function, expr air.Expr) (loweredExpr, 
 	if maybeInfo.Kind != air.TypeMaybe {
 		return loweredExpr{}, fmt.Errorf("maybe clear target is not Maybe")
 	}
-	var target ast.Expr
-	var targetStmts []ast.Stmt
-	if expr.Target.Kind == air.ExprLoadLocal {
-		targetPayload := expr.Target.LocalPayload()
-		if targetPayload == nil {
-			return loweredExpr{}, fmt.Errorf("Maybe mutation local target is missing its payload")
-		}
-		target = l.localValueExpr(fn, targetPayload.Local)
-	} else {
-		loweredTarget, err := l.lowerExpr(fn, *expr.Target)
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		target = loweredTarget.expr
-		targetStmts = loweredTarget.stmts
+	target, err := l.lowerMutationTarget(fn, expr.Target, "maybe clear")
+	if err != nil {
+		return loweredExpr{}, err
 	}
-	target = l.valueThroughReference(expr.Target.Type, target)
 	none, err := l.maybeNoneExpr(maybeType)
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	stmts := append([]ast.Stmt{}, targetStmts...)
-	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{target}, Tok: token.ASSIGN, Rhs: []ast.Expr{none}})
+	stmts := append([]ast.Stmt{}, target.stmts...)
+	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{target.expr}, Tok: token.ASSIGN, Rhs: []ast.Expr{none}})
 	return loweredExpr{stmts: stmts, expr: l.voidValueExpr()}, nil
 }
 
@@ -7599,51 +7566,41 @@ func (l *lowerer) lowerListPrepend(fn air.Function, expr air.Expr) (loweredExpr,
 	if expr.Target == nil || len(expr.Args) != 1 {
 		return loweredExpr{}, fmt.Errorf("list prepend expects target and value")
 	}
-	if expr.Target.Kind != air.ExprLoadLocal && expr.Target.Kind != air.ExprLoadGlobal {
-		return loweredExpr{}, fmt.Errorf("list prepend requires an addressable local or global target")
-	}
-	if !validTypeID(l.program, expr.Target.Type) {
+	listInfo, ok := l.typeInfoThroughReference(expr.Target.Type)
+	if !ok {
 		return loweredExpr{}, fmt.Errorf("invalid list prepend target type")
-	}
-	listInfo := l.program.Types[expr.Target.Type-1]
-	if listInfo.Kind == air.TypeReference && validTypeID(l.program, listInfo.Elem) {
-		listInfo = l.program.Types[listInfo.Elem-1]
 	}
 	if listInfo.Kind != air.TypeList {
 		return loweredExpr{}, fmt.Errorf("list prepend target type kind %d", listInfo.Kind)
+	}
+	target, err := l.lowerMutationTarget(fn, expr.Target, "list prepend")
+	if err != nil {
+		return loweredExpr{}, err
 	}
 	value, err := l.lowerExprWithExpectedType(fn, expr.Args[0], listInfo.Elem)
 	if err != nil {
 		return loweredExpr{}, err
 	}
+	if l.isVoidType(listInfo.Elem) || isVoidExpr(value.expr) {
+		value = l.materializeVoidValue(value)
+	}
 	elemType, err := l.goType(listInfo.Elem)
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	var target ast.Expr
-	if expr.Target.Kind == air.ExprLoadLocal {
-		targetPayload := expr.Target.LocalPayload()
-		if targetPayload == nil {
-			return loweredExpr{}, fmt.Errorf("Maybe mutation local target is missing its payload")
-		}
-		target = l.localValueExpr(fn, targetPayload.Local)
-	} else {
-		globalPayload := expr.Target.GlobalPayload()
-		if globalPayload == nil || globalPayload.Global < 0 || int(globalPayload.Global) >= len(l.program.Globals) {
-			return loweredExpr{}, fmt.Errorf("list prepend references an invalid global")
-		}
-		target = l.globalExpr(l.program.Globals[globalPayload.Global])
+	ops := [2]operand{target, valueOperand(value, listInfo.Elem)}
+	stmts, err := l.sequenceOperands(ops[:])
+	if err != nil {
+		return loweredExpr{}, err
 	}
-	target = l.valueThroughReference(expr.Target.Type, target)
-	valueExpr := value.expr
-	stmts := append([]ast.Stmt{}, value.stmts...)
-	if l.isVoidType(listInfo.Elem) || isVoidExpr(valueExpr) {
-		stmts = l.appendVoidValueEval(stmts, valueExpr)
-		valueExpr = l.voidValueExpr()
+	// The target is used three times; the value is evaluated in the append.
+	if stmts, err = l.evaluateOnce(stmts, &ops[0]); err != nil {
+		return loweredExpr{}, err
 	}
-	assign := &ast.AssignStmt{Lhs: []ast.Expr{target}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.CallExpr{Fun: l.ident("append"), Args: []ast.Expr{&ast.CompositeLit{Type: &ast.ArrayType{Elt: elemType}, Elts: []ast.Expr{valueExpr}}, target}, Ellipsis: 2}}}
+	targetExpr, valueExpr := ops[0].expr, ops[1].expr
+	assign := &ast.AssignStmt{Lhs: []ast.Expr{targetExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.CallExpr{Fun: l.ident("append"), Args: []ast.Expr{&ast.CompositeLit{Type: &ast.ArrayType{Elt: elemType}, Elts: []ast.Expr{valueExpr}}, targetExpr}, Ellipsis: 2}}}
 	stmts = append(stmts, assign)
-	return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.ident("len"), Args: []ast.Expr{target}}}, nil
+	return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.ident("len"), Args: []ast.Expr{targetExpr}}}, nil
 }
 
 func (l *lowerer) lowerListSort(fn air.Function, expr air.Expr) (loweredExpr, error) {
@@ -7697,15 +7654,19 @@ func (l *lowerer) lowerListPush(fn air.Function, expr air.Expr) (loweredExpr, er
 	if expr.Target == nil {
 		return loweredExpr{}, fmt.Errorf("list push missing target")
 	}
-	if expr.Target.Kind != air.ExprLoadLocal && expr.Target.Kind != air.ExprGetField && expr.Target.Kind != air.ExprLoadGlobal {
-		return loweredExpr{}, fmt.Errorf("list push requires an addressable local, field, or global target")
-	}
 	if len(expr.Args) != 1 {
 		return loweredExpr{}, fmt.Errorf("list push expects one arg")
 	}
+	target, err := l.lowerMutationTarget(fn, expr.Target, "list push")
+	if err != nil {
+		return loweredExpr{}, err
+	}
 	var value loweredExpr
-	var err error
-	if info, ok := l.typeInfoThroughReference(expr.Target.Type); ok && info.Kind == air.TypeList {
+	valueType := expr.Args[0].Type
+	info, ok := l.typeInfoThroughReference(expr.Target.Type)
+	isList := ok && info.Kind == air.TypeList
+	if isList {
+		valueType = info.Elem
 		value, err = l.lowerExprWithExpectedType(fn, expr.Args[0], info.Elem)
 	} else {
 		value, err = l.lowerExpr(fn, expr.Args[0])
@@ -7713,34 +7674,13 @@ func (l *lowerer) lowerListPush(fn air.Function, expr air.Expr) (loweredExpr, er
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	var target ast.Expr
-	var targetStmts []ast.Stmt
-	if expr.Target.Kind == air.ExprLoadLocal {
-		targetPayload := expr.Target.LocalPayload()
-		if targetPayload == nil {
-			return loweredExpr{}, fmt.Errorf("Maybe mutation local target is missing its payload")
-		}
-		target = l.localValueExpr(fn, targetPayload.Local)
-	} else {
-		loweredTarget, err := l.lowerExpr(fn, *expr.Target)
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		target = loweredTarget.expr
-		targetStmts = loweredTarget.stmts
-	}
-	target = l.valueThroughReference(expr.Target.Type, target)
-	valueType := expr.Args[0].Type
-	if info, ok := l.typeInfoThroughReference(expr.Target.Type); ok && info.Kind == air.TypeList {
-		valueType = info.Elem
-		if l.isVoidType(info.Elem) {
-			value = l.materializeVoidValue(value)
-		}
+	if isList && l.isVoidType(info.Elem) {
+		value = l.materializeVoidValue(value)
 	}
 	if isVoidExpr(value.expr) {
 		value.expr = l.voidValueExpr()
 	}
-	ops := [2]operand{placeOperand(loweredExpr{stmts: targetStmts, expr: target}, expr.Target), valueOperand(value, valueType)}
+	ops := [2]operand{target, valueOperand(value, valueType)}
 	stmts, err := l.sequenceOperands(ops[:])
 	if err != nil {
 		return loweredExpr{}, err
@@ -7749,14 +7689,35 @@ func (l *lowerer) lowerListPush(fn air.Function, expr air.Expr) (loweredExpr, er
 	if stmts, err = l.evaluateOnce(stmts, &ops[0]); err != nil {
 		return loweredExpr{}, err
 	}
-	target, valueExpr := ops[0].expr, ops[1].expr
+	targetExpr, valueExpr := ops[0].expr, ops[1].expr
 	assign := &ast.AssignStmt{
-		Lhs: []ast.Expr{target},
+		Lhs: []ast.Expr{targetExpr},
 		Tok: token.ASSIGN,
-		Rhs: []ast.Expr{&ast.CallExpr{Fun: l.ident("append"), Args: []ast.Expr{target, valueExpr}}},
+		Rhs: []ast.Expr{&ast.CallExpr{Fun: l.ident("append"), Args: []ast.Expr{targetExpr, valueExpr}}},
 	}
 	stmts = append(stmts, assign)
-	return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.ident("len"), Args: []ast.Expr{target}}}, nil
+	return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.ident("len"), Args: []ast.Expr{targetExpr}}}, nil
+}
+
+// lowerMutationTarget lowers the receiver of a built-in method that writes
+// to it in place, such as push, prepend, and Maybe set and clear, to a place
+// operand. The checker accepts a mutable reference, or a field reached through
+// one, as such a receiver. A reference lowers to a dereference, which is a
+// place even when the reference comes from a call (#600, #601).
+func (l *lowerer) lowerMutationTarget(fn air.Function, target *air.Expr, method string) (operand, error) {
+	switch target.Kind {
+	case air.ExprLoadLocal, air.ExprLoadGlobal, air.ExprGetField:
+	default:
+		if !l.isReferenceType(target.Type) {
+			return operand{}, fmt.Errorf("%s requires a variable, field, or mutable reference target", method)
+		}
+	}
+	lowered, err := l.lowerExpr(fn, *target)
+	if err != nil {
+		return operand{}, err
+	}
+	lowered.expr = l.valueThroughReference(target.Type, lowered.expr)
+	return placeOperand(lowered, target), nil
 }
 
 func (l *lowerer) lowerMakeMap(fn air.Function, expr air.Expr) (loweredExpr, error) {
