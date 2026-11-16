@@ -1730,3 +1730,40 @@ fn make(seed: $T) models::Marker<$T> {
 		t.Fatalf("unexpected diagnostics: %v", checked.Diagnostics())
 	}
 }
+
+// Issue #607: a generic static function from another module used as a value
+// still needs an expected function type that fixes every type parameter.
+func TestImportedGenericStaticFunctionValueWithoutFixingContextIsRejected(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		source string
+	}{
+		{"no expected type", "fn main() {\n  let f = feature::Box::same\n}\n"},
+		{"non-function expected type", "fn main() {\n  let f: Any = feature::Box::same\n}\n"},
+		{"function argument before the argument that fixes $A", "fn apply(f: fn($A) $A, x: $A) $A { f(x) }\n\nfn main() {\n  let value = apply(feature::Box::same, 4)\n}\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			projectDir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(projectDir, "feature.ard"), []byte("struct Box {\n  value: Int,\n}\n\nfn Box::same(x: $T) $T {\n  x\n}\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			mainPath := filepath.Join(projectDir, "main.ard")
+			result := parse.Parse([]byte("use demo/feature\n\n"+tc.source), mainPath)
+			if len(result.Errors) > 0 {
+				t.Fatalf("parse errors: %v", result.Errors)
+			}
+			resolver, err := checker.NewModuleResolver(projectDir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			c := checker.New(mainPath, result.Program, resolver)
+			c.Check()
+			if got := diagnosticsString(c.Diagnostics()); !strings.Contains(got, "Unresolved generic") {
+				t.Fatalf("diagnostics = %v, want unresolved generic", c.Diagnostics())
+			}
+		})
+	}
+}
