@@ -7090,17 +7090,14 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 	fieldTypes := make(map[string]Type)
 	providedFields := make(map[string]bool)
 	// fieldOrder lists the checked fields in the order they are written, which
-	// is the order their values are evaluated in (ADR 0078). A field written
-	// twice keeps only its last value, in the position of that value.
+	// is the order their values are evaluated in (ADR 0078).
 	fieldOrder := make([]string, 0, len(properties))
 	setField := func(name string, value Expression, fieldType Type) {
-		if _, exists := fields[name]; exists {
-			fieldOrder = slices.DeleteFunc(fieldOrder, func(other string) bool { return other == name })
-		}
 		fields[name] = value
 		fieldTypes[name] = fieldType
 		fieldOrder = append(fieldOrder, name)
 	}
+	seen := make(map[string]SourceSpan, len(properties))
 
 	// For generic structs, infer generics from provided field values
 	var structDefCopy *StructDef
@@ -7184,7 +7181,12 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 
 		if !ok {
 			c.addUnresolvedReference(unknownStructField, fieldName, property.GetLocation())
+		} else if original, duplicate := seen[fieldName]; duplicate {
+			c.addDiagnostic(duplicateStructLiteralFieldDiagnostic{
+				Name: fieldName, Span: c.sourceSpan(property.Name.GetLocation()), PreviousSpan: original,
+			}.build())
 		} else {
+			seen[fieldName] = c.sourceSpan(property.Name.GetLocation())
 			providedFields[fieldName] = true
 
 			// A `mut T` (MutableRef) field accepts an existing `mut T` reference value
