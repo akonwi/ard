@@ -64,6 +64,7 @@
 (attribute namespace: (identifier) @attribute)
 (attribute name: (identifier) @attribute)
 (attribute_named_argument name: (identifier) @property)
+(attribute_value (identifier) @constant)
 
 ; Parameters
 (parameter name: (identifier) @variable.parameter)
