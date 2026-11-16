@@ -19,6 +19,7 @@ import (
 
 	"github.com/akonwi/ard/air"
 	"github.com/akonwi/ard/checker"
+	"github.com/akonwi/ard/platform"
 	runtimesrc "github.com/akonwi/ard/runtime"
 	"golang.org/x/mod/modfile"
 )
@@ -1507,6 +1508,18 @@ type goBuildOptions struct {
 	// -ldflags on the command line replaces, rather than extends, one from
 	// GOFLAGS, so any linker flags found here are carried into ours.
 	goflags string
+	// platform is the explicit target platform (ADR 0082). When unset, the
+	// go tool builds for its default platform.
+	platform platform.Platform
+}
+
+// goToolEnv is the environment for go tool commands that build for opts.
+// It is nil, inheriting the compiler's environment, unless a platform is set.
+func goToolEnv(opts goBuildOptions) []string {
+	if opts.platform.IsZero() {
+		return nil
+	}
+	return opts.platform.Env(os.Environ())
 }
 
 const stripDebugLinkFlags = "-s -w"
@@ -1579,12 +1592,12 @@ func splitGoflags(goflags string) []string {
 
 func buildGeneratedProgram(dir string, outputPath string, opts goBuildOptions) error {
 	if opts.race {
-		if err := checkRaceDetector(dir); err != nil {
+		if err := checkRaceDetector(dir, goToolEnv(opts)); err != nil {
 			return err
 		}
 	}
 	if !opts.release {
-		goflags, err := effectiveGoflags(dir)
+		goflags, err := effectiveGoflags(dir, goToolEnv(opts))
 		if err != nil {
 			return err
 		}
@@ -1592,6 +1605,7 @@ func buildGeneratedProgram(dir string, outputPath string, opts goBuildOptions) e
 	}
 	cmd := exec.Command("go", goBuildArgs(outputPath, opts)...)
 	cmd.Dir = dir
+	cmd.Env = goToolEnv(opts)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
@@ -1599,9 +1613,10 @@ func buildGeneratedProgram(dir string, outputPath string, opts goBuildOptions) e
 
 // effectiveGoflags asks the go tool for the GOFLAGS it will apply, which
 // combines the environment with any value stored by `go env -w`.
-func effectiveGoflags(dir string) (string, error) {
+func effectiveGoflags(dir string, env []string) (string, error) {
 	cmd := exec.Command("go", "env", "GOFLAGS")
 	cmd.Dir = dir
+	cmd.Env = env
 	cmd.Stderr = os.Stderr
 	out, err := cmd.Output()
 	if err != nil {
@@ -1630,9 +1645,10 @@ func (e *RaceUnavailableError) Hint() string {
 // `go build -race` in a few milliseconds, so the answer always matches the
 // installed toolchain. Failures that do not concern -race are left for the
 // build itself to report.
-func checkRaceDetector(dir string) error {
+func checkRaceDetector(dir string, env []string) error {
 	cmd := exec.Command("go", "list", "-race", "runtime")
 	cmd.Dir = dir
+	cmd.Env = env
 	out, err := cmd.CombinedOutput()
 	if err == nil {
 		return nil
@@ -1651,6 +1667,9 @@ func goBuildOptionsFor(projectInfo *checker.ProjectInfo, options BuildOptions) g
 	opts := goBuildOptions{release: options.Release, race: options.Race}
 	if projectInfo != nil && len(projectInfo.Go.BuildTags) > 0 {
 		opts.tags = append([]string(nil), projectInfo.Go.BuildTags...)
+	}
+	if projectInfo != nil {
+		opts.platform = projectInfo.Platform
 	}
 	return opts
 }

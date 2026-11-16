@@ -25,6 +25,7 @@ import (
 	"github.com/akonwi/ard/lsp"
 	"github.com/akonwi/ard/manifest"
 	"github.com/akonwi/ard/parse"
+	"github.com/akonwi/ard/platform"
 	"github.com/akonwi/ard/version"
 )
 
@@ -52,13 +53,18 @@ func main() {
 		os.Exit(0)
 	case "check":
 		{
-			if len(os.Args) < 3 {
-				reportCLIError(os.Stderr, fmt.Errorf("expected filepath argument"))
+			args, err := parseCheckArgs(os.Args[2:])
+			if err != nil {
+				reportCLIError(os.Stderr, err)
 				os.Exit(1)
 			}
-
-			inputPath := os.Args[2]
-			if err := check(inputPath); err != nil {
+			if args.AllPlatforms {
+				if !checkAllPlatforms(args.Input) {
+					os.Exit(1)
+				}
+				os.Exit(0)
+			}
+			if err := check(args.Input, args.Platform); err != nil {
 				reportCLIError(os.Stderr, err)
 				os.Exit(1)
 			}
@@ -117,7 +123,7 @@ func main() {
 				reportCLIError(os.Stderr, err)
 				os.Exit(1)
 			}
-			if _, err := buildGoBinaryWithOptions(args.Input, args.Output, checker.BuildOptions{Release: args.Release, Overrides: args.Overrides}, args.Race); err != nil {
+			if _, err := buildGoBinaryWithOptions(args.Input, args.Output, checker.BuildOptions{Release: args.Release, Overrides: args.Overrides, Platform: args.Platform}, args.Race); err != nil {
 				reportCLIError(os.Stderr, err)
 				os.Exit(1)
 			}
@@ -289,10 +295,11 @@ func printUsage(w io.Writer) {
 	fmt.Fprint(w, `Usage: ard <command> [args]
 
 Commands:
-  check <file.ard>                  Type-check a program
+  check [--platform <os>/<arch> | --all-platforms] <file.ard>
+                                      Type-check a program for one or every platform
   run [--race] <file.ard> [args...]  Run a program
   build <file.ard> [--out <path>] [--release] [--race] [--define <name=value>]
-                                      Build a program (--release keeps Go debug sections)
+        [--platform <os>/<arch>]      Build a program (--release keeps Go debug sections)
   test [path] [--filter <pattern>] [--fail-fast] [--race]
                                       Run Ard tests
   add <git-source@ref> [as alias]    Add or update a Git dependency and lock it
@@ -933,9 +940,91 @@ func dependencyManifestEntry(dep checker.DependencyInfo) string {
 	return fmt.Sprintf("%s = { git = %q, commit = %q }", dep.Alias, dep.Git, dep.Commit)
 }
 
-func check(inputPath string) error {
-	_, err := loadModule(inputPath)
+func check(inputPath string, target platform.Platform) error {
+	_, err := frontend.LoadModuleWithOptions(inputPath, frontend.LoadOptions{Build: checker.BuildOptions{Platform: target}})
 	return err
+}
+
+type checkArgs struct {
+	Input        string
+	Platform     platform.Platform
+	AllPlatforms bool
+}
+
+func parseCheckArgs(args []string) (checkArgs, error) {
+	result := checkArgs{}
+	seenPlatform := false
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch arg {
+		case "--platform":
+			target, err := parsePlatformFlag(args, i, seenPlatform)
+			if err != nil {
+				return checkArgs{}, err
+			}
+			seenPlatform = true
+			result.Platform = target
+			i++
+		case "--all-platforms":
+			result.AllPlatforms = true
+		default:
+			if strings.HasPrefix(arg, "-") {
+				return checkArgs{}, fmt.Errorf("unknown flag: %s", arg)
+			}
+			if result.Input != "" {
+				return checkArgs{}, fmt.Errorf("unexpected argument: %s", arg)
+			}
+			result.Input = arg
+		}
+	}
+	if seenPlatform && result.AllPlatforms {
+		return checkArgs{}, fmt.Errorf("--platform and --all-platforms cannot be combined")
+	}
+	if result.Input == "" {
+		return checkArgs{}, fmt.Errorf("expected filepath argument")
+	}
+	return result, nil
+}
+
+// parsePlatformFlag reads the value of a `--platform` flag at args[index].
+func parsePlatformFlag(args []string, index int, seen bool) (platform.Platform, error) {
+	if seen {
+		return platform.Platform{}, fmt.Errorf("--platform may be provided only once")
+	}
+	if index+1 >= len(args) || args[index+1] == "" || strings.HasPrefix(args[index+1], "-") {
+		return platform.Platform{}, fmt.Errorf("--platform requires <os>/<arch>")
+	}
+	return platform.Parse(args[index+1])
+}
+
+// checkAllPlatforms checks inputPath once for each distinct selection of its
+// `#platform` declarations (ADR 0082) and reports whether every check passed.
+func checkAllPlatforms(inputPath string) bool {
+	host := platform.Detect(filepath.Dir(inputPath))
+	targets, err := frontend.RepresentativePlatforms(inputPath, host)
+	if err != nil {
+		reportCLIError(os.Stderr, err)
+		return false
+	}
+	names := make([]string, 0, len(targets))
+	failed := false
+	for _, target := range targets {
+		names = append(names, target.String())
+		if len(targets) > 1 {
+			fmt.Fprintf(os.Stderr, "Checking for %s\n", target)
+		}
+		if err := check(inputPath, target); err != nil {
+			failed = true
+			if !diagnostics.IsAlreadyReported(err) {
+				reportCLIError(os.Stderr, err)
+			}
+		}
+	}
+	if failed {
+		return false
+	}
+	fmt.Printf("✅ No errors found on %s\n", strings.Join(names, ", "))
+	return true
 }
 
 func loadModule(inputPath string) (checker.Module, error) {
@@ -981,6 +1070,7 @@ type buildArgs struct {
 	Release   bool
 	Race      bool
 	Overrides []checker.BuildOverride
+	Platform  platform.Platform
 }
 
 func parseBuildArgs(args []string) (buildArgs, error) {
@@ -988,9 +1078,18 @@ func parseBuildArgs(args []string) (buildArgs, error) {
 	seenOutput := false
 	seenRelease := false
 	seenRace := false
+	seenPlatform := false
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		switch arg {
+		case "--platform":
+			target, err := parsePlatformFlag(args, i, seenPlatform)
+			if err != nil {
+				return buildArgs{}, err
+			}
+			seenPlatform = true
+			result.Platform = target
+			i++
 		case "--out":
 			if seenOutput {
 				return buildArgs{}, fmt.Errorf("--out may be provided only once")
@@ -1042,6 +1141,9 @@ func parseBuildArgs(args []string) (buildArgs, error) {
 		result.Output = filepath.Base(strings.TrimSuffix(result.Input, filepath.Ext(result.Input)))
 		if result.Output == "" || result.Output == "." || result.Output == string(filepath.Separator) {
 			result.Output = "main"
+		}
+		if result.Platform.OS == "windows" {
+			result.Output += ".exe"
 		}
 	}
 	return result, nil

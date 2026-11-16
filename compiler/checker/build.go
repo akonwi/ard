@@ -2,6 +2,7 @@ package checker
 
 import (
 	"fmt"
+	"github.com/akonwi/ard/platform"
 	"sort"
 	"strconv"
 
@@ -18,6 +19,9 @@ type BuildOverride struct {
 type BuildOptions struct {
 	Release   bool
 	Overrides []BuildOverride
+	// Platform is the explicit target platform, as from `--target`. When
+	// unset, the go tool's default platform is used.
+	Platform platform.Platform
 }
 
 type effectiveBuildValue struct {

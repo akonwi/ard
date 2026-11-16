@@ -16,8 +16,37 @@ import (
 // (ADR 0043). Returns nil when the position resolves to nothing so callers
 // can fall back to legacy heuristics during the migration.
 func (s *Server) hoverFromSpans(ctx context.Context, docURI uri.URI, position protocol.Position) *hoverInfo {
-	fa, err := s.analyzeSnapshot(ctx, docURI)
-	if err != nil || fa == nil || fa.Spans == nil {
+	fa, err := s.analyzeSnapshotAt(ctx, docURI, position)
+	if err != nil || fa == nil {
+		return nil
+	}
+	return s.withPlatformSiblings(fa, s.hoverFromAnalysis(fa, docURI, position), position)
+}
+
+// withPlatformSiblings lists a declaration's platform-specific siblings
+// under its hover (ADR 0082).
+func (s *Server) withPlatformSiblings(fa *analysis.FileAnalysis, info *hoverInfo, position protocol.Position) *hoverInfo {
+	if info == nil || fa.Program == nil {
+		return info
+	}
+	point := s.docLinesFor(fa.FilePath).positionToPoint(position)
+	siblings := checker.AnalyzePlatforms(fa.Program).SiblingsAt(point)
+	if len(siblings) == 0 {
+		return info
+	}
+	lines := make([]string, 0, len(siblings))
+	for _, sibling := range siblings {
+		label := "without `#platform`"
+		if sibling.Names != nil {
+			label = "`#platform(" + strings.Join(sibling.Names, ", ") + ")`"
+		}
+		lines = append(lines, fmt.Sprintf("- %s (line %d)", label, sibling.Location.Start.Row))
+	}
+	return &hoverInfo{content: info.content + "\n\nAlso declared:\n" + strings.Join(lines, "\n")}
+}
+
+func (s *Server) hoverFromAnalysis(fa *analysis.FileAnalysis, docURI uri.URI, position protocol.Position) *hoverInfo {
+	if fa.Spans == nil {
 		return nil
 	}
 

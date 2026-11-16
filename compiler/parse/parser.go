@@ -241,14 +241,31 @@ func (p *parser) parse() (*Program, error) {
 	// Parse imports first
 	importing := true
 	for importing {
+		p.skipNewlines()
+		if p.check(hash) {
+			// Attributes before a `use` belong to the import. Before anything
+			// else they belong to the first declaration, so rewind and leave
+			// the import phase.
+			index, errorCount := p.index, len(p.errors)
+			attributes := p.parseDeclarationAttributes()
+			if p.check(use) {
+				if imp := p.parseImport(); imp != nil {
+					imp.Attributes = attributes
+					program.Imports = append(program.Imports, *imp)
+				}
+				continue
+			}
+			p.index, p.errors = index, p.errors[:errorCount]
+			break
+		}
 		if imp := p.parseImport(); imp != nil {
 			program.Imports = append(program.Imports, *imp)
 		} else {
 			if c := p.parseComment(); c != nil {
 				program.Statements = append(program.Statements, c)
 			}
-			// Continue import phase while the current token is an empty line, 'use', or comment
-			importing = p.check(new_line) || p.check(use) || p.check(comment)
+			// Continue import phase while the current token is an empty line, 'use', a comment, or an attribute
+			importing = p.check(new_line) || p.check(use) || p.check(comment) || p.check(hash)
 		}
 	}
 
@@ -258,9 +275,20 @@ func (p *parser) parse() (*Program, error) {
 			continue
 		}
 		mark := len(p.detachedComments)
+		var attributes []Attribute
+		if p.check(hash) {
+			attributes = p.parseDeclarationAttributes()
+			if p.isAtEnd() {
+				p.addError(p.peek(), "Expected declaration after attribute")
+				break
+			}
+		}
 		stmt, err := p.parseStatement()
 		if err != nil {
 			return nil, err
+		}
+		if len(attributes) > 0 && !setDeclarationAttributes(stmt, attributes) {
+			p.errors = append(p.errors, ParseError{Location: attributes[0].Location, Message: "Attributes must be followed by a declaration"})
 		}
 		program.Statements = p.placeDetachedComments(program.Statements, mark, stmt)
 		if stmt != nil {
@@ -272,6 +300,32 @@ func (p *parser) parse() (*Program, error) {
 	program.Statements = p.placeDetachedComments(program.Statements, 0, nil)
 
 	return program, nil
+}
+
+// parseDeclarationAttributes reads the attributes written before a top-level
+// declaration or `use`, each on its own line.
+func (p *parser) parseDeclarationAttributes() []Attribute {
+	var attributes []Attribute
+	for p.check(hash) {
+		attribute, ok := p.parseAttribute()
+		if ok {
+			attributes = append(attributes, attribute)
+		}
+		if !p.check(new_line) && !p.isAtEnd() {
+			if ok {
+				p.addError(p.peek(), "Expected new line after attribute")
+			}
+			p.synchronize()
+		}
+		p.skipNewlines()
+		if p.check(comment) {
+			p.addError(p.peek(), "Comments must come before attributes")
+			for p.check(comment) || p.check(new_line) {
+				p.advance()
+			}
+		}
+	}
+	return attributes
 }
 
 func (p *parser) parseImport() *Import {
@@ -397,7 +451,7 @@ func (p *parser) parseStatementEndingAt(terminators ...kind) (Statement, error) 
 		return nil, nil
 	}
 	if p.match(hash) {
-		p.addError(p.previous(), "Attributes are only supported on struct fields")
+		p.addError(p.previous(), "Attributes are only supported on struct fields and top-level declarations")
 		p.synchronize()
 		return nil, nil
 	}

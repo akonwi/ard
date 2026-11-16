@@ -8,6 +8,7 @@ import (
 
 	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/lsp/analysis"
+	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
 )
 
@@ -101,6 +102,22 @@ func (s *Server) analyzeSnapshot(ctx context.Context, docURI uri.URI) (*analysis
 	}
 	snap := s.workspaceSnapshotFor(filePath)
 	fa, err := snap.AnalyzeCtx(ctx, filePath)
+	if err != nil {
+		return nil, fmt.Errorf("analyze %s: %w", filePath, err)
+	}
+	return fa, nil
+}
+
+// analyzeSnapshotAt is analyzeSnapshot for a feature acting at position.
+// Inside a declaration the primary platform does not select, the document is
+// analyzed for a platform that selects it (ADR 0082).
+func (s *Server) analyzeSnapshotAt(ctx context.Context, docURI uri.URI, position protocol.Position) (*analysis.FileAnalysis, error) {
+	filePath, err := filePathFromURI(docURI)
+	if err != nil {
+		return nil, err
+	}
+	snap := s.workspaceSnapshotFor(filePath)
+	fa, err := snap.AnalyzeAtCtx(ctx, filePath, s.docLinesFor(filePath).positionToPoint(position))
 	if err != nil {
 		return nil, fmt.Errorf("analyze %s: %w", filePath, err)
 	}

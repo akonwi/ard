@@ -82,6 +82,9 @@ func (entry importEntry) firstRow() int {
 	if len(entry.leading) > 0 {
 		return entry.leading[0].Location.Start.Row
 	}
+	if len(entry.item.Attributes) > 0 {
+		return entry.item.Attributes[0].Location.Start.Row
+	}
 	return entry.item.Location.Start.Row
 }
 
@@ -177,6 +180,11 @@ func (p printer) renderImports(imports []importEntry) []string {
 			for _, comment := range entry.leading {
 				lines = append(lines, p.renderStatementComment(comment.Value))
 			}
+			if !entry.removed {
+				for _, attribute := range entry.item.Attributes {
+					lines = append(lines, p.printDocAtColumn(p.renderAttributeDoc(attribute), 0))
+				}
+			}
 			switch {
 			case !entry.removed && entry.trailing != nil:
 				lines = append(lines, p.renderImport(entry.item)+" "+p.renderStatementComment(entry.trailing.Value))
@@ -230,7 +238,17 @@ func (p printer) renderStatementDoc(statement parse.Statement) doc {
 	if statement == nil {
 		return dText("")
 	}
+	if attributes := parse.DeclarationAttributes(statement); len(attributes) > 0 {
+		parts := make([]doc, 0, len(attributes)*2+1)
+		for _, attribute := range attributes {
+			parts = append(parts, p.renderAttributeDoc(attribute), dHardLine())
+		}
+		return dConcat(append(parts, p.renderDeclarationDoc(statement))...)
+	}
+	return p.renderDeclarationDoc(statement)
+}
 
+func (p printer) renderDeclarationDoc(statement parse.Statement) doc {
 	switch node := statement.(type) {
 	case *parse.Comment:
 		return dText(p.renderStatementComment(node.Value))
@@ -403,6 +421,10 @@ func (p printer) renderFunctionDeclarationDoc(node *parse.FunctionDeclaration, t
 }
 
 func (p printer) renderStaticFunctionDeclarationDoc(node *parse.StaticFunctionDeclaration) doc {
+	return p.renderBlockDoc(p.staticFunctionHeader(node), node.Body)
+}
+
+func (p printer) staticFunctionHeader(node *parse.StaticFunctionDeclaration) string {
 	prefix := ""
 	if node.Private {
 		prefix += "private "
@@ -417,7 +439,7 @@ func (p printer) renderStaticFunctionDeclarationDoc(node *parse.StaticFunctionDe
 	if node.ReturnType != nil {
 		header += " " + p.renderType(node.ReturnType)
 	}
-	return p.renderBlockDoc(header, node.Body)
+	return header
 }
 
 func (p printer) renderStructDefinitionDoc(node *parse.StructDefinition) doc {
@@ -2150,6 +2172,9 @@ func hasSourceBlankLine(previous parse.Statement, current parse.Statement) bool 
 }
 
 func statementStartRow(statement parse.Statement) int {
+	if attributes := parse.DeclarationAttributes(statement); len(attributes) > 0 && attributes[0].Location.Start.Row > 0 {
+		return attributes[0].Location.Start.Row
+	}
 	loc := statement.GetLocation()
 	if loc.Start.Row > 0 {
 		return loc.Start.Row

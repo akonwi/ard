@@ -42,7 +42,20 @@ struct User {
 }
 ```
 
-Argument-free marker attributes omit parentheses. Attributes are currently accepted only on Ard-owned struct fields.
+Argument-free marker attributes omit parentheses.
+
+[`#platform`](/guide/platforms/) attributes on top-level declarations and `use` lines also appear one per line immediately before what they annotate. An annotated `use` stays with its attribute when imports are sorted:
+
+```ard
+use go:os
+#platform(unix)
+use go:syscall
+
+#platform(unix)
+fn hangup() os::Signal {
+  syscall::SIGHUP
+}
+```
 
 ## Struct Literals
 

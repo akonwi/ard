@@ -1,5 +1,7 @@
 package checker
 
+import "github.com/akonwi/ard/platform"
+
 type TargetInfo struct {
 	IntBits     int
 	UintBits    int
@@ -10,6 +12,9 @@ type CheckOptions struct {
 	// ModulePath overrides the checked module identity while keeping filePath for diagnostics.
 	ModulePath string
 	Target     TargetInfo
+	// Platform selects `#platform` declarations (ADR 0082). When unset, the
+	// module resolver's platform is used, or the go tool's default.
+	Platform platform.Platform
 	// GoResolver overrides the project-aware go/packages resolver created for
 	// checked programs that import Go.
 	GoResolver GoPackageResolver

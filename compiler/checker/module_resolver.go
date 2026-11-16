@@ -21,6 +21,7 @@ import (
 
 	"github.com/akonwi/ard/manifest"
 	"github.com/akonwi/ard/parse"
+	"github.com/akonwi/ard/platform"
 	"github.com/akonwi/ard/version"
 )
 
@@ -33,6 +34,9 @@ type ProjectInfo struct {
 	Build         manifest.BuildConfig
 	RootPackageID string
 	Packages      map[string]PackageInfo
+	// Platform is the explicit target platform for this invocation, as from
+	// `--target`. When unset, Go tooling uses its default platform.
+	Platform platform.Platform
 }
 
 type GoProjectConfig struct {
@@ -100,6 +104,9 @@ type ModuleResolver struct {
 	modulePackages  map[string]string         // canonical module path -> package ID
 	goImportAliases map[string]goImportAliasesResult
 	buildModule     Module
+
+	platformOnce sync.Once
+	platform     platform.Platform
 
 	embedMu                  sync.Mutex
 	embeddedResources        map[string]EmbeddedResource
@@ -1590,6 +1597,7 @@ func NewModuleResolverWithOptions(workingDir string, options BuildOptions) (*Mod
 	if err != nil {
 		return nil, err
 	}
+	project.Platform = options.Platform
 
 	return &ModuleResolver{
 		project:                 project,
@@ -2247,6 +2255,23 @@ func (mr *ModuleResolver) DependencyPackageName(packageID string) (string, bool)
 
 func (mr *ModuleResolver) GetProjectInfo() *ProjectInfo {
 	return mr.project
+}
+
+// Platform is the target platform modules are selected for (ADR 0082): the
+// explicit platform from BuildOptions, or the go tool's default.
+func (mr *ModuleResolver) Platform() platform.Platform {
+	mr.platformOnce.Do(func() {
+		if mr.project != nil && !mr.project.Platform.IsZero() {
+			mr.platform = mr.project.Platform
+			return
+		}
+		dir := ""
+		if mr.project != nil {
+			dir = mr.project.RootPath
+		}
+		mr.platform = platform.Detect(dir)
+	})
+	return mr.platform
 }
 
 // LoadModule loads and parses a module file from the given import path.

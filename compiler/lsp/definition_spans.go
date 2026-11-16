@@ -16,7 +16,7 @@ import (
 // table (ADR 0043). It returns nil when the position resolves to nothing,
 // letting callers fall back to legacy heuristics during the migration.
 func (s *Server) definitionFromSpans(ctx context.Context, docURI uri.URI, position protocol.Position) []protocol.Location {
-	fa, err := s.analyzeSnapshot(ctx, docURI)
+	fa, err := s.analyzeSnapshotAt(ctx, docURI, position)
 	if err != nil || fa == nil || fa.Spans == nil {
 		return nil
 	}

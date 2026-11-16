@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/akonwi/ard/parse"
+	"github.com/akonwi/ard/platform"
 )
 
 // GoImportScanEntry pairs a parsed program with its canonical module path
@@ -13,6 +14,12 @@ import (
 type GoImportScanEntry struct {
 	Program    *parse.Program
 	ModulePath string
+	// Selected reports that Program already holds only the declarations
+	// for the target platform (ADR 0082).
+	Selected bool
+	// Platform overrides the resolver's platform for selecting the
+	// declarations of every scanned module.
+	Platform platform.Platform
 }
 
 // CollectGoImportPaths walks the Ard import graph reachable from the given
@@ -29,13 +36,35 @@ func CollectGoImportPaths(resolver *ModuleResolver, entries ...GoImportScanEntry
 	goPaths := map[string]bool{}
 	visited := map[string]bool{}
 	queue := entries
+	var target platform.Platform
+	targetFor := func() platform.Platform {
+		if target.IsZero() {
+			for _, entry := range entries {
+				if !entry.Platform.IsZero() {
+					target = entry.Platform
+					return target
+				}
+			}
+			if resolver != nil {
+				target = resolver.Platform()
+			} else {
+				target = platform.Detect("")
+			}
+		}
+		return target
+	}
 	for len(queue) > 0 {
 		entry := queue[0]
 		queue = queue[1:]
 		if entry.Program == nil {
 			continue
 		}
-		for _, imp := range entry.Program.Imports {
+		program := entry.Program
+		if !entry.Selected {
+			// `use` lines for other platforms load no packages.
+			program = SelectPlatform(program, targetFor())
+		}
+		for _, imp := range program.Imports {
 			if imp.Kind == parse.ImportKindGo {
 				path := imp.Path
 				if resolver != nil {

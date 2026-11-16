@@ -23,8 +23,9 @@ func (s *Server) signatureHelpFromSpans(ctx context.Context, docURI uri.URI, sou
 	// a dangling comma) need the legacy paren-patching to parse. Patching a
 	// valid call would corrupt it, so try the plain source first.
 	base := s.workspaceSnapshotFor(filePath)
+	target := s.docLinesFor(filePath).positionToPoint(position)
 	analyzeWith := func(text string, allowPartial bool) *analysis.FileAnalysis {
-		fa, err := base.WithOverlay(filePath, text).AnalyzeEphemeral(ctx, filePath)
+		fa, err := base.WithOverlay(filePath, text).AnalyzeEphemeralAt(ctx, filePath, target)
 		if err != nil || fa == nil || fa.Spans == nil {
 			return nil
 		}
@@ -42,7 +43,6 @@ func (s *Server) signatureHelpFromSpans(ctx context.Context, docURI uri.URI, sou
 		return nil
 	}
 
-	target := s.docLinesFor(filePath).positionToPoint(position)
 	for _, rec := range fa.Spans.At(target) {
 		label, params, callLoc, callArgs, ok := signatureFromRecord(rec)
 		if !ok {

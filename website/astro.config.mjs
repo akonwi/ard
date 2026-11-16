@@ -204,6 +204,7 @@ export default defineConfig({
             { label: "Dependencies", slug: "guide/dependencies" },
             { label: "Build values", slug: "guide/build-values" },
             { label: "Embedded files", slug: "guide/embedding" },
+            { label: "Platform-specific code", slug: "guide/platforms" },
             { label: "Testing", slug: "guide/testing" },
             { label: "Formatting", slug: "guide/formatting" },
           ],

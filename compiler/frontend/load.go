@@ -60,6 +60,7 @@ func LoadModuleWithOptions(inputPath string, options LoadOptions) (*LoadResult, 
 	// go/types universe (ADR 0044).
 	goResolver := checker.NewGoPackagesResolver(projectInfo.RootPath, projectInfo.Go.BuildTags)
 	goResolver.DependencyModuleRoots = checker.DependencyGoModuleRoots(projectInfo)
+	goResolver.Platform = projectInfo.Platform
 	c := checker.New(relPath, program, moduleResolver, checker.CheckOptions{GoResolver: goResolver})
 	c.Check()
 	if len(c.Diagnostics()) > 0 {
