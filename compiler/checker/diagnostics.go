@@ -2012,6 +2012,9 @@ type invalidEqualityDiagnostic struct {
 	RightSpan     SourceSpan
 	LegacyMessage string
 	Unsupported   bool
+	// Hint is an optional note, such as the match type pattern suggested for
+	// Go interface operands (ADR 0085).
+	Hint string
 }
 
 func (d invalidEqualityDiagnostic) build() Diagnostic {
@@ -2021,8 +2024,7 @@ func (d invalidEqualityDiagnostic) build() Diagnostic {
 		primary.Message = fmt.Sprintf("values of type `%s` do not support equality", d.RightType)
 		secondary.Message = fmt.Sprintf("left operand has the same non-comparable type `%s`", d.LeftType)
 	}
-	text := goInterfaceEqualityHint(d.Operator, d.LeftType, d.RightType)
-	diagnostic := newLabeledDiagnostic(Error, d.LegacyMessage, "Values cannot be compared", text, primary, secondary)
+	diagnostic := newLabeledDiagnostic(Error, d.LegacyMessage, "Values cannot be compared", d.Hint, primary, secondary)
 	diagnostic.Code = DiagnosticCodeInvalidEqualityOperation
 	return diagnostic
 }
