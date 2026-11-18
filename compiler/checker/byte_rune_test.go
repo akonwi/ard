@@ -54,7 +54,7 @@ let same = slash == '/'`,
 			name:  "split method is removed from primitive str",
 			input: `"a,b".split(",")`,
 			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: `Undefined: "a,b".split`},
+				{Kind: checker.Error, Message: "Undefined: Str.split"},
 			},
 		},
 	})

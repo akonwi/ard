@@ -285,8 +285,8 @@ func TestUndefinedInstanceMembersHaveStructuredDiagnostics(t *testing.T) {
 		title      string
 		legacy     string
 	}{
-		{diagnostic: c.Diagnostics()[0], location: property.Property.GetLocation(), title: "Undefined field", legacy: `Undefined: "foo".length`},
-		{diagnostic: c.Diagnostics()[1], location: method.Method.GetLocation(), title: "Undefined method", legacy: `Undefined: "foo".save`},
+		{diagnostic: c.Diagnostics()[0], location: property.Property.GetLocation(), title: "Undefined field", legacy: "Undefined: Str.length"},
+		{diagnostic: c.Diagnostics()[1], location: method.Method.GetLocation(), title: "Undefined method", legacy: "Undefined: Str.save"},
 	}
 	for _, tt := range tests {
 		if tt.diagnostic.Code != checker.DiagnosticCodeUndefinedMember || tt.diagnostic.Title != tt.title || tt.diagnostic.Message != tt.legacy {

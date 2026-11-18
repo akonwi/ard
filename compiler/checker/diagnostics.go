@@ -427,13 +427,23 @@ const (
 )
 
 type undefinedMemberDiagnostic struct {
-	Kind     undefinedMemberKind
-	Receiver string
+	Kind undefinedMemberKind
+	// Receiver is the type whose members were searched; see memberOwnerName.
+	Receiver Type
 	Member   string
 	Span     SourceSpan
-	// ReceiverType names the receiver's type when the receiver itself prints
-	// as an expression (a variable name, say). Suggestions key on the type.
-	ReceiverType string
+}
+
+// memberOwnerName names the type whose members a diagnostic searched.
+// Diagnostics name receivers by type rather than by checked expression,
+// which has no readable form in general. Ard references are transparent to
+// member access, so they name the referent; Go pointer types keep the
+// pointer because their method set differs from the value's.
+func memberOwnerName(t Type) string {
+	if t == nil {
+		return invalidType.String()
+	}
+	return derefMutableRef(t).String()
 }
 
 func (d undefinedMemberDiagnostic) build() Diagnostic {
@@ -446,17 +456,14 @@ func (d undefinedMemberDiagnostic) build() Diagnostic {
 	default:
 		panic(fmt.Sprintf("unknown undefined-member kind: %d", d.Kind))
 	}
-	label := fmt.Sprintf("`%s` is not defined for `%s`", d.Member, d.Receiver)
-	receiverType := d.ReceiverType
-	if receiverType == "" {
-		receiverType = d.Receiver
-	}
-	if replacement := removedConversionMethod(receiverType, d.Member); replacement != "" {
+	receiver := memberOwnerName(d.Receiver)
+	label := fmt.Sprintf("`%s` is not defined for `%s`", d.Member, receiver)
+	if replacement := removedConversionMethod(receiver, d.Member); replacement != "" {
 		label = fmt.Sprintf("`%s` has been removed; use `%s` (ADR 0072)", d.Member, replacement)
 	}
 	diagnostic := newLabeledDiagnostic(
 		Error,
-		fmt.Sprintf("Undefined: %s.%s", d.Receiver, d.Member),
+		fmt.Sprintf("Undefined: %s.%s", receiver, d.Member),
 		fmt.Sprintf("Undefined %s", memberKind),
 		"",
 		DiagnosticLabel{
@@ -785,26 +792,29 @@ const (
 )
 
 type referenceReceiverDiagnostic struct {
-	Kind            referenceReceiverKind
-	Receiver        string
+	Kind referenceReceiverKind
+	// Receiver is the type that owns Method; see memberOwnerName. Maybe
+	// receivers leave it nil because their wording names Maybe directly.
+	Receiver        Type
 	Method          string
 	Span            SourceSpan
 	DeclarationSpan *SourceSpan
 }
 
 func (d referenceReceiverDiagnostic) build() Diagnostic {
-	legacy := fmt.Sprintf("Cannot call mutating method '%s.%s': receiver is not a writable pointer", d.Receiver, d.Method)
+	receiver := memberOwnerName(d.Receiver)
+	legacy := fmt.Sprintf("Cannot call mutating method '%s.%s': receiver is not a writable pointer", receiver, d.Method)
 	title := "Mutating method requires a writable pointer"
 	primary := fmt.Sprintf("`.%s()` requires a `&mut` receiver", d.Method)
 	if d.Kind == referenceMaybeReceiver {
 		legacy = fmt.Sprintf("Cannot call Maybe.%s: receiver is not a writable pointer", d.Method)
 		primary = fmt.Sprintf("`Maybe.%s` requires a `&mut` receiver", d.Method)
 	} else if d.Kind == referencePointerMethodAccess {
-		legacy = fmt.Sprintf("Cannot access pointer receiver method %s.%s on a value", d.Receiver, d.Method)
+		legacy = fmt.Sprintf("Cannot access pointer receiver method %s.%s on a value", receiver, d.Method)
 		title = "Pointer receiver method requires a writable pointer"
 		primary = "this method value requires a `&mut` receiver"
 	} else if d.Kind == referencePointerMethodCall {
-		legacy = fmt.Sprintf("Cannot call pointer receiver method %s.%s on a value", d.Receiver, d.Method)
+		legacy = fmt.Sprintf("Cannot call pointer receiver method %s.%s on a value", receiver, d.Method)
 		title = "Pointer receiver method requires a writable pointer"
 		primary = "this method call requires a `&mut` receiver"
 	}

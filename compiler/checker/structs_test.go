@@ -345,7 +345,7 @@ func TestStructs(t *testing.T) {
 				`p.height`,
 			}, "\n"),
 			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Undefined: p.height"},
+				{Kind: checker.Error, Message: "Undefined: Person.height"},
 			},
 		},
 		{
@@ -581,7 +581,7 @@ func TestMethods(t *testing.T) {
 				let square = Shape{width: 5, height: 5}
 				square.resize(8,8)`, shapeCode),
 			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Cannot call mutating method 'square.resize': receiver is not a writable pointer"},
+				{Kind: checker.Error, Message: "Cannot call mutating method 'Shape.resize': receiver is not a writable pointer"},
 			},
 		},
 	})

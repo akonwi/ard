@@ -7534,7 +7534,7 @@ func (c *Checker) createInterpolationMethodNode(original, observed Expression, d
 		if !c.permitsInteriorMutation(original) {
 			c.addInteriorMutationDiagnostic(original, referenceReceiverDiagnostic{
 				Kind:            referenceArdReceiver,
-				Receiver:        fmt.Sprint(original),
+				Receiver:        original.Type(),
 				Method:          declaration.Name,
 				Span:            c.sourceSpan(loc),
 				DeclarationSpan: expressionBindingSpan(original),
@@ -8144,7 +8144,6 @@ func (c *Checker) createMaybeMethod(subject Expression, methodName string, args 
 	if (kind == MaybeSet || kind == MaybeClear) && !c.permitsInteriorMutation(subject) {
 		c.addInteriorMutationDiagnostic(subject, referenceReceiverDiagnostic{
 			Kind:            referenceMaybeReceiver,
-			Receiver:        "Maybe",
 			Method:          methodName,
 			Span:            c.sourceSpan(loc),
 			DeclarationSpan: expressionBindingSpan(subject),
@@ -9021,7 +9020,7 @@ func (c *Checker) checkFunctionFieldCall(subject Expression, method parse.Functi
 	if _, ok := subject.Type().(*StructDef); ok {
 		field.Kind = StructSubject
 	}
-	return c.checkFunctionValueCall(field, method.Args, method.TypeArgs, location, fmt.Sprintf("%s.%s", subject, method.Name), expectedReturn), true
+	return c.checkFunctionValueCall(field, method.Args, method.TypeArgs, location, fmt.Sprintf("%s.%s", memberOwnerName(subject.Type()), method.Name), expectedReturn), true
 }
 
 func comparisonOperatorText(operator parse.Operator) string {
@@ -9448,7 +9447,7 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 						if !c.permitsInteriorMutation(subj) {
 							c.addInteriorMutationDiagnostic(subj, referenceReceiverDiagnostic{
 								Kind:            referencePointerMethodAccess,
-								Receiver:        foreign.String(),
+								Receiver:        foreign,
 								Method:          s.Property.Name,
 								Span:            c.sourceSpan(s.Property.GetLocation()),
 								DeclarationSpan: expressionBindingSpan(subj),
@@ -9472,7 +9471,7 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 				}
 				c.addDiagnostic(undefinedMemberDiagnostic{
 					Kind:     undefinedField,
-					Receiver: fmt.Sprint(subj),
+					Receiver: subj.Type(),
 					Member:   s.Property.Name,
 					Span:     c.sourceSpan(s.Property.GetLocation()),
 				}.build())
@@ -9567,7 +9566,7 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 							if !c.permitsInteriorMutation(subj) {
 								c.addInteriorMutationDiagnostic(subj, referenceReceiverDiagnostic{
 									Kind:            referencePointerMethodCall,
-									Receiver:        foreign.String(),
+									Receiver:        foreign,
 									Method:          s.Method.Name,
 									Span:            c.sourceSpan(s.Method.GetLocation()),
 									DeclarationSpan: expressionBindingSpan(subj),
@@ -9599,11 +9598,10 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 				}
 				if sig == nil {
 					c.addDiagnostic(undefinedMemberDiagnostic{
-						Kind:         undefinedMethod,
-						Receiver:     fmt.Sprint(subj),
-						ReceiverType: fmt.Sprint(derefMutableRef(subj.Type())),
-						Member:       s.Method.Name,
-						Span:         c.sourceSpan(s.Method.GetLocation()),
+						Kind:     undefinedMethod,
+						Receiver: subj.Type(),
+						Member:   s.Method.Name,
+						Span:     c.sourceSpan(s.Method.GetLocation()),
 					}.build())
 					return nil
 				}
@@ -9611,7 +9609,7 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 
 			fnDef, ok := sig.(*FunctionDef)
 			if !ok {
-				c.addNonCallable(fmt.Sprintf("%s.%s", subj, s.Method.Name), s.Method.GetLocation(), nil, nonCallableSuffix)
+				c.addNonCallable(fmt.Sprintf("%s.%s", memberOwnerName(subj.Type()), s.Method.Name), s.Method.GetLocation(), nil, nonCallableSuffix)
 				return nil
 			}
 			memberType = derefMutableRef(subj.Type())
@@ -9624,7 +9622,7 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 				// slot (ADRs 0057 and 0073).
 				c.addInteriorMutationDiagnostic(subj, referenceReceiverDiagnostic{
 					Kind:            referenceArdReceiver,
-					Receiver:        fmt.Sprint(subj),
+					Receiver:        subj.Type(),
 					Method:          s.Method.Name,
 					Span:            c.sourceSpan(s.Method.GetLocation()),
 					DeclarationSpan: expressionBindingSpan(subj),
@@ -14391,14 +14389,14 @@ func (c *Checker) checkMethodInMaybeAccessorContext(method *parse.InstanceMethod
 	if signature == nil {
 		c.addDiagnostic(undefinedMemberDiagnostic{
 			Kind:     undefinedMethod,
-			Receiver: fmt.Sprint(innerType),
+			Receiver: innerType,
 			Member:   method.Method.Name,
 			Span:     c.sourceSpan(method.Method.GetLocation()),
 		}.build())
 		return nil
 	}
 	if _, ok := signature.(*FunctionDef); !ok {
-		c.addNonCallable(fmt.Sprintf("%s.%s", innerType, method.Method.Name), method.Method.GetLocation(), nil, nonCallableSuffix)
+		c.addNonCallable(fmt.Sprintf("%s.%s", memberOwnerName(innerType), method.Method.Name), method.Method.GetLocation(), nil, nonCallableSuffix)
 		return nil
 	}
 
@@ -14442,7 +14440,7 @@ func (c *Checker) checkAccessorChainWithMaybes(parseExpr parse.Expression) Expre
 			if !found {
 				c.addDiagnostic(undefinedMemberDiagnostic{
 					Kind:     undefinedField,
-					Receiver: fmt.Sprint(target),
+					Receiver: target.Type(),
 					Member:   property.Property.Name,
 					Span:     c.sourceSpan(property.Property.GetLocation()),
 				}.build())
@@ -14460,7 +14458,7 @@ func (c *Checker) checkAccessorChainWithMaybes(parseExpr parse.Expression) Expre
 	if !isStruct {
 		c.addDiagnostic(undefinedMemberDiagnostic{
 			Kind:     undefinedField,
-			Receiver: fmt.Sprint(innerType),
+			Receiver: innerType,
 			Member:   property.Property.Name,
 			Span:     c.sourceSpan(property.Property.GetLocation()),
 		}.build())
@@ -14471,7 +14469,7 @@ func (c *Checker) checkAccessorChainWithMaybes(parseExpr parse.Expression) Expre
 		c.recordCompletionType(property.Property.GetLocation(), structType)
 		c.addDiagnostic(undefinedMemberDiagnostic{
 			Kind:     undefinedField,
-			Receiver: fmt.Sprint(innerType),
+			Receiver: innerType,
 			Member:   property.Property.Name,
 			Span:     c.sourceSpan(property.Property.GetLocation()),
 		}.build())

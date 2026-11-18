@@ -1583,7 +1583,7 @@ fn invalid() {
 	checked := checker.New(invalidPath, result.Program, resolver, checker.CheckOptions{GoResolver: goResolver})
 	checked.Check()
 	diagnostics := checked.Diagnostics()
-	if len(diagnostics) != 2 || diagnostics[0].Message != "Undefined: outer.Name" || diagnostics[1].Message != "Unknown field: Name" {
+	if len(diagnostics) != 2 || diagnostics[0].Message != "Undefined: ffi::Outer.Name" || diagnostics[1].Message != "Unknown field: Name" {
 		t.Fatalf("promoted field diagnostics = %v", diagnostics)
 	}
 }
