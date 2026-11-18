@@ -213,7 +213,7 @@ func TestRemovedConversionMethods(t *testing.T) {
   b.to_int()
 }`,
 			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Undefined: b.to_int"},
+				{Kind: checker.Error, Message: "Undefined: Byte.to_int"},
 			},
 		},
 		{
@@ -222,7 +222,7 @@ func TestRemovedConversionMethods(t *testing.T) {
   r.to_int()
 }`,
 			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Undefined: r.to_int"},
+				{Kind: checker.Error, Message: "Undefined: Rune.to_int"},
 			},
 		},
 		{
@@ -231,7 +231,7 @@ func TestRemovedConversionMethods(t *testing.T) {
   n.to_f64()
 }`,
 			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Undefined: n.to_f64"},
+				{Kind: checker.Error, Message: "Undefined: Int.to_f64"},
 			},
 		},
 		{
@@ -240,7 +240,7 @@ func TestRemovedConversionMethods(t *testing.T) {
   value.to_int()
 }`,
 			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Undefined: value.to_int"},
+				{Kind: checker.Error, Message: "Undefined: Float64.to_int"},
 			},
 		},
 		{

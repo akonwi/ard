@@ -121,7 +121,7 @@ let same = a == (1, 2)`,
 			input: `let pair = (1, "a")
 let first = pair.first`,
 			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Undefined: pair.first"},
+				{Kind: checker.Error, Message: "Undefined: (Int, Str).first"},
 			},
 		},
 	})

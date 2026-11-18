@@ -541,7 +541,7 @@ fn main() {
   let timeout = time::After(1)
   timeout.send(time::Now())
 }`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Undefined: timeout.send"}},
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Undefined: Receiver<time::Time>.send"}},
 		},
 		{
 			name: "Go struct channel field is receive-only channel",

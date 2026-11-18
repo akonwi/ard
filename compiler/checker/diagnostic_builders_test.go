@@ -79,8 +79,8 @@ func TestUndefinedMemberDiagnostic(t *testing.T) {
 		legacy      string
 		primaryText string
 	}{
-		{name: "field", kind: undefinedField, title: "Undefined field", legacy: "Undefined: user.height", primaryText: "`height` is not defined for `user`"},
-		{name: "method", kind: undefinedMethod, title: "Undefined method", legacy: "Undefined: user.save", primaryText: "`save` is not defined for `user`"},
+		{name: "field", kind: undefinedField, title: "Undefined field", legacy: "Undefined: User.height", primaryText: "`height` is not defined for `User`"},
+		{name: "method", kind: undefinedMethod, title: "Undefined method", legacy: "Undefined: User.save", primaryText: "`save` is not defined for `User`"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -88,7 +88,7 @@ func TestUndefinedMemberDiagnostic(t *testing.T) {
 			if tt.kind == undefinedMethod {
 				member = "save"
 			}
-			diagnostic := (undefinedMemberDiagnostic{Kind: tt.kind, Receiver: "user", Member: member, Span: span}).build()
+			diagnostic := (undefinedMemberDiagnostic{Kind: tt.kind, Receiver: &MutableRef{of: &StructDef{Name: "User"}}, Member: member, Span: span}).build()
 			if diagnostic.Code != DiagnosticCodeUndefinedMember || diagnostic.Title != tt.title || diagnostic.Message != tt.legacy {
 				t.Fatalf("code/title/message = %q/%q/%q", diagnostic.Code, diagnostic.Title, diagnostic.Message)
 			}

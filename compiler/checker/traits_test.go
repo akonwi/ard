@@ -777,7 +777,7 @@ fn mutate(counter: Counter) {
   counter.set(2)
 }
 `,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Cannot call mutating method 'counter.set': receiver is not a writable pointer"}},
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Cannot call mutating method 'Counter.set': receiver is not a writable pointer"}},
 		},
 		{
 			name: "non-mutating contract rejects mutating implementation",
@@ -816,7 +816,7 @@ fn render(value: Renderable) Str {
   "{value}"
 }
 `,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Cannot call mutating method 'value.to_str': receiver is not a writable pointer"}},
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Cannot call mutating method 'Renderable.to_str': receiver is not a writable pointer"}},
 		},
 		{
 			name: "mutating trait interpolation accepts reference receiver",

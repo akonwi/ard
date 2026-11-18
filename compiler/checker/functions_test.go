@@ -824,7 +824,7 @@ func TestUnknownParameterTypeMethodLookupReportsDiagnostics(t *testing.T) {
 	if !strings.Contains(diagnostics, "Unrecognized type: Missing") {
 		t.Fatalf("diagnostics = %v, want unrecognized type diagnostic", c.Diagnostics())
 	}
-	if !strings.Contains(diagnostics, "Undefined: x.to_str") {
+	if !strings.Contains(diagnostics, "Undefined: $unknown.to_str") {
 		t.Fatalf("diagnostics = %v, want undefined method diagnostic", c.Diagnostics())
 	}
 }

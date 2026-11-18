@@ -483,8 +483,8 @@ func TestInstanceProperties(t *testing.T) {
 				`name.len`,
 			}, "\n"),
 			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: `Undefined: "foo".length`},
-				{Kind: checker.Error, Message: "Undefined: name.len"},
+				{Kind: checker.Error, Message: "Undefined: Str.length"},
+				{Kind: checker.Error, Message: "Undefined: Str.len"},
 			},
 		},
 	})
@@ -1873,7 +1873,7 @@ func TestLists(t *testing.T) {
 			  let list = [1,2,3]
 				list.push(4)`,
 			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Cannot call mutating method 'list.push': receiver is not a writable pointer"},
+				{Kind: checker.Error, Message: "Cannot call mutating method '[Int].push': receiver is not a writable pointer"},
 			},
 		},
 	})
@@ -3017,7 +3017,7 @@ func TestDirectionalChannels(t *testing.T) {
   rx.send(1)
 }`,
 			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Undefined: rx.send"},
+				{Kind: checker.Error, Message: "Undefined: Receiver<Int>.send"},
 			},
 		},
 		{
@@ -3037,7 +3037,7 @@ func TestDirectionalChannels(t *testing.T) {
   let v = tx.recv()
 }`,
 			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Undefined: tx.recv"},
+				{Kind: checker.Error, Message: "Undefined: Sender<Int>.recv"},
 			},
 		},
 		{
