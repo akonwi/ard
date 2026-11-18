@@ -393,3 +393,27 @@ fn main() {
 		t.Fatalf("output = %q, want %q", got, want)
 	}
 }
+
+// Ard rejects `==` on Go interface values (ADR 0085). A type pattern is the
+// supported way to ask whether an interface holds a particular value: it
+// narrows to the concrete type, whose own `==` cannot panic.
+func TestGoTargetMatchTypePatternComparesGoInterfaceValue(t *testing.T) {
+	got := runGoTargetSourceStdout(t, `use go:fmt
+use go:os
+use go:syscall
+
+fn is_resize(sig: os::Signal) Bool {
+  match sig {
+    syscall::Signal(s) => s == syscall::SIGWINCH,
+    _ => false,
+  }
+}
+
+fn main() {
+  fmt::Println(is_resize(syscall::SIGWINCH), is_resize(syscall::SIGHUP), is_resize(os::Interrupt))
+}
+`)
+	if want := "true false false\n"; got != want {
+		t.Fatalf("output = %q, want %q", got, want)
+	}
+}
