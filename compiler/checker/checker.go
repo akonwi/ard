@@ -8843,7 +8843,7 @@ func (c *Checker) checkIfChain(s *parse.IfStatement) Expression {
 			block := c.checkBlockWithExpected(current.Body, nil, expectedType, false)
 			c.expectedExpr = expectedType
 			if referenceType != nil {
-				merged, compatible := commonResultType(referenceType, block.Type())
+				merged, compatible := c.ifResultType(expectedType, referenceType, block.Type())
 				if !compatible {
 					c.addDiagnostic(branchTypeMismatchDiagnostic{
 						Expected:      referenceType,
@@ -8890,7 +8890,7 @@ func (c *Checker) checkIfChain(s *parse.IfStatement) Expression {
 			referenceType = body.Type()
 			referenceSpan = bodyResultLocation(current.Body, current.GetLocation())
 		} else {
-			merged, compatible := commonResultType(referenceType, body.Type())
+			merged, compatible := c.ifResultType(expectedType, referenceType, body.Type())
 			if !compatible {
 				c.addDiagnostic(branchTypeMismatchDiagnostic{
 					Expected:      referenceType,
@@ -8922,6 +8922,20 @@ func (c *Checker) checkIfChain(s *parse.IfStatement) Expression {
 		current = next
 	}
 	return &If{Branches: branches, Else: elseBlock, ResultType: referenceType}
+}
+
+// ifResultType merges the result types of two if branches. Branches that
+// produce different types, such as different members of a union or different
+// implementers of a trait, unify to an expected type both convert to, as match
+// arms do (see mergeMatchResultType).
+func (c *Checker) ifResultType(expected Type, current Type, next Type) (Type, bool) {
+	if merged, ok := commonResultType(current, next); ok {
+		return merged, true
+	}
+	if expected != nil && c.areCompatible(expected, current) && c.areCompatible(expected, next) {
+		return expected, true
+	}
+	return nil, false
 }
 
 func functionDefForCallableType(typ Type) (*FunctionDef, bool) {

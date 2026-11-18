@@ -57,3 +57,81 @@ fn values() [Val] {
 		},
 	})
 }
+
+// if/else branches producing different members of the expected type unify to
+// that type, as match arms do.
+func TestIfBranchesUnifyToExpectedType(t *testing.T) {
+	run(t, []test{
+		{
+			name: "branches return different union members",
+			input: `struct Square { size: Int }
+struct Circle { radius: Int }
+type Shape = Square | Circle
+
+fn pick(square: Bool) Shape {
+  if square {
+    Square{size: 1}
+  } else {
+    Circle{radius: 2}
+  }
+}`,
+		},
+		{
+			name: "else-if chain returns union members",
+			input: `type Val = Int | Str
+
+fn describe(n: Int) Val {
+  if n == 0 {
+    0
+  } else if n == 1 {
+    "one"
+  } else {
+    n
+  }
+}`,
+		},
+		{
+			name: "branches return different trait implementers",
+			input: `trait Named {
+  fn name() Str
+}
+
+struct A {}
+impl Named for A {
+  fn name() Str {
+    "a"
+  }
+}
+
+struct B {}
+impl Named for B {
+  fn name() Str {
+    "b"
+  }
+}
+
+fn pick(a: Bool) Named {
+  if a {
+    A{}
+  } else {
+    B{}
+  }
+}`,
+		},
+		{
+			name: "branch outside the union is still rejected",
+			input: `type Val = Int | Str
+
+fn pick(flag: Bool) Val {
+  if flag {
+    1
+  } else {
+    true
+  }
+}`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "All branches must have the same result type"},
+			},
+		},
+	})
+}

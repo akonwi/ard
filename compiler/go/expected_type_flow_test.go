@@ -45,3 +45,83 @@ fn main() {
 		t.Fatalf("stdout = %q, want %q", got, want)
 	}
 }
+
+// if/else branches returning different members of the declared return type
+// produce values of that type.
+func TestGoTargetIfBranchesUnifyToExpectedType(t *testing.T) {
+	got := runGoTargetSourceStdout(t, `use go:fmt
+
+struct Square { size: Int }
+struct Circle { radius: Int }
+type Shape = Square | Circle
+type Val = Int | Str
+
+trait Named {
+  fn name() Str
+}
+
+struct A {}
+impl Named for A {
+  fn name() Str {
+    "a"
+  }
+}
+
+struct B {}
+impl Named for B {
+  fn name() Str {
+    "b"
+  }
+}
+
+fn pick(square: Bool) Shape {
+  if square {
+    Square{size: 1}
+  } else {
+    Circle{radius: 2}
+  }
+}
+
+fn describe(n: Int) Val {
+  if n == 0 {
+    0
+  } else if n == 1 {
+    "one"
+  } else {
+    n
+  }
+}
+
+fn named(a: Bool) Named {
+  if a {
+    A{}
+  } else {
+    B{}
+  }
+}
+
+fn shape(s: Shape) Str {
+  match s {
+    Square => "square {it.size}",
+    Circle => "circle {it.radius}",
+  }
+}
+
+fn show(value: Val) Str {
+  match value {
+    Int => "int {it}",
+    Str => "str {it}",
+  }
+}
+
+fn main() {
+  fmt::Println(shape(pick(true)), shape(pick(false)))
+  fmt::Println(show(describe(0)), show(describe(1)), show(describe(7)))
+  fmt::Println(named(true).name(), named(false).name())
+}
+`)
+	want := "square 1 circle 2\nint 0 str one int 7\na b\n"
+	if got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+}
