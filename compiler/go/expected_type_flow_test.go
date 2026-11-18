@@ -125,3 +125,53 @@ fn main() {
 		t.Fatalf("stdout = %q, want %q", got, want)
 	}
 }
+
+// A tuple literal argument converts its elements to the parameter's element
+// types.
+func TestGoTargetParameterTypesTupleLiteralArgument(t *testing.T) {
+	got := runGoTargetSourceStdout(t, `use go:fmt
+
+type Val = Int | Str
+
+struct Holder { pair: (Val, Val) }
+
+impl Holder {
+  fn show_with(pair: (Val, Val)) Str {
+    let first, _ = self.pair
+    let _, second = pair
+    "{show(first)} {show(second)}"
+  }
+}
+
+fn show(value: Val) Str {
+  match value {
+    Int => "int {it}",
+    Str => "str {it}",
+  }
+}
+
+fn take(pair: (Val, Val)) Str {
+  let first, second = pair
+  "{show(first)} {show(second)}"
+}
+
+fn maybe_take(pair: (Val, Val)?) Str {
+  match pair {
+    p => take(p),
+    _ => "none",
+  }
+}
+
+fn main() {
+  fmt::Println(take((1, 2)))
+  fmt::Println(take((1, "x")))
+  fmt::Println(maybe_take(("z", 9)))
+  let holder = Holder{pair: (3, 4)}
+  fmt::Println(holder.show_with((5, "y")))
+}
+`)
+	want := "int 1 int 2\nint 1 str x\nstr z int 9\nint 3 str y\n"
+	if got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+}

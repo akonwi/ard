@@ -135,3 +135,59 @@ fn pick(flag: Bool) Val {
 		},
 	})
 }
+
+// A tuple literal argument is typed by its parameter, as list and map
+// literal arguments are.
+func TestParameterTypesTupleLiteralArgument(t *testing.T) {
+	run(t, []test{
+		{
+			name: "function argument",
+			input: `type Shape = Int | Str
+
+fn take(pair: (Shape, Shape)) Int {
+  1
+}
+
+take((1, 2))
+take((1, "x"))`,
+		},
+		{
+			name: "nullable parameter",
+			input: `type Shape = Int | Str
+
+fn take(pair: (Shape, Shape)?) Int {
+  1
+}
+
+take((1, "x"))`,
+		},
+		{
+			name: "method argument",
+			input: `type Shape = Int | Str
+
+struct Holder { pair: (Shape, Shape) }
+
+impl Holder {
+  fn put(pair: (Shape, Shape)) Int {
+    1
+  }
+}
+
+let holder = Holder{pair: (1, 2)}
+holder.put((3, "y"))`,
+		},
+		{
+			name: "element outside the union is still rejected",
+			input: `type Shape = Int | Str
+
+fn take(pair: (Shape, Shape)) Int {
+  1
+}
+
+take((1, true))`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Type mismatch: Expected Shape, got Bool"},
+			},
+		},
+	})
+}

@@ -13499,7 +13499,7 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 			continue
 		}
 
-		// For list and map literals, use checkExprAs to infer type from context.
+		// For list, map, and tuple literals, use checkExprAs to infer type from context.
 		// Anonymous functions also use checkExprAs so parameter types are inferred from
 		// the (possibly bound) paramType.
 		// For nullable parameters, use the inner type since literals can't be Maybe
@@ -13508,6 +13508,9 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 			_, isLiteralOrFunc := resolvedExprs[i].(*parse.ListLiteral)
 			if !isLiteralOrFunc {
 				_, isLiteralOrFunc = resolvedExprs[i].(*parse.MapLiteral)
+			}
+			if !isLiteralOrFunc {
+				_, isLiteralOrFunc = resolvedExprs[i].(*parse.TupleLiteral)
 			}
 			if !isLiteralOrFunc {
 				_, isLiteralOrFunc = resolvedExprs[i].(*parse.AnonymousFunction)
@@ -13525,7 +13528,7 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 		var checkedArg Expression
 		c.withValueExprContext(func() {
 			switch arg := resolvedExprs[i].(type) {
-			case *parse.ListLiteral, *parse.MapLiteral:
+			case *parse.ListLiteral, *parse.MapLiteral, *parse.TupleLiteral:
 				if hasGenericsInType(expectedType) {
 					checkedArg = c.checkExpr(resolvedExprs[i])
 				} else {
