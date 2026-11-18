@@ -77,9 +77,17 @@ required catch-all arm makes the "some other type" case explicit.
 The equality diagnostic carries a hint whenever an operand is a non-empty Go
 interface:
 
-- When the other operand is a concrete Go type that the interface can hold,
-  that a type pattern can name (not a pointer, since ADR 0042 defers pointer
-  patterns), and that Ard can compare, the hint gives the exact match:
+- The hint gives the exact match when the other operand is a concrete Go
+  type that:
+  - the interface can hold;
+  - is not a pointer, since ADR 0042 defers pointer patterns;
+  - Ard can compare;
+  - the module can write as a pattern. Some package the module imports must
+    export a name for the type: the type's own name, or an exported Go
+    alias of it. The hint uses that import's name. With `use go:time as t`,
+    the hint suggests `t::Month(v)`.
+
+  For example:
 
   ```
   error: Values cannot be compared
@@ -96,14 +104,15 @@ interface:
   ```
 
   For `!=` the hint uses `v != other` and a `true` fallback.
-- Otherwise, including interface-to-interface comparisons such as
-  `sig == os::Interrupt`, the hint describes the type pattern in general
-  terms.
+- Otherwise the hint describes the type pattern in general terms. That
+  covers interface-to-interface comparisons such as `sig == os::Interrupt`
+  and unexported types that have no exported alias.
 
-Empty Go interfaces map to `Any` and are outside this rule. `Error` is also
-outside it. Sentinel checks such as `err == io::EOF` compare two `error`
-values, and Go's `errors.Is` is the right tool there, because it also follows
-wrapped errors.
+The rule also leaves out empty Go interfaces. Unnamed ones, and aliases of
+them, map to `Any`. Named empty interfaces keep their Go type, but they
+receive no hint. `Error` is also outside the rule. Sentinel checks such as
+`err == io::EOF` compare two `error` values, and Go's `errors.Is` is the right
+tool there, because it also follows wrapped errors.
 
 ## Consequences
 

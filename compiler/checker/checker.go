@@ -9090,6 +9090,7 @@ func (c *Checker) rejectReferenceRelational(operator string, left, right Express
 func (c *Checker) addInvalidEquality(operator string, left, right Expression, leftLoc, rightLoc parse.Location, legacy string, unsupported bool) {
 	c.addDiagnostic(invalidEqualityDiagnostic{
 		Operator: operator, LeftType: left.Type(), RightType: right.Type(), LeftSpan: c.sourceSpan(leftLoc), RightSpan: c.sourceSpan(rightLoc), LegacyMessage: legacy, Unsupported: unsupported,
+		Hint: c.goInterfaceEqualityHint(operator, left.Type(), right.Type()),
 	}.build())
 }
 
