@@ -5392,7 +5392,10 @@ func (c *Checker) canCheckStatementAsExpectedExpression(stmt parse.Statement, ex
 		switch s := stmt.(type) {
 		case *parse.MatchExpression, *parse.ConditionalMatchExpression, *parse.SelectExpression, *parse.IfStatement,
 			*parse.FunctionCall, *parse.FunctionValueCall, *parse.InstanceMethod, *parse.StaticFunction,
-			*parse.StaticProperty, *parse.StructInstance, *parse.TupleLiteral, *parse.Try, *parse.UnsafeBlock:
+			*parse.StaticProperty, *parse.StructInstance, *parse.TupleLiteral, *parse.Try, *parse.UnsafeBlock,
+			*parse.ListLiteral, *parse.MapLiteral:
+			// A collection literal's elements convert to the declared
+			// element type, as under a `let` annotation.
 			return true
 		case *parse.MutRef:
 			// `mut <container literal>` needs the reference destination's
@@ -8839,7 +8842,7 @@ func (c *Checker) checkIfChain(s *parse.IfStatement) Expression {
 			block := c.checkBlockWithExpected(current.Body, nil, expectedType, false)
 			c.expectedExpr = expectedType
 			if referenceType != nil {
-				merged, compatible := commonResultType(referenceType, block.Type())
+				merged, compatible := c.ifResultType(expectedType, referenceType, block.Type())
 				if !compatible {
 					c.addDiagnostic(branchTypeMismatchDiagnostic{
 						Expected:      referenceType,
@@ -8886,7 +8889,7 @@ func (c *Checker) checkIfChain(s *parse.IfStatement) Expression {
 			referenceType = body.Type()
 			referenceSpan = bodyResultLocation(current.Body, current.GetLocation())
 		} else {
-			merged, compatible := commonResultType(referenceType, body.Type())
+			merged, compatible := c.ifResultType(expectedType, referenceType, body.Type())
 			if !compatible {
 				c.addDiagnostic(branchTypeMismatchDiagnostic{
 					Expected:      referenceType,
@@ -8918,6 +8921,20 @@ func (c *Checker) checkIfChain(s *parse.IfStatement) Expression {
 		current = next
 	}
 	return &If{Branches: branches, Else: elseBlock, ResultType: referenceType}
+}
+
+// ifResultType merges the result types of two if branches. Branches that
+// produce different types, such as different members of a union or different
+// implementers of a trait, unify to an expected type both convert to, as match
+// arms do (see mergeMatchResultType).
+func (c *Checker) ifResultType(expected Type, current Type, next Type) (Type, bool) {
+	if merged, ok := commonResultType(current, next); ok {
+		return merged, true
+	}
+	if expected != nil && c.areCompatible(expected, current) && c.areCompatible(expected, next) {
+		return expected, true
+	}
+	return nil, false
 }
 
 func functionDefForCallableType(typ Type) (*FunctionDef, bool) {
@@ -13480,7 +13497,7 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 			continue
 		}
 
-		// For list and map literals, use checkExprAs to infer type from context.
+		// For list, map, and tuple literals, use checkExprAs to infer type from context.
 		// Anonymous functions also use checkExprAs so parameter types are inferred from
 		// the (possibly bound) paramType.
 		// For nullable parameters, use the inner type since literals can't be Maybe
@@ -13489,6 +13506,9 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 			_, isLiteralOrFunc := resolvedExprs[i].(*parse.ListLiteral)
 			if !isLiteralOrFunc {
 				_, isLiteralOrFunc = resolvedExprs[i].(*parse.MapLiteral)
+			}
+			if !isLiteralOrFunc {
+				_, isLiteralOrFunc = resolvedExprs[i].(*parse.TupleLiteral)
 			}
 			if !isLiteralOrFunc {
 				_, isLiteralOrFunc = resolvedExprs[i].(*parse.AnonymousFunction)
@@ -13506,7 +13526,7 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 		var checkedArg Expression
 		c.withValueExprContext(func() {
 			switch arg := resolvedExprs[i].(type) {
-			case *parse.ListLiteral, *parse.MapLiteral:
+			case *parse.ListLiteral, *parse.MapLiteral, *parse.TupleLiteral:
 				if hasGenericsInType(expectedType) {
 					checkedArg = c.checkExpr(resolvedExprs[i])
 				} else {
