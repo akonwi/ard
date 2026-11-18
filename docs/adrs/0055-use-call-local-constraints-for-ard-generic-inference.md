@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Accepted. Extended by ADR 0084, which instantiates generic function references used as values from an expected function type.
 
 ## Context
 
@@ -328,6 +328,7 @@ The complete compiler suite must pass. Downstream validation must include `decod
 - `docs/adrs/0010-support-dollar-prefixed-generics.md`
 - `docs/adrs/0052-adopt-structured-labeled-diagnostics.md`
 - `docs/adrs/0054-represent-generic-structs-as-nominal-applications.md`
+- `docs/adrs/0084-instantiate-generic-function-references-from-expected-types.md`
 - `compiler/checker/checker.go`
 - `compiler/checker/scope.go`
 - `compiler/checker/functions_test.go`

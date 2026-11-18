@@ -62,3 +62,4 @@ Conflicting bindings for the same generic parameter must be rejected.
 - `docs/adrs/0002-use-air-as-backend-boundary.md`
 - `docs/adrs/0009-support-traits-for-shared-behavior.md`
 - `docs/adrs/0055-use-call-local-constraints-for-ard-generic-inference.md`
+- `docs/adrs/0084-instantiate-generic-function-references-from-expected-types.md`
