@@ -45,7 +45,7 @@ Each piece of evidence constrains the variables; none overwrites an earlier bind
 
 Two special cases:
 
-- **Variables of an enclosing call are skipped, not linked.** In `m.map(same)` the expected type is `fn(Int) $U`, where `$U` belongs to `map`. `$T = Int` comes from the parameter. The reference never binds `$U`; the enclosing call binds `$U` from the reference's resulting concrete return type, as with any other argument. This keeps call ownership as ADR 0055 defines it.
+- **Variables of an enclosing call are skipped, not linked.** In `m.map(same)` the expected type is `fn(Int) $U`, where `$U` belongs to `map`. `$T = Int` comes from the parameter. The reference never binds `$U`; the enclosing call binds `$U` from the reference's specialized return type, as with any other argument. This keeps call ownership as ADR 0055 defines it.
 - **A `Void` expected return is not evidence.** `fn(Int) Void` accepts `same` through the existing result-discarding conversion (ADR 0055, "Compatibility and coercion"), so the function's own return type is not constrained by it.
 
 Generics of an enclosing declaration are rigid, concrete evidence. Inside `fn through(x: $U) $U`, `let f: fn($U) $U = same` binds `$T = $U`.
@@ -62,11 +62,11 @@ The last case follows ADR 0055's left-to-right rule. With `fn apply(f: fn($A) $A
 
 Conflicting evidence is a type mismatch, not an unresolved generic:
 
-- `let f: fn(Int) Str = same` reports `Expected fn(Int) Str, got fn(Int) Int`. The parameter fixed `$T = Int` first, and the return then conflicts.
-- A different parameter count, or different parameter mutability or variadic metadata, is reported against the generic signature: `Expected fn(Int, Int) Int, got fn($T) $T`.
+- `let f: fn(Int) Str = same` is a mismatch between the annotation's `fn(Int) Str` and the specialization `fn(Int) Int`. The parameter fixed `$T = Int` first, and the return then conflicts.
+- A different parameter count, or different parameter mutability or variadic metadata, is a mismatch against the generic signature: `let f: fn(Int, Int) Int = same` reports `fn(Int, Int) Int` against `fn($T) $T`.
 - A conflict that leaves a variable open is also reported as a mismatch, not as unresolved.
 
-In argument position the mismatch is reported as an incorrect argument type for that parameter. With an annotation or other expected value, it uses the structured type-mismatch labels from ADR 0052.
+In argument position the mismatch is reported as an incorrect argument type for that parameter. With an annotation or other expected value, it is a type-mismatch diagnostic with the structured labels from ADR 0052: the expected type on the annotation and the reference's type on the expression.
 
 A completed specialization goes through the same checks as a call's:
 
@@ -82,7 +82,7 @@ A reference is instantiated wherever the checker already checks an expression ag
 - the final expression of a block with an expected value, including function bodies, `if`/`else` branches, and `match` arms;
 - struct fields, including nullable fields, generic struct fields, and field assignment;
 - list, map, and tuple elements;
-- `Maybe::new`.
+- the argument of `Maybe::new` when the expected type is a `Maybe` of a function type, as in `let m: (fn(Int) Int)? = Maybe::new(same)`. A bare `Maybe::new(same)` has no function type to instantiate from.
 
 The expectation is attached to the reference node itself and does not reach nested expressions.
 
@@ -119,7 +119,7 @@ Binding is by name only. A static function whose generics are not named like the
 
 ### The resulting value
 
-Once every variable is fixed, the reference's type is a concrete function type. It declares no generics of its own but keeps its generic bindings. A binding such as `let w = IntCell::wrap` therefore keeps `fn(Int) Cell<Int>`, and calling `w(2)` infers nothing again.
+Once every variable is fixed, the reference's type is a function type with the referenced function's own generics substituted. It declares no generics of its own but keeps its generic bindings. A binding such as `let w = IntCell::wrap` therefore keeps `fn(Int) Cell<Int>`, and calling `w(2)` infers nothing again. Inside a generic declaration it may still mention that declaration's generics, as `fn($U) $U` does in `through` above; those belong to the enclosing declaration, not to the reference.
 
 The checker completes the specialization; AIR does not infer. AIR lowers a specialized reference as an `ExprFunctionRef` to the single generic definition. Its type arguments follow the declaration's generic parameter order, and the Go target emits an explicit instantiation such as `Same[int]`. A non-generic reference lowers as before.
 
@@ -132,8 +132,8 @@ The checker completes the specialization; AIR does not infer. AIR lowers a speci
 
 If it is added later, these are the intended rules:
 
-- **Parsing.** The parser accepts call type arguments only when `<` directly follows the name with no space (plus a few lookahead exclusions, such as `<<`), and when the closing `>` is directly followed by `(`; otherwise it rewinds and reads `<` as less-than. Static paths such as `Maybe::new<Int>(...)` use the same rule. A reference form would also accept a closing `>` followed by a token that cannot continue an expression: a newline, `)`, `,`, `]`, `}`, or end of input. No valid program reads differently, because a comparison chain cannot end in `>` before those tokens. A dedicated AST node is preferable to type arguments on `Identifier`, so consumers that do not handle it fail visibly rather than dropping the arguments.
-- **Semantics.** Explicit arguments supply all of the function's own generics in declaration order and are bound first, as on a call (ADR 0055, "Explicit and receiver-derived bindings"). Alias bindings and the expected type then add constraints; conflicts are mismatches.
+- **Parsing.** The parser accepts call type arguments only when `<` directly follows the name with no space (plus a few lookahead exclusions, such as `<<`), and when the token after the closing `>` is `(` (spaces are allowed there, a newline is not); otherwise it rewinds and reads `<` as less-than. Static paths such as `Maybe::new<Int>(...)` use the same rule. A reference form would also accept a closing `>` followed by a token that cannot continue an expression: a newline, `)`, `,`, `]`, `}`, or end of input. No valid program reads differently, because a comparison chain cannot end in `>` before those tokens. A dedicated AST node is preferable to type arguments on `Identifier`, so consumers that do not handle it fail visibly rather than dropping the arguments.
+- **Semantics.** Explicit arguments supply all of the function's own generics in declaration order. They are bound in the same order as on a call (ADR 0055, "Explicit and receiver-derived bindings"): after any alias-owner bindings, which act like receiver bindings, and before the expected type. An explicit argument that disagrees with an alias binding is rejected as already bound, as `IntCell::wrap<Str>("s")` is today. A conflict with the expected type is a mismatch.
 
 ## Non-goals
 
@@ -150,7 +150,7 @@ This decision does not:
 - References follow the same left-to-right limits as anonymous functions: `apply(same, 4)` and `apply(fn(n) { n }, 4)` are both unresolved.
 - Static functions are values through every owner path, and their generic forms follow the same rule.
 - An alias of an applied generic is a usable shorthand for both calls and values. Because binding is by name, it depends on a static function reusing its owner's generic parameter names.
-- Fixing every type parameter makes the value's type concrete, so it behaves like a non-generic function value after binding.
+- Fixing every type parameter leaves the value with no generics of its own, so it behaves like a non-generic function value after binding.
 - Positions that do not check against an expected type, such as `let f = same`, still need an annotation.
 
 ## Related
