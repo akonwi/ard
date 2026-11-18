@@ -292,6 +292,10 @@ An interface containing `*W` uses pointer equality. Two independently boxed
 copies of the same `W` normally compare unequal because they have distinct
 addresses.
 
+Ard does not expose this operator on Go interface values: `==` and `!=` on
+an interface-typed operand are rejected, and a match type pattern tests the
+dynamic type and value instead (ADR 0085, ADR 0042).
+
 Primary reference:
 
 - [Go specification: Comparison operators](https://go.dev/ref/spec#Comparison_operators)

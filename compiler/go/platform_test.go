@@ -40,7 +40,10 @@ fn is_resize(signal: os::Signal) Bool {
 
 #platform(unix)
 fn is_resize(signal: os::Signal) Bool {
-  signal.String() == syscall::SIGWINCH.String()
+  match signal {
+    syscall::Signal(s) => s == syscall::SIGWINCH,
+    _ => false,
+  }
 }
 `
 

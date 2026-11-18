@@ -2011,7 +2011,8 @@ func (d invalidEqualityDiagnostic) build() Diagnostic {
 		primary.Message = fmt.Sprintf("values of type `%s` do not support equality", d.RightType)
 		secondary.Message = fmt.Sprintf("left operand has the same non-comparable type `%s`", d.LeftType)
 	}
-	diagnostic := newLabeledDiagnostic(Error, d.LegacyMessage, "Values cannot be compared", "", primary, secondary)
+	text := goInterfaceEqualityHint(d.Operator, d.LeftType, d.RightType)
+	diagnostic := newLabeledDiagnostic(Error, d.LegacyMessage, "Values cannot be compared", text, primary, secondary)
 	diagnostic.Code = DiagnosticCodeInvalidEqualityOperation
 	return diagnostic
 }
