@@ -5392,7 +5392,10 @@ func (c *Checker) canCheckStatementAsExpectedExpression(stmt parse.Statement, ex
 		switch s := stmt.(type) {
 		case *parse.MatchExpression, *parse.ConditionalMatchExpression, *parse.SelectExpression, *parse.IfStatement,
 			*parse.FunctionCall, *parse.FunctionValueCall, *parse.InstanceMethod, *parse.StaticFunction,
-			*parse.StaticProperty, *parse.StructInstance, *parse.TupleLiteral, *parse.Try, *parse.UnsafeBlock:
+			*parse.StaticProperty, *parse.StructInstance, *parse.TupleLiteral, *parse.Try, *parse.UnsafeBlock,
+			*parse.ListLiteral, *parse.MapLiteral:
+			// A collection literal's elements convert to the declared
+			// element type, as under a `let` annotation.
 			return true
 		case *parse.MutRef:
 			// `mut <container literal>` needs the reference destination's
