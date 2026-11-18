@@ -8120,6 +8120,23 @@ func setMaybeConstructorElementType(expr Expression, elem Type) {
 	}
 }
 
+// builtinOrResultType is the result of Maybe.or or Result.or. A fallback
+// provides the evidence for a receiver whose value type is still open, as in
+// Maybe::new().or(1). A resolved receiver value type is the result even when
+// the fallback is a narrower compatible value: an Event? with a Shutdown{}
+// fallback yields an Event.
+func (c *Checker) builtinOrResultType(valueType Type, fallbackType Type) Type {
+	valueType = derefType(valueType)
+	fallbackType = derefType(fallbackType)
+	if firstUnresolvedCallTypeVar(valueType) != nil || firstUnresolvedCallTypeVar(fallbackType) != nil || validationEqualTypes(valueType, fallbackType) {
+		return fallbackType
+	}
+	if c.areCompatible(valueType, fallbackType) {
+		return valueType
+	}
+	return fallbackType
+}
+
 func (c *Checker) createMaybeMethod(subject Expression, methodName string, args []Expression, fnDef *FunctionDef, loc parse.Location) Expression {
 	var kind MaybeMethodKind
 	switch methodName {
@@ -8161,7 +8178,7 @@ func (c *Checker) createMaybeMethod(subject Expression, methodName string, args 
 	if maybeType, ok := subject.Type().(*Maybe); ok {
 		fallback := Type(Void)
 		if kind == MaybeOr && len(args) == 1 {
-			orType = derefType(args[0].Type())
+			orType = c.builtinOrResultType(maybeType.Of(), args[0].Type())
 			fallback = orType
 		}
 		bindDirectUnresolvedCallTypeVar(maybeType.Of(), fallback)
@@ -8667,6 +8684,9 @@ func (c *Checker) createResultMethod(subject Expression, methodName string, args
 	var orType Type
 	if kind == ResultOr && len(args) == 1 {
 		orType = derefType(args[0].Type())
+		if resultType, ok := subject.Type().(*Result); ok {
+			orType = c.builtinOrResultType(resultType.Val(), args[0].Type())
+		}
 		setResultConstructorValueType(subject, orType)
 	}
 	resultType, hasResult := subject.Type().(*Result)
@@ -12983,20 +13003,49 @@ func (c *Checker) checkMaybeNewStatic(s *parse.StaticFunction, mod Module, expec
 		c.addUnknownNamedArgument(arg.Name, arg.GetLocation(), "unknown argument: "+arg.Name)
 		return nil
 	}
-	var value Expression
-	if contextualInner {
-		switch arg.Value.(type) {
-		case *parse.ListLiteral, *parse.MapLiteral, *parse.AnonymousFunction:
-			value = c.checkExprAs(arg.Value, typeVar)
-		default:
-			if c.isGenericFunctionReference(arg.Value) {
-				value = c.checkExprAs(arg.Value, typeVar)
-			} else {
-				value = c.checkExpr(arg.Value)
+	checkValue := func() Expression {
+		if contextualInner {
+			switch arg.Value.(type) {
+			case *parse.ListLiteral, *parse.MapLiteral, *parse.AnonymousFunction:
+				return c.checkExprAs(arg.Value, typeVar)
+			default:
+				if c.isGenericFunctionReference(arg.Value) {
+					return c.checkExprAs(arg.Value, typeVar)
+				}
 			}
 		}
-	} else {
-		value = c.checkExpr(arg.Value)
+		return c.checkExpr(arg.Value)
+	}
+	diagnosticCount := len(c.diagnostics)
+	spansMark := c.spansMark()
+	value := checkValue()
+	needsMaybeContext := value == nil
+	if value != nil {
+		_, valueIsMaybe := value.Type().(*Maybe)
+		needsMaybeContext = valueIsMaybe && !c.areCompatible(maybeType, value.Type())
+	}
+	if contextualInner && needsMaybeContext {
+		// A nested Maybe-producing expression observes the explicit or expected
+		// inner type, either to widen it, as in
+		// Maybe::new<Event>(Maybe::new(Shutdown{})), or to resolve it, as in
+		// Maybe::new<Event>(empty()) for `fn empty() $T?`. The contextual
+		// check replaces the first attempt's diagnostics and spans; when the
+		// context does not apply, the original check is restored so its
+		// diagnostics are reported.
+		c.diagnostics = c.diagnostics[:diagnosticCount]
+		c.spansTruncate(spansMark)
+		retried := c.checkExprAs(arg.Value, maybeType)
+		retriedMaybe := false
+		if retried != nil {
+			_, retriedMaybe = retried.Type().(*Maybe)
+		}
+		if retriedMaybe && c.areCompatible(maybeType, retried.Type()) {
+			value = retried
+		} else {
+			c.diagnostics = c.diagnostics[:diagnosticCount]
+			c.spansTruncate(spansMark)
+			value = checkValue()
+		}
 	}
 	if value == nil {
 		return nil
@@ -13043,6 +13092,11 @@ func (c *Checker) checkMaybeNewStatic(s *parse.StaticFunction, mod Module, expec
 	valueType := value.Type()
 	if IsNever(valueType) {
 		valueType = Void
+	} else if contextualInner && firstUnresolvedCallTypeVar(typeVar) == nil && !validationEqualTypes(typeVar, valueType) && c.areCompatible(typeVar, valueType) {
+		// The explicit or expected inner type fixes the result: a union
+		// member wrapped as Maybe::new<Event>(Shutdown{}) is an Event?, not a
+		// Shutdown?. Lowering converts the value to the inner type.
+		valueType = typeVar
 	}
 	maybeType = MakeMaybe(valueType)
 	call := &FunctionCall{
@@ -13634,6 +13688,8 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 									return nil, nil
 								}
 							}
+						} else if c.concreteArgumentCompatible(maybeParam.Of(), argType, genericScope) {
+							// Already-determined inner type: a compatibility obligation.
 						} else if err := c.unifyTypes(maybeParam.Of(), argType, genericScope); err != nil {
 							c.addUnificationArgumentMismatch(err, paramType, argType, resolvedExprs[i].GetLocation(), fnDefCopy.Parameters[i], genericScope, fnDefCopy.Parameters[i].Type)
 							return nil, nil
@@ -13689,7 +13745,7 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 				checkedArg = coerceDiscardingFunction(paramType, checkedArg)
 				discardCoerced = true
 			}
-			if !discardCoerced {
+			if !discardCoerced && !c.concreteArgumentCompatible(paramType, checkedArg.Type(), genericScope) {
 				if err := c.unifyTypes(paramType, checkedArg.Type(), genericScope); err != nil {
 					c.addUnificationArgumentMismatch(err, paramType, checkedArg.Type(), resolvedExprs[i].GetLocation(), fnDefCopy.Parameters[i], genericScope, fnDefCopy.Parameters[i].Type)
 					return nil, nil
@@ -13958,6 +14014,21 @@ func (c *Checker) addUnificationArgumentMismatch(err error, expected, actual Typ
 		}
 	}
 	c.addIncorrectArgumentType(err.Error(), expected, actual, location, parameter, false, related...)
+}
+
+// concreteArgumentCompatible reports whether an argument satisfies a generic
+// call's parameter whose type is already fully determined by explicit type
+// arguments, the receiver, earlier arguments, or its declaration. Such a
+// parameter carries a compatibility obligation rather than a unification
+// constraint (ADR 0055), so it accepts the same arguments as a non-generic
+// parameter of that type: Maybe::new<Event>(Shutdown{}), id<Event>(Shutdown{}).
+// Nothing is left to bind, so accepting here never skips inference evidence;
+// an incompatible argument still goes through unification for its diagnostic.
+func (c *Checker) concreteArgumentCompatible(paramType Type, argType Type, genericScope *SymbolTable) bool {
+	if hasUnresolvedGenericsFrom(paramType, genericScope.genericContext) || firstUnresolvedCallTypeVar(paramType) != nil || firstUnresolvedCallTypeVar(argType) != nil {
+		return false
+	}
+	return c.areCompatible(paramType, argType)
 }
 
 func (c *Checker) unifyTypes(expected Type, actual Type, genericScope *SymbolTable) error {

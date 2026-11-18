@@ -2305,8 +2305,12 @@ func signatureForCallWithInterner(call *checker.FunctionCall, intern func(checke
 		}
 		params := make([]Param, len(def.Parameters))
 		for i, param := range def.Parameters {
+			// A parameter left open by an enclosing declaration's generics takes
+			// its argument's type. A resolved parameter keeps its own type so the
+			// argument is converted to it, e.g. a union member wrapped as the
+			// union a generic callee declares or was specialized to.
 			paramType := param.Type
-			if i < len(call.Args) {
+			if i < len(call.Args) && typeHasUnresolvedTypeVar(paramType) {
 				paramType = call.Args[i].Type()
 			}
 			typeID, err := intern(paramType)
@@ -4889,12 +4893,22 @@ func (fl *functionLowerer) lowerOptionMatch(typeID TypeID, match *checker.Option
 	return &Expr{Kind: ExprMatchMaybe, Type: typeID, Target: subject, Payload: &MaybeMatchExprPayload{SomeLocal: someLocal, Some: someBlock, None: noneBlock}}, nil
 }
 
+// lowerBuiltinOrArgs lowers a Maybe.or or Result.or fallback against the
+// method's result type, so a union member fallback converts to the union the
+// receiver holds. Other builtin methods lower their arguments as written.
+func (fl *functionLowerer) lowerBuiltinOrArgs(isOr bool, args []checker.Expression, resultType TypeID) ([]Expr, error) {
+	if isOr && len(args) == 1 {
+		return fl.lowerArgsWithTypeIDs(args, []TypeID{resultType})
+	}
+	return fl.lowerArgs(args)
+}
+
 func (fl *functionLowerer) lowerMaybeMethod(typeID TypeID, method *checker.MaybeMethod) (*Expr, error) {
 	target, err := fl.lowerExpr(method.Subject)
 	if err != nil {
 		return nil, err
 	}
-	args, err := fl.lowerArgs(method.Args)
+	args, err := fl.lowerBuiltinOrArgs(method.Kind == checker.MaybeOr, method.Args, typeID)
 	if err != nil {
 		return nil, err
 	}
@@ -5121,7 +5135,7 @@ func (fl *functionLowerer) lowerResultMethod(typeID TypeID, method *checker.Resu
 	if err != nil {
 		return nil, err
 	}
-	args, err := fl.lowerArgs(method.Args)
+	args, err := fl.lowerBuiltinOrArgs(method.Kind == checker.ResultOr, method.Args, typeID)
 	if err != nil {
 		return nil, err
 	}
@@ -5871,8 +5885,19 @@ func (fl *functionLowerer) lowerUserDefinedInstanceMethod(typeID TypeID, target 
 		args := make([]Expr, 0, len(method.Method.Args)+1)
 		args = append(args, *target)
 		concreteParams := make([]Param, len(method.Method.Args))
+		var specialized *checker.FunctionDef
+		if method.Method != nil {
+			specialized = method.Method.Signature()
+		}
 		for i, arg := range method.Method.Args {
-			tid, err := fl.internType(arg.Type())
+			// Lower against the receiver-specialized parameter type when it is
+			// resolved, so a union member converts to a Holder<Event> method's
+			// Event parameter.
+			argType := arg.Type()
+			if specialized != nil && i < len(specialized.Parameters) && !typeHasUnresolvedTypeVar(specialized.Parameters[i].Type) {
+				argType = specialized.Parameters[i].Type
+			}
+			tid, err := fl.internType(argType)
 			if err != nil {
 				return nil, err
 			}
