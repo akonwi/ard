@@ -141,7 +141,7 @@ jobs:
         working-directory: compiler
         run: |
           go build \
-            -ldflags="-X github.com/akonwi/ard/version.Version=${VERSION}" \
+            -ldflags="-X github.com/akonwi/ard/compiler/version.Version=${VERSION}" \
             -o ard \
             .
 

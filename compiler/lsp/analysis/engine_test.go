@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/akonwi/ard/parse"
+	"github.com/akonwi/ard/compiler/parse"
 )
 
 func writeProject(t *testing.T, files map[string]string) string {

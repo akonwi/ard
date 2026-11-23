@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/akonwi/ard/manifest"
-	"github.com/akonwi/ard/parse"
+	"github.com/akonwi/ard/compiler/manifest"
+	"github.com/akonwi/ard/compiler/parse"
 )
 
 func TestResolveBuildValues(t *testing.T) {

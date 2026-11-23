@@ -3,7 +3,7 @@ package air
 import (
 	"testing"
 
-	"github.com/akonwi/ard/checker"
+	"github.com/akonwi/ard/compiler/checker"
 )
 
 func TestLowerForeignResultShapeUsesExplicitAIRValues(t *testing.T) {

@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/akonwi/ard/air"
-	"github.com/akonwi/ard/frontend"
+	"github.com/akonwi/ard/compiler/air"
+	"github.com/akonwi/ard/compiler/frontend"
 )
 
 // Go values that implement Go's `error` flow into builtin Error as native Go

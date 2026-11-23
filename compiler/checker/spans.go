@@ -4,7 +4,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/akonwi/ard/parse"
+	"github.com/akonwi/ard/compiler/parse"
 )
 
 // SpanIndex is a position-indexed table of resolved source spans, recorded

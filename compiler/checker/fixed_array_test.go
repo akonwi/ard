@@ -3,7 +3,7 @@ package checker_test
 import (
 	"testing"
 
-	checker "github.com/akonwi/ard/checker"
+	checker "github.com/akonwi/ard/compiler/checker"
 )
 
 func TestFixedArrayTypes(t *testing.T) {

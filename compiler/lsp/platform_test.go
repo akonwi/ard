@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/akonwi/ard/platform"
+	"github.com/akonwi/ard/compiler/platform"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
 )

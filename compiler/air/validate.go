@@ -7,7 +7,7 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/akonwi/ard/checker"
+	"github.com/akonwi/ard/compiler/checker"
 )
 
 func airTypeIsBuiltinError(program *Program, id TypeID) bool {

@@ -26,9 +26,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/akonwi/ard/checker"
-	"github.com/akonwi/ard/parse"
-	"github.com/akonwi/ard/platform"
+	"github.com/akonwi/ard/compiler/checker"
+	"github.com/akonwi/ard/compiler/parse"
+	"github.com/akonwi/ard/compiler/platform"
 )
 
 // Engine holds project-wide shared analysis state. It is safe for concurrent

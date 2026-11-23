@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/akonwi/ard/air"
-	"github.com/akonwi/ard/frontend"
+	"github.com/akonwi/ard/compiler/air"
+	"github.com/akonwi/ard/compiler/frontend"
 )
 
 // ADR 0073 runtime behavior for explicit pointer syntax.

@@ -3,8 +3,8 @@ package diagnostics
 import (
 	"io"
 
-	"github.com/akonwi/ard/checker"
-	"github.com/akonwi/ard/parse"
+	"github.com/akonwi/ard/compiler/checker"
+	"github.com/akonwi/ard/compiler/parse"
 )
 
 func ParseErrors(filePath string, parseErrors []parse.ParseError) []checker.Diagnostic {

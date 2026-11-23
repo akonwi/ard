@@ -6,7 +6,7 @@ import (
 	"go/token"
 	"strconv"
 
-	"github.com/akonwi/ard/air"
+	"github.com/akonwi/ard/compiler/air"
 )
 
 // matchLowering lowers one ExprMatch (ADR 0083). Each subject is evaluated

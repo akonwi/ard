@@ -1,6 +1,6 @@
 package checker
 
-import "github.com/akonwi/ard/parse"
+import "github.com/akonwi/ard/compiler/parse"
 
 // topLevelDeclarationName is the name a top-level declaration binds and the
 // location of that name.

@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/akonwi/ard/checker"
+	"github.com/akonwi/ard/compiler/checker"
 )
 
 // structuralTypeKey is the semantic identity of an anonymous AIR type.

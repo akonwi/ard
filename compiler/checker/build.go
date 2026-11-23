@@ -2,11 +2,11 @@ package checker
 
 import (
 	"fmt"
-	"github.com/akonwi/ard/platform"
+	"github.com/akonwi/ard/compiler/platform"
 	"sort"
 	"strconv"
 
-	"github.com/akonwi/ard/manifest"
+	"github.com/akonwi/ard/compiler/manifest"
 )
 
 const BuildModulePath = "ard/build"

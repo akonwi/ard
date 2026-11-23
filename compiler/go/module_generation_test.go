@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/akonwi/ard/air"
-	"github.com/akonwi/ard/checker"
+	"github.com/akonwi/ard/compiler/air"
+	"github.com/akonwi/ard/compiler/checker"
 	"golang.org/x/mod/modfile"
 )
 
@@ -76,7 +76,7 @@ func TestGeneratedGoModPreservesDefaultToolchainDirective(t *testing.T) {
 
 func TestGeneratedGoModDoesNotDuplicateExistingArdDependency(t *testing.T) {
 	root := t.TempDir()
-	goMod := "module example.com/app\n\ngo 1.21\n\nrequire github.com/akonwi/ard v0.0.0\n\nreplace github.com/akonwi/ard => /tmp/ard\n"
+	goMod := "module example.com/app\n\ngo 1.21\n\nrequire github.com/akonwi/ard/compiler v0.0.0\n\nreplace github.com/akonwi/ard/compiler => /tmp/ard/compiler\n"
 	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte(goMod), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -85,11 +85,11 @@ func TestGeneratedGoModDoesNotDuplicateExistingArdDependency(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generatedGoMod: %v", err)
 	}
-	if count := strings.Count(generated, "require github.com/akonwi/ard"); count != 1 {
-		t.Fatalf("github.com/akonwi/ard require count = %d in:\n%s", count, generated)
+	if count := strings.Count(generated, "require github.com/akonwi/ard/compiler"); count != 1 {
+		t.Fatalf("github.com/akonwi/ard/compiler require count = %d in:\n%s", count, generated)
 	}
-	if count := strings.Count(generated, "replace github.com/akonwi/ard"); count != 1 {
-		t.Fatalf("github.com/akonwi/ard replace count = %d in:\n%s", count, generated)
+	if count := strings.Count(generated, "replace github.com/akonwi/ard/compiler"); count != 1 {
+		t.Fatalf("github.com/akonwi/ard/compiler replace count = %d in:\n%s", count, generated)
 	}
 }
 

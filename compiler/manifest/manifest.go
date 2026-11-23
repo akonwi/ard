@@ -7,7 +7,7 @@ import (
 	"regexp"
 	"sort"
 
-	"github.com/akonwi/ard/parse"
+	"github.com/akonwi/ard/compiler/parse"
 	"github.com/pelletier/go-toml/v2"
 	"golang.org/x/mod/module"
 )

@@ -3,7 +3,7 @@ package checker_test
 import (
 	"testing"
 
-	"github.com/akonwi/ard/checker"
+	"github.com/akonwi/ard/compiler/checker"
 )
 
 func TestForeignGenericArgumentsParticipateInInstantiationCycles(t *testing.T) {

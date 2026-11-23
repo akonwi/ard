@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/akonwi/ard/air"
-	"github.com/akonwi/ard/checker"
+	"github.com/akonwi/ard/compiler/air"
+	"github.com/akonwi/ard/compiler/checker"
 )
 
 // requireRaceDetector skips t when the host Go toolchain cannot build with

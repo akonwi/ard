@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	checker "github.com/akonwi/ard/checker"
+	checker "github.com/akonwi/ard/compiler/checker"
 )
 
 // An undefined variable must not stop the checker from reporting later

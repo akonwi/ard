@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/akonwi/ard/air"
+	"github.com/akonwi/ard/compiler/air"
 )
 
 func renderOperandSequence(t *testing.T, stmts []ast.Stmt, ops []operand) string {

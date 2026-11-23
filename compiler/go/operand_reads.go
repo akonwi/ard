@@ -5,7 +5,7 @@ import (
 	"go/token"
 	"strings"
 
-	"github.com/akonwi/ard/air"
+	"github.com/akonwi/ard/compiler/air"
 )
 
 // Go orders only the calls, method calls, and channel receives in an

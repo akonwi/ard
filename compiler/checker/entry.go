@@ -3,7 +3,7 @@ package checker
 import (
 	"path/filepath"
 
-	"github.com/akonwi/ard/parse"
+	"github.com/akonwi/ard/compiler/parse"
 )
 
 // EntryResult is the outcome of CheckEntry.

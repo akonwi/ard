@@ -1,4 +1,4 @@
-module github.com/akonwi/ard
+module github.com/akonwi/ard/compiler
 
 go 1.27.0
 

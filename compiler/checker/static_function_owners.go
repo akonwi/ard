@@ -1,7 +1,7 @@
 package checker
 
 import (
-	"github.com/akonwi/ard/parse"
+	"github.com/akonwi/ard/compiler/parse"
 )
 
 // Static functions resolved through their owner type (issue #607).

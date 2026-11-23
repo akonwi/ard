@@ -1,6 +1,6 @@
 package checker
 
-import "github.com/akonwi/ard/platform"
+import "github.com/akonwi/ard/compiler/platform"
 
 type TargetInfo struct {
 	IntBits     int

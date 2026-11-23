@@ -3,7 +3,7 @@ package gotarget
 import (
 	"testing"
 
-	"github.com/akonwi/ard/air"
+	"github.com/akonwi/ard/compiler/air"
 )
 
 func TestNamePlanMatchesExistingNamesAndImportCollisions(t *testing.T) {

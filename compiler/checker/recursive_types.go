@@ -4,7 +4,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/akonwi/ard/parse"
+	"github.com/akonwi/ard/compiler/parse"
 )
 
 const recursiveLayoutDiagnostic = "Put the recursive reference behind mut, list, map, nullable, trait, or function indirection."

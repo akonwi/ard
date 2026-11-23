@@ -3,7 +3,7 @@ package checker
 import (
 	"testing"
 
-	"github.com/akonwi/ard/parse"
+	"github.com/akonwi/ard/compiler/parse"
 )
 
 func checkNestedNamedFunctionSource(t *testing.T, source string) *Checker {

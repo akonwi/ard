@@ -3,9 +3,9 @@ package analysis
 import (
 	"context"
 
-	"github.com/akonwi/ard/checker"
-	"github.com/akonwi/ard/parse"
-	"github.com/akonwi/ard/platform"
+	"github.com/akonwi/ard/compiler/checker"
+	"github.com/akonwi/ard/compiler/parse"
+	"github.com/akonwi/ard/compiler/platform"
 )
 
 // PlatformView is a file analyzed for a platform other than the engine's

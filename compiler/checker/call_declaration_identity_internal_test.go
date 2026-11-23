@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/akonwi/ard/parse"
+	"github.com/akonwi/ard/compiler/parse"
 )
 
 func TestRepeatedVariadicCallSignatureDoesNotCopyDeclarationBody(t *testing.T) {

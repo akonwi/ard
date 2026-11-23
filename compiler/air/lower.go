@@ -10,7 +10,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/akonwi/ard/checker"
+	"github.com/akonwi/ard/compiler/checker"
 )
 
 type LowerOptions struct {

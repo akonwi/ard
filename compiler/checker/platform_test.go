@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	checker "github.com/akonwi/ard/checker"
-	"github.com/akonwi/ard/parse"
-	"github.com/akonwi/ard/platform"
+	checker "github.com/akonwi/ard/compiler/checker"
+	"github.com/akonwi/ard/compiler/parse"
+	"github.com/akonwi/ard/compiler/platform"
 )
 
 var (

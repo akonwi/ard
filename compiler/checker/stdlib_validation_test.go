@@ -4,8 +4,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/akonwi/ard/parse"
-	std_lib "github.com/akonwi/ard/std_lib"
+	"github.com/akonwi/ard/compiler/parse"
+	std_lib "github.com/akonwi/ard/compiler/std_lib"
 )
 
 func TestFindEmbeddedModuleCachesConcurrentLoads(t *testing.T) {

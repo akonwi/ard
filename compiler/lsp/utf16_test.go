@@ -3,7 +3,7 @@ package lsp
 import (
 	"testing"
 
-	"github.com/akonwi/ard/parse"
+	"github.com/akonwi/ard/compiler/parse"
 )
 
 func TestDiagnosticLocationToRangeUsesOneCharacterFallbackForUnavailableLocation(t *testing.T) {

@@ -7,8 +7,8 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/akonwi/ard/checker"
-	"github.com/akonwi/ard/parse"
+	"github.com/akonwi/ard/compiler/checker"
+	"github.com/akonwi/ard/compiler/parse"
 )
 
 // Module.Types is part of the AIR contract external consumers read: it lists

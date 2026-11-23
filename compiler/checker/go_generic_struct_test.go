@@ -7,8 +7,8 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 
-	checker "github.com/akonwi/ard/checker"
-	"github.com/akonwi/ard/parse"
+	checker "github.com/akonwi/ard/compiler/checker"
+	"github.com/akonwi/ard/compiler/parse"
 )
 
 func TestGoGenericStructLiterals(t *testing.T) {

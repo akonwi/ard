@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/akonwi/ard/platform"
+	"github.com/akonwi/ard/compiler/platform"
 )
 
 func writeProject(t *testing.T, files map[string]string) string {

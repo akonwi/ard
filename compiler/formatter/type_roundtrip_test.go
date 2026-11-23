@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/akonwi/ard/parse"
+	"github.com/akonwi/ard/compiler/parse"
 )
 
 // typeShape renders a declared type with every grouping explicit, so two

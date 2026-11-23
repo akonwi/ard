@@ -3,7 +3,7 @@ package lsp
 import (
 	"strings"
 
-	"github.com/akonwi/ard/parse"
+	"github.com/akonwi/ard/compiler/parse"
 	"go.lsp.dev/protocol"
 )
 

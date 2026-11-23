@@ -12,8 +12,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/akonwi/ard/air"
-	"github.com/akonwi/ard/checker"
+	"github.com/akonwi/ard/compiler/air"
+	"github.com/akonwi/ard/compiler/checker"
 )
 
 type loweredExpr struct {

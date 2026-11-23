@@ -6,7 +6,7 @@ import (
 	"go/token"
 	"strconv"
 
-	"github.com/akonwi/ard/air"
+	"github.com/akonwi/ard/compiler/air"
 )
 
 // numericTarget describes a conversion endpoint: an integer with a width and

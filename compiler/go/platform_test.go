@@ -8,10 +8,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/akonwi/ard/air"
-	"github.com/akonwi/ard/checker"
-	"github.com/akonwi/ard/frontend"
-	"github.com/akonwi/ard/platform"
+	"github.com/akonwi/ard/compiler/air"
+	"github.com/akonwi/ard/compiler/checker"
+	"github.com/akonwi/ard/compiler/frontend"
+	"github.com/akonwi/ard/compiler/platform"
 )
 
 // signalWatchModule is the platform-specific part of Cooper's signal
