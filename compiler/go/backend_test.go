@@ -846,7 +846,11 @@ func TestLowerProgramPassesMutTraitArgsByPointer(t *testing.T) {
 		t.Fatal("generated AST dereferences mutable trait dispatch arg")
 	}
 }
-func TestLowerProgramDereferencesMutParamForNonMutMethodCall(t *testing.T) {
+
+// A struct with a `fn mut` method uses pointer receivers for all of its
+// methods, so a non-mut call through `&mut Box` passes the pointer instead of
+// copying the struct (issue #622).
+func TestLowerProgramPassesMutParamPointerToNonMutMethod(t *testing.T) {
 	program := lowerSource(t, `
 		struct Box {
 			value: Int,
@@ -869,23 +873,53 @@ func TestLowerProgramDereferencesMutParamForNonMutMethodCall(t *testing.T) {
 	`)
 
 	files := lowerProgramAST(t, program, Options{PackageName: "main"})
-	if !astFilesContain(files, func(node ast.Node) bool {
-		call, ok := node.(*ast.CallExpr)
-		if !ok || len(call.Args) != 0 {
-			return false
+	for _, method := range []string{"Bump", "Peek"} {
+		if !astFilesContain(files, func(node ast.Node) bool {
+			call, ok := node.(*ast.CallExpr)
+			if !ok || len(call.Args) != 0 {
+				return false
+			}
+			selector, ok := call.Fun.(*ast.SelectorExpr)
+			if !ok || selector.Sel == nil || selector.Sel.Name != method {
+				return false
+			}
+			ident, ok := selector.X.(*ast.Ident)
+			return ok && ident.Name == "b"
+		}) {
+			t.Fatalf("generated AST missing pointer call b.%s()", method)
 		}
-		selector, ok := call.Fun.(*ast.SelectorExpr)
-		if !ok || selector.Sel == nil || selector.Sel.Name != "Bump" {
-			return false
+		if receiver := goMethodReceiverTypeName(files, "Box", method); receiver != "*Box" {
+			t.Fatalf("%s receiver = %q, want *Box", method, receiver)
 		}
-		ident, ok := selector.X.(*ast.Ident)
-		return ok && ident.Name == "b"
-	}) {
-		t.Fatal("generated AST missing mut method pointer call")
+	}
+}
+
+// A struct without `fn mut` methods keeps value receivers; a call through
+// `&mut Box` reads the value.
+func TestLowerProgramKeepsValueReceiversWithoutMutMethods(t *testing.T) {
+	program := lowerSource(t, `
+		struct Box {
+			value: Int,
+		}
+
+		impl Box {
+			fn peek() Int {
+				self.value
+			}
+		}
+
+		fn process(b: &mut Box) Int {
+			b.peek()
+		}
+	`)
+
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if receiver := goMethodReceiverTypeName(files, "Box", "Peek"); receiver != "Box" {
+		t.Fatalf("Peek receiver = %q, want Box", receiver)
 	}
 	if !astFilesContain(files, func(node ast.Node) bool {
 		call, ok := node.(*ast.CallExpr)
-		if !ok || len(call.Args) != 0 {
+		if !ok {
 			return false
 		}
 		selector, ok := call.Fun.(*ast.SelectorExpr)
@@ -899,8 +933,36 @@ func TestLowerProgramDereferencesMutParamForNonMutMethodCall(t *testing.T) {
 		ident, identOK := star.X.(*ast.Ident)
 		return identOK && ident.Name == "b"
 	}) {
-		t.Fatal("generated AST missing deref for non-mut method call on mut param")
+		t.Fatal("generated AST missing deref for value-receiver method call on mut param")
 	}
+}
+
+// goMethodReceiverTypeName renders the receiver type of the Go method named
+// method on typeName, such as "Box" or "*Box", or "" when it is missing.
+func goMethodReceiverTypeName(files map[string]*ast.File, typeName, method string) string {
+	for _, file := range files {
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Recv == nil || len(fn.Recv.List) != 1 || fn.Name.Name != method {
+				continue
+			}
+			receiver := fn.Recv.List[0].Type
+			prefix := ""
+			if star, ok := receiver.(*ast.StarExpr); ok {
+				prefix, receiver = "*", star.X
+			}
+			if index, ok := receiver.(*ast.IndexExpr); ok {
+				receiver = index.X
+			}
+			if index, ok := receiver.(*ast.IndexListExpr); ok {
+				receiver = index.X
+			}
+			if ident, ok := receiver.(*ast.Ident); ok && ident.Name == typeName {
+				return prefix + ident.Name
+			}
+		}
+	}
+	return ""
 }
 func TestGenerateSourcesRendersSimpleProgram(t *testing.T) {
 	program := lowerSource(t, `

@@ -12,6 +12,10 @@ Trait declarations now include receiver-mutability contracts. References use
 pointer identity for equality, map keys, and `comparable` constraints. Exact
 direct-Go ABI forms remain unchanged.
 
+Amended by ADR 0086: a struct with at least one `fn mut` method uses pointer
+receivers for all of its methods, except methods implementing an imported Go
+interface.
+
 ## Context
 
 The Go/native backend is the reference target for Ard (see `0002-use-air-as-backend-boundary.md`). It has grown incrementally, and its lowering rules now live mostly in code and accumulated test expectations rather than in a stated contract. This makes the backend hard to evolve and makes it unclear which behaviors are intentional Ard semantics, which are Go-specific conveniences, and which are historical accidents that should be removed.
@@ -307,6 +311,10 @@ The receiver shape is determined by whether the method mutates `self`:
 - a non-mutating method lowers to a value receiver, `func (u User) Method()`
 - a mutating method lowers to a pointer receiver, `func (u *User) Method()`
 
+ADR 0086 amends this rule: when a struct has any mutating method, all of its
+methods use pointer receivers, except methods implementing an imported Go
+interface, so non-mutating calls through `&mut T` do not copy the struct.
+
 Pointer receivers are how the backend expresses Ard mutation through methods. This replaces the previous mutable-trait forwarding-table representation: a trait whose implementation mutates `self` is satisfied by the pointer type, and call sites pass an addressable value. The addressability requirements this places on trait satisfaction are covered in the Traits section.
 
 #### Mutable parameters
@@ -363,7 +371,8 @@ that omits `mut`; a non-mutating implementation may satisfy a mutating contract
 because it requires less capability. An implementation that mutates `self`
 lowers to a pointer-receiver method, so that implementer satisfies the Go
 interface as `*T`. A non-mutating implementation lowers to a value receiver and
-satisfies the same interface as `T` and `*T`. When a pointer implementation is
+satisfies the same interface as `T` and `*T`, unless its type has mutating
+methods and so uses pointer receivers throughout (ADR 0086). When a pointer implementation is
 used as a trait object, it is held as a pointer, and the checker guarantees that
 the upcast source is addressable. Receiver mutability remains a source-level
 contract and does not alter the canonical Go interface method signature.

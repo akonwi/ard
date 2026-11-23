@@ -271,3 +271,86 @@ func TestUnattributedRace(t *testing.T) {
 		})
 	}
 }
+
+// sharedBoxProgram calls non-mut methods through a shared &mut pointer on one
+// goroutine while a fn mut method writes a field under a mutex on another
+// (issue #622). label() and labeled() never read `closed`, and stats() reads
+// `count` only under the lock, so the program has no data race unless a
+// non-mut method call copies the whole receiver.
+const sharedBoxProgram = `use ard/async
+use go:fmt
+use go:sync
+
+struct Box {
+  name: Str,
+  lock: &mut sync::Mutex,
+  closed: Bool,
+  count: Int,
+}
+
+impl Box {
+  fn label() Str {
+    self.name
+  }
+
+  fn labeled(suffix: Str) Str {
+    self.name + suffix
+  }
+
+  fn stats() Int {
+    self.lock.Lock()
+    let n = self.count
+    self.lock.Unlock()
+    n
+  }
+
+  fn mut close() {
+    self.lock.Lock()
+    self.closed = true
+    self.count = self.count + 1
+    self.lock.Unlock()
+  }
+}
+
+fn suffix() Str {
+  "!"
+}
+
+fn main() {
+  let b = &mut Box{name: "b", lock: &mut sync::Mutex{}, closed: false, count: 0}
+  let done = Chan::new<Bool>(1)
+  async::start(fn() {
+    for _ in 1..1000 {
+      let _ = b.label()
+      // A call in the arguments must not make the receiver a copy either.
+      let _ = b.labeled(suffix())
+      let _ = b.stats()
+    }
+    done.send(true)
+  })
+  b.close()
+  let _ = done.recv()
+  fmt::Println(b.label(), b.stats())
+}
+`
+
+func TestNonMutMethodThroughPointerDoesNotRace(t *testing.T) {
+	requireRaceDetector(t)
+	projectDir := t.TempDir()
+	files := map[string]string{
+		"ard.toml": "name = \"recvrace\"\nard = \">= 0.27.0\"\n",
+		"main.ard": sharedBoxProgram,
+	}
+	for name, source := range files {
+		if err := os.WriteFile(filepath.Join(projectDir, name), []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stdout, stderr, err := runCLIForTest(t, "run", "--race", filepath.Join(projectDir, "main.ard"))
+	if code := cliExitCode(t, err); code != 0 || strings.Contains(stderr, raceReportHeader) {
+		t.Fatalf("run --race exit = %d, want 0 with no race report\nstderr:\n%s", code, stderr)
+	}
+	if got := strings.TrimSpace(strings.TrimSuffix(stdout, "PASS\n")); got != "b 1" {
+		t.Fatalf("stdout = %q, want %q", got, "b 1")
+	}
+}

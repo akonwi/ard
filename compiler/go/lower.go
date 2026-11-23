@@ -51,6 +51,9 @@ type lowerer struct {
 	generatedModulePath string
 	inlineClosures      map[air.FunctionID]bool
 	goMethodCollisions  map[string]bool
+	// promotedReceivers holds the non-mut methods emitted with a pointer
+	// receiver because their struct has a `fn mut` method (ADR 0086).
+	promotedReceivers map[air.FunctionID]bool
 	// memberGoNamesByType caches, per struct or union type, the Go field
 	// names its members occupy, so method-name collision checks do not
 	// recompute every member's identifier per method.
@@ -106,6 +109,7 @@ func lowerProgram(program *air.Program, options Options) (map[string]*ast.File, 
 	l.inlineClosures = l.collectInlineClosureFunctions()
 	l.functionComparable = l.collectFunctionComparableTypeParams()
 	l.goMethodCollisions = l.collectGoMethodCollisions()
+	l.promotedReceivers = l.collectPromotedReceivers()
 	l.functionModules = l.collectFunctionEmitModules()
 	l.namePlan = newNamePlan(l)
 	l.topLevelReserved = l.namePlan.localReserved
@@ -1609,6 +1613,74 @@ func (l *lowerer) goMethodReceiverProvidesConstraints(fn air.Function, receiverT
 	return true
 }
 
+// receiverBaseType returns the struct type a method's receiver names, using
+// the generic definition for an instantiated generic struct.
+func (l *lowerer) receiverBaseType(fn air.Function) air.TypeID {
+	receiverTypeID := fn.Receiver
+	if receiverTypeID == air.NoType && len(fn.Signature.Params) > 0 {
+		receiverTypeID = fn.Signature.Params[0].Type
+		if l.isReferenceType(receiverTypeID) {
+			receiverTypeID = l.program.Types[receiverTypeID-1].Elem
+		}
+	}
+	if !validTypeID(l.program, receiverTypeID) {
+		return air.NoType
+	}
+	if generic := l.program.Types[receiverTypeID-1].Generic; generic != air.NoType && validTypeID(l.program, generic) {
+		return generic
+	}
+	return receiverTypeID
+}
+
+// collectPromotedReceivers finds the non-mut methods that get a pointer
+// receiver (ADR 0086). A struct with at least one mutating (`fn mut`) method
+// uses pointer receivers for all of its Go methods, following Go's rule that a
+// type's methods should not mix receiver kinds. A non-mut call through a
+// shared `&mut T` then passes the pointer instead of copying the whole struct,
+// which would read every field and race with writes to fields the method
+// never touches (issue #622).
+//
+// A method implementing an imported Go interface keeps its value receiver, so
+// a value of the type still satisfies that interface wherever Go checks it
+// dynamically, such as fmt finding String() on a value passed as `any`.
+// A method emitted as a standalone function keeps its declared parameter.
+func (l *lowerer) collectPromotedReceivers() map[air.FunctionID]bool {
+	pointerTypes := map[air.TypeID]bool{}
+	for _, fn := range l.program.Functions {
+		if fn.Kind != air.FunctionMethod || len(fn.Signature.Params) == 0 || !l.isReferenceType(fn.Signature.Params[0].Type) {
+			continue
+		}
+		base := l.receiverBaseType(fn)
+		if base != air.NoType && l.program.Types[base-1].Kind == air.TypeStruct {
+			pointerTypes[base] = true
+		}
+	}
+	promoted := map[air.FunctionID]bool{}
+	if len(pointerTypes) == 0 {
+		return promoted
+	}
+	for _, fn := range l.program.Functions {
+		if fn.Kind != air.FunctionMethod || fn.RequiredGoMethodName != "" || len(fn.Signature.Params) == 0 || l.isReferenceType(fn.Signature.Params[0].Type) {
+			continue
+		}
+		if !pointerTypes[l.receiverBaseType(fn)] {
+			continue
+		}
+		if _, direct := l.directGoMethodName(fn); direct {
+			promoted[fn.ID] = true
+		}
+	}
+	return promoted
+}
+
+// hasPromotedPointerReceiver reports whether fn is a non-mut method emitted
+// as a Go method with a pointer receiver even though its Ard receiver is a
+// value (see collectPromotedReceivers). Its body reads `self` through the
+// pointer, and value uses of `self` dereference it.
+func (l *lowerer) hasPromotedPointerReceiver(fn air.Function) bool {
+	return fn.Kind == air.FunctionMethod && l.promotedReceivers[fn.ID]
+}
+
 func (l *lowerer) goMethodReceiverType(fn air.Function, typeArgs []air.TypeID) (ast.Expr, error) {
 	if len(fn.Signature.Params) == 0 {
 		return nil, fmt.Errorf("method %s has no receiver parameter", fn.Name)
@@ -1632,7 +1704,7 @@ func (l *lowerer) goMethodReceiverType(fn air.Function, typeArgs []air.TypeID) (
 	if err != nil {
 		return nil, err
 	}
-	if l.isReferenceType(fn.Signature.Params[0].Type) {
+	if l.isReferenceType(fn.Signature.Params[0].Type) || l.hasPromotedPointerReceiver(fn) {
 		receiverType = &ast.StarExpr{X: receiverType}
 	}
 	return receiverType, nil
@@ -1640,8 +1712,13 @@ func (l *lowerer) goMethodReceiverType(fn air.Function, typeArgs []air.TypeID) (
 
 func (l *lowerer) functionCallExpr(fn air.Function, args []ast.Expr, typeArgs []air.TypeID) *ast.CallExpr {
 	if methodName, ok := l.directGoMethodName(fn); ok && len(args) > 0 {
+		receiver := args[0]
+		if star, ok := receiver.(*ast.StarExpr); ok && l.hasPromotedPointerReceiver(fn) {
+			// `p.M()` passes the pointer that `(*p).M()` would address.
+			receiver = star.X
+		}
 		return &ast.CallExpr{
-			Fun:  &ast.SelectorExpr{X: args[0], Sel: l.ident(methodName)},
+			Fun:  &ast.SelectorExpr{X: receiver, Sel: l.ident(methodName)},
 			Args: args[1:],
 		}
 	}
@@ -1660,6 +1737,11 @@ func (l *lowerer) functionReferenceExpr(fn air.Function, typeArgs []air.TypeID) 
 			value = l.indexWithTypeArgs(value, typeArgs)
 		}
 		return value, nil
+	}
+	if l.hasPromotedPointerReceiver(fn) {
+		// The method expression would have type func(*T), not the func(T)
+		// the reference's Ard type describes.
+		return nil, fmt.Errorf("method %s cannot be referenced as a value: its Go method has a pointer receiver", fn.Name)
 	}
 	receiverType, err := l.goMethodReceiverType(fn, typeArgs)
 	if err != nil {
@@ -2081,6 +2163,15 @@ func (l *lowerer) lowerDeclaredCallArgs(fn air.Function, expr air.Expr, target a
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	if len(ops) > 0 && ops[0].source != nil && l.hasPromotedPointerReceiver(target) && goAddressable(ops[0].expr) {
+		// The method reads its receiver through a pointer when it runs, like a
+		// `fn mut` method, so the receiver is ordered as the storage it names
+		// rather than read into a copy before later arguments (ADR 0078).
+		ops[0].place = true
+		if receiver := &expr.Args[0]; receiver.Kind == air.ExprDeref && receiver.Target != nil {
+			ops[0].source = receiver.Target
+		}
+	}
 	stmts, err := l.sequenceOperandsInOrder(ops, expr.ArgOrder())
 	if err != nil {
 		return nil, nil, nil, err
@@ -2117,7 +2208,14 @@ func (l *lowerer) lowerGetField(fn air.Function, expr air.Expr) (loweredExpr, ai
 		return loweredExpr{}, air.NoType, fmt.Errorf("invalid field index %d", payload.Field)
 	}
 	field := targetType.Fields[payload.Field]
-	fieldExpr := &ast.SelectorExpr{X: target.expr, Sel: l.ident(l.goFieldName(targetType, field.Name))}
+	base := target.expr
+	if star, ok := base.(*ast.StarExpr); ok && expr.Target.Kind == air.ExprLoadLocal {
+		if local := expr.Target.LocalPayload(); local != nil && l.isPromotedReceiverLocal(fn, local.Local) {
+			// Read the one field through the receiver pointer: `self.f`.
+			base = star.X
+		}
+	}
+	fieldExpr := &ast.SelectorExpr{X: base, Sel: l.ident(l.goFieldName(targetType, field.Name))}
 	return loweredExpr{stmts: target.stmts, expr: fieldExpr}, l.declaredFieldLayout(targetType, field), nil
 }
 
@@ -2134,6 +2232,7 @@ func (l *lowerer) lowerCall(fn air.Function, expr air.Expr) (loweredExpr, air.Ty
 	if err != nil {
 		return loweredExpr{}, air.NoType, err
 	}
+	args, stmts = l.addressablePromotedReceiver(target, args, stmts)
 	call := l.functionCallExpr(target, args, payload.TypeArgs)
 	if declared := target.Signature.Return; expr.Type != declared && l.layoutDiffers(expr.Type, declared) {
 		lowered, err := l.packLayoutCall(stmts, call, writeback, expr.Type, declared)
@@ -2147,6 +2246,41 @@ func (l *lowerer) lowerCall(fn air.Function, expr air.Expr) (loweredExpr, air.Ty
 	return lowered, air.NoType, err
 }
 
+// addressablePromotedReceiver makes the receiver of a call to a value method
+// with a promoted pointer receiver addressable, as Go requires. A receiver that
+// is not a Go variable, field, or dereference (a call result or composite
+// literal, for example) is copied into a temporary first, which matches the
+// copy a value receiver would make.
+func (l *lowerer) addressablePromotedReceiver(target air.Function, args []ast.Expr, stmts []ast.Stmt) ([]ast.Expr, []ast.Stmt) {
+	if len(args) == 0 || !l.hasPromotedPointerReceiver(target) || goAddressable(args[0]) {
+		return args, stmts
+	}
+	temp := l.nextTemp()
+	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{l.ident(temp)}, Tok: token.DEFINE, Rhs: []ast.Expr{args[0]}})
+	args = append([]ast.Expr{l.ident(temp)}, args[1:]...)
+	return args, stmts
+}
+
+// goAddressable reports whether a lowered Go expression is known to be
+// addressable or a pointer dereference, so a pointer-receiver method can be
+// called on it without copying. Anything uncertain reports false.
+func goAddressable(expr ast.Expr) bool {
+	switch e := expr.(type) {
+	case *ast.Ident:
+		return e.Name != "nil" && e.Name != "_"
+	case *ast.StarExpr:
+		return true
+	case *ast.ParenExpr:
+		return goAddressable(e.X)
+	case *ast.SelectorExpr:
+		// A field of an addressable struct, or a field reached through a
+		// pointer, is addressable. A package-qualified variable is too.
+		return goAddressable(e.X)
+	default:
+		return false
+	}
+}
+
 func (l *lowerer) lowerRawCall(fn air.Function, expr air.Expr) (loweredExpr, error) {
 	payload := expr.CallPayload()
 	if expr.Kind != air.ExprCall || payload == nil || !validFunctionID(l.program, payload.Function) {
@@ -2157,6 +2291,7 @@ func (l *lowerer) lowerRawCall(fn air.Function, expr air.Expr) (loweredExpr, err
 	if err != nil {
 		return loweredExpr{}, err
 	}
+	args, stmts = l.addressablePromotedReceiver(target, args, stmts)
 	call := l.functionCallExpr(target, args, payload.TypeArgs)
 	if len(writeback) > 0 {
 		return loweredExpr{}, fmt.Errorf("raw ABI call with writeback args is not supported")
@@ -5664,6 +5799,9 @@ func (l *lowerer) implRequiresPointerReceiver(implID air.ImplID) bool {
 		if len(methodFn.Signature.Params) > 0 && l.isReferenceType(methodFn.Signature.Params[0].Type) {
 			return true
 		}
+		if l.hasPromotedPointerReceiver(methodFn) {
+			return true
+		}
 	}
 	return false
 }
@@ -5729,10 +5867,16 @@ func (l *lowerer) localValueExpr(fn air.Function, local air.LocalID) ast.Expr {
 		// reads the referent (ADR 0057).
 		return name
 	}
-	if l.localIsPointerParam(fn, local) {
+	if l.localIsPointerParam(fn, local) || l.isPromotedReceiverLocal(fn, local) {
 		return &ast.StarExpr{X: name}
 	}
 	return name
+}
+
+// isPromotedReceiverLocal reports whether local is the `self` of a value
+// method emitted with a pointer receiver; its Go name holds a pointer.
+func (l *lowerer) isPromotedReceiverLocal(fn air.Function, local air.LocalID) bool {
+	return local == 0 && l.hasPromotedPointerReceiver(fn)
 }
 
 func (l *lowerer) localAssignExpr(fn air.Function, local air.LocalID) ast.Expr {
