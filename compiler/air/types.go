@@ -1,5 +1,7 @@
 package air
 
+import "fmt"
+
 type ModuleID int
 type TypeID int
 type FunctionID int
@@ -72,10 +74,46 @@ type Global struct {
 	Initializer GlobalInitializer
 }
 
+// FunctionKind records where a function came from in the source. Lowering
+// lifts anonymous and nested functions out of the bodies that contain them,
+// so Program.Functions and Module.Functions hold them alongside the module's
+// declared functions and methods; Kind tells them apart.
+type FunctionKind uint8
+
+const (
+	// FunctionDeclared is a module-level `fn` declaration, including static
+	// functions (`fn Type::name`), test functions, generic definitions, and
+	// their specializations.
+	FunctionDeclared FunctionKind = iota
+	// FunctionMethod is a method with a receiver: an impl or trait method,
+	// or one the compiler synthesizes for a builtin trait impl.
+	FunctionMethod
+	// FunctionClosure is an anonymous function expression (`fn(x: Int) {}`).
+	FunctionClosure
+	// FunctionNested is a named function declared inside a block.
+	FunctionNested
+)
+
+func (k FunctionKind) String() string {
+	switch k {
+	case FunctionDeclared:
+		return "declared"
+	case FunctionMethod:
+		return "method"
+	case FunctionClosure:
+		return "closure"
+	case FunctionNested:
+		return "nested"
+	default:
+		return fmt.Sprintf("FunctionKind(%d)", uint8(k))
+	}
+}
+
 type Function struct {
 	ID        FunctionID
 	Module    ModuleID
 	Name      string
+	Kind      FunctionKind
 	Signature Signature
 	Locals    []Local
 	Captures  []Capture
