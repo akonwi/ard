@@ -21,7 +21,7 @@ func (c *Checker) checkGenericInstantiationCycles() {
 	declarations := map[*StructDef]*parse.StructDefinition{}
 	for _, statement := range c.input.Statements {
 		decl, ok := statement.(*parse.StructDefinition)
-		if !ok {
+		if !ok || c.isConflictingTopLevelDeclaration(decl) {
 			continue
 		}
 		def, ok := c.hoistedStruct(decl.Name.Name)

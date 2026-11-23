@@ -654,3 +654,18 @@ func TestIncompleteFunctionCallDoesNotHang(t *testing.T) {
 		t.Fatal("expected parse error for incomplete function call")
 	}
 }
+
+func TestFunctionDeclarationNameLocation(t *testing.T) {
+	result := Parse([]byte("private fn mut f() {}\nfn P::new() {}\n"), "test.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	fn := result.Program.Statements[0].(*FunctionDeclaration)
+	if want := (Location{Start: Point{Row: 1, Col: 16}, End: Point{Row: 1, Col: 16}}); fn.NameLocation != want {
+		t.Fatalf("function name location = %v, want %v", fn.NameLocation, want)
+	}
+	static := result.Program.Statements[1].(*StaticFunctionDeclaration)
+	if want := (Location{Start: Point{Row: 2, Col: 4}, End: Point{Row: 2, Col: 9}}); static.NameLocation != want {
+		t.Fatalf("static function name location = %v, want %v", static.NameLocation, want)
+	}
+}

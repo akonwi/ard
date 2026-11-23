@@ -1,6 +1,7 @@
 package parse
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"slices"
@@ -29,7 +30,6 @@ func (pr ParseResult) PrintErrors() {
 type parser struct {
 	tokens                 []token
 	index                  int
-	fileName               string
 	errors                 []ParseError
 	disallowStructInstance bool
 	// structOperandAllowed reports whether we are in a value position where a
@@ -50,7 +50,7 @@ type parser struct {
 
 func Parse(source []byte, fileName string) ParseResult {
 	lexer := NewLexer(source)
-	p := new(lexer.Scan(), fileName)
+	p := new(lexer.Scan())
 	p.errors = append(p.errors, lexer.errors...)
 	program, err := p.parse()
 
@@ -60,22 +60,25 @@ func Parse(source []byte, fileName string) ParseResult {
 		Errors:   p.errors,
 	}
 
-	// If there was a panic-based error, add it to errors
-	if err != nil && len(p.errors) == 0 {
-		result.Errors = append(result.Errors, ParseError{
-			Message: err.Error(),
-		})
+	// An error that stopped parsing is reported where it happened (#625),
+	// after any errors parsing recovered from.
+	if err != nil {
+		stopped := ParseError{Message: err.Error()}
+		var failure *parseFailure
+		if errors.As(err, &failure) {
+			stopped = failure.ParseError
+		}
+		result.Errors = append(result.Errors, stopped)
 	}
 
 	return result
 }
 
-func new(tokens []token, fileName string) *parser {
+func new(tokens []token) *parser {
 	return &parser{
-		tokens:   tokens,
-		index:    0,
-		fileName: fileName,
-		errors:   []ParseError{},
+		tokens: tokens,
+		index:  0,
+		errors: []ParseError{},
 	}
 }
 
@@ -1867,13 +1870,14 @@ func (p *parser) traitImpl() (*TraitImplementation, error) {
 		if p.match(new_line) {
 			continue
 		}
+		memberStart := p.peek()
 		stmt, err := p.functionDef(true, false)
 		if err != nil {
 			return nil, err
 		}
 		fn, ok := stmt.(*FunctionDeclaration)
 		if !ok {
-			return nil, p.makeError(p.peek(), "Expected function declaration in trait implementation block")
+			return nil, p.makeError(memberStart, "Expected function declaration in trait implementation block")
 		}
 		traitImpl.Methods = append(traitImpl.Methods, *fn)
 	}
@@ -3235,6 +3239,7 @@ func (p *parser) functionDef(asMethod bool, isTest bool) (Statement, error) {
 	if p.match(fn) {
 		keyword := p.previous()
 		var name any = ""
+		var nameLocation Location
 		mutates := p.check(mut) && !(asMethod && p.check(mut, left_paren))
 		if mutates {
 			p.advance()
@@ -3243,10 +3248,13 @@ func (p *parser) functionDef(asMethod bool, isTest bool) (Statement, error) {
 			// should this signal warning of unnecessary `mut`?
 		}
 
+		pathStart := p.peek()
 		if path := p.parseStaticPath(); path != nil {
 			name = path
+			nameLocation = Location{Start: pathStart.getLocation().Start, End: p.previous().getLocation().End}
 		} else if p.check(identifier) || (asMethod && p.isKeyword(p.peek().kind)) {
 			nameToken := p.advance()
+			nameLocation = nameToken.getLocation()
 			if nameToken.text == "" {
 				name = string(nameToken.kind)
 			} else {
@@ -3417,6 +3425,8 @@ func (p *parser) functionDef(asMethod bool, isTest bool) (Statement, error) {
 				End:   Point{Row: p.previous().line, Col: p.previous().column},
 			},
 		}
+
+		fnDef.NameLocation = nameLocation
 
 		switch name := name.(type) {
 		case string:
@@ -5151,9 +5161,20 @@ func (p *parser) isKeyword(k kind) bool {
 	}
 }
 
+// parseFailure is an error that stops parsing. It keeps the location of the
+// token it was raised at, so Parse reports it there rather than at the start
+// of the file.
+type parseFailure struct {
+	ParseError
+}
+
+func (f *parseFailure) Error() string {
+	return f.Message
+}
+
 /* Error creation helpers */
 func (p *parser) makeError(at *token, msg string) error {
-	return fmt.Errorf("%s:%d:%d: %s", p.fileName, at.line, at.column, msg)
+	return &parseFailure{ParseError{Location: at.getLocation(), Message: msg}}
 }
 
 /* conditionally advance if the current token is one of those provided */
@@ -5323,14 +5344,16 @@ func (p *parser) parseFunctionArguments() ([]Argument, []Comment, error) {
 				Value: value,
 			})
 		} else {
-			// Check if we've already seen named arguments
-			if hasNamedArgs {
-				return nil, nil, fmt.Errorf("positional arguments cannot follow named arguments")
-			}
-
 			arg, err := p.parseExpression()
 			if err != nil {
 				return nil, nil, err
+			}
+			// Keep the argument so parsing continues, but report it (#625).
+			if hasNamedArgs {
+				p.errors = append(p.errors, ParseError{
+					Location: Location{Start: start, End: arg.GetLocation().End},
+					Message:  "positional arguments cannot follow named arguments",
+				})
 			}
 
 			// Add as Argument with empty name (positional)

@@ -7,29 +7,18 @@ import (
 )
 
 func (c *Checker) hoistTopLevelTypeDeclarations() {
-	seen := map[string]parse.Location{}
 	for i := range c.input.Statements {
 		stmt := c.input.Statements[i]
 		name, loc, ok := topLevelTypeDeclarationName(stmt)
-		if !ok {
+		if !ok || c.isConflictingTopLevelDeclaration(stmt) {
 			continue
 		}
-		if original, dup := seen[name]; dup {
-			c.addDiagnostic(duplicateDeclarationDiagnostic{
-				Name:          name,
-				DuplicateSpan: c.sourceSpan(loc),
-				OriginalSpan:  c.sourceSpan(original),
-			}.build())
-			c.markDuplicateTopLevelTypeDeclaration(stmt)
-			continue
-		}
-		seen[name] = loc
 		if isReservedBuiltinTypeName(name) {
 			c.addDiagnostic(builtInTypeRedeclarationDiagnostic{
 				Name: name,
 				Span: c.sourceSpan(loc),
 			}.build())
-			c.markDuplicateTopLevelTypeDeclaration(stmt)
+			c.markConflictingTopLevelDeclaration(stmt)
 			continue
 		}
 
@@ -71,7 +60,7 @@ func (c *Checker) hoistTopLevelFunctionSignatures() {
 	c.hoistedTopLevelFunctions = map[*parse.FunctionDeclaration]*FunctionDef{}
 	for i := range c.input.Statements {
 		def, ok := c.input.Statements[i].(*parse.FunctionDeclaration)
-		if !ok {
+		if !ok || c.isConflictingTopLevelDeclaration(def) {
 			continue
 		}
 		params := c.resolveParametersWithContext(def.Parameters, nil)
@@ -173,7 +162,7 @@ func isTopLevelTypeDeclaration(stmt parse.Statement) bool {
 }
 
 func (c *Checker) checkedTopLevelTypeStatement(stmt parse.Statement) *Statement {
-	if c.isDuplicateTopLevelTypeDeclaration(stmt) {
+	if c.isConflictingTopLevelDeclaration(stmt) {
 		return nil
 	}
 	switch s := stmt.(type) {
@@ -295,17 +284,6 @@ func collectGenericParamsFromDeclaredType(t parse.DeclaredType, params *[]string
 			collectGenericParamsFromDeclaredType(arg, params, seen)
 		}
 	}
-}
-
-func (c *Checker) markDuplicateTopLevelTypeDeclaration(stmt parse.Statement) {
-	if c.duplicateTopLevelTypeDeclarations == nil {
-		c.duplicateTopLevelTypeDeclarations = map[parse.Statement]bool{}
-	}
-	c.duplicateTopLevelTypeDeclarations[stmt] = true
-}
-
-func (c *Checker) isDuplicateTopLevelTypeDeclaration(stmt parse.Statement) bool {
-	return c.duplicateTopLevelTypeDeclarations != nil && c.duplicateTopLevelTypeDeclarations[stmt]
 }
 
 func (c *Checker) isResolvingStructDefinition(def *StructDef) bool {
@@ -603,7 +581,7 @@ func (c *Checker) resolveTopLevelTypeAliasReference(name string, location parse.
 func (c *Checker) validateTopLevelTypeAliases() {
 	for i := range c.input.Statements {
 		decl, ok := c.input.Statements[i].(*parse.TypeDeclaration)
-		if !ok || len(decl.Type) != 1 || c.recursiveTopLevelAliases[decl.Name.Name] {
+		if !ok || len(decl.Type) != 1 || c.recursiveTopLevelAliases[decl.Name.Name] || c.isConflictingTopLevelDeclaration(decl) {
 			continue
 		}
 		custom, ok := decl.Type[0].(*parse.CustomType)

@@ -1,8 +1,15 @@
 package checker
 
-import "github.com/akonwi/ard/parse"
+import (
+	"fmt"
+	"strings"
 
-// testBodyName names the synthetic functions WrapStatementRuns creates.
+	"github.com/akonwi/ard/parse"
+)
+
+// testBodyName prefixes the synthetic functions WrapStatementRuns creates.
+// Each run gets its own numbered name, since a module cannot declare a name
+// twice.
 const testBodyName = "__checker_test_body__"
 
 // WrapStatementRuns moves each run of consecutive executable statements in a
@@ -18,6 +25,7 @@ const testBodyName = "__checker_test_body__"
 func WrapStatementRuns(program *parse.Program) *parse.Program {
 	wrapped := &parse.Program{Imports: program.Imports}
 	var run *parse.FunctionDeclaration
+	runs := 0
 	for _, stmt := range program.Statements {
 		if IsTopLevelDeclaration(stmt) {
 			run = nil
@@ -25,7 +33,9 @@ func WrapStatementRuns(program *parse.Program) *parse.Program {
 			continue
 		}
 		if run == nil {
-			run = &parse.FunctionDeclaration{Name: testBodyName, Location: stmt.GetLocation()}
+			name := fmt.Sprintf("%s%d", testBodyName, runs)
+			runs++
+			run = &parse.FunctionDeclaration{Name: name, Location: stmt.GetLocation()}
 			wrapped.Statements = append(wrapped.Statements, run)
 		}
 		run.Body = append(run.Body, stmt)
@@ -41,7 +51,7 @@ func WrapStatementRuns(program *parse.Program) *parse.Program {
 func UnwrapStatementRuns(statements []Statement) []Statement {
 	unwrapped := make([]Statement, 0, len(statements))
 	for _, stmt := range statements {
-		if fn, ok := stmt.Expr.(*FunctionDef); ok && fn.Name == testBodyName {
+		if fn, ok := stmt.Expr.(*FunctionDef); ok && strings.HasPrefix(fn.Name, testBodyName) {
 			if fn.Body != nil {
 				for _, bodyStmt := range fn.Body.Stmts {
 					if bodyStmt.Expr == nil && bodyStmt.Stmt == nil && !bodyStmt.Break {
