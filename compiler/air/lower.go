@@ -47,6 +47,7 @@ func LowerModulesWithOptions(modules []checker.Module, options LowerOptions) (*P
 	if err := l.lowerAllModuleGlobals(); err != nil {
 		return nil, err
 	}
+	l.recordDeclaredTypesInModules()
 	if err := l.typeInterner.validateComplete(); err != nil {
 		return nil, err
 	}
@@ -372,7 +373,6 @@ func (l *lowerer) lowerModule(module checker.Module) error {
 	defer delete(l.loweringModules, path)
 
 	modID := l.internModule(path)
-	mod := &l.program.Modules[modID]
 	prog := module.Program()
 	if prog == nil {
 		l.loweredModules[path] = true
@@ -382,7 +382,7 @@ func (l *lowerer) lowerModule(module checker.Module) error {
 	for _, imported := range l.sortedImports(prog) {
 		l.moduleByName[imported.Path()] = imported
 		importID := l.internModule(imported.Path())
-		mod.Imports = append(mod.Imports, importID)
+		l.program.Modules[modID].Imports = append(l.program.Modules[modID].Imports, importID)
 	}
 
 	for i := range prog.Statements {
@@ -390,9 +390,13 @@ func (l *lowerer) lowerModule(module checker.Module) error {
 		switch node := stmt.Stmt.(type) {
 		case *checker.StructDef:
 			if len(node.GenericParams) > 0 {
-				if _, err := l.internGenericStructDef(node); err != nil {
+				// internGenericStructDef lists the definition by its ModulePath,
+				// which is empty for a root checked without a module path.
+				typeID, err := l.internGenericStructDef(node)
+				if err != nil {
 					return err
 				}
+				l.program.Modules[modID].Types = appendUniqueType(l.program.Modules[modID].Types, typeID)
 				continue
 			}
 			if l.typeHasUnresolvedTypeVar(node) {
@@ -402,13 +406,13 @@ func (l *lowerer) lowerModule(module checker.Module) error {
 			if err != nil {
 				return err
 			}
-			mod.Types = appendUniqueType(mod.Types, typeID)
+			l.program.Modules[modID].Types = appendUniqueType(l.program.Modules[modID].Types, typeID)
 		case *checker.Enum:
 			typeID, err := l.internType(node)
 			if err != nil {
 				return err
 			}
-			mod.Types = appendUniqueType(mod.Types, typeID)
+			l.program.Modules[modID].Types = appendUniqueType(l.program.Modules[modID].Types, typeID)
 		case *checker.Union:
 			if l.typeHasUnresolvedTypeVar(node) {
 				continue
@@ -417,7 +421,7 @@ func (l *lowerer) lowerModule(module checker.Module) error {
 			if err != nil {
 				return err
 			}
-			mod.Types = appendUniqueType(mod.Types, typeID)
+			l.program.Modules[modID].Types = appendUniqueType(l.program.Modules[modID].Types, typeID)
 		}
 
 		switch node := stmt.Stmt.(type) {
@@ -484,6 +488,38 @@ func (l *lowerer) lowerModule(module checker.Module) error {
 
 	l.loweredModules[path] = true
 	return nil
+}
+
+// recordDeclaredTypesInModules lists every interned nominal declaration in
+// its declaring module's Types. Lowering registers a module's declarations when
+// it lowers or reaches that module, but a declaration can also be interned only
+// through another module (a field or signature type), leaving its own module
+// unreached. Module.Types is the AIR contract for "types this module declares",
+// so complete it here without interning anything new. Generic instantiations
+// are derived types, not declarations, and stay unlisted.
+func (l *lowerer) recordDeclaredTypesInModules() {
+	listed := map[TypeID]bool{}
+	for _, module := range l.program.Modules {
+		for _, id := range module.Types {
+			listed[id] = true
+		}
+	}
+	for i := range l.program.Types {
+		typ := &l.program.Types[i]
+		switch typ.Kind {
+		case TypeStruct, TypeEnum, TypeUnion:
+		default:
+			continue
+		}
+		if typ.Generic != NoType || typ.ModulePath == "" || listed[typ.ID] {
+			continue
+		}
+		modID, ok := l.moduleByPath[typ.ModulePath]
+		if !ok {
+			continue
+		}
+		l.program.Modules[modID].Types = append(l.program.Modules[modID].Types, typ.ID)
+	}
 }
 
 func (l *lowerer) internModule(path string) ModuleID {
@@ -5869,7 +5905,6 @@ func (fl *functionLowerer) lowerUserDefinedInstanceMethod(typeID TypeID, target 
 	}
 	module := fl.l.moduleForInstanceMethod(method, fl.fn.Module)
 	if module >= 0 && int(module) < len(fl.l.program.Modules) {
-		fl.l.program.Modules[module].Types = appendUniqueType(fl.l.program.Modules[module].Types, target.Type)
 		if err := fl.l.ensureModuleGlobalsDeclared(fl.l.program.Modules[module].Path); err != nil {
 			return nil, err
 		}
