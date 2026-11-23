@@ -88,6 +88,7 @@ var compareOptions = cmp.Options{
 	cmpopts.IgnoreFields(checker.Diagnostic{}, "Code", "Title", "Text", "Primary", "Secondary"),
 	cmpopts.IgnoreFields(checker.OptionMatch{}, "ResultType"),
 	cmpopts.IgnoreFields(checker.EnumVariant{}, "EnumType", "Discriminant"),
+	cmpopts.IgnoreFields(checker.Enum{}, "Location", "Methods"),
 	cmpopts.IgnoreFields(checker.ListLiteral{}, "ListType"),
 	cmpopts.IgnoreFields(checker.InstanceMethod{}, "ReceiverKind", "StructType", "EnumType", "TraitType", "DispatchTrait"),
 	cmpopts.IgnoreFields(checker.ModuleStructInstance{}, "StructType"),
@@ -2050,6 +2051,7 @@ func TestEnums(t *testing.T) {
 			}, "\n"),
 			output: &checker.Program{
 				Statements: []checker.Statement{
+					{Stmt: &checker.Enum{Name: "Color", Values: []checker.EnumValue{{Name: "blue", Value: 0}, {Name: "green", Value: 1}, {Name: "purple", Value: 2}}}},
 					{
 						Stmt: &checker.VariableDef{
 							Name:  "choice",
@@ -2150,6 +2152,7 @@ func TestMatchingOnEnums(t *testing.T) {
 			}, "\n"),
 			output: &checker.Program{
 				Statements: []checker.Statement{
+					{Stmt: &checker.Enum{Name: "Direction", Values: []checker.EnumValue{{Name: "up", Value: 0}, {Name: "down", Value: 1}}}},
 					{
 						Stmt: &checker.VariableDef{
 							Name:  "dir",
@@ -2190,6 +2193,7 @@ func TestMatchingOnEnums(t *testing.T) {
 			}, "\n"),
 			output: &checker.Program{
 				Statements: []checker.Statement{
+					{Stmt: &checker.Enum{Name: "Direction", Values: []checker.EnumValue{{Name: "up", Value: 0}, {Name: "down", Value: 1}}}},
 					{
 						Stmt: &checker.VariableDef{
 							Name:  "dir",
@@ -2287,6 +2291,7 @@ func TestMatchingOnEnums(t *testing.T) {
 			}, "\n"),
 			output: &checker.Program{
 				Statements: []checker.Statement{
+					{Stmt: &checker.Enum{Name: "Direction", Values: []checker.EnumValue{{Name: "up", Value: 0}, {Name: "down", Value: 1}, {Name: "left", Value: 2}, {Name: "right", Value: 3}}}},
 					{
 						Stmt: &checker.VariableDef{
 							Name:  "dir",
@@ -2598,6 +2603,7 @@ func TestMatchingOnInts(t *testing.T) {
 			}, "\n"),
 			output: &checker.Program{
 				Statements: []checker.Statement{
+					{Stmt: &checker.Enum{Name: "Status", Values: []checker.EnumValue{{Name: "active", Value: 0}, {Name: "inactive", Value: 1}, {Name: "pending", Value: 2}}}},
 					{
 						Stmt: &checker.VariableDef{
 							Name:  "code",

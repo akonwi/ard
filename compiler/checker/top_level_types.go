@@ -183,6 +183,12 @@ func (c *Checker) checkedTopLevelTypeStatement(stmt parse.Statement) *Statement 
 			return nil
 		}
 		return &Statement{Stmt: def}
+	case *parse.EnumDefinition:
+		enum, ok := c.hoistedEnum(s.Name)
+		if !ok {
+			return nil
+		}
+		return &Statement{Stmt: enum}
 	case *parse.TypeDeclaration:
 		if len(s.Type) <= 1 {
 			return nil
