@@ -742,6 +742,7 @@ func (c *Checker) permitsInteriorMutation(expr Expression) bool {
 // read-only receivers stay ordinary values. The binding slot itself is never
 // writable, so `self` cannot be rebound.
 func receiverBindingType(target Type, mutates bool) Type {
+	target = receiverSelfType(target)
 	if !mutates {
 		return target
 	}
@@ -755,6 +756,22 @@ func receiverBindingType(target Type, mutates bool) Type {
 		return target
 	}
 	return MakeMutableRef(target)
+}
+
+// receiverSelfType returns the type `self` has inside a method declared on a
+// generic struct: the struct applied to its own receiver generics
+// (`Box<$T>`), not the bare canonical declaration. The bare declaration has
+// no type arguments, so it never matches an explicit `Box<$T>` annotation.
+func receiverSelfType(target Type) Type {
+	def, ok := target.(*StructDef)
+	if !ok || def.Definition != nil || len(def.TypeArgs) > 0 || len(def.GenericParams) == 0 {
+		return target
+	}
+	typeArgs := make([]Type, len(def.GenericParams))
+	for i, name := range def.GenericParams {
+		typeArgs[i] = &TypeVar{name: name}
+	}
+	return newStructApplication(def, typeArgs)
 }
 
 // assignmentSubjectBase returns the base expression a property-assignment
@@ -13812,7 +13829,7 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 		}
 	}
 
-	if genericScope != nil && expectedReturn != nil {
+	if genericScope != nil && expectedReturn != nil && !c.concreteReturnCompatible(expectedReturn, fnDefCopy.ReturnType, genericScope) {
 		if err := c.inferBindingsFromExpectedReturn(fnDefCopy.ReturnType, expectedReturn, genericScope); err != nil {
 			c.addExpectedReturnConflict(expectedReturn, derefType(fnDefCopy.ReturnType), callLocation, genericScope, fnDefCopy.ReturnType)
 			return nil, nil
@@ -13994,7 +14011,16 @@ func (c *Checker) addExpectedReturnConflict(expected, actual Type, location pars
 }
 
 func (c *Checker) addUnificationArgumentMismatch(err error, expected, actual Type, location parse.Location, parameter Parameter, genericScope *SymbolTable, parameterPattern Type) {
-	expected, actual = unificationDiagnosticTypes(err, expected, actual)
+	// A structural mismatch is located somewhere inside the parameter type,
+	// but the labels describe the whole argument and the whole parameter, so
+	// they keep the full types (`&mut Plain` vs `&mut Box<$T>`). The mismatched
+	// component still decides which earlier binding to point at.
+	mismatchedExpected, _ := unificationDiagnosticTypes(err, expected, actual)
+	if _, structural := err.(*unificationError); structural {
+		expected = derefType(expected)
+	} else {
+		expected, actual = unificationDiagnosticTypes(err, expected, actual)
+	}
 	var related []DiagnosticLabel
 	if genericScope != nil {
 		if conflict, ok := err.(*genericBindingConflictError); ok {
@@ -14007,8 +14033,8 @@ func (c *Checker) addUnificationArgumentMismatch(err error, expected, actual Typ
 			for _, name := range slices.Sorted(maps.Keys(patternNames)) {
 				origin, hasOrigin := genericScope.genericOrigins[name]
 				typeVar := (*genericScope.genericContext)[name]
-				if hasOrigin && typeVar != nil && typeVar.bound && deref(typeVar.actual).equal(expected) {
-					related = append(related, DiagnosticLabel{Span: origin.Span, Message: fmt.Sprintf("%s establishes `$%s` as `%s`", origin.Kind, name, expected)})
+				if hasOrigin && typeVar != nil && typeVar.bound && deref(typeVar.actual).equal(mismatchedExpected) {
+					related = append(related, DiagnosticLabel{Span: origin.Span, Message: fmt.Sprintf("%s establishes `$%s` as `%s`", origin.Kind, name, mismatchedExpected)})
 					break
 				}
 			}
@@ -14030,6 +14056,22 @@ func (c *Checker) concreteArgumentCompatible(paramType Type, argType Type, gener
 		return false
 	}
 	return c.areCompatible(paramType, argType)
+}
+
+// concreteReturnCompatible reports whether a generic call's return type is
+// already fully determined by the receiver, explicit type arguments, or the
+// arguments, and is compatible with the contextual expected type. The
+// expected return then carries a compatibility obligation rather than a
+// unification constraint (ADR 0055): it has nothing left to bind, so a result
+// such as `[R]` flows into an `Any` or trait destination exactly as the same
+// result of a non-generic call does. An incompatible result still goes
+// through expected-return inference for its conflict diagnostic.
+func (c *Checker) concreteReturnCompatible(expected Type, returnType Type, genericScope *SymbolTable) bool {
+	returnType = derefType(returnType)
+	if hasUnresolvedGenericsFrom(returnType, genericScope.genericContext) || firstUnresolvedCallTypeVar(returnType) != nil {
+		return false
+	}
+	return c.areCompatible(expected, returnType)
 }
 
 func (c *Checker) unifyTypes(expected Type, actual Type, genericScope *SymbolTable) error {
