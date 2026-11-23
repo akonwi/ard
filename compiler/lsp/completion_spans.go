@@ -395,6 +395,20 @@ func staticCompletionTarget(source string, cctx completionContext) string {
 
 // staticSymbolCompletionItem renders one module member.
 func staticSymbolCompletionItem(name string, sym checker.Symbol) protocol.CompletionItem {
+	if sym.IsTypeDeclaration() {
+		kind := protocol.CompletionItemKindClass
+		switch sym.Type.(type) {
+		case *checker.StructDef:
+			kind = protocol.CompletionItemKindStruct
+		case *checker.Enum:
+			kind = protocol.CompletionItemKindEnum
+		case *checker.Trait:
+			kind = protocol.CompletionItemKindInterface
+		}
+		// Other type names, such as unions and aliases of pointers, function
+		// types, or scalars, are types only: never offer them as values or calls.
+		return protocol.CompletionItem{Label: name, Kind: kind, Detail: checkerTypeString(sym.Type)}
+	}
 	if def, ok := sym.Type.(*checker.FunctionDef); ok {
 		return protocol.CompletionItem{
 			Label:  name,

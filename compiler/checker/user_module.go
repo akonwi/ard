@@ -27,12 +27,23 @@ func (m *UserModule) setFilePath(path string) {
 	m.filePath = path
 }
 
-// NewUserModule creates a UserModule from a checked program, extracting only public symbols
-func NewUserModule(filePath string, program *Program, globalScope *SymbolTable) *UserModule {
+// NewUserModule creates a UserModule from a checked program, extracting only
+// public symbols. typeAliases maps each top-level type alias name to whether
+// its declaration is private.
+func NewUserModule(filePath string, program *Program, globalScope *SymbolTable, typeAliases map[string]bool) *UserModule {
 	publicSymbols := make(map[string]Symbol)
 
 	// Extract public symbols from the global scope
 	for name, sym := range globalScope.symbols {
+		// A type alias's scope symbol carries its target type, which can be any
+		// type (`&mut Box<Int>`, `[Str]`, a Go type) and has its own visibility.
+		// The alias declaration alone decides whether the alias is exported.
+		if private, alias := typeAliases[name]; alias && sym.typeDeclaration {
+			if !private {
+				publicSymbols[name] = *sym
+			}
+			continue
+		}
 		switch s := sym.Type.(type) {
 		case *FunctionDef:
 			if !s.Private {
@@ -77,6 +88,16 @@ func NewUserModule(filePath string, program *Program, globalScope *SymbolTable) 
 		publicSymbols: publicSymbols,
 		program:       program,
 	}
+}
+
+// typeAliasVisibility maps each top-level type alias this module declares to
+// whether it is private.
+func (c *Checker) typeAliasVisibility() map[string]bool {
+	aliases := make(map[string]bool, len(c.topLevelTypeAliases))
+	for name, declaration := range c.topLevelTypeAliases {
+		aliases[name] = declaration.Private
+	}
+	return aliases
 }
 
 // Symbols returns the module's public symbols. Read-only.

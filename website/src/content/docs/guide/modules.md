@@ -132,7 +132,7 @@ Nested modules still use their full path, such as `use my_calculator/math/operat
 
 ## Public and Private Declarations
 
-Functions, structs, enums, traits, and immutable top-level variables are public by default. Use `private` to keep a declaration module-local.
+Functions, structs, enums, traits, type aliases and unions, and immutable top-level variables are public by default. Use `private` to keep a declaration module-local.
 
 ```ard
 // utils.ard
@@ -151,7 +151,12 @@ struct Config {
 private struct InternalConfig {
   secret: Str,
 }
+
+type ConfigRef = &mut Config         // public: other modules can name utils::ConfigRef
+private type Scratch = [Config]      // private, even though Config is public
 ```
+
+A type alias can name any type, including pointers, `Maybe` and `Result` types, collections, function types, and Go types. Its own `private` marker decides whether other modules can use it, whatever the type it names.
 
 Mutable top-level variables are private by default because they represent shared mutable module state.
 

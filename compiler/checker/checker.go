@@ -1453,7 +1453,7 @@ func (c *Checker) scanForUnresolvedGenerics() {
 // This should only be called after .Check()
 // The returned module could be problematic if there are diagnostic errors.
 func (c *Checker) Module() Module {
-	return NewUserModule(c.modulePath, c.program, c.scope)
+	return NewUserModule(c.modulePath, c.program, c.scope, c.typeAliasVisibility())
 }
 
 // check is an internal helper for recursive module checking.
