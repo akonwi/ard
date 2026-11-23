@@ -56,6 +56,12 @@ func (s Symbol) IsZero() bool {
 	return s == Symbol{}
 }
 
+// IsTypeDeclaration reports whether the symbol names a type, such as a struct
+// or a type alias, rather than a value.
+func (s Symbol) IsTypeDeclaration() bool {
+	return s.typeDeclaration
+}
+
 func makeScope(parent *SymbolTable) SymbolTable {
 	scope := SymbolTable{
 		parent:  parent,
