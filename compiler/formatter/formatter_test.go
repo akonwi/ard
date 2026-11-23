@@ -279,19 +279,26 @@ func TestFormatStringBraceEscapes(t *testing.T) {
 	}
 }
 
+// A nullable ok type is printed grouped, `(T?)!E`, which keeps the import
+// it names (#621).
 func TestFormatQualifiedMaybeInsideResultType(t *testing.T) {
-	input := "use foo/bar\n\nprivate fn load() bar::Item?!Str {}\n"
-	formatted, err := Format([]byte(input), "test.ard")
-	if err != nil {
-		t.Fatalf("format: %v", err)
-	}
-	if string(formatted) != input {
-		t.Fatalf("formatted = %q, want unchanged %q", string(formatted), input)
+	want := "use foo/bar\n\nprivate fn load() (bar::Item?)!Str {}\n"
+	for _, input := range []string{
+		"use foo/bar\n\nprivate fn load() bar::Item?!Str {}\n",
+		want,
+	} {
+		formatted, err := Format([]byte(input), "test.ard")
+		if err != nil {
+			t.Fatalf("format: %v", err)
+		}
+		if string(formatted) != want {
+			t.Fatalf("formatted = %q, want %q", string(formatted), want)
+		}
 	}
 }
 
 func TestFormatPreservesParenthesesAroundTryPostfixTarget(t *testing.T) {
-	input := "fn lookup() Int?!Str {\n  Result::ok(Maybe::new(1))\n}\n\nfn check() Void!Str {\n  let value = (try lookup()).expect(\"value\")\n  let present = (try lookup()).is_some()\n  Result::ok(())\n}\n"
+	input := "fn lookup() (Int?)!Str {\n  Result::ok(Maybe::new(1))\n}\n\nfn check() Void!Str {\n  let value = (try lookup()).expect(\"value\")\n  let present = (try lookup()).is_some()\n  Result::ok(())\n}\n"
 	formatted, err := Format([]byte(input), "test.ard")
 	if err != nil {
 		t.Fatalf("format: %v", err)
