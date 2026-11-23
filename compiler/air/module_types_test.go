@@ -198,3 +198,42 @@ func TestModuleTypesListsTypesReachedOnlyThroughAnotherModule(t *testing.T) {
 	assertModuleTypeNames(t, program, "spike/shared", "Meta")
 	assertModuleTypesOwnDeclarations(t, program)
 }
+
+const moduleTypesMethodsSource = `
+	struct Box { value: $T }
+
+	impl Box {
+		fn get() $T { self.value }
+	}
+
+	struct Counter { count: Int }
+
+	impl Counter {
+		fn mut bump() { self.count = self.count + 1 }
+	}
+
+	fn bump_twice(counter: &mut Counter) {
+		counter.bump()
+		counter.bump()
+	}
+
+	fn main() {
+		let box = Box{value: 1}
+		let _ = box.get()
+	}
+`
+
+func TestModuleTypesExcludesMethodReceiverReferencesAndInstantiations(t *testing.T) {
+	// Calling methods interns the receiver's mutable reference (&mut Counter)
+	// and the instantiation (Box<Int>); neither is a declaration.
+	program := lowerProjectSource(t, writeModuleTypesProject(t), moduleTypesMethodsSource)
+	assertModuleTypeNames(t, program, "main.ard", "Box", "Counter")
+	assertModuleTypesOwnDeclarations(t, program)
+}
+
+func TestModuleTypesListsGenericDefinitionsOfSingleFileRoot(t *testing.T) {
+	// Without a module path, declarations carry an empty ModulePath; the root
+	// still lists everything it declares, generic definitions included.
+	program := lowerSource(t, moduleTypesMethodsSource)
+	assertModuleTypeNames(t, program, "test.ard", "Box", "Counter")
+}
