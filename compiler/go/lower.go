@@ -8673,7 +8673,7 @@ func (l *lowerer) collectInlineClosureFunctions() map[air.FunctionID]bool {
 }
 
 func (l *lowerer) canInlineClosureFunction(fn air.Function) bool {
-	return strings.HasPrefix(fn.Name, "anon_func_") && !functionDirectlyReferences(fn.Body, fn.ID)
+	return fn.Kind == air.FunctionClosure && !functionDirectlyReferences(fn.Body, fn.ID)
 }
 
 func functionDirectlyReferences(block air.Block, function air.FunctionID) bool {

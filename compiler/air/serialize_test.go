@@ -82,6 +82,18 @@ func TestSerializeProgramPreservesGlobalInitializerLocals(t *testing.T) {
 	if len(decoded.Globals) != 1 || !reflect.DeepEqual(decoded.Globals[0].Initializer, program.Globals[0].Initializer) {
 		t.Fatalf("decoded initializer = %#v, want %#v", decoded.Globals, program.Globals[0].Initializer)
 	}
+	closures := 0
+	for i, fn := range decoded.Functions {
+		if fn.Kind != program.Functions[i].Kind {
+			t.Fatalf("decoded %s kind = %v, want %v", fn.Name, fn.Kind, program.Functions[i].Kind)
+		}
+		if fn.Kind == air.FunctionClosure {
+			closures++
+		}
+	}
+	if closures != 1 {
+		t.Fatalf("decoded %d closure functions, want 1", closures)
+	}
 }
 
 func TestSerializeProgramPreservesEveryExprPayloadType(t *testing.T) {

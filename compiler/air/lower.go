@@ -583,6 +583,7 @@ func (l *lowerer) declareFunction(module ModuleID, def *checker.FunctionDef) (Fu
 		ID:     id,
 		Module: module,
 		Name:   def.Name,
+		Kind:   FunctionDeclared,
 		Signature: Signature{
 			Params: params,
 			Return: returnType,
@@ -637,6 +638,7 @@ func (l *lowerer) declareFunctionSpecializationWithSignatureAndGenericKey(module
 		ID:        id,
 		Module:    module,
 		Name:      def.Name,
+		Kind:      FunctionDeclared,
 		Signature: signature,
 		IsTest:    def.IsTest,
 		Private:   def.Private,
@@ -698,6 +700,7 @@ func (l *lowerer) declareGenericFunctionDef(module ModuleID, declaration *checke
 		ID:             id,
 		Module:         module,
 		Name:           declaration.Name,
+		Kind:           FunctionDeclared,
 		Signature:      signature,
 		TypeParams:     goParams,
 		TypeParamOwner: paramOwner,
@@ -794,13 +797,16 @@ func (l *lowerer) declareClosureFunction(module ModuleID, keyName string, def *c
 	}
 	id := FunctionID(len(l.program.Functions))
 	l.functions[key] = id
+	kind := FunctionClosure
 	if def.LocalNamed {
 		l.localNamedFunctions[def] = id
+		kind = FunctionNested
 	}
 	l.program.Functions = append(l.program.Functions, Function{
 		ID:        id,
 		Module:    module,
 		Name:      def.Name,
+		Kind:      kind,
 		Signature: signature,
 		Private:   def.LocalNamed || def.Private,
 	})
@@ -1877,6 +1883,7 @@ func (l *lowerer) declareBuiltinToStringMethod(module ModuleID, ownerInfo TypeIn
 		ID:         id,
 		Module:     module,
 		Name:       ownerInfo.Name + ".ToString.to_str",
+		Kind:       FunctionMethod,
 		Receiver:   ownerInfo.ID,
 		MethodName: "to_str",
 		Signature: Signature{
@@ -1927,6 +1934,7 @@ func (l *lowerer) declareMethodFunction(module ModuleID, owner checker.Type, tra
 		ID:                   id,
 		Module:               module,
 		Name:                 owner.String() + "." + traitName + "." + def.Name,
+		Kind:                 FunctionMethod,
 		Receiver:             ownerType,
 		MethodName:           def.Name,
 		RequiredGoMethodName: def.RequiredGoMethodName,
@@ -2005,6 +2013,7 @@ func (l *lowerer) declareInstanceMethodFunction(module ModuleID, ownerName strin
 		ID:                   id,
 		Module:               module,
 		Name:                 ownerName + "." + def.Name,
+		Kind:                 FunctionMethod,
 		Receiver:             ownerType,
 		MethodName:           def.Name,
 		RequiredGoMethodName: def.RequiredGoMethodName,
@@ -2062,6 +2071,7 @@ func (fl *functionLowerer) declareInstanceMethodFunction(module ModuleID, ownerN
 		ID:                   id,
 		Module:               module,
 		Name:                 ownerName + "." + def.Name,
+		Kind:                 FunctionMethod,
 		Receiver:             ownerType,
 		MethodName:           def.Name,
 		RequiredGoMethodName: def.RequiredGoMethodName,
@@ -2228,6 +2238,7 @@ func (fl *functionLowerer) declareGenericMethodFunction(module ModuleID, instanc
 		ID:                   id,
 		Module:               module,
 		Name:                 functionName,
+		Kind:                 FunctionMethod,
 		Receiver:             recvType,
 		MethodName:           method.Name,
 		RequiredGoMethodName: method.RequiredGoMethodName,

@@ -703,7 +703,31 @@ func validateGlobal(program *Program, global Global) error {
 	return nil
 }
 
+// validateFunctionKind checks that a function's Kind agrees with the shape
+// lowering gave it: only methods have receivers, and only lifted closures and
+// nested functions capture locals.
+func validateFunctionKind(fn Function) error {
+	switch fn.Kind {
+	case FunctionDeclared, FunctionMethod, FunctionClosure, FunctionNested:
+	default:
+		return fmt.Errorf("function %s has invalid kind %d", fn.Name, fn.Kind)
+	}
+	if fn.Kind == FunctionMethod && fn.Receiver == NoType {
+		return fmt.Errorf("function %s is a method without a receiver", fn.Name)
+	}
+	if fn.Kind != FunctionMethod && fn.Receiver != NoType {
+		return fmt.Errorf("function %s has a receiver but is a %s function, not a method", fn.Name, fn.Kind)
+	}
+	if len(fn.Captures) > 0 && fn.Kind != FunctionClosure && fn.Kind != FunctionNested {
+		return fmt.Errorf("function %s captures locals but is a %s function", fn.Name, fn.Kind)
+	}
+	return nil
+}
+
 func validateFunction(program *Program, fn Function) error {
+	if err := validateFunctionKind(fn); err != nil {
+		return err
+	}
 	if fn.RequiredGoMethodName != "" && (fn.Receiver == NoType || fn.MethodName == "") {
 		return fmt.Errorf("function %s requires Go method %s without method receiver metadata", fn.Name, fn.RequiredGoMethodName)
 	}
@@ -1521,6 +1545,9 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 	if expr.Kind == ExprMakeClosure {
 		payload := exprPayloadAs[*CallExprPayload](&expr)
 		closureFn := program.Functions[payload.Function]
+		if closureFn.Kind != FunctionClosure && closureFn.Kind != FunctionNested {
+			return fmt.Errorf("closure value made from %s function %s", closureFn.Kind, closureFn.Name)
+		}
 		if len(payload.CaptureLocals) != len(closureFn.Captures) {
 			return fmt.Errorf("closure %s expects %d captures, got %d", closureFn.Name, len(closureFn.Captures), len(payload.CaptureLocals))
 		}

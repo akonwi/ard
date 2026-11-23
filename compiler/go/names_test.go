@@ -142,14 +142,25 @@ func TestNaturalFunctionAndGlobalNamesUseVisibility(t *testing.T) {
 }
 func TestNaturalFunctionNameFallsBackForSyntheticFunctions(t *testing.T) {
 	program := &air.Program{Functions: []air.Function{
-		{ID: 0, Module: 0, Name: "User.ToString.to_str", Receiver: 1},
-		{ID: 1, Module: 0, Name: "anon_func_1"},
+		{ID: 0, Module: 0, Name: "User.ToString.to_str", Kind: air.FunctionMethod, Receiver: 1},
+		{ID: 1, Module: 0, Name: "anon_func_1", Kind: air.FunctionClosure},
 	}}
 	if got := functionName(program, program.Functions[0]); got != "Module_0__User_ToString_to_str" {
 		t.Fatalf("method helper function = %q, want Module_0__User_ToString_to_str", got)
 	}
 	if got := functionName(program, program.Functions[1]); got != "module_0__anon_func_1" {
 		t.Fatalf("closure helper function = %q, want module_0__anon_func_1", got)
+	}
+}
+
+// A declared function is named by its kind, not its spelling: one the user
+// happens to call anon_func_* still gets its natural Go name.
+func TestNaturalFunctionNameKeepsDeclaredFunctionNamedLikeClosure(t *testing.T) {
+	program := &air.Program{Functions: []air.Function{
+		{ID: 0, Module: 0, Name: "anon_func_9_9", Kind: air.FunctionDeclared},
+	}}
+	if got := functionName(program, program.Functions[0]); got != "AnonFunc99" {
+		t.Fatalf("declared function = %q, want AnonFunc99", got)
 	}
 }
 func TestNaturalTopLevelNamesAliasSpecialGoNames(t *testing.T) {
@@ -301,11 +312,11 @@ func TestPlannedQualifiedFunctionNamesMatchUnplanned(t *testing.T) {
 			{ID: 2, Path: "lib/other.ard"},
 		},
 		Functions: []air.Function{
-			{ID: 0, Module: 0, Name: "anon_func_0x1", Private: true},
-			{ID: 1, Module: 0, Name: "anon_func_0x1", Private: true},
-			{ID: 2, Module: 1, Name: "anon_func_0x2", Private: true},
-			{ID: 3, Module: 2, Name: "anon_func_0x1", Private: true},
-			{ID: 4, Module: 2, Name: "with-receiver", Receiver: 1},
+			{ID: 0, Module: 0, Name: "anon_func_0x1", Kind: air.FunctionClosure, Private: true},
+			{ID: 1, Module: 0, Name: "anon_func_0x1", Kind: air.FunctionClosure, Private: true},
+			{ID: 2, Module: 1, Name: "anon_func_0x2", Kind: air.FunctionClosure, Private: true},
+			{ID: 3, Module: 2, Name: "anon_func_0x1", Kind: air.FunctionClosure, Private: true},
+			{ID: 4, Module: 2, Name: "with-receiver", Kind: air.FunctionMethod, Receiver: 1},
 		},
 		Globals: []air.Global{
 			{ID: 0, Module: 1, Name: "1bad name"},

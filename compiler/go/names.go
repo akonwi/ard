@@ -168,7 +168,7 @@ func naturalFunctionName(program *air.Program, fn air.Function) (string, bool) {
 }
 
 func naturalFunctionNameEligible(fn air.Function) bool {
-	return fn.Name != "" && fn.Receiver == air.NoType && len(fn.Captures) == 0 && !strings.HasPrefix(fn.Name, "anon_func_")
+	return fn.Name != "" && fn.Kind != air.FunctionClosure && fn.Receiver == air.NoType && len(fn.Captures) == 0
 }
 
 func qualifiedFunctionName(program *air.Program, fn air.Function) string {
