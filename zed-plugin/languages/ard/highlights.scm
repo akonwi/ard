@@ -25,11 +25,12 @@
 (address_of_expression mutable: "mut" @keyword)
 (function_declaration "test" @keyword)
 (function_declaration "fn" @keyword)
+(anonymous_function "fn" @keyword)
+(function_type "fn" @keyword)
 (function_declaration
   _ @keyword
   (#eq? @keyword "mut"))
-(extern_function "extern" @keyword)
-(extern_function "fn" @keyword)
+(type_declaration "type" @keyword)
 (struct_declaration "struct" @keyword)
 (enum_declaration "enum" @keyword)
 (trait_declaration "trait" @keyword)
@@ -38,6 +39,10 @@
 (impl_block "impl" @keyword)
 (impl_block "for" @keyword)
 (impl_block "as" @keyword)
+"private" @keyword
+(not_expression "not" @keyword.operator)
+(and_expression "and" @keyword.operator)
+(or_expression "or" @keyword.operator)
 
 ; Types
 (primitive_type) @type.builtin
@@ -47,17 +52,16 @@
 (generic_type (qualified_identifier) @type)
 (generic_type (identifier) @type)
 (qualified_identifier) @type
+(nullable_type (identifier) @type)
 
 ; Declarations
+(type_declaration name: (identifier) @type)
 (struct_declaration name: (identifier) @type)
 (enum_declaration name: (identifier) @type)
 (trait_declaration name: (identifier) @type.interface)
 (trait_method name: (identifier) @function.definition)
 (function_declaration name: (identifier) @function.definition)
 (function_declaration name: (qualified_identifier) @function.definition)
-(extern_function name: (identifier) @function.definition)
-(extern_binding (qualified_identifier) @function)
-(extern_binding_entry target: (extern_binding_target) @variable.builtin)
 (enum_variant name: (identifier) @constant)
 (attribute "#" @punctuation.special)
 (attribute_namespace_separator) @punctuation.delimiter
