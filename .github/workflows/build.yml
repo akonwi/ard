@@ -74,6 +74,9 @@ jobs:
           }
 
           require_absent "git/ref/tags/${VERSION}" "Tag"
+          # Go resolves github.com/akonwi/ard/compiler@vX.Y.Z from this
+          # subdirectory module tag.
+          require_absent "git/ref/tags/compiler/${VERSION}" "Go module tag"
           require_absent "releases/tags/${VERSION}" "Release"
 
   test:
@@ -178,7 +181,7 @@ jobs:
       - name: Generate checksums
         run: sha256sum dist/*.tar.gz > dist/checksums.txt
 
-      - name: Create and verify tag at tested commit
+      - name: Create and verify tags at tested commit
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ inputs.version }}
@@ -186,14 +189,27 @@ jobs:
           TESTED_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          gh api --method POST "repos/${REPOSITORY}/git/refs" \
-            --field "ref=refs/tags/${VERSION}" \
-            --field "sha=${TESTED_SHA}" >/dev/null
-          TAG_SHA="$(gh api "repos/${REPOSITORY}/git/ref/tags/${VERSION}" --jq '.object.sha')"
-          if [[ "$TAG_SHA" != "$TESTED_SHA" ]]; then
-            echo "Created tag points to $TAG_SHA, expected $TESTED_SHA" >&2
-            exit 1
-          fi
+          # Creating a ref fails if it already exists, so a tag made by another
+          # actor during the approval wait stops publication instead of being
+          # reused or moved.
+          create_tag() {
+            local tag="$1"
+            gh api --method POST "repos/${REPOSITORY}/git/refs" \
+              --field "ref=refs/tags/${tag}" \
+              --field "sha=${TESTED_SHA}" >/dev/null
+            local tag_sha
+            tag_sha="$(gh api "repos/${REPOSITORY}/git/ref/tags/${tag}" --jq '.object.sha')"
+            if [[ "$tag_sha" != "$TESTED_SHA" ]]; then
+              echo "Created tag ${tag} points to ${tag_sha}, expected ${TESTED_SHA}" >&2
+              exit 1
+            fi
+          }
+
+          # The release tag.
+          create_tag "${VERSION}"
+          # The Go module tag for github.com/akonwi/ard/compiler, which lives in
+          # the compiler/ subdirectory.
+          create_tag "compiler/${VERSION}"
 
       - name: Create release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2

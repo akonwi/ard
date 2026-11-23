@@ -9,11 +9,11 @@ description: Draft final user-facing Ard release notes before dispatching the bu
 
 Write final release notes for an Ard compiler/language version. Notes target language users, not contributors.
 
-In the normal release flow, notes are completed before the `Release Binaries` workflow is dispatched. The workflow receives them as its `notes` input and publishes them when it creates the tag and release after build approval.
+In the normal release flow, notes are completed before the `Release Binaries` workflow is dispatched. The workflow receives them as its `notes` input and publishes them when it creates the tags (`vX.Y.Z` and the Go module tag `compiler/vX.Y.Z`) and release after build approval.
 
 ## 1. Identify the version range
 
-Use the latest stable release tag, ignoring prerelease tags when appropriate:
+Use the latest stable release tag, ignoring prerelease tags when appropriate. The `compiler/vX.Y.Z` Go module tags mirror the release tags; compare ranges with the plain `vX.Y.Z` tags:
 
 ```bash
 git tag --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -5
@@ -70,6 +70,7 @@ Guidelines:
 - Do not describe tests unless they communicate compatibility confidence.
 - Clearly call out breaking changes and provide before/after migration examples.
 - Keep notes concise and complete; normal releases do not edit notes after publication.
+- Changes to the compiler's exported Go packages matter to Go programs that embed the compiler through `github.com/akonwi/ard/compiler` (for example, frameworks importing `frontend`, `checker`, or `air`). Mention breaking API changes there when they are intentional.
 
 Write them to a temporary file:
 
