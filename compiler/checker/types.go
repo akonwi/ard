@@ -1178,7 +1178,8 @@ func MakeMaybe(of Type) *Maybe {
 }
 
 func (m *Maybe) String() string {
-	switch m.of.(type) {
+	// A bound type variable prints as its actual type, so group by that.
+	switch deref(m.of).(type) {
 	case *FunctionDef, FunctionDef, *Result, *MutableRef:
 		return "(" + typeSyntaxString(m.of) + ")?"
 	default:
@@ -1195,7 +1196,7 @@ func typeSyntaxString(t Type) string {
 	case *Maybe:
 		return typ.String()
 	case *Result:
-		return resultOperandSyntax(typ.val) + "!" + resultOperandSyntax(typ.err)
+		return resultTypeString(typ.val, typ.err)
 	case *List:
 		return "[" + typeSyntaxString(typ.of) + "]"
 	case *Slice:
@@ -1209,14 +1210,19 @@ func typeSyntaxString(t Type) string {
 	}
 }
 
-func resultOperandSyntax(t Type) string {
-	value := typeSyntaxString(t)
-	switch t.(type) {
-	case *FunctionDef, FunctionDef, *Result:
-		return "(" + value + ")"
-	default:
-		return value
+// resultTypeString renders `val!err` the way the formatter prints it, so a
+// diagnostic names the same type the source spells (#621). `!` is
+// right-associative and the error type extends as far right as it can, so
+// only the ok type needs grouping: a Result, function, pointer, or Maybe
+// before `!` would otherwise read as part of a different type.
+func resultTypeString(val, err Type) string {
+	value := typeSyntaxString(val)
+	// A bound type variable prints as its actual type, so group by that.
+	switch deref(val).(type) {
+	case *Result, *FunctionDef, FunctionDef, *MutableRef, *Maybe:
+		value = "(" + value + ")"
 	}
+	return value + "!" + typeSyntaxString(err)
 }
 
 func functionTypeString(f FunctionDef) string {
@@ -1383,7 +1389,7 @@ func MakeResult(val, err Type) *Result {
 }
 
 func (r Result) String() string {
-	return fmt.Sprintf("%s!%s", r.val.String(), r.err.String())
+	return resultTypeString(r.val, r.err)
 }
 
 func (r Result) get(name string) Type {

@@ -725,10 +725,7 @@ func (p printer) renderTypeDeclaration(node *parse.TypeDeclaration) string {
 	if node.Private {
 		prefix = "private "
 	}
-	parts := make([]string, 0, len(node.Type))
-	for _, item := range node.Type {
-		parts = append(parts, p.renderType(item))
-	}
+	parts := p.renderUnionMembers(node.Type)
 	return fmt.Sprintf("%stype %s = %s", prefix, node.Name.Name, strings.Join(parts, " | "))
 }
 
@@ -742,11 +739,9 @@ func (p printer) renderTypeDeclarationDoc(node *parse.TypeDeclaration) doc {
 		return dText(header + " =")
 	}
 
-	parts := make([]string, 0, len(node.Type))
-	brokenParts := make([]doc, 0, len(node.Type))
-	for _, item := range node.Type {
-		rendered := p.renderType(item)
-		parts = append(parts, rendered)
+	parts := p.renderUnionMembers(node.Type)
+	brokenParts := make([]doc, 0, len(parts))
+	for _, rendered := range parts {
 		brokenParts = append(brokenParts, dText("| "+rendered))
 	}
 
@@ -986,7 +981,7 @@ func (p printer) renderType(declared parse.DeclaredType) string {
 				prefix = "&"
 			}
 		}
-		name := prefix + p.renderType(node.Inner)
+		name := prefix + p.renderPrefixedType(node.Inner)
 		if node.IsNullable() {
 			return "(" + name + ")?"
 		}
@@ -1007,7 +1002,7 @@ func (p printer) renderType(declared parse.DeclaredType) string {
 	case *parse.List:
 		return maybeNullable("["+p.renderType(node.Element)+"]", node.IsNullable())
 	case *parse.FixedArray:
-		return maybeNullable(fmt.Sprintf("[%s; %d]", p.renderType(node.Element), node.Length), node.IsNullable())
+		return maybeNullable(fmt.Sprintf("[%s; %d]", p.renderTypeBefore(node.Element), node.Length), node.IsNullable())
 	case *parse.TupleType:
 		elements := make([]string, 0, len(node.Elements))
 		for _, element := range node.Elements {
@@ -1018,8 +1013,7 @@ func (p printer) renderType(declared parse.DeclaredType) string {
 		return maybeNullable("["+p.renderType(node.Key)+": "+p.renderType(node.Value)+"]", node.IsNullable())
 	case *parse.ResultType:
 		value := p.renderType(node.Val)
-		switch node.Val.(type) {
-		case *parse.MutableType, parse.MutableType:
+		if needsGroupingAsResultValue(node.Val) {
 			value = "(" + value + ")"
 		}
 		name := value + "!" + p.renderType(node.Err)
@@ -1030,7 +1024,7 @@ func (p printer) renderType(declared parse.DeclaredType) string {
 	case *parse.FunctionType:
 		params := make([]string, 0, len(node.Params))
 		for i, item := range node.Params {
-			param := p.renderType(item)
+			param := p.renderPrefixedType(item)
 			if i < len(node.ParamMutability) && node.ParamMutability[i] {
 				param = "mut " + param
 			}
@@ -1050,6 +1044,87 @@ func (p printer) renderType(declared parse.DeclaredType) string {
 	default:
 		return declared.GetName()
 	}
+}
+
+// The parser keeps no node for a parenthesized type, so the printer adds
+// parentheses wherever printing a nested type bare would let the parser
+// group it differently (#621). The parser's type grammar is greedy: the
+// error type after `!`, a function's return type, and the type after `&`,
+// `&mut`, or `mut` each extend as far right as they can.
+
+// needsGroupingAsResultValue reports whether a Result's ok type must be
+// parenthesized before `!`. Only types that end in a closing name or bracket
+// may precede `!`: a Result there would make `!` right-associate, a function
+// or pointer would take `!E` into its return or referent, and the parser does
+// not accept `?!` after most types. Nullable ok types are always grouped, as
+// `(T?)!E`, so the rule is uniform and the tree-sitter grammar parses it.
+func needsGroupingAsResultValue(declared parse.DeclaredType) bool {
+	if declared == nil {
+		return false
+	}
+	if declared.IsNullable() {
+		return true
+	}
+	switch declared.(type) {
+	case *parse.ResultType, parse.ResultType,
+		*parse.FunctionType, parse.FunctionType,
+		*parse.MutableType, parse.MutableType:
+		return true
+	}
+	return false
+}
+
+// endsWithBareFunctionType reports whether the printed type ends in a function
+// type with no return type, such as `fn()` or `Int!fn(Str)`. The parser would
+// read a following `|` or `;` as the start of that function's return type.
+func endsWithBareFunctionType(declared parse.DeclaredType) bool {
+	if declared == nil || declared.IsNullable() {
+		// Nullable composite types print as `(...)?` or `fn(...)?`.
+		return false
+	}
+	switch node := declared.(type) {
+	case *parse.FunctionType:
+		return node.Return == nil || endsWithBareFunctionType(node.Return)
+	case *parse.ResultType:
+		return endsWithBareFunctionType(node.Err)
+	case *parse.MutableType:
+		return endsWithBareFunctionType(node.Inner)
+	}
+	return false
+}
+
+// renderTypeBefore prints a type that is followed by `|` or `;`.
+func (p printer) renderTypeBefore(declared parse.DeclaredType) string {
+	rendered := p.renderType(declared)
+	if endsWithBareFunctionType(declared) {
+		return "(" + rendered + ")"
+	}
+	return rendered
+}
+
+// renderPrefixedType prints a type that follows `&` or begins a function type
+// parameter, where a legacy `mut T` would merge into `&mut T` or into the
+// parameter's own `mut` marker.
+func (p printer) renderPrefixedType(declared parse.DeclaredType) string {
+	rendered := p.renderType(declared)
+	if mutable, ok := declared.(*parse.MutableType); ok && !mutable.Pointer && !mutable.IsNullable() {
+		return "(" + rendered + ")"
+	}
+	return rendered
+}
+
+// renderUnionMembers prints the members of a type union, each followed by `|`
+// except the last.
+func (p printer) renderUnionMembers(types []parse.DeclaredType) []string {
+	parts := make([]string, 0, len(types))
+	for i, item := range types {
+		if i < len(types)-1 {
+			parts = append(parts, p.renderTypeBefore(item))
+		} else {
+			parts = append(parts, p.renderType(item))
+		}
+	}
+	return parts
 }
 
 func maybeNullable(base string, nullable bool) string {

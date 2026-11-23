@@ -123,6 +123,46 @@ func TestMaybeStringParenthesizesCompositeTypes(t *testing.T) {
 		t.Fatalf("nested function maybe string = %q, want %q", got, want)
 	}
 }
+
+// A Result type renders the way `ard format` prints it, so diagnostics tell
+// `(T!E)!F` and `T!(E!F)` apart (#621).
+func TestResultStringGroupsOkType(t *testing.T) {
+	callback := &FunctionDef{Name: "<function>", ReturnType: Int}
+	tests := []struct {
+		name string
+		typ  Type
+		want string
+	}{
+		{"result ok", MakeResult(MakeResult(Int, Str), Str), "(Int!Str)!Str"},
+		{"result error", MakeResult(Int, MakeResult(Str, Bool)), "Int!Str!Bool"},
+		{"deeply nested ok", MakeResult(MakeResult(MakeResult(Int, Str), Str), Str), "((Int!Str)!Str)!Str"},
+		{"function ok", MakeResult(callback, Str), "(fn() Int)!Str"},
+		{"function returning result", &FunctionDef{Name: "<function>", ReturnType: MakeResult(Int, Str)}, "fn() Int!Str"},
+		{"pointer ok", MakeResult(MakeMutableRef(Int), Str), "(&mut Int)!Str"},
+		{"read-only pointer ok", MakeResult(MakeReadOnlyRef(Int), Str), "(&Int)!Str"},
+		{"maybe ok", MakeResult(MakeMaybe(Int), Str), "(Int?)!Str"},
+		{"maybe error", MakeResult(Int, MakeMaybe(Str)), "Int!Str?"},
+		{"list of nested result", MakeList(MakeResult(MakeResult(Int, Str), Str)), "[(Int!Str)!Str]"},
+		{"map of nested result", MakeMap(Str, MakeResult(MakeResult(Int, Str), Str)), "[Str: (Int!Str)!Str]"},
+		{"maybe of nested result", MakeMaybe(MakeResult(MakeResult(Int, Str), Str)), "((Int!Str)!Str)?"},
+		// A bound type variable prints as its actual type and is grouped like it.
+		{"bound result ok", MakeResult(&TypeVar{name: "T", actual: MakeResult(Int, Str), bound: true}, Str), "(Int!Str)!Str"},
+		{"bound function ok", MakeResult(&TypeVar{name: "T", actual: callback, bound: true}, Str), "(fn() Int)!Str"},
+		{"bound maybe ok", MakeResult(&TypeVar{name: "T", actual: MakeMaybe(Int), bound: true}, Str), "(Int?)!Str"},
+		{"bound pointer ok", MakeResult(&TypeVar{name: "T", actual: MakeMutableRef(Int), bound: true}, Str), "(&mut Int)!Str"},
+		{"bound chain ok", MakeResult(&TypeVar{name: "T", actual: &TypeVar{name: "U", actual: MakeResult(Int, Str), bound: true}, bound: true}, Str), "(Int!Str)!Str"},
+		{"unbound ok", MakeResult(&TypeVar{name: "T"}, Str), "$T!Str"},
+		{"maybe of bound result", MakeMaybe(&TypeVar{name: "T", actual: MakeResult(Int, Str), bound: true}), "(Int!Str)?"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.typ.String(); got != tt.want {
+				t.Fatalf("String() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestTypeEquality(t *testing.T) {
 	var tests = []struct {
 		left   Type
