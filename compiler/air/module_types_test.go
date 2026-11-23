@@ -151,6 +151,14 @@ func assertModuleTypesOwnDeclarations(t *testing.T, program *Program) {
 				t.Fatalf("type %s listed by both %s and %s", info.Name, previous, module.Path)
 			}
 			listedBy[id] = module.Path
+			switch info.Kind {
+			case TypeStruct, TypeEnum, TypeUnion:
+			default:
+				t.Fatalf("module %s lists non-declaration %s (kind %v)", module.Path, info.Name, info.Kind)
+			}
+			if info.Generic != NoType {
+				t.Fatalf("module %s lists generic instantiation %s", module.Path, info.Name)
+			}
 			if info.ModulePath != module.Path {
 				t.Fatalf("module %s lists %s declared in %s", module.Path, info.Name, info.ModulePath)
 			}
