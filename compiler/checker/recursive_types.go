@@ -21,7 +21,7 @@ func (c *Checker) checkRecursiveStructLayouts() {
 	structSet := map[*StructDef]bool{}
 	for i := range c.input.Statements {
 		decl, ok := c.input.Statements[i].(*parse.StructDefinition)
-		if !ok {
+		if !ok || c.isConflictingTopLevelDeclaration(decl) {
 			continue
 		}
 		def, ok := c.hoistedStruct(decl.Name.Name)
@@ -38,7 +38,7 @@ func (c *Checker) checkRecursiveStructLayouts() {
 	edges := map[*StructDef][]recursiveStructEdge{}
 	for i := range c.input.Statements {
 		decl, ok := c.input.Statements[i].(*parse.StructDefinition)
-		if !ok {
+		if !ok || c.isConflictingTopLevelDeclaration(decl) {
 			continue
 		}
 		owner, ok := c.hoistedStruct(decl.Name.Name)

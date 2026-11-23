@@ -459,6 +459,10 @@ type FunctionDeclaration struct {
 	Comments   []Comment // Comments found within the parameter list
 	// Attributes are written on the lines before a top-level declaration.
 	Attributes []Attribute
+
+	// NameLocation spans the name, or the `Type::name` path of a static
+	// function.
+	NameLocation Location
 }
 
 func (f FunctionDeclaration) String() string {

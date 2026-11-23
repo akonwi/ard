@@ -925,7 +925,7 @@ type Checker struct {
 	moduleResolver                    *ModuleResolver
 	options                           CheckOptions
 	expectedExpr                      Type
-	duplicateTopLevelTypeDeclarations map[parse.Statement]bool
+	nameConflictingTopLevelStatements map[parse.Statement]bool
 	topLevelStructDeclarations        map[string]*parse.StructDefinition
 	topLevelTypeAliases               map[string]*parse.TypeDeclaration
 	hoistedTopLevelFunctions          map[*parse.FunctionDeclaration]*FunctionDef
@@ -3690,7 +3690,7 @@ func (c *Checker) bindFailedVariable(decl *parse.VariableDeclaration, bindingTyp
 }
 
 func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
-	if c.isDuplicateTopLevelTypeDeclaration(*stmt) {
+	if c.isConflictingTopLevelDeclaration(*stmt) {
 		return nil
 	}
 	switch s := (*stmt).(type) {

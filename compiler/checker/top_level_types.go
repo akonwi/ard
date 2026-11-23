@@ -6,11 +6,21 @@ import (
 	"github.com/akonwi/ard/parse"
 )
 
+// hoistTopLevelTypeDeclarations adds the module's types to scope before any
+// other declaration is checked. It also reports each top-level declaration of
+// any kind whose name an earlier one already binds (#624). Values, functions,
+// and types share one namespace and Ard has no overloading, so any two
+// declarations of a name conflict; static functions are keyed by their
+// `Type::name` path. The first declaration keeps the name, and later ones are
+// skipped by every other pass, so references bind to the first and a
+// duplicate's body is not checked. Platform selection (ADR 0082) has already
+// removed the siblings inactive on the current platform, so same-named
+// declarations for different platforms never conflict here.
 func (c *Checker) hoistTopLevelTypeDeclarations() {
 	seen := map[string]parse.Location{}
 	for i := range c.input.Statements {
 		stmt := c.input.Statements[i]
-		name, loc, ok := topLevelTypeDeclarationName(stmt)
+		name, loc, ok := topLevelDeclarationName(stmt)
 		if !ok {
 			continue
 		}
@@ -20,16 +30,19 @@ func (c *Checker) hoistTopLevelTypeDeclarations() {
 				DuplicateSpan: c.sourceSpan(loc),
 				OriginalSpan:  c.sourceSpan(original),
 			}.build())
-			c.markDuplicateTopLevelTypeDeclaration(stmt)
+			c.markConflictingTopLevelDeclaration(stmt)
 			continue
 		}
 		seen[name] = loc
+		if !isTopLevelTypeDeclaration(stmt) {
+			continue
+		}
 		if isReservedBuiltinTypeName(name) {
 			c.addDiagnostic(builtInTypeRedeclarationDiagnostic{
 				Name: name,
 				Span: c.sourceSpan(loc),
 			}.build())
-			c.markDuplicateTopLevelTypeDeclaration(stmt)
+			c.markConflictingTopLevelDeclaration(stmt)
 			continue
 		}
 
@@ -71,7 +84,7 @@ func (c *Checker) hoistTopLevelFunctionSignatures() {
 	c.hoistedTopLevelFunctions = map[*parse.FunctionDeclaration]*FunctionDef{}
 	for i := range c.input.Statements {
 		def, ok := c.input.Statements[i].(*parse.FunctionDeclaration)
-		if !ok {
+		if !ok || c.isConflictingTopLevelDeclaration(def) {
 			continue
 		}
 		params := c.resolveParametersWithContext(def.Parameters, nil)
@@ -173,7 +186,7 @@ func isTopLevelTypeDeclaration(stmt parse.Statement) bool {
 }
 
 func (c *Checker) checkedTopLevelTypeStatement(stmt parse.Statement) *Statement {
-	if c.isDuplicateTopLevelTypeDeclaration(stmt) {
+	if c.isConflictingTopLevelDeclaration(stmt) {
 		return nil
 	}
 	switch s := stmt.(type) {
@@ -295,17 +308,6 @@ func collectGenericParamsFromDeclaredType(t parse.DeclaredType, params *[]string
 			collectGenericParamsFromDeclaredType(arg, params, seen)
 		}
 	}
-}
-
-func (c *Checker) markDuplicateTopLevelTypeDeclaration(stmt parse.Statement) {
-	if c.duplicateTopLevelTypeDeclarations == nil {
-		c.duplicateTopLevelTypeDeclarations = map[parse.Statement]bool{}
-	}
-	c.duplicateTopLevelTypeDeclarations[stmt] = true
-}
-
-func (c *Checker) isDuplicateTopLevelTypeDeclaration(stmt parse.Statement) bool {
-	return c.duplicateTopLevelTypeDeclarations != nil && c.duplicateTopLevelTypeDeclarations[stmt]
 }
 
 func (c *Checker) isResolvingStructDefinition(def *StructDef) bool {
@@ -603,7 +605,7 @@ func (c *Checker) resolveTopLevelTypeAliasReference(name string, location parse.
 func (c *Checker) validateTopLevelTypeAliases() {
 	for i := range c.input.Statements {
 		decl, ok := c.input.Statements[i].(*parse.TypeDeclaration)
-		if !ok || len(decl.Type) != 1 || c.recursiveTopLevelAliases[decl.Name.Name] {
+		if !ok || len(decl.Type) != 1 || c.recursiveTopLevelAliases[decl.Name.Name] || c.isConflictingTopLevelDeclaration(decl) {
 			continue
 		}
 		custom, ok := decl.Type[0].(*parse.CustomType)
