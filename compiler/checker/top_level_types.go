@@ -6,11 +6,35 @@ import (
 	"github.com/akonwi/ard/parse"
 )
 
+// hoistTopLevelTypeDeclarations adds the module's types to scope before any
+// other declaration is checked. It also reports each top-level declaration of
+// any kind whose name an earlier one already binds (#624). Values, functions,
+// and types share one namespace and Ard has no overloading, so any two
+// declarations of a name conflict; static functions are keyed by their
+// `Type::name` path. The first declaration keeps the name, and later ones are
+// skipped by every other pass, so references bind to the first and a
+// duplicate's body is not checked. Platform selection (ADR 0082) has already
+// removed the siblings inactive on the current platform, so same-named
+// declarations for different platforms never conflict here.
 func (c *Checker) hoistTopLevelTypeDeclarations() {
+	seen := map[string]parse.Location{}
 	for i := range c.input.Statements {
 		stmt := c.input.Statements[i]
-		name, loc, ok := topLevelTypeDeclarationName(stmt)
-		if !ok || c.isConflictingTopLevelDeclaration(stmt) {
+		name, loc, ok := topLevelDeclarationName(stmt)
+		if !ok {
+			continue
+		}
+		if original, dup := seen[name]; dup {
+			c.addDiagnostic(duplicateDeclarationDiagnostic{
+				Name:          name,
+				DuplicateSpan: c.sourceSpan(loc),
+				OriginalSpan:  c.sourceSpan(original),
+			}.build())
+			c.markConflictingTopLevelDeclaration(stmt)
+			continue
+		}
+		seen[name] = loc
+		if !isTopLevelTypeDeclaration(stmt) {
 			continue
 		}
 		if isReservedBuiltinTypeName(name) {

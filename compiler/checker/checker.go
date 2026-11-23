@@ -1391,7 +1391,6 @@ func (c *Checker) Check() {
 		}
 	}
 
-	c.reportDuplicateTopLevelDeclarations()
 	c.hoistTopLevelTypeDeclarations()
 	c.predeclareTopLevelTypeAliases()
 	c.populateTopLevelTypeDefinitions()

@@ -2,38 +2,6 @@ package checker
 
 import "github.com/akonwi/ard/parse"
 
-// reportDuplicateTopLevelDeclarations reports each top-level declaration whose
-// name an earlier declaration in the module already binds (#624). Values,
-// functions, and types share one namespace, and Ard has no overloading, so
-// any two declarations of a name conflict whatever their kinds. Static
-// functions are keyed by their `Type::name` path.
-//
-// The first declaration keeps the name. Later ones are skipped by every other
-// pass, so references bind to the first and a duplicate's body is not checked.
-//
-// Platform selection (ADR 0082) has already removed the siblings that are
-// inactive on the current platform, so same-named declarations for different
-// platforms never reach this pass.
-func (c *Checker) reportDuplicateTopLevelDeclarations() {
-	seen := map[string]parse.Location{}
-	for _, stmt := range c.input.Statements {
-		name, loc, ok := topLevelDeclarationName(stmt)
-		if !ok {
-			continue
-		}
-		if original, duplicate := seen[name]; duplicate {
-			c.addDiagnostic(duplicateDeclarationDiagnostic{
-				Name:          name,
-				DuplicateSpan: c.sourceSpan(loc),
-				OriginalSpan:  c.sourceSpan(original),
-			}.build())
-			c.markConflictingTopLevelDeclaration(stmt)
-			continue
-		}
-		seen[name] = loc
-	}
-}
-
 // topLevelDeclarationName is the name a top-level declaration binds and the
 // location of that name.
 func topLevelDeclarationName(stmt parse.Statement) (string, parse.Location, bool) {
