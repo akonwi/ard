@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/akonwi/ard/air"
+	"github.com/akonwi/ard/compiler/air"
 )
 
 func TestLowerForeignCallRequiresResultShapeForAdaptedReturn(t *testing.T) {

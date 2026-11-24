@@ -3,7 +3,7 @@ package checker_test
 import (
 	"testing"
 
-	"github.com/akonwi/ard/checker"
+	"github.com/akonwi/ard/compiler/checker"
 )
 
 // Bitwise operators (ADR 0080) accept Int, every sized integer, Uintptr,

@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/akonwi/ard/air"
+	"github.com/akonwi/ard/compiler/air"
 )
 
 func TestGoStructFieldTagComposesAndQuotesOpaqueValues(t *testing.T) {

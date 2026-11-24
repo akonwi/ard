@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	gotarget "github.com/akonwi/ard/go"
+	gotarget "github.com/akonwi/ard/compiler/go"
 )
 
 // requireRaceDetector skips t when the host Go toolchain cannot build with

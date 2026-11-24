@@ -3,7 +3,7 @@ package air
 import (
 	"fmt"
 
-	"github.com/akonwi/ard/checker"
+	"github.com/akonwi/ard/compiler/checker"
 )
 
 func declarationNominalKey(kind TypeKind, modulePath, name string) nominalTypeKey {

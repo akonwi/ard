@@ -5,7 +5,7 @@ import (
 	"go/ast"
 	"go/token"
 
-	"github.com/akonwi/ard/air"
+	"github.com/akonwi/ard/compiler/air"
 )
 
 // Generic declarations are emitted as Go generics, and Go substitutes a type

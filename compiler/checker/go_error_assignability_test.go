@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/akonwi/ard/checker"
-	"github.com/akonwi/ard/parse"
+	"github.com/akonwi/ard/compiler/checker"
+	"github.com/akonwi/ard/compiler/parse"
 )
 
 // Builtin Error is Go's predeclared `error`, so a Go value whose method set

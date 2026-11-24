@@ -16,17 +16,17 @@ import (
 	"strings"
 	"time"
 
-	"github.com/akonwi/ard/air"
-	"github.com/akonwi/ard/checker"
-	"github.com/akonwi/ard/diagnostics"
-	"github.com/akonwi/ard/formatter"
-	"github.com/akonwi/ard/frontend"
-	gotarget "github.com/akonwi/ard/go"
-	"github.com/akonwi/ard/lsp"
-	"github.com/akonwi/ard/manifest"
-	"github.com/akonwi/ard/parse"
-	"github.com/akonwi/ard/platform"
-	"github.com/akonwi/ard/version"
+	"github.com/akonwi/ard/compiler/air"
+	"github.com/akonwi/ard/compiler/checker"
+	"github.com/akonwi/ard/compiler/diagnostics"
+	"github.com/akonwi/ard/compiler/formatter"
+	"github.com/akonwi/ard/compiler/frontend"
+	gotarget "github.com/akonwi/ard/compiler/go"
+	"github.com/akonwi/ard/compiler/lsp"
+	"github.com/akonwi/ard/compiler/manifest"
+	"github.com/akonwi/ard/compiler/parse"
+	"github.com/akonwi/ard/compiler/platform"
+	"github.com/akonwi/ard/compiler/version"
 )
 
 func main() {

@@ -3,7 +3,7 @@ package checker
 import (
 	"sort"
 
-	"github.com/akonwi/ard/parse"
+	"github.com/akonwi/ard/compiler/parse"
 )
 
 // hoistTopLevelTypeDeclarations adds the module's types to scope before any

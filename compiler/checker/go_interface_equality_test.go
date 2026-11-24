@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/akonwi/ard/checker"
-	"github.com/akonwi/ard/parse"
+	"github.com/akonwi/ard/compiler/checker"
+	"github.com/akonwi/ard/compiler/parse"
 )
 
 // Go interface values do not support == or != in Ard (ADR 0085). Go's own

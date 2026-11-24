@@ -22,9 +22,9 @@ import (
 	"sort"
 	"time"
 
-	"github.com/akonwi/ard/air"
-	"github.com/akonwi/ard/frontend"
-	gotarget "github.com/akonwi/ard/go"
+	"github.com/akonwi/ard/compiler/air"
+	"github.com/akonwi/ard/compiler/frontend"
+	gotarget "github.com/akonwi/ard/compiler/go"
 )
 
 type stageTimes struct {

@@ -3,8 +3,8 @@ package checker
 import (
 	"sync"
 
-	"github.com/akonwi/ard/parse"
-	"github.com/akonwi/ard/std_lib"
+	"github.com/akonwi/ard/compiler/parse"
+	"github.com/akonwi/ard/compiler/std_lib"
 )
 
 type embeddedModuleCacheEntry struct {

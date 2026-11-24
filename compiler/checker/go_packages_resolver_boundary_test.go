@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/akonwi/ard/checker"
+	"github.com/akonwi/ard/compiler/checker"
 )
 
 func TestGoPackagesResolverRejectsProjectLocalPackageOutsideFFI(t *testing.T) {

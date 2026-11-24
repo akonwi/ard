@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/akonwi/ard/air"
+	"github.com/akonwi/ard/compiler/air"
 )
 
 // namePlan caches generated top-level names and import-collision sets for one

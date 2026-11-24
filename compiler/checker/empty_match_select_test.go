@@ -3,8 +3,8 @@ package checker_test
 import (
 	"testing"
 
-	"github.com/akonwi/ard/checker"
-	"github.com/akonwi/ard/parse"
+	"github.com/akonwi/ard/compiler/checker"
+	"github.com/akonwi/ard/compiler/parse"
 )
 
 // An empty match or select reports one diagnostic that names the missing

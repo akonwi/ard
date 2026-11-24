@@ -14,8 +14,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/akonwi/ard/goname"
-	"github.com/akonwi/ard/parse"
+	"github.com/akonwi/ard/compiler/goname"
+	"github.com/akonwi/ard/compiler/parse"
 )
 
 type Program struct {

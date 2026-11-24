@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/akonwi/ard/checker"
+	"github.com/akonwi/ard/compiler/checker"
 	"go.lsp.dev/protocol"
 )
 

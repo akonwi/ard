@@ -1,6 +1,6 @@
 package air
 
-import "github.com/akonwi/ard/checker"
+import "github.com/akonwi/ard/compiler/checker"
 
 func hasSelfReference(owner *checker.StructDef) bool {
 	for _, field := range owner.Fields {

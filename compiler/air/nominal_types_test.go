@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/akonwi/ard/checker"
+	"github.com/akonwi/ard/compiler/checker"
 )
 
 func TestNominalInternerTracksLifecycle(t *testing.T) {

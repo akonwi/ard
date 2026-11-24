@@ -3,7 +3,7 @@ package formatter
 import (
 	"testing"
 
-	"github.com/akonwi/ard/parse"
+	"github.com/akonwi/ard/compiler/parse"
 )
 
 func TestFormatVariadicSpreadArguments(t *testing.T) {

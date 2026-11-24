@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/akonwi/ard/air"
+	"github.com/akonwi/ard/compiler/air"
 )
 
 func TestIndexedTypesForModulePreservesUncachedOrder(t *testing.T) {

@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/akonwi/ard/parse"
+	"github.com/akonwi/ard/compiler/parse"
 )
 
 const indentWidth = 2

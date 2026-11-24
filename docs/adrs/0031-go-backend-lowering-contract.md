@@ -474,7 +474,7 @@ runtime still defines exactly `Maybe` and `Result` (see below).
 
 ### Runtime shapes
 
-Each generated program embeds a small internal runtime package at `<module>/internal/ard`. That package exists only to hold the shapes that encode Ard semantics Go cannot express directly. It is generated into the artifact rather than imported from `github.com/akonwi/ard/runtime`, keeping generated output self-contained and avoiding compiler-module `require`/`replace` wiring. Everything else lives in generated code, Go builtins, direct Go imports, or ordinary host Go shim packages.
+Each generated program embeds a small internal runtime package at `<module>/internal/ard`. That package exists only to hold the shapes that encode Ard semantics Go cannot express directly. It is generated into the artifact rather than imported from `github.com/akonwi/ard/compiler/runtime`, keeping generated output self-contained and avoiding compiler-module `require`/`replace` wiring. Everything else lives in generated code, Go builtins, direct Go imports, or ordinary host Go shim packages.
 
 #### Sanctioned runtime types
 

@@ -4,7 +4,7 @@ import (
 	"maps"
 	"slices"
 
-	"github.com/akonwi/ard/parse"
+	"github.com/akonwi/ard/compiler/parse"
 )
 
 // Generic named functions as values (issue #593).

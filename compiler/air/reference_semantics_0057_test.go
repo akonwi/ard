@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/akonwi/ard/checker"
+	"github.com/akonwi/ard/compiler/checker"
 )
 
 func TestADR0057PreservesClosureCaptureModes(t *testing.T) {

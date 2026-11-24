@@ -3,7 +3,7 @@ package formatter
 import (
 	"strings"
 
-	"github.com/akonwi/ard/parse"
+	"github.com/akonwi/ard/compiler/parse"
 )
 
 // removeUnusedImports drops the imports the program does not use and

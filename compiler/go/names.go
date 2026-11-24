@@ -9,8 +9,8 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/akonwi/ard/air"
-	"github.com/akonwi/ard/goname"
+	"github.com/akonwi/ard/compiler/air"
+	"github.com/akonwi/ard/compiler/goname"
 )
 
 func moduleFileName(program *air.Program, module air.Module) string {

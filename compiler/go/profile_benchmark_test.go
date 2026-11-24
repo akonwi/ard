@@ -5,10 +5,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/akonwi/ard/air"
-	"github.com/akonwi/ard/checker"
-	"github.com/akonwi/ard/frontend"
-	"github.com/akonwi/ard/parse"
+	"github.com/akonwi/ard/compiler/air"
+	"github.com/akonwi/ard/compiler/checker"
+	"github.com/akonwi/ard/compiler/frontend"
+	"github.com/akonwi/ard/compiler/parse"
 )
 
 const defaultBenchmarkInput = "../../examples/vaxis-demo/main.ard"

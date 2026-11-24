@@ -17,7 +17,7 @@ This is a monorepo with the following top-level directories:
   - /compiler/std_lib: standard library definitions (intentionally minimal during the FFI reset, see ADR 0034)
   - /compiler/samples: runnable Ard program samples
   - /compiler/main.go: compiler CLI entry point
-  - /compiler/go.mod & go.sum: Go module dependencies for the compiler
+  - /compiler/go.mod & go.sum: the Go module `github.com/akonwi/ard/compiler` and its dependencies. Other Go modules import compiler packages from it (e.g. `github.com/akonwi/ard/compiler/checker`); each release also tags `compiler/vX.Y.Z` so `go get github.com/akonwi/ard/compiler@vX.Y.Z` resolves
 - /docs: project-wide documentation; /docs/adrs holds the Architecture Decision Records
 - /examples: full example projects (vaxis-demo exercises the direct Go FFI against a real dependency)
 - /scripts: repo tooling (commit message validation, the manual LSP harness)

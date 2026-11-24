@@ -17,7 +17,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/akonwi/ard/platform"
+	"github.com/akonwi/ard/compiler/platform"
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/module"
 	"golang.org/x/tools/go/gcexportdata"

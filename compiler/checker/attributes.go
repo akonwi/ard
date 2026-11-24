@@ -4,7 +4,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/akonwi/ard/parse"
+	"github.com/akonwi/ard/compiler/parse"
 )
 
 func (c *Checker) addAttributeDiagnostic(code DiagnosticCode, message, title string, location parse.Location, secondary ...DiagnosticLabel) {

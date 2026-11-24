@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/akonwi/ard/checker"
-	"github.com/akonwi/ard/parse"
+	"github.com/akonwi/ard/compiler/checker"
+	"github.com/akonwi/ard/compiler/parse"
 )
 
 func TestFindProjectRoot(t *testing.T) {

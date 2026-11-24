@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	checker "github.com/akonwi/ard/checker"
-	"github.com/akonwi/ard/parse"
+	checker "github.com/akonwi/ard/compiler/checker"
+	"github.com/akonwi/ard/compiler/parse"
 )
 
 func TestMatchReturningRecursiveStructDoesNotOverflowTypeBinding(t *testing.T) {

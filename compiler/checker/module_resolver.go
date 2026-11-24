@@ -19,10 +19,10 @@ import (
 
 	"slices"
 
-	"github.com/akonwi/ard/manifest"
-	"github.com/akonwi/ard/parse"
-	"github.com/akonwi/ard/platform"
-	"github.com/akonwi/ard/version"
+	"github.com/akonwi/ard/compiler/manifest"
+	"github.com/akonwi/ard/compiler/parse"
+	"github.com/akonwi/ard/compiler/platform"
+	"github.com/akonwi/ard/compiler/version"
 )
 
 // ProjectInfo holds information about the current project

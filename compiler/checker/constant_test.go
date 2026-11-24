@@ -3,7 +3,7 @@ package checker_test
 import (
 	"testing"
 
-	"github.com/akonwi/ard/checker"
+	"github.com/akonwi/ard/compiler/checker"
 )
 
 // An integer expression built only from literals and Go constants is a Go

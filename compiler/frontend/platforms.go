@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/akonwi/ard/checker"
-	"github.com/akonwi/ard/parse"
-	"github.com/akonwi/ard/platform"
+	"github.com/akonwi/ard/compiler/checker"
+	"github.com/akonwi/ard/compiler/parse"
+	"github.com/akonwi/ard/compiler/platform"
 )
 
 // RepresentativePlatforms returns one platform for each distinct selection of

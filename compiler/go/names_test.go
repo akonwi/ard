@@ -4,7 +4,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/akonwi/ard/air"
+	"github.com/akonwi/ard/compiler/air"
 )
 
 func TestModulePackageHelpersSanitizePaths(t *testing.T) {

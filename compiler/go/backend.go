@@ -17,10 +17,10 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/akonwi/ard/air"
-	"github.com/akonwi/ard/checker"
-	"github.com/akonwi/ard/platform"
-	runtimesrc "github.com/akonwi/ard/runtime"
+	"github.com/akonwi/ard/compiler/air"
+	"github.com/akonwi/ard/compiler/checker"
+	"github.com/akonwi/ard/compiler/platform"
+	runtimesrc "github.com/akonwi/ard/compiler/runtime"
 	"golang.org/x/mod/modfile"
 )
 

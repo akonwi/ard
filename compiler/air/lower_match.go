@@ -3,7 +3,7 @@ package air
 import (
 	"fmt"
 
-	"github.com/akonwi/ard/checker"
+	"github.com/akonwi/ard/compiler/checker"
 )
 
 // lowerPatternMatch lowers a checked match (ADR 0083) to ExprMatch, carrying

@@ -11,12 +11,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/akonwi/ard/air"
-	"github.com/akonwi/ard/checker"
-	"github.com/akonwi/ard/diagnostics"
-	"github.com/akonwi/ard/frontend"
-	gotarget "github.com/akonwi/ard/go"
-	"github.com/akonwi/ard/platform"
+	"github.com/akonwi/ard/compiler/air"
+	"github.com/akonwi/ard/compiler/checker"
+	"github.com/akonwi/ard/compiler/diagnostics"
+	"github.com/akonwi/ard/compiler/frontend"
+	gotarget "github.com/akonwi/ard/compiler/go"
+	"github.com/akonwi/ard/compiler/platform"
 )
 
 func captureStdout(t *testing.T, fn func()) string {

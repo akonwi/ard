@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"go/types"
 
-	"github.com/akonwi/ard/parse"
+	"github.com/akonwi/ard/compiler/parse"
 )
 
 // goTypeParamBindings maps a generic Go function's type parameters to the Ard

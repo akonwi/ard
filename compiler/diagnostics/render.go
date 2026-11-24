@@ -12,7 +12,7 @@ import (
 
 	"golang.org/x/text/width"
 
-	"github.com/akonwi/ard/checker"
+	"github.com/akonwi/ard/compiler/checker"
 )
 
 type SourceProvider func(path string) ([]byte, error)

@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/akonwi/ard/air"
-	"github.com/akonwi/ard/frontend"
+	"github.com/akonwi/ard/compiler/air"
+	"github.com/akonwi/ard/compiler/frontend"
 )
 
 // Issue #593: a generic named function used as a value is instantiated from

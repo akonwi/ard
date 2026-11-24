@@ -5,7 +5,7 @@ package gotarget
 // types that collide with Go predeclared names, runtime helper names, or other
 // generated top-level declarations.
 
-import "github.com/akonwi/ard/air"
+import "github.com/akonwi/ard/compiler/air"
 
 func isPredeclaredGoIdentifier(name string) bool {
 	switch name {

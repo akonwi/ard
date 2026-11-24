@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/akonwi/ard/lsp/analysis"
+	"github.com/akonwi/ard/compiler/lsp/analysis"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
 )

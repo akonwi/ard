@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	checker "github.com/akonwi/ard/checker"
+	checker "github.com/akonwi/ard/compiler/checker"
 )
 
 // lockDriftFixture locks `dep` to a commit of a local Git repository, the way

@@ -5,8 +5,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/akonwi/ard/parse"
-	"github.com/akonwi/ard/platform"
+	"github.com/akonwi/ard/compiler/parse"
+	"github.com/akonwi/ard/compiler/platform"
 )
 
 // GoImportScanEntry pairs a parsed program with its canonical module path

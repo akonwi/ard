@@ -1,6 +1,6 @@
 package checker
 
-import "github.com/akonwi/ard/parse"
+import "github.com/akonwi/ard/compiler/parse"
 
 // legacyPointerSyntaxKind names an ADR 0057 reference spelling that ADR 0073
 // removed. The parser still accepts these spellings so the checker can

@@ -5,7 +5,7 @@ import (
 	"reflect"
 	"sort"
 
-	"github.com/akonwi/ard/parse"
+	"github.com/akonwi/ard/compiler/parse"
 )
 
 // validatePublicAPI ensures every type exposed by this module can be named by

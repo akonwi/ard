@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/akonwi/ard/checker"
+	"github.com/akonwi/ard/compiler/checker"
 )
 
 // TestGoPackagesResolverResolvesDependencyFFIFromCheckout pins issue #353: a

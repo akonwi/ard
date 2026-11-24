@@ -4,7 +4,7 @@ import (
 	"fmt"
 	gotypes "go/types"
 
-	"github.com/akonwi/ard/parse"
+	"github.com/akonwi/ard/compiler/parse"
 )
 
 type comparableConstraintCall struct {

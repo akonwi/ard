@@ -1,6 +1,6 @@
 package checker
 
-import "github.com/akonwi/ard/parse"
+import "github.com/akonwi/ard/compiler/parse"
 
 // checkStructFieldMapKeyTypes revalidates struct-bearing map keys after every
 // top-level struct declaration has been populated. During declaration

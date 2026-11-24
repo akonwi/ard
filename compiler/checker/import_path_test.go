@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/akonwi/ard/checker"
+	"github.com/akonwi/ard/compiler/checker"
 )
 
 // importPathWorkspace lays out an app that depends on a package named

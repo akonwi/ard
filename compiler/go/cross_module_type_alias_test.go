@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/akonwi/ard/air"
-	"github.com/akonwi/ard/frontend"
+	"github.com/akonwi/ard/compiler/air"
+	"github.com/akonwi/ard/compiler/frontend"
 )
 
 // Issue #620: public type aliases of any target kind are usable from another
