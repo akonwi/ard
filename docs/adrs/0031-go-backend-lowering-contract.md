@@ -525,7 +525,9 @@ An Ard-owned field may also attach opaque Go struct-tag entries with `#go:<key>(
 
 `ard.Maybe[T]` implements JSON marshalling and unmarshalling: `none` marshals to `null`, `some(x)` marshals to `x` unwrapped, a present value unmarshals to `some`, and a JSON `null` or a missing field unmarshals to `none`. By default, `Maybe` fields are not omitted, so `none` is emitted as `null`. `#json(omit: none)` adds `omitzero`, omitting only `none` while retaining present empty values (ADR 0064).
 
-`ard.Result[T, E]` also implements JSON marshalling: `ok(x)` marshals to `x` and `err(e)` marshals to `e`, each unwrapped. `Maybe` and `Result` are the two sanctioned exceptions to the reserved-method rule, because they are runtime types the backend owns and their JSON shapes encode Ard semantics directly.
+`Maybe` implements both the `encoding/json` methods (`MarshalJSON`, `UnmarshalJSON`) and the `encoding/json/v2` methods (`MarshalJSONTo`, `UnmarshalJSONFrom`). Go's JSON packages prefer the v2 methods, and since Go 1.27 `encoding/json` is implemented on top of v2. The payload is therefore encoded and decoded with the caller's own encoder or decoder, so caller options such as `DisallowUnknownFields`, `UseNumber`, `SetEscapeHTML`, or `RejectUnknownMembers` apply inside a `T?` exactly as they do outside it. The v1 methods remain for direct callers and behave the same under default options.
+
+`ard.Result[T, E]` also implements JSON marshalling: `ok(x)` marshals to `x` and `err(e)` marshals to `e`, each unwrapped. Like `Maybe`, it also implements `MarshalJSONTo`, so encoder options reach the unwrapped value. A Result has no unmarshaller, because choosing `ok` or `err` from arbitrary JSON is ambiguous. `Maybe` and `Result` are the two sanctioned exceptions to the reserved-method rule, because they are runtime types the backend owns and their JSON shapes encode Ard semantics directly.
 
 #### Enums
 
