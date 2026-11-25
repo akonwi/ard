@@ -96,3 +96,51 @@ fn main() {
 		t.Fatalf("output mismatch\ngot:\n%s\nwant:\n%s", got, want)
 	}
 }
+
+// Issue #639: an explicit type argument that is itself generic, such as
+// `same<Box<Int>>(b)`, reaches the checker instead of being read as
+// comparisons, on plain, static, and method calls.
+func TestGoTargetNestedGenericExplicitTypeArgs(t *testing.T) {
+	got := runGoTargetSourceStdout(t, `use go:fmt
+
+struct Box<$T> {
+  v: $T,
+}
+
+fn same(x: $T) $T {
+  x
+}
+
+fn main() {
+  let b = Box<Int>{v: 1}
+  let c = same<Box<Int>>(b)
+  fmt::Println("plain", c.v)
+
+  let nested = same<Box<Box<Int>>>(Box{v: Box{v: 2}})
+  fmt::Println("nested", nested.v.v)
+
+  let pair = same<Box<[Str: Int]>>(Box{v: ["three": 3]})
+  fmt::Println("map", pair.v.get("three").or(0))
+
+  let empty = Maybe::new<Box<Int>>()
+  fmt::Println("static", empty.is_none())
+
+  let number: Int? = Maybe::new(4)
+  let boxed = number.map<Box<Int>>(fn(n) { Box{v: n + 1} })
+  fmt::Println("method", boxed.or(Box{v: 0}).v)
+
+  if same<Box<Int>>(b).v < 2 {
+    fmt::Println("comparison", 1 < same<Box<Int>>(b).v + 1)
+  }
+}
+`)
+	want := "plain 1\n" +
+		"nested 2\n" +
+		"map 3\n" +
+		"static true\n" +
+		"method 5\n" +
+		"comparison true\n"
+	if got != want {
+		t.Fatalf("got:\n%s\nwant:\n%s", got, want)
+	}
+}

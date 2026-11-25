@@ -41,6 +41,11 @@ type parser struct {
 	// it can't leak through anonymous-function bodies. (#285)
 	structOperandAllowed bool
 	inCallTypeArguments  bool
+	// nestedCallTypeArgsFailed records that a `<...>` list nested inside
+	// call type arguments did not parse cleanly, so the outer `<` is read as
+	// a comparison (see parseCallTypeArguments). A speculative type parse
+	// that rolls back its errors must restore this flag too.
+	nestedCallTypeArgsFailed bool
 	// detachedComments are comments read where the syntax tree has no place
 	// for them, such as inside grouping parentheses. The statement list
 	// being parsed puts them above the statement that contained them, so
@@ -2454,10 +2459,12 @@ func (p *parser) startsAdjacentCallArgsAfterFunctionType(paramClose token, hasRi
 
 	savedIndex := p.index
 	savedErrorCount := len(p.errors)
+	savedNestedFailure := p.nestedCallTypeArgsFailed
 	groupedReturn := p.tryParseType()
 	canBeGroupedReturn := groupedReturn != nil && len(p.errors) == savedErrorCount && p.isCallTypeArgumentDelimiter()
 	p.index = savedIndex
 	p.errors = p.errors[:savedErrorCount]
+	p.nestedCallTypeArgsFailed = savedNestedFailure
 
 	return !canBeGroupedReturn
 }
@@ -2516,6 +2523,7 @@ func (p *parser) parseNamedType() DeclaredType {
 	// Check for generic arguments
 	var typeArgs []DeclaredType
 	if p.match(less_than) {
+		defer p.noteNestedCallTypeArgErrors(len(p.errors))
 		// Loop to parse comma-separated types until '>'
 		for !p.check(greater_than) && !p.isAtEnd() {
 			typeArg := p.parseType()
@@ -2644,6 +2652,7 @@ func (p *parser) parseTypeArguments() []DeclaredType {
 	if !p.match(less_than) {
 		return nil
 	}
+	defer p.noteNestedCallTypeArgErrors(len(p.errors))
 
 	var typeArgs []DeclaredType
 	if !p.check(greater_than) {
@@ -2668,6 +2677,15 @@ func (p *parser) parseTypeArguments() []DeclaredType {
 	}
 
 	return typeArgs
+}
+
+// noteNestedCallTypeArgErrors runs after a type's own `<...>` list. Inside
+// call type arguments, errors since errorCount mean that list was not made of
+// types, so the enclosing call type arguments are rejected.
+func (p *parser) noteNestedCallTypeArgErrors(errorCount int) {
+	if p.inCallTypeArguments && len(p.errors) > errorCount {
+		p.nestedCallTypeArgsFailed = true
+	}
 }
 
 func (p *parser) parseGenericTypeParameters() []string {
@@ -3529,12 +3547,12 @@ func (p *parser) tryGenericStructInstance(index int, static *StaticProperty) (Ex
 	savedErrorCount := len(p.errors)
 	nameToken := p.advance()
 	p.advance() // consume the '<'
-	typeArgs := p.parseCallTypeArguments()
+	typeArgs, typeArgsOK := p.parseCallTypeArguments()
 
 	// Commit when the `>` `{` shape is clear, even if the type arguments had
 	// diagnostics, mirroring tryStaticGenericFunctionCall's recovery policy.
 	hasTypeArgsOrErrors := len(typeArgs) > 0 || len(p.errors) > savedErrorCount
-	hasGenericStructShape := hasTypeArgsOrErrors && p.check(greater_than, left_brace)
+	hasGenericStructShape := typeArgsOK && hasTypeArgsOrErrors && p.check(greater_than, left_brace)
 	if !hasGenericStructShape {
 		p.index = index
 		p.errors = p.errors[:savedErrorCount]
@@ -4284,12 +4302,12 @@ func (p *parser) tryStaticGenericFunctionCall(target Expression) (Expression, bo
 
 	funcName := p.advance()
 	p.advance() // consume the '<'
-	typeArgs := p.parseCallTypeArguments()
+	typeArgs, typeArgsOK := p.parseCallTypeArguments()
 
 	hasTypeArgsOrErrors := len(typeArgs) > 0 || len(p.errors) > savedErrorCount
 	hasGreaterThenCall := p.check(greater_than) && p.index+1 < len(p.tokens) && p.tokens[p.index+1].kind == left_paren && hasTypeArgsOrErrors
 	missingGreaterBeforeCall := !p.check(greater_than) && p.check(left_paren) && (hasUnambiguousCallTypeArgs(typeArgs) || len(p.errors) > savedErrorCount)
-	if !hasGreaterThenCall && !missingGreaterBeforeCall {
+	if !typeArgsOK || (!hasGreaterThenCall && !missingGreaterBeforeCall) {
 		p.index = savedIndex
 		p.errors = p.errors[:savedErrorCount]
 		return nil, false, nil
@@ -4365,15 +4383,26 @@ func (p *parser) normalizeMemberName() func() {
 	return func() { p.tokens[index] = keyword }
 }
 
-func (p *parser) parseCallTypeArguments() []DeclaredType {
+// parseCallTypeArguments parses the type arguments after a call's `<`. ok is
+// false when a `<...>` list nested in them does not parse cleanly as types,
+// as in `a<b<1>>(c)`: the outer `<` is then a comparison and the caller
+// rewinds. Errors at the top level are kept so a clear call shape such as
+// `f<fn(1)>(x)` still reports them.
+func (p *parser) parseCallTypeArguments() (typeArgs []DeclaredType, ok bool) {
 	wasInCallTypeArguments := p.inCallTypeArguments
+	hadNestedFailure := p.nestedCallTypeArgsFailed
 	p.inCallTypeArguments = true
-	defer func() { p.inCallTypeArguments = wasInCallTypeArguments }()
+	p.nestedCallTypeArgsFailed = false
+	defer func() {
+		ok = !p.nestedCallTypeArgsFailed
+		p.inCallTypeArguments = wasInCallTypeArguments
+		p.nestedCallTypeArgsFailed = hadNestedFailure
+	}()
 
-	typeArgs := []DeclaredType{}
+	typeArgs = []DeclaredType{}
 	if p.check(greater_than) {
 		p.addError(p.peek(), "Expected type argument")
-		return typeArgs
+		return typeArgs, true
 	}
 
 	for {
@@ -4394,7 +4423,7 @@ func (p *parser) parseCallTypeArguments() []DeclaredType {
 			break
 		}
 	}
-	return typeArgs
+	return typeArgs, true
 }
 
 func hasUnambiguousCallTypeArgs(typeArgs []DeclaredType) bool {
@@ -4449,8 +4478,11 @@ func (p *parser) call() (Expression, error) {
 	// Only parse as type arguments if we have an identifier followed by <
 	_, isIdentifier := expr.(*Identifier)
 
-	// Type arguments never start with `<`, so `a<<b` is a shift.
-	if isIdentifier && p.check(less_than) && !p.check(less_than, number) && !p.check(less_than, less_than) && !p.check(less_than, identifier, less_than) && adjacent(expr.GetLocation(), p.peek()) {
+	// Type arguments never start with `<` or a number, so `a<<b` is a shift
+	// and `a<1` a comparison. A nested generic such as `f<Box<Int>>(x)` is
+	// tried like any other type argument; parseCallTypeArguments rejects it
+	// when the nested list is not made of types (`a<b<1>>(c)`).
+	if isIdentifier && p.check(less_than) && !p.check(less_than, number) && !p.check(less_than, less_than) && adjacent(expr.GetLocation(), p.peek()) {
 		// Look ahead to see if this is a type argument or a comparison
 		p.advance() // consume the '<'
 
@@ -4459,7 +4491,7 @@ func (p *parser) call() (Expression, error) {
 		savedErrorCount := len(p.errors)
 
 		// Try to parse type arguments
-		typeArgs := p.parseCallTypeArguments()
+		typeArgs, typeArgsOK := p.parseCallTypeArguments()
 
 		// If type arguments are followed by a call, this is a generic call. Keep
 		// type diagnostics when the call shape is otherwise clear, including recovery
@@ -4467,7 +4499,7 @@ func (p *parser) call() (Expression, error) {
 		hasTypeArgsOrErrors := len(typeArgs) > 0 || len(p.errors) > savedErrorCount
 		hasGreaterThenCall := p.check(greater_than) && p.index+1 < len(p.tokens) && p.tokens[p.index+1].kind == left_paren && hasTypeArgsOrErrors
 		missingGreaterBeforeCall := !p.check(greater_than) && p.check(left_paren) && hasFunctionTypeCallTypeArgs(typeArgs)
-		if hasGreaterThenCall || missingGreaterBeforeCall {
+		if typeArgsOK && (hasGreaterThenCall || missingGreaterBeforeCall) {
 			if hasGreaterThenCall {
 				p.advance() // consume the '>'
 			} else {
