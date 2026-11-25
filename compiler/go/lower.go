@@ -2771,7 +2771,9 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		}
 		stmts := append([]ast.Stmt{}, target.stmts...)
 		stmts = append(stmts, &ast.ExprStmt{X: &ast.CallExpr{Fun: l.ident("panic"), Args: []ast.Expr{target.expr}}})
-		zero, err := l.zeroValueExpr(expr.Type)
+		// The value after a panic is unreachable, but it is still bound like
+		// any other value (possibly with :=), so it must carry its own type.
+		zero, err := l.selfTypedZeroValueExpr(expr.Type)
 		if err != nil {
 			return loweredExpr{}, err
 		}
@@ -4977,6 +4979,17 @@ func (l *lowerer) materializeVoidValue(value loweredExpr) loweredExpr {
 	return value
 }
 
+// zeroValueExpr returns Go's zero value for typeID, written for a position
+// whose Go type is already fixed by its context: a function result or an
+// assignment to a declared variable. There an untyped constant (0, "", false,
+// nil) takes the context's type, so a named scalar such as time.Duration can
+// use a bare 0. Where the expression's own type matters, for example a value
+// bound with :=, use selfTypedZeroValueExpr instead.
+//
+// Every type kind must produce a valid expression: a composite literal T{} is
+// only used for struct, array, slice and map types, nil for pointer,
+// interface, function and channel types, and *new(T), which is the zero value
+// of any Go type, for anything else.
 func (l *lowerer) zeroValueExpr(typeID air.TypeID) (ast.Expr, error) {
 	if l.isVoidType(typeID) {
 		return l.voidValueExpr(), nil
@@ -4988,41 +5001,94 @@ func (l *lowerer) zeroValueExpr(typeID air.TypeID) (ast.Expr, error) {
 	switch info.Kind {
 	case air.TypeInt, air.TypeScalar, air.TypeByte, air.TypeRune, air.TypeEnum:
 		return &ast.BasicLit{Kind: token.INT, Value: "0"}, nil
-	case air.TypeForeignType:
-		if info.ForeignPointer {
-			return l.ident("nil"), nil
-		}
-		if validTypeID(l.program, info.Value) && !validTypeID(l.program, info.Key) {
-			return l.zeroValueExpr(info.Value)
-		}
-		typ, err := l.goType(typeID)
-		if err != nil {
-			return nil, err
-		}
-		return &ast.CompositeLit{Type: typ}, nil
 	case air.TypeFloat64:
 		return &ast.BasicLit{Kind: token.FLOAT, Value: "0"}, nil
 	case air.TypeBool:
 		return l.ident("false"), nil
 	case air.TypeStr:
 		return &ast.BasicLit{Kind: token.STRING, Value: "\"\""}, nil
-	case air.TypeAny, air.TypeFunction, air.TypeTraitObject, air.TypeReference, air.TypeEmbeddedFS:
+	case air.TypeAny, air.TypeFunction, air.TypeTraitObject, air.TypeReference, air.TypeEmbeddedFS,
+		air.TypeChannel, air.TypeReceiver, air.TypeSender:
 		return l.ident("nil"), nil
-	case air.TypeParam:
-		// A composite literal T{} is illegal for a type parameter; *new(T)
-		// is the canonical zero-value expression for any T.
-		typ, err := l.goType(typeID)
-		if err != nil {
-			return nil, err
-		}
-		return &ast.StarExpr{X: &ast.CallExpr{Fun: l.ident("new"), Args: []ast.Expr{typ}}}, nil
+	case air.TypeForeignType:
+		return l.foreignZeroValueExpr(typeID, info)
+	case air.TypeStruct, air.TypeUnion, air.TypeTuple, air.TypeMaybe, air.TypeResult,
+		air.TypeList, air.TypeSlice, air.TypeFixedArray, air.TypeMap:
+		return l.compositeZeroValueExpr(typeID)
 	default:
-		typ, err := l.goType(typeID)
-		if err != nil {
-			return nil, err
-		}
-		return &ast.CompositeLit{Type: typ}, nil
+		// TypeParam, and any kind without a known literal form: a composite
+		// literal T{} is illegal for a type parameter, while *new(T) is the
+		// zero value of every Go type.
+		return l.newZeroValueExpr(typeID)
 	}
+}
+
+// foreignZeroValueExpr classifies a Go named type by the underlying shape the
+// frontend recorded for it. A shape it does not recognise falls back to
+// *new(T) rather than guessing a literal form.
+func (l *lowerer) foreignZeroValueExpr(typeID air.TypeID, info air.TypeInfo) (ast.Expr, error) {
+	switch {
+	case info.ForeignPointer, info.ForeignInterface:
+		return l.ident("nil"), nil
+	case info.ForeignStruct:
+		return l.compositeZeroValueExpr(typeID)
+	case validTypeID(l.program, info.Key) && validTypeID(l.program, info.Value):
+		// A named map type.
+		return l.compositeZeroValueExpr(typeID)
+	case validTypeID(l.program, info.Elem):
+		// A named slice type.
+		return l.compositeZeroValueExpr(typeID)
+	case validTypeID(l.program, info.Value):
+		// A named scalar, array or function type; Value is its underlying type.
+		switch l.program.Types[info.Value-1].Kind {
+		case air.TypeInt, air.TypeScalar, air.TypeByte, air.TypeRune, air.TypeFloat64, air.TypeBool, air.TypeStr:
+			// An untyped constant converts to the named type in a typed context.
+			return l.zeroValueExpr(info.Value)
+		case air.TypeFunction:
+			return l.ident("nil"), nil
+		case air.TypeFixedArray:
+			return l.compositeZeroValueExpr(typeID)
+		}
+	}
+	return l.newZeroValueExpr(typeID)
+}
+
+// selfTypedZeroValueExpr returns Go's zero value for typeID as an expression
+// whose own Go type is exactly that type, for positions with no fixed type
+// context. The literal forms are kept where they already have the type (an
+// untyped 0, "" or false defaults to int, string or bool, and T{} names T);
+// any other type uses *new(T), since an untyped constant or nil there would
+// take the wrong type, or none, when bound with :=.
+func (l *lowerer) selfTypedZeroValueExpr(typeID air.TypeID) (ast.Expr, error) {
+	zero, err := l.zeroValueExpr(typeID)
+	if err != nil || !validTypeID(l.program, typeID) {
+		return zero, err
+	}
+	switch l.program.Types[typeID-1].Kind {
+	case air.TypeInt, air.TypeBool, air.TypeStr:
+		return zero, nil
+	}
+	switch zero.(type) {
+	case *ast.CompositeLit, *ast.StarExpr:
+		return zero, nil
+	}
+	return l.newZeroValueExpr(typeID)
+}
+
+func (l *lowerer) compositeZeroValueExpr(typeID air.TypeID) (ast.Expr, error) {
+	typ, err := l.goType(typeID)
+	if err != nil {
+		return nil, err
+	}
+	return &ast.CompositeLit{Type: typ}, nil
+}
+
+func (l *lowerer) newZeroValueExpr(typeID air.TypeID) (ast.Expr, error) {
+	typ, err := l.goType(typeID)
+	if err != nil {
+		return nil, err
+	}
+	return &ast.StarExpr{X: &ast.CallExpr{Fun: l.ident("new"), Args: []ast.Expr{typ}}}, nil
 }
 
 func (l *lowerer) isMaybeType(typeID air.TypeID) bool {
@@ -6966,11 +7032,11 @@ func (l *lowerer) lowerTryMaybe(fn air.Function, expr air.Expr) (loweredExpr, er
 		} else {
 			returnExpr := ast.Expr(targetExpr)
 			if fn.Signature.Return != targetTypeID {
-				returnType, err := l.goType(fn.Signature.Return)
+				zero, err := l.zeroValueExpr(fn.Signature.Return)
 				if err != nil {
 					return loweredExpr{}, err
 				}
-				returnExpr = &ast.CompositeLit{Type: returnType}
+				returnExpr = zero
 			}
 			noneBody = []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{returnExpr}}}
 		}

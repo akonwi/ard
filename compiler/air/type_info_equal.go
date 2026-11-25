@@ -27,6 +27,7 @@ func typeInfoEqual(a, b TypeInfo) bool {
 		a.ForeignSymbol == b.ForeignSymbol &&
 		a.ForeignPointer == b.ForeignPointer &&
 		a.ForeignInterface == b.ForeignInterface &&
+		a.ForeignStruct == b.ForeignStruct &&
 		fieldInfosEqual(a.Fields, b.Fields) &&
 		comparableSlicesEqual(a.Variants, b.Variants) &&
 		a.EnumOpen == b.EnumOpen &&
