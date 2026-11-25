@@ -60,7 +60,9 @@ When type inference isn't sufficient, provide explicit type arguments:
 let label = apply<Int, Str>(42, fn(value: Int) Str { value.to_str() })
 ```
 
-Type arguments correspond to the order of generics introduced in the signature.
+Type arguments correspond to the order of generics introduced in the signature. A type argument can itself be generic, as in `Maybe::new<Box<Int>>()` or `value.map<Box<Int>>(wrap)`.
+
+Write the `<` directly after the function name and follow the closing `>` with `(`. With a space before it, `<` is a comparison (`f < x`).
 
 ## Generic Functions as Values
 
