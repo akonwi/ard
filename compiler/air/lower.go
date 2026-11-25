@@ -1235,6 +1235,7 @@ func (l *lowerer) internForeignApplicationWithInterner(typ *checker.ForeignType,
 		ForeignSymbol:     typ.Name,
 		ForeignPointer:    typ.Pointer,
 		ForeignInterface:  typ.Interface,
+		ForeignStruct:     typ.Struct,
 		GenericArgs:       genericArgs,
 		GenericComparable: typ.ComparableTypeArgs(),
 	}

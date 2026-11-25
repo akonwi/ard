@@ -13,7 +13,7 @@ func fullTypeInfo() TypeInfo {
 		Elem: 1, Length: 3, Key: 2, Value: 3, Error: 4,
 		Elems:         []TypeID{5, 6},
 		ForeignTarget: "go", ForeignNamespace: "net/http", ForeignQualifier: "http", ForeignSymbol: "Client",
-		ForeignPointer: true, ForeignInterface: true,
+		ForeignPointer: true, ForeignInterface: true, ForeignStruct: true,
 		Fields: []FieldInfo{{
 			Name: "name", Type: 5, Index: 0,
 			JSON:   JSONFieldInfo{Name: "n", HasName: true, OmitNone: true, Skip: false},
@@ -35,7 +35,7 @@ func fullTypeInfo() TypeInfo {
 // drift from TypeInfo: it fails when a field is added without updating
 // typeInfoEqual, and it checks that mutating any single field is detected.
 func TestTypeInfoEqualMatchesDeepEqual(t *testing.T) {
-	const knownFields = 31
+	const knownFields = 32
 	if n := reflect.TypeOf(TypeInfo{}).NumField(); n != knownFields {
 		t.Fatalf("TypeInfo has %d fields, test knows %d: update typeInfoEqual and this test", n, knownFields)
 	}

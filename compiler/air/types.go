@@ -258,6 +258,9 @@ type TypeInfo struct {
 	ForeignSymbol    string
 	ForeignPointer   bool
 	ForeignInterface bool
+	// ForeignStruct marks a Go named type whose underlying type is a struct,
+	// so a backend can spell its zero value as a composite literal.
+	ForeignStruct bool
 
 	Fields   []FieldInfo
 	Variants []VariantInfo
