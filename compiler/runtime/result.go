@@ -1,6 +1,10 @@
 package runtime
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"encoding/json/jsontext"
+	jsonv2 "encoding/json/v2"
+)
 
 type Result[T any, E any] struct {
 	Value T
@@ -24,4 +28,15 @@ func (r Result[T, E]) MarshalJSON() ([]byte, error) {
 		return json.Marshal(r.Value)
 	}
 	return json.Marshal(r.Err)
+}
+
+// MarshalJSONTo is the encoding/json/v2 form of MarshalJSON, which Go's JSON
+// packages prefer. It encodes the unwrapped value with the caller's encoder so
+// encoder options (for example SetEscapeHTML) also apply inside a Result.
+// Results have no unmarshalers: choosing ok or err from JSON is ambiguous.
+func (r Result[T, E]) MarshalJSONTo(enc *jsontext.Encoder) error {
+	if r.Ok {
+		return jsonv2.MarshalEncode(enc, r.Value)
+	}
+	return jsonv2.MarshalEncode(enc, r.Err)
 }
